@@ -1,5 +1,5 @@
 BINARY := fitr
-VERSION := 0.2.0-dev
+VERSION := 0.2.0
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 

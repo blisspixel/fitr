@@ -55,8 +55,7 @@ fitr run qwen3-coder:30b --full  # or paste a Hugging Face GGUF URL
 ```
 
 From source (Go 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
-Pin a version with `FITR_VERSION=v0.2.0`, relocate with `FITR_BIN`. Until a tagged
-GitHub release exists, the installer builds from source if Go is on PATH.
+Pin a version with `FITR_VERSION=v0.2.0`, relocate with `FITR_BIN`.
 
 ## Commands
 
@@ -70,7 +69,8 @@ GitHub release exists, the installer builds from source if Go is on PATH.
 | `fitr doctor <model>` | can this box be measured fairly at all? (~1 min) |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips on shared instances |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
-| `fitr device` / `fitr profiles` | fingerprint and gates |
+| `fitr device` / `fitr profiles [new]` | fingerprint and gates; `new` scaffolds an UNCALIBRATED local profile |
+| `fitr calibrate <a> <b>` | which check items discriminated two paired runs (does not rewrite the spec) |
 
 ## Three ideas carry everything
 

@@ -76,7 +76,7 @@ func (p Profile) Bool(gate, key string) (bool, bool) {
 	return false, false
 }
 
-func LoadProfiles() ([]Profile, error) {
+func LoadEmbeddedProfiles() ([]Profile, error) {
 	entries, err := profilesFS.ReadDir("profiles")
 	if err != nil {
 		return nil, err
@@ -94,6 +94,33 @@ func LoadProfiles() ([]Profile, error) {
 		if json.Unmarshal(b, &p) == nil {
 			out = append(out, p)
 		}
+	}
+	return out, nil
+}
+
+func LoadProfiles() ([]Profile, error) {
+	embedded, err := LoadEmbeddedProfiles()
+	if err != nil {
+		return nil, err
+	}
+	user, err := loadUserProfiles()
+	if err != nil {
+		return nil, err
+	}
+	// User files first so a local calibration wins GPU/host match and
+	// overrides an embedded profile of the same name.
+	byName := map[string]Profile{}
+	var order []string
+	for _, p := range append(user, embedded...) {
+		if _, seen := byName[p.Name]; seen {
+			continue
+		}
+		byName[p.Name] = p
+		order = append(order, p.Name)
+	}
+	out := make([]Profile, 0, len(order))
+	for _, n := range order {
+		out = append(out, byName[n])
 	}
 	return out, nil
 }

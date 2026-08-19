@@ -21,7 +21,7 @@ verdict** (design rule 7).
 
 ---
 
-## Where it is now (0.2.0-dev)
+## Where it is now (0.2.0)
 
 **Done and measured:**
 
@@ -157,10 +157,13 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
 - [x] **Compaction watchdog** - filling 80% of the window with a transcript
       that never shrank FAILs `unattended_agentic`. Peak-then-compact is
       disclosed, not failed.
-- [ ] **Calibrate the check battery** by adversarial filtering: run it across
-      known-good and known-degraded quants of the same model; drop items that
-      never discriminate. (The Aider polyglot redesign kept 225 of 697
-      exercises this way.)
+- [x] **Calibrate machinery** - `fitr calibrate a b` on a shared seedset
+      reports which check items flipped and which never did. It does **not**
+      rewrite the spec: Aider kept 225 of 697 after many boxes; one pair is
+      a lead, not a cull.
+- [ ] **Calibrate the check battery on hardware** - drop items that never
+      discriminate across known-good and known-degraded quants on more than
+      one box.
 - [x] **Quant damage as correctness agreement** (machinery). `fitr compare` on
       a shared seedset reports item-level flips, including when the two rates
       match - accuracy hid the disagreements. Directional "quant damage"
@@ -187,12 +190,12 @@ loop, closable on someone else's machine.
 
 | Bar | Status |
 |---|---|
-| One-command install (curl / irm) | **done** (binary downloads need a `v*` tag) |
+| One-command install (curl / irm) | **done** |
 | Honest measurement on Ollama, llama-server, OpenAI-compat | **done** (0.3) |
 | Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals, quant flips) | **mostly done** - check-battery calibration still needs hardware; flip machinery is in `compare` |
 | `fitr advise` names a model + settings with a remedy | **done** for the NIM-shaped verdict; `--load`/`--fit` dummy-allocate; still no catalog |
 | A result can leave the terminal | **done** - `fitr export` / `fitr run --html`, opt-in, fingerprint in the page |
-| Community device profiles beyond `lappy` | **not started** |
+| Community device profiles beyond `lappy` | **scaffolded** - `fitr profiles new` writes an UNCALIBRATED local copy; no invented rtx-4090 numbers in the repo |
 
 We do **not** ship 1.0 with an uncalibrated `advise`, a public leaderboard,
 or LLM-as-judge. Battery calibration still needs hardware. `tune` can trail
@@ -224,9 +227,12 @@ The step that turns a chore into a product.
 
 ## 0.5 - Share the map
 
-- [ ] **Community device profiles** - `rtx-4090`, `m3-max`, `strix-halo`. The
-      network effect: the repo answers *"I have an M3 Max with 36 GB, what
-      should I run?"*, which no leaderboard can structurally answer.
+- [x] **Local profile scaffold** - `fitr profiles new` copies default into
+      `~/.fitr/profiles`, matched to this GPU, marked UNCALIBRATED. User
+      files override embedded profiles of the same name.
+- [ ] **Community device profiles** - `rtx-4090`, `m3-max`, `strix-halo`
+      with measured gates. The network effect: the repo answers *"I have an
+      M3 Max with 36 GB, what should I run?"*. Do not invent those numbers.
 - [x] **Shareable result artifact** - self-contained HTML via `fitr export`
       or `fitr run --html`. Never automatic: the page contains a hardware
       fingerprint and is not uploaded. Raw model output is omitted.

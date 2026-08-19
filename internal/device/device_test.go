@@ -1,6 +1,22 @@
 package device
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+)
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "fitr-profiles-")
+	if err != nil {
+		os.Exit(1)
+	}
+	os.Setenv("FITR_PROFILES", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
 
 func TestProfilesEmbedAndParse(t *testing.T) {
 	profs, err := LoadProfiles()
@@ -28,6 +44,58 @@ func TestProfilesEmbedAndParse(t *testing.T) {
 	}
 	if !haveDefault {
 		t.Fatal("a `default` profile must always exist as the fallback")
+	}
+}
+
+func TestUserProfileOverridesEmbeddedAndMalformedIsFatal(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_PROFILES", dir)
+	p := Profile{
+		Name:        "lappy",
+		Description: "user override",
+		Match:       map[string]string{"gpu_contains": "780M"},
+		Gates:       map[string]Gate{"fast_chat": {"decode_tps_min": 99.0, "why": "user's lived number"}},
+	}
+	b, _ := json.Marshal(p)
+	if err := os.WriteFile(dir+"/lappy.json", b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := SelectProfile("", Fingerprint{GPU: "AMD Radeon 780M"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Description != "user override" {
+		t.Fatalf("user profile must win on name+match: %+v", got)
+	}
+	v, ok := got.Float("fast_chat", "decode_tps_min")
+	if !ok || v != 99 {
+		t.Fatalf("user gate = %v %v", v, ok)
+	}
+
+	if err := os.WriteFile(dir+"/bad.json", []byte(`{`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadProfiles(); err == nil {
+		t.Fatal("malformed user profile must be a hard error")
+	}
+}
+
+func TestScaffoldProfileIsUncalibratedCopyOfDefault(t *testing.T) {
+	p, err := ScaffoldProfile("My Box", Fingerprint{GPU: "NVIDIA GeForce RTX 4090", Host: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "my-box" {
+		t.Fatalf("name = %q, want a slug", p.Name)
+	}
+	if p.Match["gpu_contains"] != "NVIDIA GeForce RTX 4090" {
+		t.Fatalf("match = %v", p.Match)
+	}
+	if !strings.Contains(p.Notes[0], "UNCALIBRATED") {
+		t.Fatalf("must say uncalibrated: %v", p.Notes)
+	}
+	if _, ok := p.Gates["fast_chat"]["why"]; !ok {
+		t.Fatal("copied gates must keep why")
 	}
 }
 

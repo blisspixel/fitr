@@ -42,7 +42,8 @@ need `cargo`, not a rewrite.
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips (accuracy can hide them) |
-| `fitr device` / `fitr profiles` | fingerprint and gates |
+| `fitr device` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
+| `fitr calibrate <a> <b>` | which check items discriminated two `--seedset` runs; does not rewrite the spec |
 
 | Level | Runs | ~Time |
 |---|---|---|

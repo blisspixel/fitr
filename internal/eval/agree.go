@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"sort"
 	"strings"
 )
 
@@ -90,4 +91,79 @@ func QuantRank(q string) int {
 		return 30
 	}
 	return 0
+}
+
+// ItemStat is per-task discrimination between two paired batteries. An item
+// that never flips on shared instances cannot separate a good quant from a
+// damaged one - it is a candidate to drop, not dropped by this function.
+type ItemStat struct {
+	TaskID string
+	Family string
+	Need   string
+	Shared int
+	Flips  int
+	APass  int
+	BPass  int
+}
+
+func (s ItemStat) Discriminated() bool { return s.Flips > 0 }
+
+// ItemStats rolls PairFlips down to each task id. Unshared instances are
+// dropped, same as PairFlips: we do not invent a pair the other run never saw.
+func ItemStats(a, b []CheckOutcome) []ItemStat {
+	type key struct {
+		id   string
+		seed uint64
+	}
+	left := map[key]CheckOutcome{}
+	for _, ck := range a {
+		left[key{ck.TaskID, ck.Seed}] = ck
+	}
+	type acc struct {
+		family, need          string
+		shared, flips, aP, bP int
+	}
+	by := map[string]*acc{}
+	for _, ck := range b {
+		pa, ok := left[key{ck.TaskID, ck.Seed}]
+		if !ok {
+			continue
+		}
+		s := by[ck.TaskID]
+		if s == nil {
+			s = &acc{family: firstNonEmpty(ck.Family, pa.Family), need: firstNonEmpty(ck.Need, pa.Need)}
+			by[ck.TaskID] = s
+		}
+		s.shared++
+		if pa.Pass {
+			s.aP++
+		}
+		if ck.Pass {
+			s.bP++
+		}
+		if pa.Pass != ck.Pass {
+			s.flips++
+		}
+	}
+	out := make([]ItemStat, 0, len(by))
+	for id, s := range by {
+		out = append(out, ItemStat{
+			TaskID: id, Family: s.family, Need: s.need,
+			Shared: s.shared, Flips: s.flips, APass: s.aP, BPass: s.bP,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Flips != out[j].Flips {
+			return out[i].Flips > out[j].Flips
+		}
+		return out[i].TaskID < out[j].TaskID
+	})
+	return out
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

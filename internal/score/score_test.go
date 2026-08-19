@@ -2,11 +2,23 @@ package score
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/blisspixel/fitr/internal/device"
 )
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "fitr-profiles-")
+	if err != nil {
+		os.Exit(1)
+	}
+	os.Setenv("FITR_PROFILES", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
 
 func lappy(t *testing.T) device.Profile {
 	t.Helper()

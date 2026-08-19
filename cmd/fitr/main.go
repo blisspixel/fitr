@@ -36,7 +36,7 @@ import (
 	"github.com/blisspixel/fitr/internal/stats"
 )
 
-const version = "0.2.0-dev"
+const version = "0.2.0"
 
 // Exit codes: small, documented, domain-specific. Not sysexits -- nobody uses it.
 const (
@@ -69,7 +69,8 @@ usage:
   fitr diag <model>
   fitr doctor <model> [-n N]
   fitr device
-  fitr profiles
+  fitr profiles [new [name]]
+  fitr calibrate <model-a> <model-b>
   fitr compare <model-a> <model-b>
 
 flags:
@@ -94,6 +95,8 @@ examples:
   fitr tune
   fitr tune qwen3:30b qwen3:30b-q8
   fitr export qwen3:30b --out scorecard.html
+  fitr profiles new
+  fitr calibrate qwen3:30b-q8 qwen3:30b-q4
 `)
 }
 
@@ -125,7 +128,9 @@ func run() int {
 	case "device":
 		return cmdDevice(ctx, os.Args[2:])
 	case "profiles":
-		return cmdProfiles(ctx)
+		return cmdProfiles(ctx, os.Args[2:])
+	case "calibrate":
+		return cmdCalibrate(ctx, os.Args[2:])
 	case "compare":
 		return cmdCompare(ctx, os.Args[2:])
 	case "screenshots": // dev-only: regenerate docs/assets from mock data
@@ -1784,7 +1789,24 @@ func cmdDevice(ctx context.Context, args []string) int {
 	return exitOK
 }
 
-func cmdProfiles(ctx context.Context) int {
+func cmdProfiles(ctx context.Context, args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "new":
+			name := ""
+			if len(args) > 1 {
+				name = args[1]
+			}
+			return cmdProfilesNew(ctx, name)
+		case "-h", "--help", "help":
+			fmt.Fprint(os.Stderr, "usage: fitr profiles [new [name]]\n")
+			return exitOK
+		default:
+			errPrint(fmt.Sprintf("unknown profiles subcommand %q", args[0]), "",
+				"fitr profiles    or    fitr profiles new [name]")
+			return exitUsage
+		}
+	}
 	fp := device.Detect(ctx, probeBackend(ctx))
 	active, _ := device.SelectProfile("", fp)
 	profs, err := device.LoadProfiles()
@@ -1800,6 +1822,91 @@ func cmdProfiles(ctx context.Context) int {
 		fmt.Printf(" %s %-12s %s\n", mark, p.Name, p.Description)
 	}
 	fmt.Println("\n  * = auto-selected for this machine")
+	fmt.Println("  next   fitr profiles new [name]   # UNCALIBRATED local copy; edit the gates")
+	return exitOK
+}
+
+func cmdProfilesNew(ctx context.Context, name string) int {
+	fp := device.Detect(ctx, probeBackend(ctx))
+	p, err := device.ScaffoldProfile(name, fp)
+	if err != nil {
+		errPrint(err.Error(), "", "")
+		return exitError
+	}
+	path, err := device.WriteProfile(device.UserProfilesDir(), p)
+	if err != nil {
+		errPrint(err.Error(), "", "pick a new name, or edit the existing file")
+		return exitError
+	}
+	fmt.Printf("  wrote  %s\n", path)
+	fmt.Println("  UNCALIBRATED copy of default. Run models you already have opinions")
+	fmt.Println("  about, then edit the gates so the verdicts match lived experience.")
+	fmt.Println("  Do not publish these numbers as a calibrated community profile.")
+	return exitOK
+}
+
+// cmdCalibrate reports which check items discriminated between two saved
+// runs (typically two quants of the same model on a shared seedset). It
+// does not rewrite the spec: dropping an item is a human decision after
+// more than one box has spoken.
+func cmdCalibrate(ctx context.Context, args []string) int {
+	if len(args) < 2 {
+		errPrint("need two saved results", "",
+			"fitr run a --seedset night && fitr run b --seedset night && fitr calibrate a b")
+		return exitUsage
+	}
+	results, err := loadResults()
+	if err != nil || len(results) == 0 {
+		errPrint("no saved results", "", "fitr run both models with the same --seedset first")
+		return exitError
+	}
+	a := latestNamed(results, args[0])
+	b := latestNamed(results, args[1])
+	if a == nil || b == nil {
+		errPrint("need two saved results", "", "fitr board lists what is on disk")
+		return exitUsage
+	}
+	if a.SeedSet == "" || a.SeedSet != b.SeedSet {
+		errPrint("runs did not share a seedset",
+			fmt.Sprintf("%s seedset=%q, %s seedset=%q", a.Model, a.SeedSet, b.Model, b.SeedSet),
+			"re-run both with the same --seedset so instances pair")
+		return exitUsage
+	}
+	stats := eval.ItemStats(a.Checks, b.Checks)
+	if len(stats) == 0 {
+		errPrint("no shared check instances", "", "both runs need the default (or --full) level, same seedset")
+		return exitError
+	}
+	qa, qb := a.ModelMeta.Details.QuantizationLevel, b.ModelMeta.Details.QuantizationLevel
+	fmt.Printf("  calibrate  %s (%s)  vs  %s (%s)\n", a.Model, qa, b.Model, qb)
+	fmt.Printf("  seedset    %s\n", a.SeedSet)
+	var kept, drop []eval.ItemStat
+	for _, s := range stats {
+		if s.Discriminated() {
+			kept = append(kept, s)
+		} else {
+			drop = append(drop, s)
+		}
+	}
+	fmt.Printf("  %d items shared, %d discriminated, %d never flipped\n",
+		len(stats), len(kept), len(drop))
+	if ra, rb := eval.QuantRank(qa), eval.QuantRank(qb); ra == 0 || rb == 0 || ra == rb {
+		fmt.Println("  note       dtypes are not a ranked pair; this is discrimination, not directional quant damage")
+	}
+	if len(kept) > 0 {
+		fmt.Println("\n  discriminated (these separate the two runs):")
+		for _, s := range kept {
+			fmt.Printf("    %-22s  %d/%d flipped  %s\n", s.TaskID, s.Flips, s.Shared, s.Need)
+		}
+	}
+	if len(drop) > 0 {
+		fmt.Println("\n  never flipped (candidates to drop AFTER more hardware, not dropped here):")
+		for _, s := range drop {
+			fmt.Printf("    %-22s  %d/%d agree    %s\n", s.TaskID, s.Shared, s.Shared, s.Need)
+		}
+	}
+	fmt.Println("\n  this command does not rewrite spec/tasks. Aider kept 225 of 697")
+	fmt.Println("  by repeating this on many boxes; one pair is a lead, not a cull.")
 	return exitOK
 }
 

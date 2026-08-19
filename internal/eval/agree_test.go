@@ -69,3 +69,37 @@ func TestQuantRankOrdersCommonDtypesAndSkipsIQ(t *testing.T) {
 		t.Fatal("unknown or IQ schemes must not invent a rank")
 	}
 }
+
+func TestItemStatsSeparatesNeverFlippedFromDiscriminating(t *testing.T) {
+	hi := []CheckOutcome{
+		{TaskID: "json_object", Family: "json_object", Need: "structured_output", Seed: 1, Pass: true},
+		{TaskID: "json_object", Family: "json_object", Need: "structured_output", Seed: 2, Pass: true},
+		{TaskID: "date_math", Family: "date_math", Need: "instruction_precision", Seed: 1, Pass: true},
+		{TaskID: "date_math", Family: "date_math", Need: "instruction_precision", Seed: 2, Pass: true},
+	}
+	lo := []CheckOutcome{
+		{TaskID: "json_object", Family: "json_object", Need: "structured_output", Seed: 1, Pass: false},
+		{TaskID: "json_object", Family: "json_object", Need: "structured_output", Seed: 2, Pass: true},
+		{TaskID: "date_math", Family: "date_math", Need: "instruction_precision", Seed: 1, Pass: true},
+		{TaskID: "date_math", Family: "date_math", Need: "instruction_precision", Seed: 2, Pass: true},
+	}
+	stats := ItemStats(hi, lo)
+	if len(stats) != 2 {
+		t.Fatalf("got %d items, want 2", len(stats))
+	}
+	if stats[0].TaskID != "json_object" || stats[0].Flips != 1 {
+		t.Fatalf("discriminating item should sort first: %+v", stats[0])
+	}
+	if stats[1].TaskID != "date_math" || stats[1].Discriminated() {
+		t.Fatalf("date_math never flipped, must not look like a discriminator: %+v", stats[1])
+	}
+}
+
+func TestItemStatsDropsUnsharedSeeds(t *testing.T) {
+	a := []CheckOutcome{{TaskID: "json_object", Seed: 1, Pass: true}, {TaskID: "json_object", Seed: 99, Pass: false}}
+	b := []CheckOutcome{{TaskID: "json_object", Seed: 1, Pass: false}}
+	stats := ItemStats(a, b)
+	if len(stats) != 1 || stats[0].Shared != 1 || stats[0].Flips != 1 {
+		t.Fatalf("unshared seed 99 must be dropped: %+v", stats)
+	}
+}

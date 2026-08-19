@@ -18,6 +18,17 @@ import (
 	"github.com/blisspixel/fitr/internal/stats"
 )
 
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "fitr-profiles-")
+	if err != nil {
+		os.Exit(1)
+	}
+	os.Setenv("FITR_PROFILES", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 // The golden corpus: a frozen, realistic full-run result. measure() -> Score()
 // -> Result rendering is the pipeline every run ends with, and before this
 // test none of it was covered - a scoring regression would have shipped
@@ -281,6 +292,90 @@ func TestUsageMentionsAdvise(t *testing.T) {
 	}
 	if !strings.Contains(got, "fitr tune") {
 		t.Fatalf("usage must list tune:\n%s", got)
+	}
+	if !strings.Contains(got, "fitr calibrate") {
+		t.Fatalf("usage must list calibrate:\n%s", got)
+	}
+}
+
+func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	hi, lo := golden(t), golden(t)
+	hi.Model, lo.Model = "m-q8", "m-q4"
+	hi.SeedSet, lo.SeedSet = "night", "night"
+	hi.ModelMeta.Details.QuantizationLevel = "Q8_0"
+	lo.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
+	hi.Checks = []eval.CheckOutcome{
+		{TaskID: "json_object", Need: "structured_output", Seed: 1, Pass: true},
+		{TaskID: "date_math", Need: "instruction_precision", Seed: 1, Pass: true},
+	}
+	lo.Checks = []eval.CheckOutcome{
+		{TaskID: "json_object", Need: "structured_output", Seed: 1, Pass: false},
+		{TaskID: "date_math", Need: "instruction_precision", Seed: 1, Pass: true},
+	}
+	for _, r := range []*Result{hi, lo} {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	code := cmdCalibrate(context.Background(), []string{"m-q8", "m-q4"})
+	pw.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(pr)
+	got := string(out)
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s", code, got)
+	}
+	if !strings.Contains(got, "json_object") || !strings.Contains(got, "never flipped") {
+		t.Fatalf("must name the discriminator and the inert item:\n%s", got)
+	}
+	if strings.Contains(got, "rewrites spec") {
+		t.Fatal("must not claim to rewrite the spec")
+	}
+}
+
+func TestCalibrateRejectsUnpairedSeedsets(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "aa", "bb"
+	a.SeedSet, b.SeedSet = "one", "two"
+	for _, r := range []*Result{a, b} {
+		raw, _ := json.Marshal(r)
+		os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644)
+	}
+	if code := cmdCalibrate(context.Background(), []string{"aa", "bb"}); code != exitUsage {
+		t.Fatalf("code = %d, want usage when seedsets differ", code)
+	}
+}
+
+func TestProfilesNewWritesUncalibratedFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_PROFILES", dir)
+	old := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	code := cmdProfiles(context.Background(), []string{"new", "TestBox"})
+	pw.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(pr)
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s", code, out)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "testbox.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "UNCALIBRATED") {
+		t.Fatalf("file must say uncalibrated:\n%s", b)
 	}
 }
 
