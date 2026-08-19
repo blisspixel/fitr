@@ -29,7 +29,10 @@ type Backend interface {
 	Reachable(ctx context.Context) bool
 
 	Generate(ctx context.Context, model, prompt string, s ollama.Sampling) (string, ollama.Metrics, error)
-	Chat(ctx context.Context, model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) (ollama.Message, error)
+	// Chat returns per-turn metrics alongside the message; the prompt token
+	// count is the transcript size the model re-processed, which agentic
+	// measurement needs.
+	Chat(ctx context.Context, model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) (ollama.Message, ollama.Metrics, error)
 
 	Tags(ctx context.Context) ([]ollama.ModelInfo, error)
 	Show(ctx context.Context, model string) (ollama.ModelInfo, error)

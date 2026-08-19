@@ -71,6 +71,7 @@ usage:
 flags:
   --display  auto|plain|json|none   output mode (default auto)
   --backend  auto|ollama|llama-server|openai   serving runtime (default auto-detect)
+  --pull     fetch a missing model first (Ollama; HF links pull automatically)
   -k         repeats per noisy task (default 3, 1 with --quick)
              A single run is not a measurement: identical configs vary 10-20pp.
   -q         quiet (repeat for silent)      -v  verbose
@@ -80,7 +81,8 @@ exit codes:
 
 examples:
   fitr run qwen3-coder:30b --full
-  fitr run some-new-model:tag -k 3
+  fitr run https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
+  fitr run some-new-model:tag -k 3 --pull
   fitr diag dolphin3:8b
   fitr doctor qwen3-coder:30b
 `)
@@ -163,29 +165,42 @@ func takesValue(flagArg string) bool {
 // Selection order: --backend flag, then $FITR_BACKEND, then auto-probe
 // (Ollama first - it is the default URL people have running - then
 // llama-server, then any OpenAI-compatible server at the LM Studio port).
-func newBackend(ctx context.Context, model, kind string) (llm.Backend, int) {
+//
+// A Hugging Face ref (pasted URL or hf.co/...) is an Ollama pull, not a
+// label to file results under while measuring whatever else is already
+// loaded. Prefer Ollama; refuse to pretend llama-server fetched it.
+func newBackend(ctx context.Context, model, kind string, pull bool) (llm.Backend, int) {
 	if kind == "" || kind == "auto" {
 		kind = os.Getenv("FITR_BACKEND")
 	}
+	if isHFRef(model) && (kind == "" || kind == "auto" || kind == "ollama") {
+		o := ollama.New()
+		if !o.Reachable(ctx) {
+			errPrint("Hugging Face refs need a running Ollama",
+				"Ollama pulls GGUFs from hf.co/{user}/{repo}[:quant]; other servers already have a model loaded",
+				"start `ollama serve` and re-run, or pass the name of a model already being served")
+			return nil, exitError
+		}
+		return checkModel(ctx, o, model, pull)
+	}
 	switch kind {
 	case "", "auto":
-		o := ollama.New()
-		if o.Reachable(ctx) {
-			return checkModel(ctx, o, model)
+		found := llm.Discover(ctx)
+		if len(found) == 0 {
+			errPrint("no serving runtime reachable",
+				"tried "+strings.Join(llm.Candidates(), ", "),
+				"start one, or point fitr at it: OLLAMA_BASE_URL, LLAMA_SERVER_URL, FITR_OPENAI_URL, FITR_DISCOVER_URLS, or --backend")
+			return nil, exitError
 		}
-		l := llamaserver.New()
-		if l.Reachable(ctx) {
-			return checkModel(ctx, l, model)
+		if len(found) > 1 {
+			var extra []string
+			for _, f := range found[1:] {
+				extra = append(extra, f.Kind+" at "+f.URL)
+			}
+			fmt.Fprintf(os.Stderr, "! also found %s - using %s at %s; set --backend or a URL env to pick\n",
+				strings.Join(extra, ", "), found[0].Kind, found[0].URL)
 		}
-		g := openaicompat.New()
-		if g.Reachable(ctx) {
-			return checkModel(ctx, g, model)
-		}
-		errPrint("no serving runtime reachable",
-			fmt.Sprintf("tried Ollama at %s, llama-server at %s, OpenAI-compatible at %s",
-				o.URL(), l.URL(), g.URL()),
-			"start one, or point fitr at it: OLLAMA_BASE_URL, LLAMA_SERVER_URL, FITR_OPENAI_URL, or --backend")
-		return nil, exitError
+		return checkModel(ctx, backendAt(found[0].Kind, found[0].URL), model, pull)
 	case "ollama":
 		o := ollama.New()
 		if !o.Reachable(ctx) {
@@ -194,7 +209,7 @@ func newBackend(ctx context.Context, model, kind string) (llm.Backend, int) {
 				"start it with `ollama serve`, or set OLLAMA_BASE_URL")
 			return nil, exitError
 		}
-		return checkModel(ctx, o, model)
+		return checkModel(ctx, o, model, pull)
 	case "llama-server", "llamaserver":
 		l := llamaserver.New()
 		if !l.Reachable(ctx) {
@@ -203,7 +218,7 @@ func newBackend(ctx context.Context, model, kind string) (llm.Backend, int) {
 				"start it with `llama-server -m model.gguf`, or set LLAMA_SERVER_URL")
 			return nil, exitError
 		}
-		return checkModel(ctx, l, model)
+		return checkModel(ctx, l, model, pull)
 	case "openai":
 		g := openaicompat.New()
 		if !g.Reachable(ctx) {
@@ -212,7 +227,7 @@ func newBackend(ctx context.Context, model, kind string) (llm.Backend, int) {
 				"start LM Studio / vLLM / SGLang, or set FITR_OPENAI_URL")
 			return nil, exitError
 		}
-		return checkModel(ctx, g, model)
+		return checkModel(ctx, g, model, pull)
 	default:
 		errPrint(fmt.Sprintf("unknown backend %q", kind), "",
 			"valid: auto, ollama, llama-server, openai")
@@ -220,11 +235,102 @@ func newBackend(ctx context.Context, model, kind string) (llm.Backend, int) {
 	}
 }
 
+// normalizeModelRef accepts pasted Hugging Face URLs and turns them into the
+// hf.co/{user}/{repo}[:quant] form Ollama pulls natively - so "point fitr at
+// an HF link" just works. Blob/resolve URLs keep the quant from the filename.
+func normalizeModelRef(model string) string {
+	m := strings.TrimSpace(model)
+	m = strings.SplitN(m, "?", 2)[0]
+	m = strings.SplitN(m, "#", 2)[0]
+	m = strings.TrimRight(m, "/")
+	lower := strings.ToLower(m)
+	for _, prefix := range []string{
+		"https://www.huggingface.co/",
+		"http://www.huggingface.co/",
+		"https://huggingface.co/",
+		"http://huggingface.co/",
+		"www.huggingface.co/",
+		"huggingface.co/",
+		"https://hf.co/",
+		"http://hf.co/",
+		"hf.co/",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return "hf.co/" + parseHFPath(m[len(prefix):])
+		}
+	}
+	return m
+}
+
+func parseHFPath(p string) string {
+	path, tag, hasTag := strings.Cut(p, ":")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		if hasTag {
+			return path + ":" + tag
+		}
+		return path
+	}
+	user, repo := parts[0], parts[1]
+	if !hasTag && len(parts) >= 5 {
+		switch parts[2] {
+		case "blob", "resolve":
+			if q := quantFromFilename(parts[len(parts)-1]); q != "" {
+				tag, hasTag = q, true
+			}
+		}
+	}
+	if hasTag {
+		return user + "/" + repo + ":" + tag
+	}
+	return user + "/" + repo
+}
+
+func quantFromFilename(file string) string {
+	lower := strings.ToLower(file)
+	if !strings.HasSuffix(lower, ".gguf") {
+		return ""
+	}
+	base := file[:len(file)-len(".gguf")]
+	// Underscores live inside the quant name (Q4_K_M, IQ4_XS); only '-' and
+	// '.' separate the quant from the rest of the filename.
+	i := strings.LastIndexAny(base, "-.")
+	if i < 0 {
+		return base
+	}
+	cand := base[i+1:]
+	if isQuantTag(cand) {
+		return strings.ToUpper(cand)
+	}
+	return filepath.Base(base)
+}
+
+func isQuantTag(s string) bool {
+	u := strings.ToUpper(s)
+	switch u {
+	case "F16", "F32", "BF16":
+		return true
+	}
+	rest := u
+	switch {
+	case strings.HasPrefix(u, "IQ"):
+		rest = u[2:]
+	case strings.HasPrefix(u, "Q"):
+		rest = u[1:]
+	default:
+		return false
+	}
+	return rest != "" && rest[0] >= '0' && rest[0] <= '9'
+}
+
+func isHFRef(model string) bool { return strings.HasPrefix(model, "hf.co/") }
+
 // checkModel verifies the model label against what the backend serves. On
-// Ollama a missing model is a hard error with a pull hint; a single-model
-// server ignores the label at request time, so a mismatch there is a warning
-// - the results would otherwise be filed under a name the server never saw.
-func checkModel(ctx context.Context, b llm.Backend, model string) (llm.Backend, int) {
+// Ollama a missing model is a hard error with a pull hint - or an automatic
+// pull with progress when the caller allows it; a single-model server ignores
+// the label at request time, so a mismatch there is a warning - the results
+// would otherwise be filed under a name the server never saw.
+func checkModel(ctx context.Context, b llm.Backend, model string, pull bool) (llm.Backend, int) {
 	if model == "" {
 		return b, exitOK
 	}
@@ -247,11 +353,49 @@ func checkModel(ctx context.Context, b llm.Backend, model string) (llm.Backend, 
 		return b, exitOK
 	}
 	if b.Name() != "ollama" {
+		if isHFRef(model) {
+			errPrint("Hugging Face refs need Ollama to pull",
+				b.Name()+" is serving its own model, not fetching from Hugging Face",
+				"start Ollama, or pass the served model name instead of an HF URL")
+			return nil, exitUsage
+		}
+		if pull {
+			fmt.Fprintf(os.Stderr, "! --pull is an Ollama feature; %s serves whatever is already loaded\n", b.Name())
+		}
 		fmt.Fprintf(os.Stderr, "! %s serves %q, not %q - results will be recorded under %q\n",
 			b.Name(), tags[0].Name, model, model)
 		return b, exitOK
 	}
-	hint := "pull it first: `ollama pull " + model + "`"
+	// Pasting an HF URL is the request to fetch it. Regular Ollama tags
+	// still need --pull so a typo does not start a multi-gigabyte download.
+	if pull || isHFRef(model) {
+		o, ok := b.(*ollama.Client)
+		if ok {
+			src := "Ollama"
+			if isHFRef(model) {
+				src = "Hugging Face via Ollama"
+			}
+			fmt.Fprintf(os.Stderr, "  pulling %s from %s\n", model, src)
+			last := ""
+			err := o.Pull(ctx, model, func(status string, pct int) {
+				line := status
+				if pct >= 0 {
+					line = fmt.Sprintf("%s %d%%", status, pct)
+				}
+				if line != last {
+					fmt.Fprintf(os.Stderr, "\r  %-60s", line)
+					last = line
+				}
+			})
+			fmt.Fprintln(os.Stderr)
+			if err != nil {
+				errPrint("pull failed: "+err.Error(), "", "")
+				return nil, exitError
+			}
+			return b, exitOK
+		}
+	}
+	hint := "pull it first: `ollama pull " + model + "`, or re-run with --pull"
 	if len(near) > 0 {
 		hint = "did you mean: " + strings.Join(near, ", ")
 	}
@@ -262,17 +406,35 @@ func checkModel(ctx context.Context, b llm.Backend, model string) (llm.Backend, 
 
 // probeBackend is the no-error variant for commands that merely display state.
 func probeBackend(ctx context.Context) llm.Backend {
-	o := ollama.New()
-	if o.Reachable(ctx) {
-		return o
+	found := llm.Discover(ctx)
+	if len(found) == 0 {
+		return ollama.New()
 	}
-	if l := llamaserver.New(); l.Reachable(ctx) {
-		return l
+	return backendAt(found[0].Kind, found[0].URL)
+}
+
+func backendAt(kind, url string) llm.Backend {
+	url = strings.TrimRight(url, "/")
+	switch kind {
+	case "llama-server", "llamaserver":
+		c := llamaserver.New()
+		if url != "" {
+			c.BaseURL = url
+		}
+		return c
+	case "openai":
+		c := openaicompat.New()
+		if url != "" {
+			c.BaseURL = url
+		}
+		return c
+	default:
+		c := ollama.New()
+		if url != "" {
+			c.BaseURL = url
+		}
+		return c
 	}
-	if g := openaicompat.New(); g.Reachable(ctx) {
-		return g
-	}
-	return o
 }
 
 // ---------------------------------------------------------------- run
@@ -289,6 +451,8 @@ func cmdRun(ctx context.Context, args []string) int {
 		"a seedset face IDENTICAL task instances, enabling a paired comparison")
 	adaptive := fs.Bool("adaptive", false, "repeat generated checks until each gated need is "+
 		"decided against its gate (Wald SPRT, alpha=beta=0.05) or 6 rounds pass")
+	pullFlag := fs.Bool("pull", false, "pull the model first if it is not installed "+
+		"(Ollama; supports hf.co/... and pasted Hugging Face URLs)")
 	quiet := fs.Int("q", 0, "quiet level")
 	verbose := fs.Bool("v", false, "verbose")
 	if err := fs.Parse(permute(args)); err != nil {
@@ -298,7 +462,7 @@ func cmdRun(ctx context.Context, args []string) int {
 		errPrint("missing model", "", "fitr run <model> --full")
 		return exitUsage
 	}
-	model := fs.Arg(0)
+	model := normalizeModelRef(fs.Arg(0))
 
 	level := "default"
 	if *quick {
@@ -319,7 +483,7 @@ func cmdRun(ctx context.Context, args []string) int {
 		*mode = "plain"
 	}
 
-	c, code := newBackend(ctx, model, *backend)
+	c, code := newBackend(ctx, model, *backend, *pullFlag)
 	if code != exitOK {
 		return code
 	}
@@ -394,6 +558,7 @@ type Result struct {
 	CodeFix    []eval.ExecResult              `json:"code_fix"`
 	Checks     []eval.CheckOutcome            `json:"checks,omitempty"`
 	Tools      []eval.ToolLoopResult          `json:"tools"`
+	Withdrawal *eval.ToolLoopResult           `json:"tool_withdrawal,omitempty"`
 	Agentic    *eval.ToolLoopResult           `json:"agentic,omitempty"`
 	Refusal    map[string]eval.RefusalVerdict `json:"refusal,omitempty"`
 	Refused    int                            `json:"refused_count"`
@@ -662,6 +827,19 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	}
 
 	if level != "quick" {
+		if err := step("withdrawal", "a tool vanishes mid-loop", func() error {
+			w, err := eval.RunToolLoop(ctx, c, model, spec.Withdrawal, filepath.Join(work, "wd"))
+			if err != nil {
+				return err
+			}
+			res.Withdrawal = &w
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	if level != "quick" {
 		if err := step("refusal", "3 prompts", func() error {
 			r, n, err := eval.RunRefusal(ctx, c, model, spec.Refusal)
 			res.Refusal, res.Refused = r, n
@@ -779,6 +957,17 @@ func measure(r *Result) score.Measured {
 	if r.DecodeSum.N > 0 {
 		m.SpeedKnown = true
 		m.DecodeTPS, m.TTFT, m.PrefillTPS = r.DecodeSum.Mean, r.TTFTSum.Mean, r.PrefillSum.Mean
+		for _, s := range r.Speed {
+			if s.ColdTTFT > 0 && m.TTFTCold == 0 {
+				m.TTFTCold = s.ColdTTFT
+			}
+			if s.WarmTTFT > 0 && m.TTFTWarm == 0 {
+				m.TTFTWarm = s.WarmTTFT
+			}
+			if s.PromptTok > 0 && s.GatedCachedTok*5 >= s.PromptTok {
+				m.TTFTCacheContaminated = true
+			}
+		}
 	}
 	if r.Memory.ResidentGB > 0 {
 		m.MemoryKnown, m.ResidentGB32K = true, r.Memory.ResidentGB
@@ -833,6 +1022,14 @@ func measure(r *Result) score.Measured {
 		m.AgenticRan, m.AgenticPass = true, r.Agentic.Pass
 		m.AgenticMalformed = r.Agentic.Malformed
 		m.AgenticTurns = r.Agentic.Turns
+		m.AgenticCtxCeiling = r.Agentic.CtxCeiling
+		m.AgenticMaxPrompt = r.Agentic.MaxPromptTok
+		m.AgenticCompacted = r.Agentic.Compacted
+	}
+	if r.Withdrawal != nil {
+		m.WithdrawRan = true
+		m.WithdrawDeadCalls = r.Withdrawal.DeadCalls
+		m.WithdrawClean = r.Withdrawal.Ended == "clean_stop"
 	}
 	if r.Plumbing != nil {
 		m.PlumbingRan = true
@@ -1003,8 +1200,8 @@ func cmdDiag(ctx context.Context, args []string) int {
 		errPrint("missing model", "", "fitr diag <model>")
 		return exitUsage
 	}
-	model := fs.Arg(0)
-	c, code := newBackend(ctx, model, *backend)
+	model := normalizeModelRef(fs.Arg(0))
+	c, code := newBackend(ctx, model, *backend, false)
 	if code != exitOK {
 		return code
 	}
@@ -1050,8 +1247,8 @@ func cmdDoctor(ctx context.Context, args []string) int {
 		errPrint("missing model", "", "fitr doctor <model>")
 		return exitUsage
 	}
-	model := fs.Arg(0)
-	c, code := newBackend(ctx, model, *backend)
+	model := normalizeModelRef(fs.Arg(0))
+	c, code := newBackend(ctx, model, *backend, false)
 	if code != exitOK {
 		return code
 	}

@@ -73,6 +73,11 @@ type ToolLoopSpec struct {
 		PassIfStdoutContains string   `json:"pass_if_stdout_contains"`
 	} `json:"verify"`
 	ExpectedSequence string `json:"expected_sequence_regex"`
+	// WithdrawTool names a tool that disappears from the tools list once
+	// WithdrawAfter turns have run - the "tool vanished, stop calling it"
+	// scenario every long-lived agent session eventually faces.
+	WithdrawTool  string `json:"withdraw_tool,omitempty"`
+	WithdrawAfter int    `json:"withdraw_after_turns,omitempty"`
 }
 
 type RefusalSpec struct {
@@ -97,15 +102,16 @@ type PlumbingSpec struct {
 }
 
 type Spec struct {
-	Speed     SpeedSpec
-	CodeWrite ExecSpec
-	CodeFix   ExecSpec
-	Tools     ToolLoopSpec
-	Agentic   ToolLoopSpec
-	Refusal   RefusalSpec
-	Plumbing  PlumbingSpec
-	Checks    []CheckSpec
-	Version   struct {
+	Speed      SpeedSpec
+	CodeWrite  ExecSpec
+	CodeFix    ExecSpec
+	Tools      ToolLoopSpec
+	Agentic    ToolLoopSpec
+	Withdrawal ToolLoopSpec
+	Refusal    RefusalSpec
+	Plumbing   PlumbingSpec
+	Checks     []CheckSpec
+	Version    struct {
 		SpecVersion         int    `json:"spec_version"`
 		ResultSchemaVersion int    `json:"result_schema_version"`
 		Note                string `json:"note"`
@@ -133,8 +139,8 @@ func LoadSpec() (*Spec, error) {
 		into any
 	}{
 		{"speed", &s.Speed}, {"code_write", &s.CodeWrite}, {"code_fix", &s.CodeFix},
-		{"tools", &s.Tools}, {"agentic", &s.Agentic}, {"refusal", &s.Refusal},
-		{"tool_plumbing", &s.Plumbing},
+		{"tools", &s.Tools}, {"agentic", &s.Agentic}, {"tool_withdrawal", &s.Withdrawal},
+		{"refusal", &s.Refusal}, {"tool_plumbing", &s.Plumbing},
 	} {
 		if err := load(step.name, step.into); err != nil {
 			return nil, err

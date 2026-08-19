@@ -54,6 +54,29 @@ func New() *Client {
 func (c *Client) Name() string { return "llama-server" }
 func (c *Client) URL() string  { return c.BaseURL }
 
+// Accel returns the raw build/system/device string the server exposes.
+// device.Detect maps it onto cuda|metal|vulkan|rocm|...; we do not guess
+// from the model's name.
+func (c *Client) Accel(ctx context.Context) string {
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	p, err := c.props(cctx)
+	if err != nil {
+		return ""
+	}
+	var bits []string
+	if p.BuildInfo != "" {
+		bits = append(bits, p.BuildInfo)
+	}
+	if p.SystemInfo != "" {
+		bits = append(bits, p.SystemInfo)
+	}
+	for _, d := range p.Devices {
+		bits = append(bits, d.Backend, d.Device, d.Name, d.Type)
+	}
+	return strings.TrimSpace(strings.Join(bits, " "))
+}
+
 func (c *Client) Reachable(ctx context.Context) bool {
 	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -77,9 +100,16 @@ type props struct {
 		Audio  bool `json:"audio"`
 	} `json:"modalities"`
 	ChatTemplateCaps map[string]bool `json:"chat_template_caps"`
+	SystemInfo       string          `json:"system_info"`
 	DefaultSettings  struct {
 		NCtx int `json:"n_ctx"`
 	} `json:"default_generation_settings"`
+	Devices []struct {
+		Name    string `json:"name"`
+		Type    string `json:"type"`
+		Backend string `json:"backend"`
+		Device  string `json:"device"`
+	} `json:"devices"`
 }
 
 func (c *Client) props(ctx context.Context) (props, error) {
@@ -242,6 +272,7 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 		EvalCount:    final.Timings.PredictedN,
 		PromptTokens: final.Timings.PromptN,
 		CachedTokens: final.TokensCached,
+		CacheKnown:   true,
 		DoneReason:   final.StopType,
 		Truncated:    final.Truncated || final.StopType == "limit",
 	}
@@ -258,27 +289,40 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 // Chat uses /v1/chat/completions - the code path every real agent framework
 // exercises against this server, which makes it the honest one to measure.
 // The wire mapping is shared with every OpenAI-shaped backend (internal/oai).
-func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) (ollama.Message, error) {
+func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) (ollama.Message, ollama.Metrics, error) {
+	start := time.Now()
 	resp, err := c.post(ctx, "/v1/chat/completions", oai.ChatPayload(model, msgs, tools, s))
 	if err != nil {
-		return ollama.Message{}, err
+		return ollama.Message{}, ollama.Metrics{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return ollama.Message{}, httpError("llama-server", resp)
+		return ollama.Message{}, ollama.Metrics{}, httpError("llama-server", resp)
 	}
 	var r struct {
 		Choices []struct {
-			Message oai.Message `json:"message"`
+			Message      oai.Message `json:"message"`
+			FinishReason string      `json:"finish_reason"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return ollama.Message{}, err
+		return ollama.Message{}, ollama.Metrics{}, err
 	}
 	if len(r.Choices) == 0 {
-		return ollama.Message{}, fmt.Errorf("llama-server: no choices in response")
+		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf("llama-server: no choices in response")
 	}
-	return oai.ToMessage(r.Choices[0].Message), nil
+	m := ollama.Metrics{
+		WallSeconds:  round(time.Since(start).Seconds(), 2),
+		EvalCount:    r.Usage.CompletionTokens,
+		PromptTokens: r.Usage.PromptTokens,
+		DoneReason:   r.Choices[0].FinishReason,
+		Truncated:    r.Choices[0].FinishReason == "length",
+	}
+	return oai.ToMessage(r.Choices[0].Message), m, nil
 }
 
 // ---------------------------------------------------------------- plumbing

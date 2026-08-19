@@ -122,7 +122,7 @@ func TestChatSharesTheOpenAIMapping(t *testing.T) {
 			`"function":{"name":"f","arguments":"{\"a\":1}"}}]}}]}`))
 	})
 	defer done()
-	msg, err := c.Chat(context.Background(), "m",
+	msg, _, err := c.Chat(context.Background(), "m",
 		[]ollama.Message{{Role: "user", Content: "x"}}, nil, ollama.Deterministic(64, 8192))
 	if err != nil {
 		t.Fatal(err)

@@ -52,6 +52,9 @@ func TestGenerateParsesSSEStreamAndTimings(t *testing.T) {
 	if m.PromptTokens != 100 || m.CachedTokens != 12 {
 		t.Fatalf("prompt=%d cached=%d", m.PromptTokens, m.CachedTokens)
 	}
+	if !m.CacheKnown {
+		t.Fatal("llama-server tokens_cached is a real receipt; CacheKnown must be set")
+	}
 	if m.TTFTSeconds <= 0 {
 		t.Fatal("TTFT must be wall-clock measured, not zero")
 	}
@@ -113,7 +116,7 @@ func TestChatNormalizesOpenAIToolCalls(t *testing.T) {
 	})
 	defer done()
 
-	msg, err := c.Chat(context.Background(), "m",
+	msg, _, err := c.Chat(context.Background(), "m",
 		[]ollama.Message{{Role: "user", Content: "weather?"}},
 		[]ollama.Tool{{Type: "function"}}, ollama.Deterministic(300, 8192))
 	if err != nil {
@@ -143,7 +146,7 @@ func TestChatKeepsMalformedArgumentsMalformed(t *testing.T) {
 			`"function":{"name":"f","arguments":"{not json"}}]}}]}`))
 	})
 	defer done()
-	msg, err := c.Chat(context.Background(), "m", nil, nil, ollama.Deterministic(64, 8192))
+	msg, _, err := c.Chat(context.Background(), "m", nil, nil, ollama.Deterministic(64, 8192))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +180,7 @@ func TestChatMapsToolResultsToOpenAIShape(t *testing.T) {
 		{Role: "assistant", Thinking: "checking", ToolCalls: []ollama.ToolCall{call}},
 		{Role: "tool", ToolName: "get_weather", ToolCallID: "call_9", Content: "-3C"},
 	}
-	if _, err := c.Chat(context.Background(), "m", msgs, nil, ollama.Deterministic(64, 8192)); err != nil {
+	if _, _, err := c.Chat(context.Background(), "m", msgs, nil, ollama.Deterministic(64, 8192)); err != nil {
 		t.Fatal(err)
 	}
 	if len(gotReq.Messages) != 3 {
@@ -221,6 +224,18 @@ func TestShowReadsCapabilitiesFromProps(t *testing.T) {
 	}
 	if v := c.Version(context.Background()); v != "llama-server b6142-abc123" {
 		t.Fatalf("version = %q", v)
+	}
+}
+
+func TestAccelReadsDevicesAndSystemInfo(t *testing.T) {
+	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"build_info":"b6142","system_info":"AVX = 1 | CUDA : ARCHS = 890",` +
+			`"devices":[{"name":"NVIDIA RTX 4090","backend":"CUDA","type":"gpu"}]}`))
+	})
+	defer done()
+	got := c.Accel(context.Background())
+	if !strings.Contains(got, "CUDA") {
+		t.Fatalf("Accel = %q, want a CUDA receipt from /props", got)
 	}
 }
 

@@ -161,3 +161,38 @@ func TestMDEIsSaidOutLoud(t *testing.T) {
 		t.Fatalf("MDE at 23 trials = %.1fpp - expected roughly 29pp; the formula changed", mde)
 	}
 }
+
+func TestNormalizeModelRefAcceptsPastedHFLinks(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"qwen3-coder:30b", "qwen3-coder:30b"},
+		{"hf.co/bartowski/Foo-GGUF", "hf.co/bartowski/Foo-GGUF"},
+		{"hf.co/bartowski/Foo-GGUF:Q4_K_M", "hf.co/bartowski/Foo-GGUF:Q4_K_M"},
+		{"https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+			"hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"},
+		{"https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/",
+			"hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"},
+		{"https://huggingface.co/bartowski/Foo-GGUF:Q8_0",
+			"hf.co/bartowski/Foo-GGUF:Q8_0"},
+		{"https://huggingface.co/bartowski/Foo-GGUF/tree/main",
+			"hf.co/bartowski/Foo-GGUF"},
+		{"https://huggingface.co/bartowski/Foo-GGUF/blob/main/Foo-Q4_K_M.gguf",
+			"hf.co/bartowski/Foo-GGUF:Q4_K_M"},
+		{"https://huggingface.co/bartowski/Foo-GGUF/resolve/main/Foo.Q8_0.gguf?download=true",
+			"hf.co/bartowski/Foo-GGUF:Q8_0"},
+		{"http://hf.co/org/model", "hf.co/org/model"},
+		{"huggingface.co/org/model", "hf.co/org/model"},
+	}
+	for _, tc := range cases {
+		if got := normalizeModelRef(tc.in); got != tc.want {
+			t.Errorf("normalizeModelRef(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	if !isHFRef(normalizeModelRef("https://huggingface.co/a/b")) {
+		t.Fatal("a pasted HF URL must become an hf.co/ ref")
+	}
+	if isHFRef("qwen3-coder:30b") {
+		t.Fatal("an Ollama tag is not an HF ref")
+	}
+}

@@ -58,6 +58,10 @@ func New() *Client {
 func (c *Client) Name() string { return "openai" }
 func (c *Client) URL() string  { return c.BaseURL }
 
+// Accel is unknown on the generic OpenAI surface; returning empty is the
+// honest answer (design rule 6). vLLM's /version does not name the GPU API.
+func (c *Client) Accel(ctx context.Context) string { return "" }
+
 func (c *Client) Reachable(ctx context.Context) bool {
 	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -268,27 +272,40 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 }
 
 // ---------------------------------------------------------------- chat
-func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) (ollama.Message, error) {
+func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) (ollama.Message, ollama.Metrics, error) {
+	start := time.Now()
 	resp, err := c.post(ctx, "/v1/chat/completions", oai.ChatPayload(model, msgs, tools, s))
 	if err != nil {
-		return ollama.Message{}, err
+		return ollama.Message{}, ollama.Metrics{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return ollama.Message{}, httpError(resp)
+		return ollama.Message{}, ollama.Metrics{}, httpError(resp)
 	}
 	var r struct {
 		Choices []struct {
-			Message oai.Message `json:"message"`
+			Message      oai.Message `json:"message"`
+			FinishReason string      `json:"finish_reason"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return ollama.Message{}, err
+		return ollama.Message{}, ollama.Metrics{}, err
 	}
 	if len(r.Choices) == 0 {
-		return ollama.Message{}, fmt.Errorf("openai-compat: no choices in response")
+		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf("openai-compat: no choices in response")
 	}
-	return oai.ToMessage(r.Choices[0].Message), nil
+	m := ollama.Metrics{
+		WallSeconds:  round(time.Since(start).Seconds(), 2),
+		EvalCount:    r.Usage.CompletionTokens,
+		PromptTokens: r.Usage.PromptTokens,
+		DoneReason:   r.Choices[0].FinishReason,
+		Truncated:    r.Choices[0].FinishReason == "length",
+	}
+	return oai.ToMessage(r.Choices[0].Message), m, nil
 }
 
 func (c *Client) post(ctx context.Context, path string, body any) (*http.Response, error) {

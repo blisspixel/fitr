@@ -28,6 +28,13 @@ func TestSpecLoadsAndIsComplete(t *testing.T) {
 	if s.Agentic.MaxTurns < 20 {
 		t.Fatalf("agentic max_turns = %d, want >=20", s.Agentic.MaxTurns)
 	}
+	if s.Withdrawal.WithdrawTool == "" || s.Withdrawal.WithdrawAfter <= 0 {
+		t.Fatal("withdrawal spec must name a tool and a turn to drop it")
+	}
+	if s.Withdrawal.MaxTurns <= s.Withdrawal.WithdrawAfter {
+		t.Fatalf("withdrawal max_turns = %d must outlast withdraw_after = %d",
+			s.Withdrawal.MaxTurns, s.Withdrawal.WithdrawAfter)
+	}
 	if len(s.Agentic.Tools) != 4 {
 		t.Fatalf("agentic needs list/read/write/run_tests, got %d", len(s.Agentic.Tools))
 	}

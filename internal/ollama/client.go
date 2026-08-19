@@ -14,6 +14,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -87,8 +90,10 @@ type Metrics struct {
 	// CachedTokens is how much of the prompt was served from the prefix cache
 	// rather than evaluated - the receipt that separates a warm TTFT from a
 	// cold one, which differ by 70-200x. Ollama does not report it (always 0);
-	// llama-server does.
-	CachedTokens int `json:"cached_tokens,omitempty"`
+	// llama-server does. CacheKnown is whether the field is a real receipt:
+	// a zero with CacheKnown=false is "not measured", not "cache miss".
+	CachedTokens int  `json:"cached_tokens,omitempty"`
+	CacheKnown   bool `json:"cache_known,omitempty"`
 	// Truncated means the model hit the token cap. Worth scoring as a failure:
 	// roughly 92% of truncations are repetition loops wearing a cap.
 	Truncated bool `json:"truncated"`
@@ -231,11 +236,20 @@ type Message struct {
 }
 
 type chatResp struct {
-	Message Message `json:"message"`
-	Done    bool    `json:"done"`
+	Message            Message `json:"message"`
+	Done               bool    `json:"done"`
+	DoneReason         string  `json:"done_reason"`
+	EvalCount          int     `json:"eval_count"`
+	EvalDuration       int64   `json:"eval_duration"`
+	PromptEvalCount    int     `json:"prompt_eval_count"`
+	PromptEvalDuration int64   `json:"prompt_eval_duration"`
 }
 
-func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools []Tool, s Sampling) (Message, error) {
+// Chat returns the message plus per-turn metrics. The prompt token count is
+// what makes an agentic loop measurable: it is the size of the transcript the
+// model just re-processed, which is both the prefill bill and the input to
+// the compaction watchdog.
+func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools []Tool, s Sampling) (Message, Metrics, error) {
 	payload := map[string]any{
 		"model": model, "messages": msgs, "stream": false,
 		"options": map[string]any{
@@ -249,22 +263,36 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools [
 	if len(tools) > 0 {
 		payload["tools"] = tools
 	}
+	start := time.Now()
 	resp, err := c.post(ctx, "/api/chat", payload)
 	if err != nil {
-		return Message{}, err
+		return Message{}, Metrics{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		buf := new(bytes.Buffer)
 		buf.ReadFrom(resp.Body)
-		return Message{}, fmt.Errorf("ollama %d: %s", resp.StatusCode,
+		return Message{}, Metrics{}, fmt.Errorf("ollama %d: %s", resp.StatusCode,
 			strings.TrimSpace(buf.String()))
 	}
 	var r chatResp
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return Message{}, err
+		return Message{}, Metrics{}, err
 	}
-	return r.Message, nil
+	m := Metrics{
+		WallSeconds:  round(time.Since(start).Seconds(), 2),
+		EvalCount:    r.EvalCount,
+		PromptTokens: r.PromptEvalCount,
+		DoneReason:   r.DoneReason,
+		Truncated:    r.DoneReason == "length",
+	}
+	if r.EvalDuration > 0 {
+		m.DecodeTPS = round(float64(r.EvalCount)/(float64(r.EvalDuration)/1e9), 2)
+	}
+	if r.PromptEvalDuration > 0 {
+		m.PrefillTPS = round(float64(r.PromptEvalCount)/(float64(r.PromptEvalDuration)/1e9), 2)
+	}
+	return r.Message, m, nil
 }
 
 // ---------------------------------------------------------------- inspection
@@ -389,6 +417,68 @@ func (c *Client) StopAll(ctx context.Context) ([]string, error) {
 
 func (c *Client) Name() string { return "ollama" }
 func (c *Client) URL() string  { return c.BaseURL }
+
+// Accel reads the last `library=` from Ollama's server log. There is no HTTP
+// field for it; the log is how the runtime names CUDA vs Vulkan vs Metal.
+func (c *Client) Accel(ctx context.Context) string {
+	b, err := os.ReadFile(serverLogPath())
+	if err != nil {
+		return ""
+	}
+	all := regexp.MustCompile(`library=([A-Za-z0-9_]+)`).FindAllStringSubmatch(string(b), -1)
+	if len(all) == 0 {
+		return ""
+	}
+	return all[len(all)-1][1]
+}
+
+func serverLogPath() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "Ollama", "server.log")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".ollama", "logs", "server.log")
+}
+
+// Pull downloads a model, streaming progress lines. Ollama pulls GGUFs
+// straight from Hugging Face when the name is hf.co/{user}/{repo}[:quant],
+// so "point fitr at an HF link" is this plus name normalization.
+func (c *Client) Pull(ctx context.Context, model string, progress func(status string, pct int)) error {
+	resp, err := c.post(ctx, "/api/pull", map[string]any{"model": model, "stream": true})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(resp.Body)
+		return fmt.Errorf("ollama %d: %s", resp.StatusCode, strings.TrimSpace(buf.String()))
+	}
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		var p struct {
+			Status    string `json:"status"`
+			Error     string `json:"error"`
+			Total     int64  `json:"total"`
+			Completed int64  `json:"completed"`
+		}
+		if json.Unmarshal(bytes.TrimSpace(sc.Bytes()), &p) != nil {
+			continue
+		}
+		if p.Error != "" {
+			return fmt.Errorf("pull: %s", p.Error)
+		}
+		if progress != nil && p.Status != "" {
+			pct := -1
+			if p.Total > 0 {
+				pct = int(100 * p.Completed / p.Total)
+			}
+			progress(p.Status, pct)
+		}
+	}
+	return sc.Err()
+}
 
 // Version asks the server, falling back to the CLI. The server's answer wins:
 // the fingerprint must describe the process that served the tokens, and that

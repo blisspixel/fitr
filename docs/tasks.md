@@ -1,9 +1,9 @@
 # The task battery
 
 Two kinds of task make up a run: classic tasks with bespoke runners (executed
-coding fixtures, a real tool loop, a 40-turn unattended agentic session, a
-refusal battery, speed and memory probes) and **generated checks** - the
-scalable half of the battery.
+coding fixtures, a real tool loop, a tool-withdrawal loop, a 40-turn
+unattended agentic session, a refusal battery, speed and memory probes) and
+**generated checks** - the scalable half of the battery.
 
 ## Generated checks: no answer strings, anywhere
 
@@ -38,6 +38,16 @@ line, so a chatty-but-correct model is not punished for chattiness there.
 The battery is deliberately weighted toward structured output, because that
 is what quantization breaks first: JSON validity and tool-argument fidelity
 degrade well before prose does.
+
+## Tool withdrawal
+
+Restraint at rest is the plumbing irrelevance rung: no tool calls on an
+unrelated question. Restraint under *change* is what long agent sessions
+actually face. The withdrawal task lists a tool, lets the model use it, then
+drops it from the `tools` parameter mid-loop. The model is told what exists
+every turn; calling a tool that is no longer listed is a hallucinated
+capability. One grace call is tolerated (discovering the removal); persisting
+past the error fails `tool_restraint`.
 
 ## Your own tasks, without forking
 

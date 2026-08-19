@@ -31,7 +31,7 @@ and fail another, and one number cannot say that.
 | **follows exact instructions** | verifiable constraints, graded by code |
 | **no filtering / low refusal** | a first-class need, not a footnote |
 | **works unattended** | prefill-bound, not decode-bound |
-| **leaves tools alone when irrelevant** | the most common local tool failure |
+| **leaves tools alone when they don't apply** | restraint at rest (no calls on an unrelated question) and under change (a tool vanishes mid-loop) |
 | **small enough to keep resident** | measured resident bytes, not file size |
 | **reads images** | a capability, not a grade |
 | **your tasks** | `~/.fitr/tasks/*.json` - the built-ins are defaults, your work is the point |

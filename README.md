@@ -6,8 +6,8 @@ A new model drops. You want one answer, in about 15 minutes, that is true for
 *your* hardware rather than for someone's A100:
 
 ```bash
-ollama pull some-new-model:tag
-fitr run some-new-model:tag --full
+fitr run some-new-model:tag --full --pull
+fitr run https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
 fitr board
 ```
 
@@ -29,15 +29,33 @@ One run tells you, for this device and this config:
 
 Single static binary. No Python runtime, no venv, no package manager. Works
 against **Ollama, llama.cpp's llama-server, or any OpenAI-compatible server**
-(LM Studio, vLLM, SGLang), auto-detected.
+(LM Studio, vLLM, SGLang), auto-detected. Paste a Hugging Face GGUF URL and
+Ollama pulls it.
 
 ## Install
 
+macOS / Linux:
+
 ```bash
-git clone https://github.com/blisspixel/fitr && cd fitr
-make install
-# or grab a binary for your platform from Releases
+curl -fsSL https://raw.githubusercontent.com/blisspixel/fitr/main/install.sh | sh
 ```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
+```
+
+Then:
+
+```bash
+fitr device                      # confirm it sees your hardware
+fitr run qwen3-coder:30b --full  # or paste a Hugging Face GGUF URL
+```
+
+From source (Go 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
+Pin a version with `FITR_VERSION=v0.2.0`, relocate with `FITR_BIN`. Until a tagged
+GitHub release exists, the installer builds from source if Go is on PATH.
 
 ## Commands
 

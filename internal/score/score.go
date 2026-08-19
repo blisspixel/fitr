@@ -62,7 +62,7 @@ var NeedLabel = map[string]string{
 	"instruction_precision": "follows exact instructions",
 	"uncensored":            "no filtering / low refusal",
 	"unattended_agentic":    "works unattended (agent loop)",
-	"tool_restraint":        "leaves tools alone when irrelevant",
+	"tool_restraint":        "leaves tools alone when they don't apply",
 	"low_footprint":         "small enough to keep resident",
 	"vision":                "reads images",
 	"output_health":         "no degenerate output",
@@ -233,9 +233,14 @@ type Measured struct {
 	Capabilities []string
 
 	DecodeTPS  float64
-	TTFT       float64
+	TTFT       float64 // loaded, prompt uncached - what the gate judges
+	TTFTCold   float64 // first question of the day: load + prefill + first token
+	TTFTWarm   float64 // same prompt again, prefix cache hit
 	PrefillTPS float64
 	SpeedKnown bool
+	// TTFTCacheContaminated is true when the gated TTFT prompt was mostly
+	// served from cache - the number would be a warm-prefix figure.
+	TTFTCacheContaminated bool
 
 	ResidentGB32K float64
 	MemoryKnown   bool
@@ -259,6 +264,16 @@ type Measured struct {
 	AgenticRan, AgenticPass bool
 	AgenticMalformed        int
 	AgenticTurns            int
+	AgenticCtxCeiling       bool
+	AgenticMaxPrompt        int
+	AgenticCompacted        bool
+
+	// Tool withdrawal: restraint under change. DeadCalls counts calls to a
+	// tool after it vanished from the tools list; one grace call is tolerated
+	// (discovering the removal), persisting past the error is not.
+	WithdrawRan       bool
+	WithdrawDeadCalls int
+	WithdrawClean     bool
 
 	ToolsRan  bool
 	ToolsPass bool
@@ -295,9 +310,18 @@ func Score(m Measured, p device.Profile) Scorecard {
 	} else {
 		ttftMax, _ := p.Float("fast_chat", "ttft_s_max")
 		ok := m.DecodeTPS >= tpsMin && m.TTFT <= ttftMax
-		n["fast_and_decent"] = Verdict{state(ok), fmt.Sprintf(
-			"%.2f tok/s (need >=%.1f), TTFT %.2fs (need <=%.1f)",
-			m.DecodeTPS, tpsMin, m.TTFT, ttftMax)}
+		why := fmt.Sprintf("%.2f tok/s (need >=%.1f), TTFT %.2fs loaded/uncached (need <=%.1f)",
+			m.DecodeTPS, tpsMin, m.TTFT, ttftMax)
+		if m.TTFTCold > 0 {
+			why += fmt.Sprintf(", cold start %.1fs", m.TTFTCold)
+		}
+		if m.TTFTWarm > 0 {
+			why += fmt.Sprintf(", cached prefix %.2fs", m.TTFTWarm)
+		}
+		if m.TTFTCacheContaminated {
+			why += "; gated TTFT was a cache hit - not a new-question number"
+		}
+		n["fast_and_decent"] = Verdict{state(ok), why}
 	}
 
 	// --- coding. The gate is the executed code tasks; generated reasoning
@@ -379,23 +403,56 @@ func Score(m Measured, p device.Profile) Scorecard {
 		}
 		bmax, _ := p.Float("unattended_agentic", "malformed_tool_calls_max")
 		ok2 := m.PrefillTPS >= pmin && float64(m.AgenticMalformed) <= bmax && m.AgenticPass
-		n["unattended_agentic"] = Verdict{state(ok2), fmt.Sprintf(
+		why := fmt.Sprintf(
 			"prefill %.1f tok/s (need >=%.0f), unattended pass=%v in %d turns, malformed=%d",
-			m.PrefillTPS, pmin, m.AgenticPass, m.AgenticTurns, m.AgenticMalformed)}
+			m.PrefillTPS, pmin, m.AgenticPass, m.AgenticTurns, m.AgenticMalformed)
+		if m.AgenticCtxCeiling && !m.AgenticCompacted {
+			ok2 = false
+			why += fmt.Sprintf("; transcript peaked at %d tokens and never shrank - filled the window with no compaction",
+				m.AgenticMaxPrompt)
+		} else if m.AgenticCtxCeiling {
+			why += fmt.Sprintf("; transcript peaked at %d tokens then compacted",
+				m.AgenticMaxPrompt)
+		}
+		n["unattended_agentic"] = Verdict{state(ok2), why}
 	}
 
 	// --- tool restraint: needs no ground truth, and it is the most common
-	// local-model tool failure.
+	// local-model tool failure. Two halves: restraint at REST (no calls on an
+	// irrelevant question) and restraint under CHANGE (a tool vanishes
+	// mid-loop; one grace call to discover that, then stop).
 	switch {
-	case !m.IrrelevanceRan:
+	case !m.IrrelevanceRan && !m.WithdrawRan:
 		n["tool_restraint"] = Verdict{Skip, "plumbing diagnostic not run"}
 	case m.PlumbingRan && !m.PlumbingHealthy:
 		n["tool_restraint"] = Verdict{NA, "model does not emit usable tool calls"}
-	case m.IrrelevancePass:
-		n["tool_restraint"] = Verdict{Pass, "left tools alone on an unrelated question"}
 	default:
-		n["tool_restraint"] = Verdict{Fail, fmt.Sprintf(
-			"fired %d tool call(s) on an unrelated question", m.SpuriousCalls)}
+		ok := true
+		var bits []string
+		if m.IrrelevanceRan {
+			if m.IrrelevancePass {
+				bits = append(bits, "left tools alone on an unrelated question")
+			} else {
+				ok = false
+				bits = append(bits, fmt.Sprintf("fired %d tool call(s) on an unrelated question", m.SpuriousCalls))
+			}
+		}
+		if m.WithdrawRan {
+			withdrawOK := m.WithdrawDeadCalls <= 1 && m.WithdrawClean
+			switch {
+			case withdrawOK && m.WithdrawDeadCalls == 0:
+				bits = append(bits, "never called a withdrawn tool")
+			case withdrawOK:
+				bits = append(bits, "one grace call to a withdrawn tool, then stopped cleanly")
+			case m.WithdrawDeadCalls > 1:
+				ok = false
+				bits = append(bits, fmt.Sprintf("kept calling a withdrawn tool (%d dead calls)", m.WithdrawDeadCalls))
+			default:
+				ok = false
+				bits = append(bits, "did not stop cleanly after a tool was withdrawn")
+			}
+		}
+		n["tool_restraint"] = Verdict{state(ok), strings.Join(bits, "; ")}
 	}
 
 	// --- footprint

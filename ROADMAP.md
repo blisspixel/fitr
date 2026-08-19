@@ -68,7 +68,32 @@ verdict** (design rule 7).
   values in tests.
 - Spec drift protection: `spec/` at the repo root is canonical, the embedded
   copies are compared byte-for-byte in tests, `make spec-sync` repairs
-- Single static binary, 5 platforms, CI on 3 OSes
+- Single static binary, 6 platforms (linux/darwin/windows × amd64/arm64),
+  CI on 3 OSes
+- **One-command install** matching the grok/codex shape:
+  `curl -fsSL .../install.sh | sh` and
+  `irm .../install.ps1 | iex`. Checksums on tagged releases; `FITR_VERSION`
+  to pin, `FITR_BIN` to relocate.
+- **Pasted Hugging Face GGUF URLs** rewrite to `hf.co/{user}/{repo}[:quant]`
+  and pull through Ollama - blob/resolve links keep the quant from the
+  filename. Regular Ollama tags still need `--pull` so a typo does not start
+  a multi-gigabyte download.
+- **Tool withdrawal** - a tool vanishes from the `tools` list mid-loop;
+  `tool_restraint` now covers rest (irrelevance) and change (one grace call
+  tolerated, persistence fails)
+- Cold TTFT captured from the loading warm-up (when it actually loaded) and
+  **disclosed** next to the loaded/uncached figure the gate still judges
+- **Three-way TTFT split on backends that report cache receipts** (llama-server):
+  load (cold start), loaded/uncached (the gate), cached-prefix (warm). A
+  gated TTFT that was actually a cache hit is labeled contaminated rather
+  than published as a new-question number.
+- **Compaction watchdog is a FAIL**: hitting 80% of the context window with
+  a transcript that never shrank fails `unattended_agentic`. Peak-then-compact
+  is disclosed, not failed.
+- **Runtime discovery by signature, not port** - `/api/tags` / `/props` /
+  `/v1/models`, extra well-known local ports, `$FITR_DISCOVER_URLS`
+- **GPU backend in the fingerprint** (cuda/metal/vulkan/rocm/...); `board`
+  refuses to rank a Vulkan run against a CUDA one of the same binary
 
 **Honest limitations right now:**
 
@@ -76,8 +101,6 @@ verdict** (design rule 7).
 |---|---|
 | ~23 binary trials per default run | MDE ~ 29pp. Better than the ~33pp of six tasks, still separates *broken* from *working*, not *good* from *slightly better*. `-k 3` on checks triples the sample. |
 | OpenAI-backend timings are client-derived | usage gives counts, not server timings; decode/prefill rates there are wall-clock estimates |
-| Cold/warm TTFT split not yet applied | cached-token counts are now recorded on llama-server; the speed phase does not use them yet |
-| No compaction watchdog in the agentic loop | 40 turns now, but a model that never manages its context is not yet caught before the window fills |
 | 2 device profiles | `lappy` and an uncalibrated `default` |
 | Terminal output only | no shareable artifact |
 
@@ -105,27 +128,29 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
       `board` refuses to rank across them.
 - [x] **Auto-detection** - probes Ollama then llama-server; `--backend` and
       `$FITR_BACKEND` to force.
-- [ ] **Exploit the cold/warm receipt** - `CachedTokens` is recorded but the
-      speed phase does not yet split cold vs warm TTFT on backends that
-      report it. That split is the single biggest measurement error available.
+- [x] **Exploit the cold/warm receipt** - three TTFTs: load, loaded/uncached
+      (gated), cached-prefix (disclosed when `tokens_cached` is a real
+      receipt). The gate never judges a cache-hit figure.
 - [x] **Generic OpenAI-compatible adapter** for LM Studio / vLLM / SGLang -
       `/v1/completions` streaming with a chat fallback, usage-derived token
       counts, client-derived timings labeled as such, and the shared OpenAI
       wire mapping (`internal/oai`) both it and llama-server use. Tool support
       is claimed optimistically and verified by the plumbing diagnostic;
       vision is never claimed unverifiably.
-- [ ] **Wider runtime discovery** - more than three well-known ports; notice
-      what is already running.
-- [ ] **GPU backend (Vulkan/CUDA/Metal/ROCm) in the fingerprint** - the
-      runtime version implies it poorly; read it from the server where exposed.
+- [x] **Wider runtime discovery** - identify by response shape, not port;
+      extra well-known local ports; `$FITR_DISCOVER_URLS` for the rest.
+- [x] **GPU backend (Vulkan/CUDA/Metal/ROCm) in the fingerprint** - read
+      from `/props` / the Ollama log `library=`; `board` refuses to rank
+      across it.
 
 ## 0.2.x - finish making the measurement trustworthy
 
 - [x] **40-turn agentic floor** (was 20 - that measured early-abort behaviour)
       and **`reasoning_content` round-trip** in the loop; the Message struct
       simply had no field for it, so re-serializing the transcript deleted it.
-- [ ] **Compaction watchdog** - flag a model that lets the transcript grow
-      to the context limit without managing it.
+- [x] **Compaction watchdog** - filling 80% of the window with a transcript
+      that never shrank FAILs `unattended_agentic`. Peak-then-compact is
+      disclosed, not failed.
 - [ ] **Calibrate the check battery** by adversarial filtering: run it across
       known-good and known-degraded quants of the same model; drop items that
       never discriminate. (The Aider polyglot redesign kept 225 of 697
@@ -143,6 +168,27 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
       Server-level env sweeps (`OLLAMA_FLASH_ATTENTION`, `KV_CACHE_TYPE`) need
       restart orchestration fitr does not have; until it does, `tune` prints
       the variant instructions and diffs the fingerprints it observes.
+
+## Path to 1.0
+
+1.0 ships when a stranger can install in one command, point fitr at whatever
+is already serving, and get a verdict they can act on - including *what to
+run next* when the answer is no. That is the advise → run → tune → apply
+loop, closable on someone else's machine.
+
+| Bar | Status |
+|---|---|
+| One-command install (curl / irm) | **done** (binary downloads need a `v*` tag) |
+| Honest measurement on Ollama, llama-server, OpenAI-compat | **done** (0.3) |
+| Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals) | **mostly done** - check-battery calibration and quant-flip damage still open |
+| `fitr advise` names a model + settings with a remedy | **not started** (0.4) - design rule 7; do not ship 1.0 without it |
+| A result can leave the terminal | **not started** (0.5 artifact) |
+| Community device profiles beyond `lappy` | **not started** |
+
+We do **not** ship 1.0 with an uncalibrated `advise`, a public leaderboard,
+or LLM-as-judge. The next 1.0-blocking work is battery calibration, then
+`advise`. `tune` can trail advise: a one-line remedy ("try num_ctx=4096")
+is advise; sweeping knobs is tune.
 
 ## 0.4 - `fitr advise`
 

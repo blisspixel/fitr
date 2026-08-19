@@ -21,16 +21,30 @@ const NumCtx = 8192
 
 // ---------------------------------------------------------------- speed
 type SpeedResult struct {
-	DecodeTPS  float64 `json:"decode_tps"`
+	DecodeTPS float64 `json:"decode_tps"`
+	// Three TTFTs, because blending them is the single biggest measurement
+	// error available (they differ 70-200x on real stacks):
+	//
+	//   TTFT      - model loaded, prompt uncached. This is a new question
+	//               on a running model, and it is what the gate judges.
+	//   ColdTTFT  - first question of the day: load + prefill + first token.
+	//   WarmTTFT  - same prompt sent again; prefix cache hit. Only filled
+	//               when the backend returns a real cache receipt.
 	TTFT       float64 `json:"ttft_s"`
+	ColdTTFT   float64 `json:"cold_ttft_s,omitempty"`
+	WarmTTFT   float64 `json:"warm_ttft_s,omitempty"`
 	PrefillTPS float64 `json:"prefill_tps"`
 	PromptTok  int     `json:"prompt_tokens"`
 	// CachedPromptTok is how much of the PREFILL probe's prompt was served
 	// from cache. The nonce exists to make this zero; a nonzero value on a
 	// backend that reports it means the prefill figure is partly fiction, and
 	// the run says so instead of quietly publishing it.
-	CachedPromptTok int  `json:"cached_prompt_tokens,omitempty"`
-	Truncated       bool `json:"truncated"`
+	CachedPromptTok int `json:"cached_prompt_tokens,omitempty"`
+	// GatedCachedTok is how much of the GATED TTFT prompt was cached. If this
+	// is a large fraction of the prompt, the gated number is a warm-prefix
+	// figure wearing a cold-prompt badge.
+	GatedCachedTok int  `json:"gated_cached_tokens,omitempty"`
+	Truncated      bool `json:"truncated"`
 }
 
 // RunSpeed measures decode and prefill.
@@ -42,24 +56,49 @@ type SpeedResult struct {
 func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce string) (SpeedResult, error) {
 	var out SpeedResult
 	// Warm the model first. TTFT must measure time-to-first-token for a LOADED
-	// model; including a cold load reported 4.33s where the warm figure is 0.97s.
+	// model; including a cold load reported 4.33s where the warm figure is
+	// 0.97s. When this warm-up call actually had to load (the phase starts
+	// with residents cleared, so on the first repeat it does), its wall-clock
+	// first token IS the honest cold-start figure - record it instead of
+	// discarding it.
 	warm := ollama.Deterministic(8, NumCtx)
-	if _, _, err := c.Generate(ctx, model, "Say OK.", warm); err != nil {
+	_, m0, err := c.Generate(ctx, model, "Say OK.", warm)
+	if err != nil {
 		return out, err
+	}
+	if m0.LoadSeconds > 0.1 {
+		out.ColdTTFT = m0.TTFTSeconds
 	}
 	samp := ollama.Deterministic(s.Speed.Decode.NumPredict, NumCtx)
 	tag := ""
 	if nonce != "" {
 		tag = "  <!-- run " + nonce + " -->"
 	}
-	_, m1, err := c.Generate(ctx, model, s.Speed.Decode.Prompt+tag, samp)
+	decodePrompt := s.Speed.Decode.Prompt + tag
+	_, m1, err := c.Generate(ctx, model, decodePrompt, samp)
 	if err != nil {
 		return out, err
 	}
 	out.DecodeTPS, out.TTFT = m1.DecodeTPS, m1.TTFTSeconds
+	if m1.CacheKnown {
+		out.GatedCachedTok = m1.CachedTokens
+	}
 	// Deliberately NOT recording m1.Truncated: the speed probe caps output at
 	// num_predict, so it always stops on "length". Truncation is only a
 	// degeneracy signal for tasks that were free to finish.
+
+	// Same prompt again: if the backend reports a cache receipt, this IS the
+	// warm-prefix number. Skipping when CacheKnown is false is the honesty
+	// rule - a second generate on Ollama would just be another uncached TTFT.
+	if m1.CacheKnown {
+		_, m1w, err := c.Generate(ctx, model, decodePrompt, samp)
+		if err != nil {
+			return out, err
+		}
+		if m1w.CachedTokens > 0 {
+			out.WarmTTFT = m1w.TTFTSeconds
+		}
+	}
 
 	samp2 := ollama.Deterministic(s.Speed.Prefill.NumPredict, NumCtx)
 	_, m2, err := c.Generate(ctx, model, buildLongPrompt(nonce), samp2)
@@ -270,20 +309,35 @@ func tail(s string, n int) string {
 
 // ---------------------------------------------------------------- tool loops
 type ToolLoopResult struct {
-	Pass       bool     `json:"pass"`
-	Turns      int      `json:"turns"`
-	Calls      int      `json:"tool_calls"`
-	Malformed  int      `json:"malformed_calls"`
-	Repeats    int      `json:"repeated_identical_calls"`
-	Looped     bool     `json:"looped"`
-	Ended      string   `json:"ended"`
-	Sequence   string   `json:"call_sequence"`
+	Pass      bool   `json:"pass"`
+	Turns     int    `json:"turns"`
+	Calls     int    `json:"tool_calls"`
+	Malformed int    `json:"malformed_calls"`
+	Repeats   int    `json:"repeated_identical_calls"`
+	Looped    bool   `json:"looped"`
+	Ended     string `json:"ended"`
+	Sequence  string `json:"call_sequence"`
+	// MaxPromptTok is the largest transcript the model re-processed in one
+	// turn; CtxCeiling is set when it crossed 80% of the context window.
+	// A model that lets its transcript grow to the ceiling without managing
+	// it will fail in exactly the way a looped table fails: everything looks
+	// structurally fine until the window is full.
+	MaxPromptTok int  `json:"max_prompt_tokens,omitempty"`
+	CtxCeiling   bool `json:"context_ceiling,omitempty"`
+	// Compacted is true if prompt tokens ever shrank between turns: the
+	// model managed its context. Ceiling without this is the watchdog FAIL.
+	Compacted bool `json:"compacted,omitempty"`
+	// DeadCalls counts calls to a tool AFTER it was withdrawn mid-loop. The
+	// tools parameter names what exists each turn; calling a tool that is no
+	// longer listed is a hallucinated capability.
+	DeadCalls  int      `json:"withdrawn_tool_calls,omitempty"`
 	FilesWrote []string `json:"files_written"`
 	Detail     string   `json:"detail"`
 }
 
 var seqCode = map[string]string{
 	"list_files": "L", "read_file": "R", "write_file": "W", "run_tests": "T",
+	"lookup_part": "K",
 }
 
 // RunToolLoop drives a real tool loop and verifies the RESULT, not the chatter.
@@ -301,6 +355,7 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 	written := map[string]bool{}
 	sigCount := map[string]int{}
 	msgs := []ollama.Message{{Role: "user", Content: spec.Prompt}}
+	lastPrompt := 0
 	samp := ollama.Deterministic(spec.NumPredict, NumCtx)
 	deadline := time.Now().Add(time.Duration(spec.Budget) * time.Second)
 	var seq strings.Builder
@@ -311,10 +366,31 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 			r.Ended = "time_budget"
 			break
 		}
-		msg, err := c.Chat(ctx, model, msgs, spec.Tools, samp)
+		// A withdrawn tool disappears from the tools parameter: the model is
+		// TOLD what exists every turn, so continuing to call it is on the model.
+		activeTools := spec.Tools
+		withdrawn := spec.WithdrawTool != "" && turn >= spec.WithdrawAfter
+		if withdrawn {
+			activeTools = nil
+			for _, t := range spec.Tools {
+				if t.Function.Name != spec.WithdrawTool {
+					activeTools = append(activeTools, t)
+				}
+			}
+		}
+		msg, tm, err := c.Chat(ctx, model, msgs, activeTools, samp)
 		if err != nil {
 			r.Ended = "error: " + err.Error()
 			break
+		}
+		if tm.PromptTokens > r.MaxPromptTok {
+			r.MaxPromptTok = tm.PromptTokens
+		}
+		if lastPrompt > 0 && tm.PromptTokens > 0 && tm.PromptTokens < lastPrompt {
+			r.Compacted = true
+		}
+		if tm.PromptTokens > lastPrompt {
+			lastPrompt = tm.PromptTokens
 		}
 		if len(msg.ToolCalls) == 0 {
 			if strings.Contains(strings.ToUpper(msg.Content), "DONE") {
@@ -354,7 +430,13 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 			sig := name + "|" + p + "|" + shortHash(content)
 			sigCount[sig]++
 
-			result := doTool(ctx, dir, name, p, content, spec, written)
+			var result string
+			if withdrawn && name == spec.WithdrawTool {
+				r.DeadCalls++
+				result = "ERROR: tool " + name + " is no longer available; it has been removed"
+			} else {
+				result = doTool(ctx, dir, name, p, content, args, spec, written)
+			}
 			msgs = append(msgs, ollama.Message{
 				Role: "tool", ToolName: name, ToolCallID: tc.ID,
 				Content: truncate(result, 4000),
@@ -369,17 +451,24 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 	}
 	r.Looped = r.Repeats >= 3
 	r.Sequence = seq.String()
+	r.CtxCeiling = r.MaxPromptTok > samp.NumCtx*8/10
 	for f := range written {
 		r.FilesWrote = append(r.FilesWrote, f)
 	}
 
+	// Behavioral tasks (withdrawal) have no verify runner: passing means the
+	// loop terminated cleanly; the behavioral counters are judged by the scorer.
+	if len(spec.Verify.Runner) == 0 {
+		r.Pass = r.Ended == "clean_stop"
+		return r, nil
+	}
 	out, _ := runIn(ctx, dir, spec.Verify.Runner)
 	r.Detail = tail(out, 300)
 	r.Pass = strings.Contains(out, spec.Verify.PassIfStdoutContains)
 	return r, nil
 }
 
-func doTool(ctx context.Context, dir, name, p, content string, spec ToolLoopSpec, written map[string]bool) string {
+func doTool(ctx context.Context, dir, name, p, content string, args map[string]any, spec ToolLoopSpec, written map[string]bool) string {
 	switch name {
 	case "list_files":
 		entries, err := os.ReadDir(dir)
@@ -410,6 +499,20 @@ func doTool(ctx context.Context, dir, name, p, content string, spec ToolLoopSpec
 			return "PASS\n" + out
 		}
 		return "FAIL\n" + out
+	case "lookup_part":
+		// Prices ship in the task's own parts.txt (NAME=PRICE per line), so
+		// the data stays in the spec, not in Go.
+		part, _ := args["part"].(string)
+		b, err := os.ReadFile(filepath.Join(dir, "parts.txt"))
+		if err != nil {
+			return "ERROR: " + err.Error()
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok && k == part {
+				return v
+			}
+		}
+		return "ERROR: unknown part " + part
 	}
 	return "ERROR: unknown tool " + name
 }

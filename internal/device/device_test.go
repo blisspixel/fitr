@@ -83,6 +83,29 @@ func TestFingerprintKeyChangesWithConfig(t *testing.T) {
 	if base.Key() == kv.Key() {
 		t.Fatal("a KV cache dtype change MUST invalidate comparability")
 	}
+	accel := base
+	accel.GPUBackend = "vulkan"
+	if base.Key() == accel.Key() {
+		t.Fatal("a GPU backend change (CUDA vs Vulkan) MUST invalidate comparability")
+	}
+}
+
+func TestNormalizeAccelPrefersGPUOverCPU(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"CUDA : ARCHS = 890 | CPU : AVX = 1", "cuda"},
+		{"ggml_vulkan: 0 = AMD Radeon 780M", "vulkan"},
+		{"library=Metal", "metal"},
+		{"HIP/ROCm gfx1100", "rocm"},
+		{"cpu only, AVX2", "cpu"},
+		{"chipset listing, no gpu", ""}, // must not match hip inside chip
+		{"", ""},
+		{"something unknown", ""},
+	}
+	for _, tc := range cases {
+		if got := NormalizeAccel(tc.in); got != tc.want {
+			t.Errorf("NormalizeAccel(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }
 
 func TestGateLookupMissingIsNotZero(t *testing.T) {

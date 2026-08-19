@@ -146,9 +146,13 @@ type Fingerprint struct {
 	// (bare, for continuity with results recorded before other backends
 	// existed; hence the json tag), "llama-server b6xxx" otherwise. A runtime
 	// change is a different measurement.
-	Runtime         string            `json:"ollama"`
-	InferenceDevice string            `json:"inference_device"`
-	Config          map[string]string `json:"config"`
+	Runtime         string `json:"ollama"`
+	InferenceDevice string `json:"inference_device"`
+	// GPUBackend is cuda|metal|vulkan|rocm|sycl|opencl|cpu - the compute
+	// API the server is actually using. The runtime version implies it
+	// poorly (a Vulkan llama-server and a CUDA one share a build number).
+	GPUBackend string            `json:"gpu_backend,omitempty"`
+	Config     map[string]string `json:"config"`
 }
 
 // Key is what decides comparability. Two results may only be ranked against
@@ -156,7 +160,7 @@ type Fingerprint struct {
 func (f Fingerprint) Key() string {
 	c := f.Config
 	return strings.Join([]string{
-		f.Host, f.GPU, f.GPUDriver, f.Runtime,
+		f.Host, f.GPU, f.GPUDriver, f.GPUBackend, f.Runtime,
 		c["OLLAMA_FLASH_ATTENTION"], c["OLLAMA_KV_CACHE_TYPE"],
 	}, "|")
 }
@@ -184,12 +188,63 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	if b != nil {
 		version = b.Version(ctx)
 	}
+	accel := ""
+	if a, ok := b.(interface{ Accel(context.Context) string }); ok {
+		accel = NormalizeAccel(a.Accel(ctx))
+	}
 	return Fingerprint{
 		Host: host, OS: runtime.GOOS, CPU: cpuName(), RAMGb: ramGB(),
 		GPU: gpu, GPUDriver: drv, GPUDriverDate: date,
 		Runtime: version, InferenceDevice: inferenceDevice(ctx, b, ""),
-		Config: cfg,
+		GPUBackend: accel, Config: cfg,
 	}
+}
+
+// NormalizeAccel maps a free-form build/log string onto the small set of
+// compute APIs that change measurements. GPU needles win over "cpu" so
+// "CUDA + CPU offload" does not classify as a CPU run.
+func NormalizeAccel(s string) string {
+	u := strings.ToLower(s)
+	for _, pair := range []struct{ needle, name string }{
+		{"cuda", "cuda"}, {"cublas", "cuda"},
+		{"metal", "metal"},
+		{"vulkan", "vulkan"},
+		{"rocm", "rocm"}, {"hip", "rocm"},
+		{"sycl", "sycl"},
+		{"opencl", "opencl"},
+		{"cpu", "cpu"},
+	} {
+		if hasToken(u, pair.needle) {
+			return pair.name
+		}
+	}
+	return ""
+}
+
+func hasToken(s, needle string) bool {
+	for i := 0; i <= len(s)-len(needle); {
+		j := strings.Index(s[i:], needle)
+		if j < 0 {
+			return false
+		}
+		j += i
+		before, after := byte('_'), byte('_')
+		if j > 0 {
+			before = s[j-1]
+		}
+		if j+len(needle) < len(s) {
+			after = s[j+len(needle)]
+		}
+		if !isAlphaNum(before) && !isAlphaNum(after) {
+			return true
+		}
+		i = j + 1
+	}
+	return false
+}
+
+func isAlphaNum(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= '0' && b <= '9'
 }
 
 // InferenceDevice reports what Ollama actually computes on.

@@ -2,19 +2,33 @@
 
 ## Install
 
-```bash
-# from source
-git clone https://github.com/blisspixel/fitr && cd fitr
-make install
+macOS / Linux:
 
-# or grab a binary for your platform from Releases
+```bash
+curl -fsSL https://raw.githubusercontent.com/blisspixel/fitr/main/install.sh | sh
 ```
 
-Needs Go 1.25+ to build, a running Ollama / llama-server / OpenAI-compatible
-server to measure, and `python3` on PATH **only** to execute the Python
-coding fixtures. The harness language and the task language are deliberately
-separate: a task declares the interpreter it needs in its spec, so adding
-Rust tasks would need `cargo`, not a rewrite.
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
+```
+
+That puts one static binary on your PATH. No Go, no Python, no venv. Pin a
+release with `FITR_VERSION=v0.2.0`; relocate with `FITR_BIN`.
+
+From source (Go 1.25+):
+
+```bash
+git clone https://github.com/blisspixel/fitr && cd fitr
+make install
+```
+
+A run needs a serving runtime (Ollama, llama-server, or any OpenAI-compatible
+server) and `python3` on PATH **only** to execute the Python coding fixtures.
+The harness language and the task language are deliberately separate: a task
+declares the interpreter it needs in its spec, so adding Rust tasks would
+need `cargo`, not a rewrite.
 
 ## Commands
 
@@ -30,7 +44,7 @@ Rust tasks would need `cargo`, not a rewrite.
 | Level | Runs | ~Time |
 |---|---|---|
 | `--quick` | speed, memory, coding, plumbing, tools | ~4 min |
-| *(default)* | + 16 generated checks + refusal battery | ~11 min |
+| *(default)* | + 16 generated checks + refusal + tool withdrawal | ~11 min |
 | `--full` | + 40-turn unattended agentic task | ~18 min |
 
 ## Flags worth knowing
@@ -45,7 +59,9 @@ Rust tasks would need `cargo`, not a rewrite.
   seedset face identical instances, which upgrades `fitr compare` to a
   paired test. Fresh instances per run remain the default.
 - `--backend auto|ollama|llama-server|openai` picks the serving runtime;
-  see [backends.md](backends.md).
+  see [backends.md](backends.md). Extra listen URLs: `$FITR_DISCOVER_URLS`.
+- `--pull` fetches a missing Ollama tag before measuring. Pasted Hugging
+  Face GGUF URLs pull automatically (they *are* the request to fetch).
 - `--profile P` forces a device profile instead of auto-matching.
 
 ## Output modes and exit codes

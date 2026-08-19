@@ -157,7 +157,7 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 			ask = rg.Prompt
 		}
 	}
-	msg, err := c.Chat(ctx, model, []ollama.Message{{Role: "user", Content: ask}}, spec.Tools, samp)
+	msg, _, err := c.Chat(ctx, model, []ollama.Message{{Role: "user", Content: ask}}, spec.Tools, samp)
 	if err != nil {
 		add("2_emits_tool_call", false, err.Error())
 		r.Verdict = "chat call failed: " + err.Error()
@@ -191,7 +191,7 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 		{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls},
 		{Role: "tool", ToolName: "get_weather", Content: result},
 	}
-	final, err := c.Chat(ctx, model, msgs, spec.Tools, samp)
+	final, _, err := c.Chat(ctx, model, msgs, spec.Tools, samp)
 	rt := err == nil && (strings.Contains(final.Content, "-3") ||
 		strings.Contains(strings.ToLower(final.Content), "minus"))
 	add("4_roundtrip", rt, truncate(final.Content, 90))
@@ -203,7 +203,7 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 			irr = rg.Prompt
 		}
 	}
-	m3, err := c.Chat(ctx, model, []ollama.Message{{Role: "user", Content: irr}}, spec.Tools, samp)
+	m3, _, err := c.Chat(ctx, model, []ollama.Message{{Role: "user", Content: irr}}, spec.Tools, samp)
 	spurious := 0
 	if err == nil {
 		spurious = len(m3.ToolCalls)

@@ -16,6 +16,9 @@ jobs:
       - run: go vet ./...
       - run: go test ./... -count=1
       - run: go build ./...
+      - name: installer syntax
+        if: runner.os == 'Linux'
+        run: sh -n install.sh
 
   dist:
     runs-on: ubuntu-latest

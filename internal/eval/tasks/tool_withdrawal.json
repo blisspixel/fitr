@@ -1,0 +1,53 @@
+{
+  "id": "tool_withdrawal",
+  "kind": "tool_loop",
+  "why": "restraint at rest is the irrelevance rung; restraint under CHANGE is what long agent sessions actually face. A tool disappears mid-loop and the score is whether the model stops calling it: the tools parameter names what exists every turn, so a call to an unlisted tool is a hallucinated capability. One grace call is tolerated; persisting past the error is the failure that burns unattended runs.",
+  "prompt": "You are looking up part prices. Use the lookup_part tool to get the price of each of these parts, one at a time: A11, B22, C33, D44. After each lookup, append one line 'PART=PRICE' to the file prices.txt using write_file (read it first if it exists, then write the full updated content). If a tool you need becomes unavailable, append the line 'HALTED: <reason>' to prices.txt instead and stop. When you are finished or cannot continue, reply DONE with no tool calls.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "lookup_part",
+        "description": "Look up the price of a part by its part number.",
+        "parameters": {
+          "type": "object",
+          "properties": { "part": { "type": "string", "description": "the part number, e.g. A11" } },
+          "required": ["part"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file and return its contents.",
+        "parameters": {
+          "type": "object",
+          "properties": { "path": { "type": "string" } },
+          "required": ["path"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "Write content to a file, replacing what was there.",
+        "parameters": {
+          "type": "object",
+          "properties": { "path": { "type": "string" }, "content": { "type": "string" } },
+          "required": ["path", "content"]
+        }
+      }
+    }
+  ],
+  "files": {
+    "parts.txt": "A11=4.50\nB22=12.00\nC33=0.75\nD44=99.10\n"
+  },
+  "withdraw_tool": "lookup_part",
+  "withdraw_after_turns": 3,
+  "max_turns": 10,
+  "time_budget_s": 600,
+  "num_predict": 400,
+  "verify": { "runner": [], "pass_if_stdout_contains": "" }
+}

@@ -207,3 +207,72 @@ func TestProfilesAreEmbeddedAndParse(t *testing.T) {
 		}
 	}
 }
+
+func TestToolRestraintCoversWithdrawal(t *testing.T) {
+	m := good()
+	m.PlumbingRan, m.PlumbingHealthy = true, true
+	m.IrrelevanceRan, m.IrrelevancePass = true, true
+	m.WithdrawRan, m.WithdrawDeadCalls, m.WithdrawClean = true, 1, true
+	sc := Score(m, lappy(t))
+	if sc.Needs["tool_restraint"].State != Pass {
+		t.Fatalf("grace call + clean stop = %v, want PASS: %s",
+			sc.Needs["tool_restraint"].State, sc.Needs["tool_restraint"].Why)
+	}
+	if !strings.Contains(sc.Needs["tool_restraint"].Why, "grace") {
+		t.Fatalf("why must disclose the grace call: %q", sc.Needs["tool_restraint"].Why)
+	}
+	m.WithdrawDeadCalls = 3
+	sc = Score(m, lappy(t))
+	if sc.Needs["tool_restraint"].State != Fail {
+		t.Fatal("persisting past the withdrawal error must fail the need")
+	}
+	if !strings.Contains(sc.Needs["tool_restraint"].Why, "withdrawn") {
+		t.Fatalf("why must name the withdrawn-tool failure: %q", sc.Needs["tool_restraint"].Why)
+	}
+}
+
+func TestContextCeilingWithoutCompactionFailsUnattended(t *testing.T) {
+	m := good()
+	m.PlumbingRan, m.PlumbingHealthy = true, true
+	m.AgenticRan, m.AgenticPass, m.AgenticTurns = true, true, 22
+	m.AgenticCtxCeiling, m.AgenticMaxPrompt, m.AgenticCompacted = true, 7100, false
+	sc := Score(m, lappy(t))
+	v := sc.Needs["unattended_agentic"]
+	if v.State != Fail {
+		t.Fatalf("filling the window with no compaction must FAIL unattended: %v %s", v.State, v.Why)
+	}
+	if !strings.Contains(v.Why, "no compaction") {
+		t.Fatalf("why must name the compaction failure: %q", v.Why)
+	}
+}
+
+func TestContextCeilingWithCompactionIsDisclosedNotFailed(t *testing.T) {
+	m := good()
+	m.PlumbingRan, m.PlumbingHealthy = true, true
+	m.AgenticRan, m.AgenticPass, m.AgenticTurns = true, true, 22
+	m.AgenticCtxCeiling, m.AgenticMaxPrompt, m.AgenticCompacted = true, 7100, true
+	sc := Score(m, lappy(t))
+	v := sc.Needs["unattended_agentic"]
+	if v.State != Pass {
+		t.Fatalf("a model that compacted after peaking is not a FAIL: %v %s", v.State, v.Why)
+	}
+	if !strings.Contains(v.Why, "compacted") {
+		t.Fatalf("why must disclose the peak-then-compact: %q", v.Why)
+	}
+}
+
+func TestColdAndWarmTTFTAreDisclosedInFastChat(t *testing.T) {
+	m := good()
+	m.TTFTCold, m.TTFTWarm = 9.1, 0.18
+	sc := Score(m, lappy(t))
+	why := sc.Needs["fast_and_decent"].Why
+	if !strings.Contains(why, "loaded/uncached") || !strings.Contains(why, "cold start 9.1s") {
+		t.Fatalf("why must label the gated figure and disclose cold: %q", why)
+	}
+	if !strings.Contains(why, "cached prefix 0.18s") {
+		t.Fatalf("why must disclose the warm-prefix receipt: %q", why)
+	}
+	if sc.Needs["fast_and_decent"].State != Pass {
+		t.Fatal("the gate judges the loaded/uncached figure only")
+	}
+}
