@@ -1,0 +1,9 @@
+{
+  "id": "json_extract_noise",
+  "kind": "check",
+  "why": "same extraction with irrelevant numbers added (GSM-NoOp style) - distractors expose fragility that clean variants miss",
+  "need": "structured_output",
+  "family": "json_extract",
+  "params": { "distractors": true },
+  "num_predict": 300
+}

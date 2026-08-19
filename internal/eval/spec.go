@@ -104,6 +104,7 @@ type Spec struct {
 	Agentic   ToolLoopSpec
 	Refusal   RefusalSpec
 	Plumbing  PlumbingSpec
+	Checks    []CheckSpec
 	Version   struct {
 		SpecVersion         int    `json:"spec_version"`
 		ResultSchemaVersion int    `json:"result_schema_version"`
@@ -139,6 +140,11 @@ func LoadSpec() (*Spec, error) {
 			return nil, err
 		}
 	}
+	checks, err := loadChecks()
+	if err != nil {
+		return nil, err
+	}
+	s.Checks = checks
 	b, err := tasksFS.ReadFile("tasks/version.json")
 	if err == nil {
 		json.Unmarshal(b, &s.Version)

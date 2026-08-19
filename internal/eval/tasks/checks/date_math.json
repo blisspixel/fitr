@@ -1,0 +1,9 @@
+{
+  "id": "date_math",
+  "kind": "check",
+  "why": "calendar arithmetic across month and year boundaries, answer computed by the harness and required in ISO form",
+  "need": "reasoning",
+  "family": "date_math",
+  "params": {},
+  "num_predict": 900
+}

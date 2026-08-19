@@ -1,0 +1,9 @@
+{
+  "id": "csv_strict",
+  "kind": "check",
+  "why": "structured output is not only JSON - CSV with an exact header and row order is parsed, not eyeballed",
+  "need": "structured_output",
+  "family": "csv_strict",
+  "params": { "rows": 4 },
+  "num_predict": 300
+}

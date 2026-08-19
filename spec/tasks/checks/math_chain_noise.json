@@ -1,0 +1,9 @@
+{
+  "id": "math_chain_noise",
+  "kind": "check",
+  "why": "same arithmetic with plausible-but-irrelevant numbers in the prompt - a memorizing or fragile model folds them in",
+  "need": "reasoning",
+  "family": "math_chain",
+  "params": { "distractors": true },
+  "num_predict": 900
+}

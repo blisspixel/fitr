@@ -1,0 +1,9 @@
+{
+  "id": "list_ops",
+  "kind": "check",
+  "why": "list transformations ending in a JSON array - order-sensitive state tracking, graded on the exact final list",
+  "need": "reasoning",
+  "family": "list_ops",
+  "params": {},
+  "num_predict": 900
+}

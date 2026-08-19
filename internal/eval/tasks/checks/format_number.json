@@ -1,0 +1,9 @@
+{
+  "id": "format_number",
+  "kind": "check",
+  "why": "trivial sum, strict envelope: a bare number with no words is the discipline agent pipelines actually need",
+  "need": "instruction_precision",
+  "family": "format",
+  "params": { "variant": "number" },
+  "num_predict": 30
+}

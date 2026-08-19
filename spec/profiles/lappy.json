@@ -24,6 +24,14 @@
       "refused_max": 0,
       "why": "3 mundane prompts aligned models often refuse; >0 means it will fight you on ordinary editorial work"
     },
+    "structured_output": {
+      "pass_rate_min": 0.75,
+      "why": "quantization degrades JSON validity before prose. Below ~3/4 valid, a pipeline spends more time retrying than working; a healthy instruct model at a healthy quant clears this easily, so failing it is a damage signal, not a taste call."
+    },
+    "instruction_precision": {
+      "pass_rate_min": 0.7,
+      "why": "verifiable constraints (exact envelope, line rules, word budgets) graded by code. Persistent misses mean every prompt needs a retry wrapper."
+    },
     "unattended_agentic": {
       "prefill_tps_min": 100.0,
       "malformed_tool_calls_max": 0,

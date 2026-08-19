@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/device"
+	"github.com/blisspixel/fitr/internal/stats"
 )
 
 // State is a verdict. SKIP means "not measured" and must NEVER read as failure;
@@ -45,27 +46,34 @@ type Verdict struct {
 	Why   string `json:"why"`
 }
 
-// Needs are the independent questions, in display order.
+// Needs are the independent questions, in display order. user_tasks is not
+// listed: it exists only on runs where ~/.fitr/tasks supplied tasks, and
+// SortedNeeds appends unknown keys at the end.
 var NeedOrder = []string{
-	"fast_and_decent", "coding", "uncensored", "unattended_agentic",
-	"tool_restraint", "low_footprint", "vision", "output_health",
+	"fast_and_decent", "coding", "structured_output", "instruction_precision",
+	"uncensored", "unattended_agentic", "tool_restraint", "low_footprint",
+	"vision", "output_health",
 }
 
 var NeedLabel = map[string]string{
-	"fast_and_decent":    "fast + pretty good (chat)",
-	"coding":             "great coding / reasoning",
-	"uncensored":         "no filtering / low refusal",
-	"unattended_agentic": "works unattended (agent loop)",
-	"tool_restraint":     "leaves tools alone when irrelevant",
-	"low_footprint":      "small enough to keep resident",
-	"vision":             "reads images",
-	"output_health":      "no degenerate output",
+	"fast_and_decent":       "fast + pretty good (chat)",
+	"coding":                "great coding / reasoning",
+	"structured_output":     "emits valid structured output",
+	"instruction_precision": "follows exact instructions",
+	"uncensored":            "no filtering / low refusal",
+	"unattended_agentic":    "works unattended (agent loop)",
+	"tool_restraint":        "leaves tools alone when irrelevant",
+	"low_footprint":         "small enough to keep resident",
+	"vision":                "reads images",
+	"output_health":         "no degenerate output",
+	"user_tasks":            "your tasks (~/.fitr/tasks)",
 }
 
 var NeedCode = map[string]string{
-	"fast_and_decent": "fast", "coding": "code", "uncensored": "unfiltered",
+	"fast_and_decent": "fast", "coding": "code", "structured_output": "json",
+	"instruction_precision": "precise", "uncensored": "unfiltered",
 	"unattended_agentic": "agentic", "tool_restraint": "restraint",
-	"low_footprint": "small", "vision": "vision",
+	"low_footprint": "small", "vision": "vision", "user_tasks": "user",
 }
 
 // ---------------------------------------------------------------- degeneracy
@@ -212,6 +220,13 @@ func InformationDensity(text string) Density {
 }
 
 // ---------------------------------------------------------------- inputs
+// Pool is a set of pooled binary trials feeding one need.
+type Pool struct {
+	Passes, N int
+}
+
+func (p Pool) rate() float64 { return float64(p.Passes) / float64(p.N) }
+
 // Measured is everything the scorer needs, decoupled from how it was gathered.
 type Measured struct {
 	Model        string
@@ -227,9 +242,16 @@ type Measured struct {
 
 	CodeWritePass, CodeFixPass bool
 	CodePasses, CodeRepeats    int
-	CodeWilsonLo, CodeWilsonHi float64
 	CodeKnown                  bool
 	CodeFlaky                  bool
+
+	// Pools of binary check-task trials, one per need they feed. Each trial is
+	// an independent generated instance, so pooling into one Wilson interval
+	// per need is legitimate.
+	Structured Pool
+	Precision  Pool
+	Reasoning  Pool
+	User       Pool
 
 	RefusedCount int
 	RefusalKnown bool
@@ -277,21 +299,49 @@ func Score(m Measured, p device.Profile) Scorecard {
 			m.DecodeTPS, tpsMin, m.TTFT, ttftMax)}
 	}
 
-	// --- coding
+	// --- coding. The gate is the executed code tasks; generated reasoning
+	// checks pool into the same interval (each instance is an independent
+	// trial) so the number rests on more than six observations.
 	if !m.CodeKnown {
 		n["coding"] = Verdict{Skip, "not measured"}
 	} else {
 		ok := m.CodeWritePass && m.CodeFixPass
 		why := fmt.Sprintf("write=%v, fix=%v", m.CodeWritePass, m.CodeFixPass)
-		if m.CodeRepeats > 1 {
+		if pooledN := m.CodeRepeats + m.Reasoning.N; pooledN > 1 {
 			flag := ""
 			if m.CodeFlaky {
 				flag = " FLAKY"
 			}
+			wi := stats.Wilson(m.CodePasses+m.Reasoning.Passes, pooledN)
 			why = fmt.Sprintf("%d/%d passes [%.2f-%.2f]%s",
-				m.CodePasses, m.CodeRepeats, m.CodeWilsonLo, m.CodeWilsonHi, flag)
+				m.CodePasses+m.Reasoning.Passes, pooledN, wi.Lo, wi.Hi, flag)
+			if m.Reasoning.N > 0 {
+				why += fmt.Sprintf(" incl. reasoning %d/%d", m.Reasoning.Passes, m.Reasoning.N)
+			}
 		}
 		n["coding"] = Verdict{state(ok), why}
+	}
+
+	// --- structured output. Quantization degrades JSON validity long before
+	// prose; this is the earliest damage signal and it gets its own need.
+	n["structured_output"] = poolVerdict(m.Structured, p, "structured_output", "valid")
+
+	// --- instruction precision: verifiable constraints, graded by code.
+	n["instruction_precision"] = poolVerdict(m.Precision, p, "instruction_precision", "held")
+
+	// --- user tasks: only present on runs that had any. The default criterion
+	// is all-must-pass -- they are the user's own requirements -- unless the
+	// profile sets a rate.
+	if m.User.N > 0 {
+		wi := stats.Wilson(m.User.Passes, m.User.N)
+		if minRate, ok := p.Float("user_tasks", "pass_rate_min"); ok {
+			n["user_tasks"] = Verdict{state(m.User.rate() >= minRate), fmt.Sprintf(
+				"%d/%d passed [%.2f-%.2f] (need >=%.2f)", m.User.Passes, m.User.N, wi.Lo, wi.Hi, minRate)}
+		} else {
+			n["user_tasks"] = Verdict{state(m.User.Passes == m.User.N), fmt.Sprintf(
+				"%d/%d passed [%.2f-%.2f] (default: all must pass; set a user_tasks gate to loosen)",
+				m.User.Passes, m.User.N, wi.Lo, wi.Hi)}
+		}
 	}
 
 	// --- uncensored: a first-class need, not a footnote
@@ -368,8 +418,12 @@ func Score(m Measured, p device.Profile) Scorecard {
 	n["output_health"] = outputHealth(m, p)
 
 	sc := Scorecard{Model: m.Model, Profile: p.Name, Needs: n}
-	for _, k := range NeedOrder {
-		switch n[k].State {
+	for _, k := range SortedNeeds(n) {
+		v, ok := n[k]
+		if !ok {
+			continue
+		}
+		switch v.State {
 		case Pass:
 			sc.Passes++
 			if k != "output_health" {
@@ -383,6 +437,22 @@ func Score(m Measured, p device.Profile) Scorecard {
 	}
 	sc.UseFor = useFor(m, n, sc.Serves)
 	return sc
+}
+
+// poolVerdict scores a pooled binary need against a pass_rate_min gate.
+// Unmeasured skips; a missing gate skips; the why always carries the Wilson
+// interval so a thin sample cannot masquerade as a confident verdict.
+func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
+	if pool.N == 0 {
+		return Verdict{Skip, "not measured"}
+	}
+	minRate, ok := p.Float(gate, "pass_rate_min")
+	if !ok {
+		return Verdict{Skip, "no " + gate + " gate in profile"}
+	}
+	wi := stats.Wilson(pool.Passes, pool.N)
+	return Verdict{state(pool.rate() >= minRate), fmt.Sprintf(
+		"%d/%d %s [%.2f-%.2f] (need >=%.2f)", pool.Passes, pool.N, verb, wi.Lo, wi.Hi, minRate)}
 }
 
 func outputHealth(m Measured, p device.Profile) Verdict {
@@ -446,6 +516,9 @@ func useFor(m Measured, n map[string]Verdict, serves []string) string {
 		bits = append(bits, "coding")
 	case has["unattended_agentic"]:
 		bits = append(bits, "unattended agent")
+	}
+	if has["structured_output"] {
+		bits = append(bits, "JSON/structured pipelines")
 	}
 	if has["uncensored"] {
 		bits = append(bits, "no-filter writing/chat")

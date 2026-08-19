@@ -1,0 +1,9 @@
+{
+  "id": "tool_args",
+  "kind": "check",
+  "why": "tool-argument fidelity with constraints in the parameter descriptions (IFEval-FC shape): normalize a date to ISO, a title to lowercase, an enum to a member",
+  "need": "structured_output",
+  "family": "tool_args",
+  "params": {},
+  "num_predict": 300
+}

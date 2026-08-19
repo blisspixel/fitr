@@ -59,6 +59,7 @@ usage:
   fitr run <model> [--quick|--full] [-k N] [--profile P] [--display MODE]
   fitr board [--current]
   fitr diag <model>
+  fitr doctor <model> [-n N]
   fitr device
   fitr profiles
   fitr compare <model-a> <model-b>
@@ -76,6 +77,7 @@ examples:
   fitr run qwen3-coder:30b --full
   fitr run some-new-model:tag -k 3
   fitr diag dolphin3:8b
+  fitr doctor qwen3-coder:30b
 `)
 }
 
@@ -96,6 +98,8 @@ func run() int {
 		return cmdBoard(ctx, os.Args[2:])
 	case "diag":
 		return cmdDiag(ctx, os.Args[2:])
+	case "doctor":
+		return cmdDoctor(ctx, os.Args[2:])
 	case "device":
 		return cmdDevice(ctx, os.Args[2:])
 	case "profiles":
@@ -142,7 +146,7 @@ func permute(args []string) []string {
 func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
-	case "k", "profile", "display", "q":
+	case "k", "n", "profile", "display", "q":
 		return true
 	}
 	return false
@@ -230,7 +234,15 @@ func cmdRun(ctx context.Context, args []string) int {
 	disp := render.New(*mode)
 	defer disp.Close()
 
-	res, err := execute(ctx, c, model, level, *profileName, reps, disp)
+	// Check tasks generate a FRESH instance per repeat, so one pass per task is
+	// already a set of independent trials pooled per need. Repeats multiply
+	// wall-clock across ~16 tasks, so they follow -k only when asked.
+	checksReps := 1
+	if *k > 0 {
+		checksReps = *k
+	}
+
+	res, err := execute(ctx, c, model, level, *profileName, reps, checksReps, disp)
 	if err != nil {
 		if ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "\ninterrupted")
@@ -280,6 +292,7 @@ type Result struct {
 	Memory     eval.MemoryResult              `json:"memory"`
 	CodeWrite  []eval.ExecResult              `json:"code_write"`
 	CodeFix    []eval.ExecResult              `json:"code_fix"`
+	Checks     []eval.CheckOutcome            `json:"checks,omitempty"`
 	Tools      []eval.ToolLoopResult          `json:"tools"`
 	Agentic    *eval.ToolLoopResult           `json:"agentic,omitempty"`
 	Refusal    map[string]eval.RefusalVerdict `json:"refusal,omitempty"`
@@ -297,7 +310,7 @@ type Result struct {
 }
 
 func execute(ctx context.Context, c *ollama.Client, model, level, profileName string,
-	reps int, disp render.Display) (*Result, error) {
+	reps, checksReps int, disp render.Display) (*Result, error) {
 
 	// Exactly one eval per machine at a time. Two runs against one inference
 	// server contaminate each other, and the damage is not recoverable after
@@ -311,6 +324,19 @@ func execute(ctx context.Context, c *ollama.Client, model, level, profileName st
 	spec, err := eval.LoadSpec()
 	if err != nil {
 		return nil, err
+	}
+	// User tasks extend the battery without a fork. A malformed one is a hard
+	// error with the filename in it - silently dropping your own task would
+	// defeat the point of having one.
+	userChecks, err := eval.LoadUserChecks(eval.UserTasksDir())
+	if err != nil {
+		return nil, err
+	}
+	if len(userChecks) > 0 {
+		if spec.Checks, err = eval.MergeChecks(spec.Checks, userChecks); err != nil {
+			return nil, err
+		}
+		disp.Note(fmt.Sprintf("%d user task(s) loaded from %s", len(userChecks), eval.UserTasksDir()), "")
 	}
 	fp := device.Detect(ctx, c)
 	prof, err := device.SelectProfile(profileName, fp)
@@ -419,6 +445,27 @@ func execute(ctx context.Context, c *ollama.Client, model, level, profileName st
 		return nil, err
 	}
 
+	// Generated checks: fresh instances per run, graded in pure Go. Skipped on
+	// --quick to keep the smoke test a smoke test.
+	if level != "quick" && len(spec.Checks) > 0 {
+		total := len(spec.Checks) * checksReps
+		if err := step("checks", fmt.Sprintf("%d generated tasks", total), func() error {
+			for _, cs := range spec.Checks {
+				for rep := range checksReps {
+					seed := eval.InstanceSeed(res.StartedAt, cs.ID, rep)
+					o, err := eval.RunCheck(ctx, c, model, cs, seed)
+					if err != nil {
+						return err
+					}
+					res.Checks = append(res.Checks, o)
+				}
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+
 	// Plumbing BEFORE capability: a tools failure is uninterpretable until you
 	// know the template and parser work.
 	if err := step("plumbing", "tool round-trip", func() error {
@@ -503,6 +550,16 @@ func execute(ctx context.Context, c *ollama.Client, model, level, profileName st
 		decodes = append(decodes, s.DecodeTPS)
 	}
 	res.Meta.FirstRunSlow, res.Meta.FirstRunRatio = stats.FirstRunSlow(decodes)
+
+	// State what this sample size CANNOT resolve, out loud, on every run.
+	trials := len(res.CodeWrite) + len(res.CodeFix) + len(res.Tools) + len(res.Checks)
+	if res.Agentic != nil {
+		trials++
+	}
+	if trials > 0 {
+		res.Meta.Trials = trials
+		res.Meta.MDEpp = 100 * stats.MinDetectableEffect(trials, 1)
+	}
 	return res, nil
 }
 
@@ -532,11 +589,25 @@ func measure(r *Result) score.Measured {
 		m.CodeWritePass = fw.Passes*2 > fw.N
 		m.CodeFixPass = ff.Passes*2 > ff.N
 		m.CodeFlaky = fw.Flaky || ff.Flaky
-		m.CodeRepeats = fw.N
 		m.CodePasses = fw.Passes + ff.Passes
-		wi := stats.Wilson(fw.Passes+ff.Passes, fw.N+ff.N)
-		m.CodeWilsonLo, m.CodeWilsonHi = wi.Lo, wi.Hi
 		m.CodeRepeats = fw.N + ff.N
+	}
+	for _, ck := range r.Checks {
+		var pool *score.Pool
+		switch ck.Need {
+		case "structured_output":
+			pool = &m.Structured
+		case "instruction_precision":
+			pool = &m.Precision
+		case "reasoning":
+			pool = &m.Reasoning
+		default:
+			pool = &m.User
+		}
+		pool.N++
+		if ck.Pass {
+			pool.Passes++
+		}
 	}
 	if r.Refusal != nil {
 		m.RefusalKnown, m.RefusedCount = true, r.Refused
@@ -742,6 +813,64 @@ func cmdDiag(ctx context.Context, args []string) int {
 			mark = "PASS"
 		}
 		fmt.Printf("  [%s] %-20s %s\n", mark, id, render.Sanitize(rung.Detail))
+	}
+	fmt.Printf("  => %s\n", r.Verdict)
+	if !r.Healthy {
+		return exitGates
+	}
+	return exitOK
+}
+
+// ---------------------------------------------------------------- doctor
+// cmdDoctor answers: can this box be measured fairly AT ALL? Every benchmark
+// silently assumes yes; nothing else checks. ~60 seconds, worth running before
+// believing any number - including ours.
+func cmdDoctor(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	n := fs.Int("n", 5, "identical generations per determinism probe")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() < 1 {
+		errPrint("missing model", "", "fitr doctor <model>")
+		return exitUsage
+	}
+	model := fs.Arg(0)
+	c, code := newClient(ctx, model)
+	if code != exitOK {
+		return code
+	}
+	// Doctor generates, so it takes the same one-eval-per-machine lock a run
+	// does, and clears residents so its timings are its own.
+	lk, err := lock.Acquire("eval", "doctor of "+model)
+	if err != nil {
+		errPrint(err.Error(), "", "")
+		return exitError
+	}
+	defer lk.Release() //nolint:errcheck // cleanup failure is not worth failing a run over
+	if left, err := c.StopAll(ctx); err == nil && len(left) > 0 {
+		fmt.Fprintf(os.Stderr, "! still resident: %s - results may be contaminated\n", strings.Join(left, ", "))
+	}
+
+	fp := device.Detect(ctx, c)
+	fmt.Printf("doctor: %s on %s (%s)\n", model, fp.GPU, fp.Ollama)
+	r, err := eval.RunDoctor(ctx, c, model, *n, eval.DoctorOpts{
+		Config: fp.Config,
+		Placement: func(ctx context.Context) string {
+			return device.InferenceDeviceFor(ctx, c, model)
+		},
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			fmt.Fprintln(os.Stderr, "\ninterrupted")
+			return exitInterrupt
+		}
+		errPrint(err.Error(), "", "")
+		return exitError
+	}
+	for _, ck := range r.Checks {
+		fmt.Printf("  [%-4s] %-18s %s\n", ck.State, ck.ID, render.Sanitize(ck.Detail))
 	}
 	fmt.Printf("  => %s\n", r.Verdict)
 	if !r.Healthy {

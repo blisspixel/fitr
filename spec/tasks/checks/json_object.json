@@ -1,0 +1,9 @@
+{
+  "id": "json_object",
+  "kind": "check",
+  "why": "quantization degrades JSON validity before it degrades prose; emitting one exact flat object is the floor",
+  "need": "structured_output",
+  "family": "json_object",
+  "params": {},
+  "num_predict": 300
+}

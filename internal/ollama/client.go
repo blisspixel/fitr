@@ -57,6 +57,12 @@ type Sampling struct {
 	NumCtx        int     `json:"num_ctx"`
 	NumPredict    int     `json:"num_predict"`
 	RepeatPenalty float64 `json:"repeat_penalty"`
+
+	// Format, when "json", asks the server for grammar-constrained output.
+	// Kept OFF for every measurement task: the constrained path has its own
+	// failure modes (it breaks seed reproducibility on some stacks), which is
+	// exactly why `doctor` probes it separately.
+	Format string `json:"-"`
 }
 
 func Deterministic(numPredict, numCtx int) Sampling {
@@ -121,6 +127,9 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling)
 		},
 		"keep_alive": "10m",
 		"think":      false,
+	}
+	if s.Format != "" {
+		payload["format"] = s.Format
 	}
 	start := time.Now()
 	resp, err := c.post(ctx, "/api/generate", payload)

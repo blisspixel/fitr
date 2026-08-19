@@ -1,0 +1,9 @@
+{
+  "id": "format_tags",
+  "kind": "check",
+  "why": "the answer is in the prompt; the only thing measured is whether the reply is EXACTLY the requested envelope",
+  "need": "instruction_precision",
+  "family": "format",
+  "params": { "variant": "tags" },
+  "num_predict": 60
+}

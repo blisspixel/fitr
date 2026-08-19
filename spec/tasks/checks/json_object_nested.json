@@ -1,0 +1,9 @@
+{
+  "id": "json_object_nested",
+  "kind": "check",
+  "why": "nesting is where quant damage shows first - a model can hold a flat object together and drop a nested one",
+  "need": "structured_output",
+  "family": "json_object",
+  "params": { "nested": true },
+  "num_predict": 400
+}

@@ -1,0 +1,9 @@
+{
+  "id": "state_track",
+  "kind": "check",
+  "why": "six sequential mutations with a conditional - state tracking is what agent loops actually demand of a model",
+  "need": "reasoning",
+  "family": "state_track",
+  "params": {},
+  "num_predict": 900
+}

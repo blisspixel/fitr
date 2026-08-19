@@ -1,0 +1,9 @@
+{
+  "id": "json_extract",
+  "kind": "check",
+  "why": "prose-to-JSON extraction with a date format conversion - the everyday pipeline shape, graded on exact values",
+  "need": "structured_output",
+  "family": "json_extract",
+  "params": {},
+  "num_predict": 300
+}

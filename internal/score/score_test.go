@@ -138,6 +138,63 @@ func TestMissingGateSkipsRatherThanCrashes(t *testing.T) {
 	}
 }
 
+func TestPooledNeedsScoreAgainstRateGates(t *testing.T) {
+	m := good()
+	m.Structured = Pool{Passes: 7, N: 7}
+	m.Precision = Pool{Passes: 2, N: 4} // 0.5 < 0.7 gate
+	sc := Score(m, lappy(t))
+	if sc.Needs["structured_output"].State != Pass {
+		t.Fatalf("structured_output = %v, want PASS", sc.Needs["structured_output"].State)
+	}
+	if !strings.Contains(sc.Needs["structured_output"].Why, "[") {
+		t.Fatalf("pooled verdict must carry its Wilson interval, got %q", sc.Needs["structured_output"].Why)
+	}
+	if sc.Needs["instruction_precision"].State != Fail {
+		t.Fatalf("instruction_precision = %v, want FAIL at 2/4 against 0.7", sc.Needs["instruction_precision"].State)
+	}
+}
+
+func TestUnmeasuredPoolsSkip(t *testing.T) {
+	sc := Score(good(), lappy(t))
+	for _, need := range []string{"structured_output", "instruction_precision"} {
+		if sc.Needs[need].State != Skip {
+			t.Fatalf("%s = %v, want SKIP when no checks ran", need, sc.Needs[need].State)
+		}
+	}
+	if _, ok := sc.Needs["user_tasks"]; ok {
+		t.Fatal("user_tasks must not appear on runs without user tasks")
+	}
+}
+
+func TestUserTasksDefaultToAllMustPass(t *testing.T) {
+	m := good()
+	m.User = Pool{Passes: 3, N: 3}
+	sc := Score(m, lappy(t))
+	if sc.Needs["user_tasks"].State != Pass {
+		t.Fatalf("3/3 user tasks = %v, want PASS", sc.Needs["user_tasks"].State)
+	}
+	m.User = Pool{Passes: 2, N: 3}
+	sc = Score(m, lappy(t))
+	if sc.Needs["user_tasks"].State != Fail {
+		t.Fatalf("2/3 user tasks = %v, want FAIL under the all-must-pass default", sc.Needs["user_tasks"].State)
+	}
+	// user_tasks lives outside NeedOrder; the counters must still see it.
+	if sc.Fails == 0 {
+		t.Fatal("a failing user_tasks need must count as a failure")
+	}
+}
+
+func TestReasoningPoolWidensTheCodingSample(t *testing.T) {
+	m := good()
+	m.CodePasses, m.CodeRepeats = 6, 6
+	m.Reasoning = Pool{Passes: 4, N: 5}
+	sc := Score(m, lappy(t))
+	why := sc.Needs["coding"].Why
+	if !strings.Contains(why, "10/11") || !strings.Contains(why, "reasoning 4/5") {
+		t.Fatalf("coding why must pool reasoning trials into the interval, got %q", why)
+	}
+}
+
 func TestProfilesAreEmbeddedAndParse(t *testing.T) {
 	profs, err := device.LoadProfiles()
 	if err != nil || len(profs) < 2 {

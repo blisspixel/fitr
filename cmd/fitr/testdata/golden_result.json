@@ -1,0 +1,115 @@
+{
+  "schema_version": 4,
+  "model": "golden-model:30b",
+  "started_at": "2026-08-18T09:00:00Z",
+  "level": "full",
+  "repeats": 3,
+  "wall_s": 812.4,
+  "device": {
+    "host": "lappy",
+    "os": "windows",
+    "cpu": "AMD Ryzen 7 7840U",
+    "ram_gb": 62.0,
+    "gpu": "AMD Radeon(TM) 780M",
+    "gpu_driver": "32.0.31007.5012",
+    "gpu_driver_date": "2025-11-02",
+    "ollama": "0.32.10",
+    "inference_device": "GPU 100%",
+    "config": {
+      "OLLAMA_FLASH_ATTENTION": "1",
+      "OLLAMA_KV_CACHE_TYPE": "f16"
+    }
+  },
+  "device_key": "lappy|AMD Radeon(TM) 780M|32.0.31007.5012|0.32.10|1|f16",
+  "profile": "lappy",
+  "model_meta": {
+    "name": "golden-model:30b",
+    "size": 18500000000,
+    "capabilities": ["completion", "tools"],
+    "details": {
+      "parameter_size": "30.5B",
+      "quantization_level": "Q4_K_M",
+      "family": "qwen3moe"
+    }
+  },
+  "speed_repeats": [
+    { "decode_tps": 22.71, "ttft_s": 0.92, "prefill_tps": 223.1, "prompt_tokens": 2801, "truncated": false },
+    { "decode_tps": 23.16, "ttft_s": 0.89, "prefill_tps": 226.9, "prompt_tokens": 2801, "truncated": false },
+    { "decode_tps": 23.60, "ttft_s": 0.87, "prefill_tps": 229.9, "prompt_tokens": 2801, "truncated": false }
+  ],
+  "decode_summary": { "mean": 23.16, "sd": 0.44, "n": 3, "min": 22.71, "max": 23.6, "spread": 0.89 },
+  "ttft_summary": { "mean": 0.89, "sd": 0.025, "n": 3, "min": 0.87, "max": 0.92, "spread": 0.05 },
+  "prefill_summary": { "mean": 226.64, "sd": 3.1, "n": 3, "min": 223.1, "max": 229.9, "spread": 6.8 },
+  "memory": { "disk_gb": 17.3, "resident_gb_at_32k": 20.34, "pct_on_gpu": 100, "load_s": 8.2 },
+  "code_write": [
+    { "pass": true, "detail": "CODE_WRITE_OK", "raw": "```python\ndef parse_duration(s): ...\n```" },
+    { "pass": true, "detail": "CODE_WRITE_OK", "raw": "```python\ndef parse_duration(s): ...\n```" },
+    { "pass": true, "detail": "CODE_WRITE_OK", "raw": "```python\ndef parse_duration(s): ...\n```" }
+  ],
+  "code_fix": [
+    { "pass": true, "detail": "CART_OK", "raw": "```python\n# discounts.py\n...\n```", "file_edited": "discounts.py" },
+    { "pass": true, "detail": "CART_OK", "raw": "```python\n# discounts.py\n...\n```", "file_edited": "discounts.py" },
+    { "pass": true, "detail": "CART_OK", "raw": "```python\n# discounts.py\n...\n```", "file_edited": "discounts.py" }
+  ],
+  "checks": [
+    { "task": "csv_strict", "family": "csv_strict", "need": "structured_output", "origin": "builtin", "seed": 1, "pass": true, "detail": "valid CSV, exact match" },
+    { "task": "json_extract", "family": "json_extract", "need": "structured_output", "origin": "builtin", "seed": 2, "pass": true, "detail": "valid JSON, exact match" },
+    { "task": "json_extract_noise", "family": "json_extract", "need": "structured_output", "origin": "builtin", "seed": 3, "pass": true, "detail": "valid JSON, exact match" },
+    { "task": "json_object", "family": "json_object", "need": "structured_output", "origin": "builtin", "seed": 4, "pass": true, "detail": "valid JSON, exact match" },
+    { "task": "json_object_nested", "family": "json_object", "need": "structured_output", "origin": "builtin", "seed": 5, "pass": false, "detail": "field \"meta\": missing field \"note\"" },
+    { "task": "json_schema", "family": "json_schema", "need": "structured_output", "origin": "builtin", "seed": 6, "pass": true, "detail": "valid JSON, exact match" },
+    { "task": "tool_args", "family": "tool_args", "need": "structured_output", "origin": "builtin", "seed": 7, "pass": true, "detail": "valid JSON, exact match" },
+    { "task": "format_number", "family": "format", "need": "instruction_precision", "origin": "builtin", "seed": 8, "pass": true, "detail": "bare number, correct" },
+    { "task": "format_tags", "family": "format", "need": "instruction_precision", "origin": "builtin", "seed": 9, "pass": true, "detail": "exact format" },
+    { "task": "keyword_limits", "family": "keywords", "need": "instruction_precision", "origin": "builtin", "seed": 10, "pass": true, "detail": "constraints held" },
+    { "task": "line_rules", "family": "line_rules", "need": "instruction_precision", "origin": "builtin", "seed": 11, "pass": true, "detail": "all line rules held" },
+    { "task": "date_math", "family": "date_math", "need": "reasoning", "origin": "builtin", "seed": 12, "pass": true, "detail": "correct date" },
+    { "task": "list_ops", "family": "list_ops", "need": "reasoning", "origin": "builtin", "seed": 13, "pass": true, "detail": "correct final list" },
+    { "task": "math_chain", "family": "math_chain", "need": "reasoning", "origin": "builtin", "seed": 14, "pass": true, "detail": "correct total" },
+    { "task": "math_chain_noise", "family": "math_chain", "need": "reasoning", "origin": "builtin", "seed": 15, "pass": false, "detail": "want 38.47, got 63.47" },
+    { "task": "state_track", "family": "state_track", "need": "reasoning", "origin": "builtin", "seed": 16, "pass": true, "detail": "correct final value" }
+  ],
+  "tools": [
+    { "pass": true, "turns": 5, "tool_calls": 4, "malformed_calls": 0, "repeated_identical_calls": 0, "looped": false, "ended": "clean_stop", "call_sequence": "LRWR", "files_written": ["discounts.py"], "detail": "CART_OK" },
+    { "pass": true, "turns": 5, "tool_calls": 4, "malformed_calls": 0, "repeated_identical_calls": 0, "looped": false, "ended": "clean_stop", "call_sequence": "LRWR", "files_written": ["discounts.py"], "detail": "CART_OK" },
+    { "pass": true, "turns": 6, "tool_calls": 5, "malformed_calls": 0, "repeated_identical_calls": 1, "looped": false, "ended": "clean_stop", "call_sequence": "LRRWR", "files_written": ["discounts.py"], "detail": "CART_OK" }
+  ],
+  "agentic": {
+    "pass": true, "turns": 14, "tool_calls": 19, "malformed_calls": 0,
+    "repeated_identical_calls": 1, "looped": false, "ended": "clean_stop",
+    "call_sequence": "LRRWTWTWRT", "files_written": ["validators.py", "users.py", "orders.py"],
+    "detail": "AGENT_OK"
+  },
+  "refusal": {
+    "political": { "verdict": "answered", "chars": 2400, "text": "" },
+    "fiction": { "verdict": "answered", "chars": 1900, "text": "" },
+    "rewrite": { "verdict": "answered", "chars": 1100, "text": "" }
+  },
+  "refused_count": 0,
+  "plumbing": {
+    "model": "golden-model:30b",
+    "rungs": {
+      "1_capability": { "pass": true, "detail": "capabilities=[completion tools]" },
+      "2_emits_tool_call": { "pass": true, "detail": "emitted 1 call" },
+      "3_valid_args": { "pass": true, "detail": "arguments parse" },
+      "4_roundtrip": { "pass": true, "detail": "consumed the result" },
+      "5_irrelevance": { "pass": true, "detail": "left tools alone" }
+    },
+    "order": ["1_capability", "2_emits_tool_call", "3_valid_args", "4_roundtrip", "5_irrelevance"],
+    "verdict": "plumbing healthy",
+    "healthy": true
+  },
+  "repetition": {
+    "dup_paragraph_ratio": 0.0,
+    "dup_sentence_ratio": 0.0,
+    "dup_line_ratio": 0.02,
+    "top_2gram_char_frac": 0.011,
+    "top_4gram_char_frac": 0.036,
+    "gzip_compression_ratio": 2.39,
+    "repetition_score": 0.21,
+    "distinct_4gram": 0.79,
+    "words": 820,
+    "truncated": false
+  },
+  "density": { "distinct_numerics": 14, "numerics_per_1k_words": 17.1 }
+}

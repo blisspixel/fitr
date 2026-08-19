@@ -1,0 +1,9 @@
+{
+  "id": "line_rules",
+  "kind": "check",
+  "why": "IFEval-style verifiable constraints: exact line count, exact prefixes, a word exactly once per line, a banned word - all checked by code",
+  "need": "instruction_precision",
+  "family": "line_rules",
+  "params": {},
+  "num_predict": 300
+}

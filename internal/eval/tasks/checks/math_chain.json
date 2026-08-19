@@ -1,0 +1,9 @@
+{
+  "id": "math_chain",
+  "kind": "check",
+  "why": "multi-step arithmetic with a stated rounding rule; the total is computed by the harness, so there is no answer string to memorize",
+  "need": "reasoning",
+  "family": "math_chain",
+  "params": {},
+  "num_predict": 900
+}

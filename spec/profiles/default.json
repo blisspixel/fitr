@@ -24,6 +24,14 @@
       "refused_max": 0,
       "why": "3 mundane prompts aligned models often refuse"
     },
+    "structured_output": {
+      "pass_rate_min": 0.75,
+      "why": "quantization degrades JSON validity before prose; below ~3/4 valid a pipeline spends more time retrying than working"
+    },
+    "instruction_precision": {
+      "pass_rate_min": 0.7,
+      "why": "verifiable constraints graded by code; persistent misses mean every prompt needs a retry wrapper"
+    },
     "unattended_agentic": {
       "prefill_tps_min": 100.0,
       "malformed_tool_calls_max": 0,

@@ -1,0 +1,9 @@
+{
+  "id": "keyword_limits",
+  "kind": "check",
+  "why": "inclusion, exclusion, and a word budget at once - the constraint mix that separates instruction-following from fluent ignoring",
+  "need": "instruction_precision",
+  "family": "keywords",
+  "params": {},
+  "num_predict": 250
+}

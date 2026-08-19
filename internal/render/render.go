@@ -137,6 +137,8 @@ type Meta struct {
 	PrefillN                 int
 	FirstRunSlow             bool
 	FirstRunRatio            float64
+	Trials                   int
+	MDEpp                    float64
 	SavedPath                string
 }
 
@@ -231,6 +233,12 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 			"over %d repeats   decode %s   prefill %s", m.Repeats,
 			stat(m.DecodeMean, m.DecodeSD, m.DecodeN, m.DecodeMin, m.DecodeMax, d.g),
 			stat(m.PrefillMean, m.PrefillSD, m.PrefillN, 0, 0, d.g))))
+	}
+	// Say what this sample CANNOT resolve. An honest gap beats implied precision.
+	if m.MDEpp > 0 {
+		fmt.Fprintf(w, "%s\n", d.pal.wrap(d.pal.Muted, fmt.Sprintf(
+			"%d binary trials %s min detectable effect ~%.0fpp - separates broken from working, "+
+				"not good from slightly better", m.Trials, d.g.Dash, m.MDEpp)))
 	}
 	if m.Repeats < 3 {
 		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Warn,

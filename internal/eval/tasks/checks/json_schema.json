@@ -1,0 +1,9 @@
+{
+  "id": "json_schema",
+  "kind": "check",
+  "why": "schema conformance: exact keys, exact types, enum membership, no extra fields - graded mechanically",
+  "need": "structured_output",
+  "family": "json_schema",
+  "params": {},
+  "num_predict": 300
+}
