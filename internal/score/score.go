@@ -21,6 +21,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -117,7 +118,7 @@ func RepetitionMetrics(text string) Repetition {
 	r.DupSentenceRatio = dupRatio(sents)
 
 	var lines []string
-	for _, l := range strings.Split(text, "\n") {
+	for l := range strings.SplitSeq(text, "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			lines = append(lines, l)
 		}
@@ -482,17 +483,12 @@ func state(ok bool) State {
 }
 
 func hasCap(caps []string, want string) bool {
-	for _, c := range caps {
-		if c == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(caps, want)
 }
 
 func round(v float64, places int) float64 {
 	p := 1.0
-	for i := 0; i < places; i++ {
+	for range places {
 		p *= 10
 	}
 	if v < 0 {

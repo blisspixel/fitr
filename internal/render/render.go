@@ -106,10 +106,7 @@ func fit(s string, n int, ell string) string {
 	if len(s) <= n {
 		return s
 	}
-	keep := n - len(ell)
-	if keep < 1 {
-		keep = 1
-	}
+	keep := max(n-len(ell), 1)
 	cut := s[:keep]
 	if i := strings.LastIndex(cut, " "); i > keep*3/5 {
 		cut = cut[:i]

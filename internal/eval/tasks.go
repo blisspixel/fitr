@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -98,7 +99,7 @@ func buildLongPrompt(nonce string) string {
 	if nonce != "" {
 		sb.WriteString("# run-id " + nonce + "\n")
 	}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		fmt.Fprintf(&sb, "# ---- module %d ----\n%s\n\n", i, codeChunk)
 	}
 	sb.WriteString("\nIn one short sentence: what data structure pairing makes LRUCache.get O(1)?")
@@ -237,12 +238,7 @@ func allowed(name string, list []string) bool {
 	if len(list) == 0 {
 		return true
 	}
-	for _, l := range list {
-		if l == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, name)
 }
 
 func runIn(ctx context.Context, dir string, argv []string) (string, error) {

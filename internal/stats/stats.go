@@ -189,21 +189,11 @@ func FirstRunSlow(xs []float64) (slow bool, ratio float64) {
 // 80% power, alpha=0.05). Exposed so the tool can state what it CANNOT
 // resolve rather than implying precision it does not have.
 func MinDetectableEffect(items, repeats int) float64 {
-	n := items * max(1, repeats)
-	if n < 1 {
-		n = 1
-	}
+	n := max(items*max(1, repeats), 1)
 	return round(2.8*math.Sqrt(0.25/float64(n)), 3)
 }
 
 func round(v float64, places int) float64 {
 	p := math.Pow(10, float64(places))
 	return math.Round(v*p) / p
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

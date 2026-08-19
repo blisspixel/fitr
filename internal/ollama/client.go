@@ -317,7 +317,7 @@ func (c *Client) Resident(ctx context.Context) ([]RunningModel, error) {
 // Callers should WARN and record leftovers rather than abort -- data marked as
 // possibly contaminated beats data silently trusted, and beats no data at all.
 func (c *Client) StopAll(ctx context.Context) ([]string, error) {
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		live, err := c.Resident(ctx)
 		if err != nil {
 			return nil, err
@@ -361,7 +361,7 @@ func (c *Client) Reachable(ctx context.Context) bool {
 
 func round(v float64, places int) float64 {
 	p := 1.0
-	for i := 0; i < places; i++ {
+	for range places {
 		p *= 10
 	}
 	return float64(int64(v*p+0.5)) / p

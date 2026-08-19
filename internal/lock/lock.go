@@ -71,7 +71,7 @@ func Acquire(name, what string) (*Lock, error) {
 
 	// Two attempts: the second only happens after clearing a stale lock, so
 	// this cannot spin.
-	for attempt := 0; attempt < 2; attempt++ {
+	for range 2 {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			host, _ := os.Hostname()

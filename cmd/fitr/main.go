@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -369,7 +370,7 @@ func execute(ctx context.Context, c *ollama.Client, model, level, profileName st
 
 	stopAll()
 	if err := step("speed", fmt.Sprintf("x%d", reps), func() error {
-		for i := 0; i < reps; i++ {
+		for i := range reps {
 			// The nonce MUST vary: identical long prompts hit the prefix cache
 			// and prefill becomes fiction.
 			nonce := fmt.Sprintf("%s-%d", res.StartedAt, i)
@@ -401,7 +402,7 @@ func execute(ctx context.Context, c *ollama.Client, model, level, profileName st
 	}
 
 	if err := step("coding", fmt.Sprintf("x%d", reps), func() error {
-		for i := 0; i < reps; i++ {
+		for i := range reps {
 			w, err := eval.RunExec(ctx, c, model, spec.CodeWrite, filepath.Join(work, fmt.Sprintf("cw%d", i)))
 			if err != nil {
 				return err
@@ -431,7 +432,7 @@ func execute(ctx context.Context, c *ollama.Client, model, level, profileName st
 	}
 
 	if err := step("tools", fmt.Sprintf("x%d", reps), func() error {
-		for i := 0; i < reps; i++ {
+		for i := range reps {
 			t, err := eval.RunToolLoop(ctx, c, model, spec.Tools, filepath.Join(work, fmt.Sprintf("tl%d", i)))
 			if err != nil {
 				return err
@@ -876,13 +877,7 @@ func codeWilson(r *Result) stats.Interval {
 // appendUnique adds items not already present, preserving order.
 func appendUnique(dst []string, items ...string) []string {
 	for _, it := range items {
-		found := false
-		for _, have := range dst {
-			if have == it {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(dst, it)
 		if !found {
 			dst = append(dst, it)
 		}
