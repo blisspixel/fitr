@@ -42,16 +42,29 @@ func New() *Client {
 // Temperature 0 alone is NOT enough (float non-associativity, batch-variant
 // kernels, prompt-cache reuse), but temp 0 + top_k 1 + a fixed seed removes
 // every source we control. Repeats handle the rest.
+//
+// RepeatPenalty is pinned deliberately, and pinned to 1.0 (off). Ollama
+// changed its own default from 1.1 to 1.0 in v0.32.10, so leaving it unset
+// makes degeneracy results depend on the server version. Worse, a repetition
+// penalty is precisely the mechanism that *hides* looping -- llama.cpp ships
+// DRY, XTC and repeat-penalty samplers that suppress loops but never report
+// them. fitr measures whether this model, at this quant, on this hardware
+// degenerates; masking that with a sampler would measure the sampler.
 type Sampling struct {
-	Temperature float64 `json:"temperature"`
-	TopK        int     `json:"top_k"`
-	Seed        int     `json:"seed"`
-	NumCtx      int     `json:"num_ctx"`
-	NumPredict  int     `json:"num_predict"`
+	Temperature   float64 `json:"temperature"`
+	TopK          int     `json:"top_k"`
+	Seed          int     `json:"seed"`
+	NumCtx        int     `json:"num_ctx"`
+	NumPredict    int     `json:"num_predict"`
+	RepeatPenalty float64 `json:"repeat_penalty"`
 }
 
 func Deterministic(numPredict, numCtx int) Sampling {
-	return Sampling{Temperature: 0, TopK: 1, Seed: 42, NumCtx: numCtx, NumPredict: numPredict}
+	return Sampling{
+		Temperature: 0, TopK: 1, Seed: 42,
+		NumCtx: numCtx, NumPredict: numPredict,
+		RepeatPenalty: 1.0,
+	}
 }
 
 // Metrics are the timing facts for one generation.
@@ -104,6 +117,7 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling)
 		"options": map[string]any{
 			"temperature": s.Temperature, "top_k": s.TopK, "seed": s.Seed,
 			"num_ctx": s.NumCtx, "num_predict": s.NumPredict,
+			"repeat_penalty": s.RepeatPenalty,
 		},
 		"keep_alive": "10m",
 		"think":      false,
@@ -202,6 +216,7 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools [
 		"options": map[string]any{
 			"temperature": s.Temperature, "top_k": s.TopK, "seed": s.Seed,
 			"num_ctx": s.NumCtx, "num_predict": s.NumPredict,
+			"repeat_penalty": s.RepeatPenalty,
 		},
 		"keep_alive": "10m",
 		"think":      false,
