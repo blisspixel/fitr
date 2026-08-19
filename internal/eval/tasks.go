@@ -25,7 +25,12 @@ type SpeedResult struct {
 	TTFT       float64 `json:"ttft_s"`
 	PrefillTPS float64 `json:"prefill_tps"`
 	PromptTok  int     `json:"prompt_tokens"`
-	Truncated  bool    `json:"truncated"`
+	// CachedPromptTok is how much of the PREFILL probe's prompt was served
+	// from cache. The nonce exists to make this zero; a nonzero value on a
+	// backend that reports it means the prefill figure is partly fiction, and
+	// the run says so instead of quietly publishing it.
+	CachedPromptTok int  `json:"cached_prompt_tokens,omitempty"`
+	Truncated       bool `json:"truncated"`
 }
 
 // RunSpeed measures decode and prefill.
@@ -62,6 +67,7 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 		return out, err
 	}
 	out.PrefillTPS, out.PromptTok = m2.PrefillTPS, m2.PromptTokens
+	out.CachedPromptTok = m2.CachedTokens
 	return out, nil
 }
 

@@ -33,7 +33,7 @@ import (
 	"github.com/blisspixel/fitr/internal/stats"
 )
 
-const version = "0.1.0"
+const version = "0.2.0-dev"
 
 // Exit codes: small, documented, domain-specific. Not sysexits -- nobody uses it.
 const (
@@ -68,6 +68,7 @@ usage:
 
 flags:
   --display  auto|plain|json|none   output mode (default auto)
+  --backend  auto|ollama|llama-server   serving runtime (default auto-detect)
   -k         repeats per noisy task (default 3, 1 with --quick)
              A single run is not a measurement: identical configs vary 10-20pp.
   -q         quiet (repeat for silent)      -v  verbose
@@ -473,12 +474,18 @@ func execute(ctx context.Context, c llm.Backend, model, level, profileName strin
 			res.Speed = append(res.Speed, s)
 		}
 		var dec, ttft, pre []float64
+		cached := 0
 		for _, s := range res.Speed {
 			dec = append(dec, s.DecodeTPS)
 			ttft = append(ttft, s.TTFT)
 			pre = append(pre, s.PrefillTPS)
+			cached += s.CachedPromptTok
 		}
 		res.DecodeSum, res.TTFTSum, res.PrefillSum = stats.MeanSD(dec), stats.MeanSD(ttft), stats.MeanSD(pre)
+		if cached > 0 {
+			disp.Note(fmt.Sprintf("prefill probe hit the prompt cache (%d tokens) despite the "+
+				"nonce - the prefill figure is partly fiction and should not be trusted", cached), "warn")
+		}
 		return nil
 	}); err != nil {
 		return nil, err

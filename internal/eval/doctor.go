@@ -103,14 +103,17 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	// 3. Served context. A server can silently evaluate less prompt than you
 	// sent; prompt_eval_count is the receipt. Nonce defeats the prefix cache.
 	_, mp, err := c.Generate(ctx, model, buildLongPrompt("doctor-ctx-probe"), ollama.Deterministic(16, NumCtx))
+	// Cached prompt tokens count as served: on backends that report the split,
+	// prompt_n alone under-reads a partially cached prompt.
+	served := mp.PromptTokens + mp.CachedTokens
 	switch {
 	case err != nil:
 		add("served_context", "FAIL", "long-prompt probe failed: "+err.Error())
-	case mp.PromptTokens < 2000:
+	case served < 2000:
 		add("served_context", "WARN", fmt.Sprintf(
-			"a ~2.8k-token prompt evaluated as %d tokens - the server may be truncating or shrinking context; check OLLAMA_CONTEXT_LENGTH and num_ctx", mp.PromptTokens))
+			"a ~2.8k-token prompt evaluated as %d tokens - the server may be truncating or shrinking context; check OLLAMA_CONTEXT_LENGTH and num_ctx", served))
 	default:
-		add("served_context", "PASS", fmt.Sprintf("~2.8k-token prompt evaluated as %d tokens", mp.PromptTokens))
+		add("served_context", "PASS", fmt.Sprintf("~2.8k-token prompt evaluated as %d tokens", served))
 	}
 
 	// 4. Determinism, plain text. Identical request, N times, byte-compared.
