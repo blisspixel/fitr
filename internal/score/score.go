@@ -241,6 +241,10 @@ type Measured struct {
 	// TTFTCacheContaminated is true when the gated TTFT prompt was mostly
 	// served from cache - the number would be a warm-prefix figure.
 	TTFTCacheContaminated bool
+	// TimingsClientDerived is true when decode/TTFT came from wall-clock on
+	// the client (OpenAI-compat). The number is still gated; the label is
+	// the honesty (design rule 6).
+	TimingsClientDerived bool
 
 	ResidentGB32K float64
 	MemoryKnown   bool
@@ -325,6 +329,9 @@ func Score(m Measured, p device.Profile) Scorecard {
 		}
 		if m.TTFTWarm > 0 {
 			why += fmt.Sprintf(", cached prefix %.2fs", m.TTFTWarm)
+		}
+		if m.TimingsClientDerived {
+			why += "; client-derived wall-clock (not server timings)"
 		}
 		n["fast_and_decent"] = Verdict{state(ok), why}
 	}

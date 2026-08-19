@@ -47,6 +47,9 @@ type SpeedResult struct {
 	GatedCachedTok int  `json:"gated_cached_tokens,omitempty"`
 	GatedPromptTok int  `json:"gated_prompt_tokens,omitempty"`
 	Truncated      bool `json:"truncated"`
+	// ClientDerived is copied from the backend: OpenAI-compat timings are
+	// wall-clock estimates, not server counters.
+	ClientDerived bool `json:"client_derived,omitempty"`
 }
 
 // GatedTTFTContaminated is true when most of the gated TTFT prompt was a
@@ -89,6 +92,7 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 		return out, err
 	}
 	out.DecodeTPS, out.TTFT = m1.DecodeTPS, m1.TTFTSeconds
+	out.ClientDerived = m1.ClientDerived
 	out.GatedPromptTok = m1.PromptTokens
 	if m1.CacheKnown {
 		out.GatedCachedTok = m1.CachedTokens

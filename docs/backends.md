@@ -65,11 +65,11 @@ Unmeasured GPU memory is SKIP, never a card-from-name number.
 
 **Generic OpenAI-compatible** covers roughly ten of the twelve relevant
 local runtimes with one adapter. Its honesty notes: timings are
-**client-derived** (the surface exposes token counts but no server timings,
-so rates come from wall clock and usage counts), tool support is claimed
-optimistically and then **verified by the plumbing diagnostic** before any
-tools verdict is issued, vision is never claimed unverifiably, and
-resident-memory needs SKIP.
+**client-derived** (token counts from usage, rates from wall clock) and the
+scorecard labels them so they cannot be mistaken for Ollama or llama-server
+counters; tool support is claimed optimistically and then **verified by the
+plumbing diagnostic** before any tools verdict is issued; vision is never
+claimed unverifiably; resident-memory needs SKIP.
 
 Across all three, tool-call arguments are normalized to one shape, and
 malformed ones survive as malformed so the tool loop counts them instead of

@@ -97,6 +97,10 @@ type Metrics struct {
 	// Truncated means the model hit the token cap. Worth scoring as a failure:
 	// roughly 92% of truncations are repetition loops wearing a cap.
 	Truncated bool `json:"truncated"`
+	// ClientDerived is true when tok/s and TTFT were computed from wall-clock
+	// on this side of the socket. The OpenAI-compatible surface has no server
+	// timings; Ollama and llama-server leave this false.
+	ClientDerived bool `json:"client_derived,omitempty"`
 }
 
 type genResp struct {

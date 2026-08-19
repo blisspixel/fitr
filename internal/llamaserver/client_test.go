@@ -55,6 +55,9 @@ func TestGenerateParsesSSEStreamAndTimings(t *testing.T) {
 	if !m.CacheKnown {
 		t.Fatal("llama-server tokens_cached is a real receipt; CacheKnown must be set")
 	}
+	if m.ClientDerived {
+		t.Fatal("llama-server timings are the server's; ClientDerived must stay false")
+	}
 	if m.TTFTSeconds <= 0 {
 		t.Fatal("TTFT must be wall-clock measured, not zero")
 	}

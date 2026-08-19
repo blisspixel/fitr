@@ -52,6 +52,9 @@ func TestGenerateStreamsCompletionsWithUsage(t *testing.T) {
 	if m.Truncated {
 		t.Fatal("stop finish must not read as truncation")
 	}
+	if !m.ClientDerived {
+		t.Fatal("OpenAI-compat timings are wall-clock; ClientDerived must be set so the scorecard can say so")
+	}
 	// Usage must be requested, or no counts arrive and every rate is zero.
 	if _, ok := gotPayload["stream_options"]; !ok {
 		t.Error("stream_options.include_usage must be requested")

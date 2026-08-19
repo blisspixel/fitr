@@ -298,3 +298,16 @@ func TestContaminatedTTFTIsExcludedFromTheGate(t *testing.T) {
 		t.Fatal("decode still has to clear its own gate")
 	}
 }
+
+func TestClientDerivedTimingsAreLabeledNotSkipped(t *testing.T) {
+	m := good()
+	m.TimingsClientDerived = true
+	sc := Score(m, lappy(t))
+	why := sc.Needs["fast_and_decent"].Why
+	if !strings.Contains(why, "client-derived") {
+		t.Fatalf("OpenAI-compat wall-clock must be labeled: %q", why)
+	}
+	if sc.Needs["fast_and_decent"].State != Pass {
+		t.Fatal("labeling is not a SKIP; decode and TTFT were still measured")
+	}
+}

@@ -1139,6 +1139,9 @@ func measure(r *Result) score.Measured {
 			if s.GatedTTFTContaminated() {
 				m.TTFTCacheContaminated = true
 			}
+			if s.ClientDerived {
+				m.TimingsClientDerived = true
+			}
 		}
 	}
 	if r.Memory.ResidentGB > 0 {

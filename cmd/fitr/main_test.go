@@ -190,6 +190,44 @@ func TestQuantDamageLineIsDirectionalAndSkipsUnknown(t *testing.T) {
 	}
 }
 
+func TestBoardDoesNotRankAcrossFingerprints(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "aa", "bb"
+	b.DeviceKey = a.DeviceKey + "|other"
+	b.Device.GPUDriver = "other-driver"
+	for _, r := range []*Result{a, b} {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldOut, oldErr := os.Stdout, os.Stderr
+	or, ow, _ := os.Pipe()
+	er, ew, _ := os.Pipe()
+	os.Stdout, os.Stderr = ow, ew
+	code := cmdBoard(context.Background(), nil)
+	ow.Close()
+	ew.Close()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	io.ReadAll(er)
+	out, _ := io.ReadAll(or)
+	got := string(out)
+	if code != exitOK {
+		t.Fatalf("code = %d, output:\n%s", code, got)
+	}
+	if !strings.Contains(got, "not comparable") {
+		t.Fatalf("board must refuse to rank across fingerprints:\n%s", got)
+	}
+	if !strings.Contains(got, "aa") || !strings.Contains(got, "bb") {
+		t.Fatalf("both groups must still be shown:\n%s", got)
+	}
+}
+
 func TestCompareRefusesDifferentFingerprints(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FITR_RESULTS", dir)

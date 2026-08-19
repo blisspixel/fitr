@@ -255,12 +255,13 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 	}
 
 	m := ollama.Metrics{
-		TTFTSeconds:  round(ttft, 3),
-		WallSeconds:  round(time.Since(start).Seconds(), 2),
-		EvalCount:    usageCompletion,
-		PromptTokens: usagePrompt,
-		DoneReason:   finish,
-		Truncated:    finish == "length",
+		TTFTSeconds:   round(ttft, 3),
+		WallSeconds:   round(time.Since(start).Seconds(), 2),
+		EvalCount:     usageCompletion,
+		PromptTokens:  usagePrompt,
+		DoneReason:    finish,
+		Truncated:     finish == "length",
+		ClientDerived: true,
 	}
 	if decode := lastTok.Sub(start).Seconds() - ttft; decode > 0 && usageCompletion > 1 {
 		m.DecodeTPS = round(float64(usageCompletion-1)/decode, 2)
