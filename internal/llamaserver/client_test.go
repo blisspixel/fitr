@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/blisspixel/fitr/internal/ollama"
 )
@@ -26,6 +27,10 @@ func TestGenerateParsesSSEStreamAndTimings(t *testing.T) {
 		}
 		json.NewDecoder(r.Body).Decode(&gotPayload)
 		w.Header().Set("Content-Type", "text/event-stream")
+		// TTFT is wall-clock and rounded to the millisecond; on a fast runner
+		// an instant reply rounds to 0.000 and the assertion below goes flaky.
+		// Make the first token take real time.
+		time.Sleep(15 * time.Millisecond)
 		// Real llama-server SSE framing: data-prefixed chunks, final carries timings.
 		w.Write([]byte(`data: {"content":"Hel","stop":false}` + "\n\n"))
 		w.Write([]byte(`data: {"content":"lo","stop":false}` + "\n\n"))
