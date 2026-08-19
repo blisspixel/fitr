@@ -145,6 +145,28 @@ func TestWarmPrefixTTFTUsesTheCacheReceipt(t *testing.T) {
 	if r.ColdTTFT != 4.0 {
 		t.Fatalf("ColdTTFT = %v, want the loading 4.0", r.ColdTTFT)
 	}
+	if r.GatedPromptTok != 80 || r.GatedCachedTok != 0 {
+		t.Fatalf("gated prompt/cached = %d/%d, want 80/0 (uncached new question)", r.GatedPromptTok, r.GatedCachedTok)
+	}
+	if r.GatedTTFTContaminated() {
+		t.Fatal("an uncached gated prompt must not be labeled a cache hit")
+	}
+
+	hit := &fakeBackend{gens: []ollama.Metrics{
+		{TTFTSeconds: 0.8, LoadSeconds: 0},
+		{TTFTSeconds: 0.05, DecodeTPS: 23, CacheKnown: true, CachedTokens: 78, PromptTokens: 80},
+		{TTFTSeconds: 0.05, CacheKnown: true, CachedTokens: 78, PromptTokens: 80},
+		{PrefillTPS: 220, PromptTokens: 2800},
+	}}
+	rh, _ := RunSpeed(context.Background(), hit, "m", s, "nonce-hit")
+	if !rh.GatedTTFTContaminated() {
+		t.Fatal("78/80 cached is a cache-hit TTFT wearing a new-question badge")
+	}
+	// Prefill length must not be the comparator: 78*5 < 2800, so using it
+	// would hide the contamination.
+	if rh.PromptTok != 2800 {
+		t.Fatalf("prefill tokens = %d", rh.PromptTok)
+	}
 
 	// A backend that cannot report cache must not spend a second generate
 	// just to invent a warm-prefix number.

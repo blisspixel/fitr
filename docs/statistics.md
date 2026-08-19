@@ -91,6 +91,14 @@ significance, fitr sides with the conservative one.
 Pinned seedsets trade contamination resistance for pairing power, so fresh
 instances per run remain the default and the pinning is explicit.
 
+Accuracy deltas hide quant damage. A lower quant can fail three items the
+higher quant passed and pass three the higher failed, and both score 6/8.
+`fitr compare` on a shared seedset therefore prints the flips even when the
+rates match ("accuracy hid N item-level flips"). Directional "quant damage"
+is claimed only when both runs expose a comparable GGUF dtype of the same
+family and one is strictly higher precision; IQ and unknown schemes SKIP
+that claim rather than invent a ranking.
+
 ## 5. Ratios of means: Fieller's theorem
 
 "Model A is 1.6x faster" needs an interval, and the ratio of two noisy

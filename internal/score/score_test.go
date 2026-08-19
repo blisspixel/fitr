@@ -276,3 +276,25 @@ func TestColdAndWarmTTFTAreDisclosedInFastChat(t *testing.T) {
 		t.Fatal("the gate judges the loaded/uncached figure only")
 	}
 }
+
+func TestContaminatedTTFTIsExcludedFromTheGate(t *testing.T) {
+	m := good()
+	// Cache-hit TTFT looks excellent (0.05s) but is not a new-question
+	// number. Counting it would PASS a model whose real loaded/uncached
+	// TTFT was never measured.
+	m.TTFT, m.TTFTCacheContaminated = 0.05, true
+	m.TTFTWarm = 0.05
+	sc := Score(m, lappy(t))
+	why := sc.Needs["fast_and_decent"].Why
+	if !strings.Contains(why, "cache hit") || !strings.Contains(why, "excluded") {
+		t.Fatalf("contaminated TTFT must be labeled and excluded: %q", why)
+	}
+	if sc.Needs["fast_and_decent"].State != Pass {
+		t.Fatal("decode still passed; excluding TTFT must not invent a FAIL")
+	}
+	m.DecodeTPS = 1 // below the lappy fast_chat gate
+	sc = Score(m, lappy(t))
+	if sc.Needs["fast_and_decent"].State != Fail {
+		t.Fatal("decode still has to clear its own gate")
+	}
+}

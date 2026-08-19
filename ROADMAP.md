@@ -161,11 +161,14 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
       known-good and known-degraded quants of the same model; drop items that
       never discriminate. (The Aider polyglot redesign kept 225 of 697
       exercises this way.)
-- [ ] **Quant damage as correctness agreement.** Compare the same model at two
-      quants on the pooled check trials - item-level flips against the
-      higher-precision run, not accuracy deltas. Accuracy provably hides quant
-      damage; flips expose it. This replaces the old "KL divergence" idea: KLD
-      collapses to noise exactly in the near-baseline zone users care about.
+- [x] **Quant damage as correctness agreement** (machinery). `fitr compare` on
+      a shared seedset reports item-level flips, including when the two rates
+      match - accuracy hid the disagreements. Directional "quant damage"
+      against the higher-precision run is claimed only when both results
+      expose a comparable GGUF dtype of the same family. Which *items*
+      discriminate still needs a live calibration pass.
+- [ ] **Quant-flip calibration on hardware.** Drop check items that never
+      flip between known-good and known-degraded quants of the same model.
 - [ ] **`fitr tune`, re-scoped.** Sweep the *request-level* knobs first
       (`num_ctx`, `num_batch`, `num_gpu`) - no restart needed - and score
       **quality + degeneracy + throughput jointly** per point; llama-bench
@@ -186,7 +189,7 @@ loop, closable on someone else's machine.
 |---|---|
 | One-command install (curl / irm) | **done** (binary downloads need a `v*` tag) |
 | Honest measurement on Ollama, llama-server, OpenAI-compat | **done** (0.3) |
-| Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals) | **mostly done** - check-battery calibration and quant-flip damage still open |
+| Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals, quant flips) | **mostly done** - check-battery calibration still needs hardware; flip machinery is in `compare` |
 | `fitr advise` names a model + settings with a remedy | **scaffolded** - three-tier + remedy from weights+KV; SKIP when it cannot measure; no catalog, no dummy allocation |
 | A result can leave the terminal | **done** - `fitr export` / `fitr run --html`, opt-in, fingerprint in the page |
 | Community device profiles beyond `lappy` | **not started** |

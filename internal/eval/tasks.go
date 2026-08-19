@@ -41,10 +41,19 @@ type SpeedResult struct {
 	// the run says so instead of quietly publishing it.
 	CachedPromptTok int `json:"cached_prompt_tokens,omitempty"`
 	// GatedCachedTok is how much of the GATED TTFT prompt was cached. If this
-	// is a large fraction of the prompt, the gated number is a warm-prefix
-	// figure wearing a cold-prompt badge.
+	// is a large fraction of GatedPromptTok, the gated number is a warm-prefix
+	// figure wearing a cold-prompt badge. Never compared to the prefill
+	// prompt: those lengths differ by 10-30x and the check would never fire.
 	GatedCachedTok int  `json:"gated_cached_tokens,omitempty"`
+	GatedPromptTok int  `json:"gated_prompt_tokens,omitempty"`
 	Truncated      bool `json:"truncated"`
+}
+
+// GatedTTFTContaminated is true when most of the gated TTFT prompt was a
+// cache hit. The threshold is 20% uncached (cached*5 >= prompt): a real
+// new-question prefill is not 80%+ cached.
+func (s SpeedResult) GatedTTFTContaminated() bool {
+	return s.GatedPromptTok > 0 && s.GatedCachedTok*5 >= s.GatedPromptTok
 }
 
 // RunSpeed measures decode and prefill.
@@ -80,6 +89,7 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 		return out, err
 	}
 	out.DecodeTPS, out.TTFT = m1.DecodeTPS, m1.TTFTSeconds
+	out.GatedPromptTok = m1.PromptTokens
 	if m1.CacheKnown {
 		out.GatedCachedTok = m1.CachedTokens
 	}

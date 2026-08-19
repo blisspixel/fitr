@@ -309,17 +309,22 @@ func Score(m Measured, p device.Profile) Scorecard {
 		n["fast_and_decent"] = Verdict{Skip, "speed not measured"}
 	} else {
 		ttftMax, _ := p.Float("fast_chat", "ttft_s_max")
-		ok := m.DecodeTPS >= tpsMin && m.TTFT <= ttftMax
+		// A cache-hit TTFT is not a new-question measurement. Judging it
+		// would let a warm-prefix figure wear a cold-prompt badge (usually
+		// a false PASS). Exclude it from the gate and say so.
+		ok := m.DecodeTPS >= tpsMin
 		why := fmt.Sprintf("%.2f tok/s (need >=%.1f), TTFT %.2fs loaded/uncached (need <=%.1f)",
 			m.DecodeTPS, tpsMin, m.TTFT, ttftMax)
+		if m.TTFTCacheContaminated {
+			why += "; gated TTFT was a cache hit - not a new-question number, excluded from the gate"
+		} else {
+			ok = ok && m.TTFT <= ttftMax
+		}
 		if m.TTFTCold > 0 {
 			why += fmt.Sprintf(", cold start %.1fs", m.TTFTCold)
 		}
 		if m.TTFTWarm > 0 {
 			why += fmt.Sprintf(", cached prefix %.2fs", m.TTFTWarm)
-		}
-		if m.TTFTCacheContaminated {
-			why += "; gated TTFT was a cache hit - not a new-question number"
 		}
 		n["fast_and_decent"] = Verdict{state(ok), why}
 	}

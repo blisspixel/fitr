@@ -40,7 +40,7 @@ need `cargo`, not a rewrite.
 | `fitr board [--current]` | compare everything, grouped by device |
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
-| `fitr compare <a> <b>` | difference/ratio intervals; paired flips on shared instances |
+| `fitr compare <a> <b>` | difference/ratio intervals; paired flips (accuracy can hide them) |
 | `fitr device` / `fitr profiles` | fingerprint and gates |
 
 | Level | Runs | ~Time |

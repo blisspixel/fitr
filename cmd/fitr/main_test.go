@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/blisspixel/fitr/internal/device"
+	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/score"
 	"github.com/blisspixel/fitr/internal/stats"
@@ -154,6 +155,65 @@ func TestDegradedResultFailsTheRightNeeds(t *testing.T) {
 	}
 	if !strings.Contains(sc.UseFor, "AVOID") {
 		t.Errorf("use_for = %q, want the degenerate-output warning", sc.UseFor)
+	}
+}
+
+func TestQuantDamageLineIsDirectionalAndSkipsUnknown(t *testing.T) {
+	base := golden(t)
+	hi, lo := *base, *base
+	lo.Checks = append([]eval.CheckOutcome(nil), base.Checks...)
+	hi.Model, lo.Model = "m:q8", "m:q4"
+	hi.ModelMeta.Details.QuantizationLevel = "Q8_0"
+	lo.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
+	for i := range lo.Checks {
+		if lo.Checks[i].Need == "structured_output" && lo.Checks[i].Pass {
+			lo.Checks[i].Pass = false
+			break
+		}
+	}
+	flips := eval.PairFlips(hi.Checks, lo.Checks)
+	line, ok := quantDamageLine(&hi, &lo, flips)
+	if !ok || !strings.Contains(line, "Q4_K_M lost") || !strings.Contains(line, "Q8_0") {
+		t.Fatalf("got %q ok=%v, want directional Q4 vs Q8", line, ok)
+	}
+	if strings.Contains(line, "accuracy") && !strings.Contains(line, "flips") {
+		t.Fatal("must say flips, not sell an accuracy delta")
+	}
+	lo.ModelMeta.Details.QuantizationLevel = "IQ4_XS"
+	if _, ok := quantDamageLine(&hi, &lo, flips); ok {
+		t.Fatal("IQ must not invent a directional rank")
+	}
+	lo.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
+	lo.ModelMeta.Details.Family = "llama"
+	if _, ok := quantDamageLine(&hi, &lo, flips); ok {
+		t.Fatal("different families are not a quant pair")
+	}
+}
+
+func TestCompareRefusesDifferentFingerprints(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "aa", "bb"
+	b.DeviceKey = a.DeviceKey + "|other"
+	for _, r := range []*Result{a, b} {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := os.Stderr
+	er, ew, _ := os.Pipe()
+	os.Stderr = ew
+	code := cmdCompare(context.Background(), []string{"aa", "bb"})
+	ew.Close()
+	os.Stderr = old
+	io.ReadAll(er)
+	if code != exitError {
+		t.Fatalf("code = %d, want error (never rank across fingerprints)", code)
 	}
 }
 

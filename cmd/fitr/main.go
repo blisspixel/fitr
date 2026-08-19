@@ -1113,7 +1113,7 @@ func measure(r *Result) score.Measured {
 			if s.WarmTTFT > 0 && m.TTFTWarm == 0 {
 				m.TTFTWarm = s.WarmTTFT
 			}
-			if s.PromptTok > 0 && s.GatedCachedTok*5 >= s.PromptTok {
+			if s.GatedTTFTContaminated() {
 				m.TTFTCacheContaminated = true
 			}
 		}
@@ -1758,41 +1758,32 @@ func poolOf(r *Result, need string) (p score.Pool) {
 // flips decide, and with fewer than six of them no split can reach p<0.05 -
 // which is reported as exactly that, never as a near-miss.
 func pairedCompare(a, b *Result) {
-	aOut := map[string]bool{}
-	for _, ck := range a.Checks {
-		aOut[fmt.Sprintf("%s|%d", ck.TaskID, ck.Seed)] = ck.Pass
-	}
-	shared, aOnly, bOnly := 0, 0, 0
-	for _, ck := range b.Checks {
-		pa, ok := aOut[fmt.Sprintf("%s|%d", ck.TaskID, ck.Seed)]
-		if !ok {
-			continue
-		}
-		shared++
-		if pa && !ck.Pass {
-			aOnly++
-		} else if !pa && ck.Pass {
-			bOnly++
-		}
-	}
-	if shared == 0 {
+	flips := eval.PairFlips(a.Checks, b.Checks)
+	if flips.Shared == 0 {
 		fmt.Println("  paired: seedsets match but no shared instances were found.")
 		return
 	}
 	fmt.Printf("  paired on %d identical instances: %s alone passed %d, %s alone passed %d, agreed on %d\n",
-		shared, a.Model, aOnly, b.Model, bOnly, shared-aOnly-bOnly)
+		flips.Shared, a.Model, flips.AOnly, b.Model, flips.BOnly, flips.Agree)
+	if flips.HidesDisagreement() {
+		fmt.Printf("  accuracy hid %d item-level flip(s) (%d/%d vs %d/%d) - rates match, the questions did not\n",
+			flips.AOnly+flips.BOnly, flips.APass, flips.Shared, flips.BPass, flips.Shared)
+	}
+	if line, ok := quantDamageLine(a, b, flips); ok {
+		fmt.Println("  " + line)
+	}
 	switch {
-	case aOnly+bOnly == 0:
+	case flips.AOnly+flips.BOnly == 0:
 		fmt.Println("  identical outcomes on every shared instance - no evidence of any difference.")
 	default:
-		pExact, pMid, separable := stats.McNemarExact(aOnly, bOnly)
+		pExact, pMid, separable := stats.McNemarExact(flips.AOnly, flips.BOnly)
 		if !separable {
 			fmt.Printf("  %d discordant instance(s) - too few to separate at alpha=0.05 regardless of split.\n",
-				aOnly+bOnly)
+				flips.AOnly+flips.BOnly)
 			return
 		}
 		winner := a.Model
-		if bOnly > aOnly {
+		if flips.BOnly > flips.AOnly {
 			winner = b.Model
 		}
 		if pExact < 0.05 {
@@ -1801,6 +1792,29 @@ func pairedCompare(a, b *Result) {
 			fmt.Printf("  ~ the flips do not separate them (McNemar exact p=%.3f, mid-p %.3f)\n", pExact, pMid)
 		}
 	}
+}
+
+// quantDamageLine is directional only when both runs expose a comparable
+// quant and one is strictly higher precision. Otherwise SKIP the claim.
+func quantDamageLine(a, b *Result, flips eval.FlipReport) (string, bool) {
+	qa, qb := a.ModelMeta.Details.QuantizationLevel, b.ModelMeta.Details.QuantizationLevel
+	ra, rb := eval.QuantRank(qa), eval.QuantRank(qb)
+	if ra == 0 || rb == 0 || ra == rb {
+		return "", false
+	}
+	fa, fb := a.ModelMeta.Details.Family, b.ModelMeta.Details.Family
+	if fa == "" || fa != fb {
+		return "", false
+	}
+	lost, ref, worse := flips.AOnly, qa, qb
+	if rb > ra {
+		lost, ref, worse = flips.BOnly, qb, qa
+	}
+	if lost == 0 {
+		return "", false
+	}
+	return fmt.Sprintf("quant damage: %s lost %d item(s) %s passed (flips, not the accuracy delta)",
+		worse, lost, ref), true
 }
 
 // appendUnique adds items not already present, preserving order.
