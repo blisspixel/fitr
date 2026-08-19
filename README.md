@@ -2,13 +2,15 @@
 
 **Is this local model any good - on your machine?**
 
-A new model drops. You want one answer, in about 15 minutes, that is true for
-*your* hardware rather than for someone's B200:
+Everyone has this problem. A model is all over your feed. You still do not
+know which quant fits in *your* VRAM, or what it actually does on this box
+in a benchmark you can compare to the last one you tried. The posts skip the
+quant. The leaderboard was someone else's hardware.
 
 ```bash
+fitr advise some-new-model:tag          # does it fit, which flag if not
 fitr run some-new-model:tag --full --pull
-fitr run https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
-fitr board
+fitr board                              # compare everything you have measured
 ```
 
 <img src="docs/assets/run.svg" alt="fitr run scorecard (mock data)" width="820">
