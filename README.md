@@ -33,9 +33,19 @@ over 3 repeats   decode 23.16 +/-0.44 (min 22.71, max 23.60)   prefill 226.64 +/
 
 Single static binary. No Python, no venv, no package manager, no runtime.
 
+> `llmfit` tells you what fits. Leaderboards tell you what is smart on
+> someone else's machine. **`fitr` tells you what is silently broken on yours**
+> - the Q4 that still writes clean prose but emits malformed tool calls, the
+> parser that swallows them, the loop your GPU triggers and nobody else's does.
+
 ---
 
-## Three ideas that make this different from a leaderboard
+## Four design commitments
+
+The first three are becoming industry consensus - `homebench`, `bench-loop`,
+`PocketPal` and `llmfit` all partition by hardware now, and Wilson intervals
+ship in several local harnesses. We hold them because they are correct, not
+because they are rare. The fourth is, as of August 2026, ours alone.
 
 ### 1. A score is meaningless without the device it was measured on
 
@@ -76,6 +86,23 @@ So tasks repeat (`-k 3` default), results carry **Wilson score intervals**, and
 `fitr compare` says **"INDISTINGUISHABLE on this sample size"** rather than
 inventing a winner. A single pass gives a Wilson interval of `[0.21, 1.0]`.
 
+### 4. A model that passes every test can still be broken here
+
+Quantization degrades structured output long before it degrades prose, and
+looping is **hardware-specific** - llama.cpp has open 2026 issues tying garbled
+output to dual-GPU CUDA but not single, batch 512 but not 1024, Vulkan on
+particular gfx IDs, quantized KV cache, and long agentic sessions.
+
+So every run scores the longest text the model produced against **five
+independent degeneracy signals** - duplicate paragraph and line ratios, top
+n-gram character fraction, gzip compression ratio, and distinct 4-grams. One
+signal is not enough: a visibly looping sample scored 0.0 on duplicate
+paragraphs because the paragraphs were shorter than the filter.
+
+No other harness reports this. llama.cpp ships DRY and XTC samplers that
+*suppress* loops but never *report* them, and two upstream attempts to add
+detection stalled or were closed.
+
 ---
 
 ## Install
@@ -88,7 +115,7 @@ make install
 # or grab a binary for your platform from Releases
 ```
 
-Needs Go 1.24+ to build, a running Ollama to measure, and `python3` on PATH
+Needs Go 1.25+ to build, a running Ollama to measure, and `python3` on PATH
 **only** to execute the Python coding fixtures. The harness language and the
 task language are deliberately separate: a task declares the interpreter it
 needs in its spec, so adding Rust tasks would need `cargo`, not a rewrite.
