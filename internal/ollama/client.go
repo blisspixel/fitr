@@ -31,7 +31,7 @@ func New() *Client {
 	}
 	return &Client{
 		BaseURL: strings.TrimRight(base, "/"),
-		// Long timeout: a 20-turn agentic run on a slow local model is legitimately
+		// Long timeout: a 40-turn agentic run on a slow local model is legitimately
 		// slow. Cancellation is the caller's job, via context.
 		HTTP: &http.Client{Timeout: 60 * time.Minute},
 	}
@@ -201,6 +201,9 @@ type ToolFunction struct {
 }
 
 type ToolCall struct {
+	// ID is empty on Ollama, which has no call ids; OpenAI-shaped backends
+	// set it and require it echoed back on the tool-result message.
+	ID       string `json:"id,omitempty"`
 	Function struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -208,10 +211,17 @@ type ToolCall struct {
 }
 
 type Message struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	ToolName  string     `json:"tool_name,omitempty"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// Thinking carries reasoning_content. It MUST round-trip across agentic
+	// turns: models trained to see their prior reasoning degrade measurably
+	// when the harness silently drops it, and that loss would be recorded as
+	// the model's failure. Appending the assistant message unmodified
+	// preserves it; this field exists so serialization does too.
+	Thinking   string     `json:"thinking,omitempty"`
+	ToolName   string     `json:"tool_name,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type chatResp struct {

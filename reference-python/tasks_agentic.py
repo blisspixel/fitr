@@ -15,8 +15,8 @@ import json, os, re, shutil, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tasks_core as E
 
-MAX_TURNS = int(os.environ.get('AGENTIC_TURNS', '20'))
-TIME_BUDGET = 1500
+MAX_TURNS = int(os.environ.get('AGENTIC_TURNS', '40'))
+TIME_BUDGET = 2400
 
 VALIDATORS = '''"""Validation helpers for the project. Currently unimplemented."""
 '''

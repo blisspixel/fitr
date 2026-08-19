@@ -258,6 +258,7 @@ type Measured struct {
 
 	AgenticRan, AgenticPass bool
 	AgenticMalformed        int
+	AgenticTurns            int
 
 	ToolsRan  bool
 	ToolsPass bool
@@ -366,7 +367,7 @@ func Score(m Measured, p device.Profile) Scorecard {
 				m.PlumbingVerdict + " -- fix template/parser, then re-run"}
 	case !m.AgenticRan && m.ToolsRan:
 		n["unattended_agentic"] = Verdict{Skip, fmt.Sprintf(
-			"only the 4-call proxy ran (tools=%v); use --full for the 20-turn verdict",
+			"only the 4-call proxy ran (tools=%v); use --full for the long-horizon verdict",
 			m.ToolsPass)}
 	case !m.AgenticRan:
 		n["unattended_agentic"] = Verdict{Skip, "not measured (use --full)"}
@@ -379,8 +380,8 @@ func Score(m Measured, p device.Profile) Scorecard {
 		bmax, _ := p.Float("unattended_agentic", "malformed_tool_calls_max")
 		ok2 := m.PrefillTPS >= pmin && float64(m.AgenticMalformed) <= bmax && m.AgenticPass
 		n["unattended_agentic"] = Verdict{state(ok2), fmt.Sprintf(
-			"prefill %.1f tok/s (need >=%.0f), 20-turn pass=%v, malformed=%d",
-			m.PrefillTPS, pmin, m.AgenticPass, m.AgenticMalformed)}
+			"prefill %.1f tok/s (need >=%.0f), unattended pass=%v in %d turns, malformed=%d",
+			m.PrefillTPS, pmin, m.AgenticPass, m.AgenticTurns, m.AgenticMalformed)}
 	}
 
 	// --- tool restraint: needs no ground truth, and it is the most common

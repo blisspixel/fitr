@@ -193,7 +193,7 @@ func cmdRun(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	quick := fs.Bool("quick", false, "speed+memory+coding+tools")
-	full := fs.Bool("full", false, "adds the 20-turn agentic task")
+	full := fs.Bool("full", false, "adds the 40-turn agentic task")
 	k := fs.Int("k", 0, "repeats per noisy task")
 	profileName := fs.String("profile", "", "device profile (default: auto-match)")
 	mode := fs.String("display", "auto", "auto|plain|json|none")
@@ -502,7 +502,7 @@ func execute(ctx context.Context, c *ollama.Client, model, level, profileName st
 	}
 
 	if level == "full" {
-		if err := step("agentic", "20 unsupervised turns", func() error {
+		if err := step("agentic", fmt.Sprintf("up to %d unsupervised turns", spec.Agentic.MaxTurns), func() error {
 			stopAll()
 			a, err := eval.RunToolLoop(ctx, c, model, spec.Agentic, filepath.Join(work, "ag"))
 			if err != nil {
@@ -625,6 +625,7 @@ func measure(r *Result) score.Measured {
 	if r.Agentic != nil {
 		m.AgenticRan, m.AgenticPass = true, r.Agentic.Pass
 		m.AgenticMalformed = r.Agentic.Malformed
+		m.AgenticTurns = r.Agentic.Turns
 	}
 	if r.Plumbing != nil {
 		m.PlumbingRan = true

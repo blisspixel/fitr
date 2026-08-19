@@ -349,7 +349,8 @@ func RunToolLoop(ctx context.Context, c *ollama.Client, model string, spec ToolL
 
 			result := doTool(ctx, dir, name, p, content, spec, written)
 			msgs = append(msgs, ollama.Message{
-				Role: "tool", ToolName: name, Content: truncate(result, 4000),
+				Role: "tool", ToolName: name, ToolCallID: tc.ID,
+				Content: truncate(result, 4000),
 			})
 		}
 	}

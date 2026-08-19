@@ -21,7 +21,7 @@ device   AMD Radeon(TM) 780M | driver 32.0.31007.5012 | GPU 100% | profile lappy
 [PASS] fast + pretty good (chat)          23.16 tok/s (need >=10.0), TTFT 0.89s
 [PASS] great coding / reasoning           6/6 passes [0.61-1.00]
 [PASS] no filtering / low refusal         refused/partial 0/3 (need <=0)
-[PASS] works unattended (agent loop)      prefill 226.6 tok/s, 20-turn pass=true
+[PASS] works unattended (agent loop)      prefill 226.6 tok/s, unattended pass=true in 14 turns
 [PASS] leaves tools alone when irrelevant left tools alone on an unrelated question
 [PASS] small enough to keep resident      resident@32K 20.34 GB (need <=22)
 [n/a ] reads images                       text-only model - not what it is for
@@ -138,7 +138,7 @@ needs in its spec, so adding Rust tasks would need `cargo`, not a rewrite.
 |---|---|---|
 | `--quick` | speed, memory, coding, plumbing, tools | ~4 min |
 | *(default)* | + 16 generated checks + refusal battery | ~11 min |
-| `--full` | + 20-turn unattended agentic task | ~18 min |
+| `--full` | + 40-turn unattended agentic task | ~18 min |
 
 ---
 

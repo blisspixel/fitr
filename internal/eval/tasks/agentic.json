@@ -1,7 +1,7 @@
 {
   "id": "agentic",
   "kind": "tool_loop",
-  "why": "4 calls proves JSON validity; 20 turns proves it can explore, edit, verify, iterate on failure, and STOP",
+  "why": "4 calls proves JSON validity; a 40-turn horizon proves it can explore, edit, verify, iterate on failure, and STOP",
   "prompt": "You are working unsupervised in a small Python project.\n\nGoal: make `python test_all.py` pass.\n\nRight now the public functions in users.py and orders.py accept anything.\nThe tests require them to raise ValueError on invalid input. Read the tests\nto learn the exact rules, implement whatever helpers you need in\nvalidators.py, and update users.py and orders.py to use them.\n\nUse the tools. Call run_tests to check your work and iterate on failures.\nWhen run_tests reports success, reply with the single word DONE and stop.",
   "tools": [
     {
@@ -75,8 +75,8 @@
     "orders.py": "from validators import *\n\n\ndef create_order(user, total):\n    return {\"user\": user, \"total\": total}\n",
     "test_all.py": "from users import create_user, rename_user\nfrom orders import create_order\n\nu = create_user(\"ada\", 36)\nassert u == {\"name\": \"ada\", \"age\": 36}, u\nassert rename_user(dict(u), \"Ada\")[\"name\"] == \"Ada\"\nassert create_order(u, 10.5)[\"total\"] == 10.5\n\nfor bad in [(\"\", 36), (\"ada\", -1), (\"ada\", \"x\"), (None, 5)]:\n    try:\n        create_user(*bad)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError(\"create_user%r must raise ValueError\" % (bad,))\n\ntry:\n    rename_user(dict(u), \"\")\nexcept ValueError:\n    pass\nelse:\n    raise AssertionError(\"rename_user with empty name must raise ValueError\")\n\nfor bad_total in [-5, \"x\", None]:\n    try:\n        create_order(u, bad_total)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError(\"create_order total=%r must raise ValueError\" % (bad_total,))\n\nprint(\"AGENT_OK\")\n"
   },
-  "max_turns": 20,
-  "time_budget_s": 1500,
+  "max_turns": 40,
+  "time_budget_s": 2400,
   "num_predict": 1200,
   "verify": {
     "runner": [
