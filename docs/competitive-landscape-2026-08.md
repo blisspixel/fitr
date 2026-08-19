@@ -120,3 +120,139 @@ In order of defensibility:
 
 Reddit's API was blocked for both completed research agents, so r/LocalLLaMA
 sentiment is absent from this picture. HN and GitHub evidence stands on its own.
+
+---
+
+# Final verdict (supersedes the sections above)
+
+The research went through three rounds of self-correction. Where this section
+disagrees with anything above, this section is right. The earlier text is kept
+because the corrections are more informative than a clean answer would be.
+
+## Further corrections
+
+### Plumbing-vs-capability has more prior art than stated above
+
+The canonical metric predates all of this: **Aider's
+`percent_cases_well_formed`** — literally "did the model emit parseable edits,"
+reported separately from whether tests passed, alongside
+`num_malformed_responses`, `syntax_errors`, `indentation_errors`,
+`exhausted_context_windows`, `lazy_comments` and `test_timeouts`. Also:
+
+- **Inspect AI** has a typed `ToolCallError` with a first-class `"parsing"`
+  variant, alongside `timeout`, `permission`, `limit`, `sandbox_unavailable`.
+- **Harbor** classifies errors into a taxonomy including
+  `AgentSafetyRefusalError`, whose docstring states the goal in our own words:
+  keeping *"a legitimate model refusal (a real `reward 0` outcome) from reading
+  as an unknown/flaky API error."*
+
+**But here is the crack, and it is the one that matters:** Harbor's taxonomy
+keys on *provider* error strings — Anthropic and OpenAI rate-limit and
+content-filter messages. Point it at a local vLLM or llama-server and
+`exception_stats` comes back near-empty.
+
+> The industry's plumbing taxonomy is built for cloud APIs and goes blind on
+> local backends.
+
+That is the defensible version of the claim.
+
+### Refusal rate is not a differentiator
+
+promptfoo ships an `is-refusal` assertion, Inspect counts refusals natively,
+Harbor has `AgentSafetyRefusalError`. Keep it as a **need axis** — it is one —
+but drop it from any novelty claim.
+
+### Statistics: split the verdict, do not drop it
+
+The earlier "drop statistical rigor entirely" was too blunt. Accurately:
+
+- Local **performance** tools do compute CIs: Inspect AI (clustered/bootstrap
+  stderr, epochs), Anubis (95% bootstrap on tok/s, TTFT, watts/token),
+  `llm-inference-bench` (Wilson + exact McNemar), `quant-toolcall-bench`
+  (bootstrapped paired deltas; prints *"No (all CIs cross 0)"*).
+- The big **agentic quality** benchmarks do not. **Every ± on tbench.ai,
+  frontierbench.ai and eqbench.com is computed leaderboard-side.** To get error
+  bars on Terminal-Bench or SWE-bench you must run `-k >= 5` and compute them
+  yourself from per-trial JSON. Harbor's `n_attempts` defaults to **1**, and its
+  `pass@k` helper never emits `pass@1`.
+
+**So: statistically-honest quality eval on local agentic tasks is genuinely
+underserved. Just never claim Wilson intervals as novel.**
+
+## The unexpected moat: local agentic eval is mechanically broken
+
+Getting any major agentic benchmark to run against a local model is a minefield.
+This is *why* nobody publishes local agentic numbers:
+
+- **Harbor** — Terminus-2 runs on the host so `localhost` works, but
+  `claude-code`, `codex` and `openhands` run *inside* the container, and the
+  compose templates ship **no `extra_hosts`**, so `host.docker.internal` fails
+  on Linux. `hosted_vllm/` also rejects model names containing more than one `/`.
+- **BFCL** — `--model` must be a registered key with a hand-written handler. The
+  generic `QuickTestingOSSHandler` is **imported but attached to zero registry
+  entries**; an unlisted local model requires editing source.
+- **SWE-bench** — its inference module is fossilized at 12 hardcoded early-2024
+  models with **no `--base_url` flag**. Usable only as a grader.
+- **Aider** — silently truncates unless `OLLAMA_CONTEXT_LENGTH` is set; its own
+  docs warn Ollama defaults to 2k and *"silently discards context that exceeds
+  the window."*
+- **Harbor GPU tasks** — impossible locally: `EnvironmentCapabilities.gpus` is
+  never set by the Docker environment.
+
+> If `fitr` makes a 20-turn agentic task against a local endpoint work in one
+> command, that alone is worth the project — independent of any scoring
+> innovation.
+
+**`fitr run <model> --full` already does this.** It is a shipped capability that
+was not recognised as a differentiator.
+
+## More dead references
+
+**LiveBench's public data is frozen at 2024-11-25** — 1,436 questions, all
+parquets `lastModified 2025-04-07`, README conceding *"not all questions for
+this release are public."* Its `agentic_coding` categories are not publicly
+runnable. A contamination-free benchmark that is publicly 21 months stale is
+contamination-*exposed* for every 2026 model.
+
+The dead list: LiveBench, Dubesor (retired 2026-04), oobabooga's board (frozen),
+LocalBench Substack (10 posts, all April 2026), Aider's leaderboard (last
+updated Nov 2025), EQ-Bench 1-3, LocalScore.
+
+Live successors: **Terminal-Bench 3.0** (2026-07-23, 74 tasks, 510*) and
+**EQ-Bench 4** — the only self-runnable harness publishing 95% CIs.
+
+## Do not claim these
+
+Prefill/decode separation · device fingerprinting and per-hardware leaderboards ·
+refusal rate · Wilson/bootstrap CIs as a concept · "speed + memory + quality in
+one command" (homebench, 2026-08-03) · well-formedness as a metric (Aider) ·
+typed parsing errors (Inspect AI).
+
+## Genuinely ours, final ordering
+
+1. **Repetition / looping detection.** Zero implementations. Two failed upstream
+   llama.cpp PRs ([#22007](https://github.com/ggml-org/llama.cpp/pull/22007)
+   stalled, [#26039](https://github.com/ggml-org/llama.cpp/pull/26039) closed)
+   and maintainer resistance on principle, which guarantees the gap persists.
+   DeepEval's `AgentLoopDetection` compares *reasoning steps*, not token output.
+   The failures are hardware-specific: garbled on dual-GPU CUDA but not single,
+   batch 512 but not 1024, Vulkan/gfx1150, quantized KV, long agentic sessions.
+   **Prepare an answer to "just raise the temperature."**
+2. **Quant x structured-output validity, per machine.** Prose survives
+   quantization; JSON does not. KLD has a documented "silent zone" that cannot
+   rank near-baseline quants. Measured evidence exists (23-point drop at Q4_K_M
+   for Llama-family, Qwen3 unmoved) — at 1 star.
+3. **A plumbing taxonomy built for local backends**, where cloud-error-string
+   taxonomies go blind.
+4. **Local agentic eval that actually runs.**
+5. **Statistically-honest local agentic quality**, since the big harnesses
+   default to `n=1` and compute error bars leaderboard-side.
+6. **Go static binary** and **cross-vendor NPU**.
+
+## Positioning, final form
+
+> `llmfit` tells you what fits.
+> Leaderboards tell you what's smart on someone else's machine.
+> **`fitr` tells you what's silently broken on yours** — the Q4 that still
+> writes clean prose but emits malformed tool calls, the parser that swallows
+> them, the loop your GPU triggers and nobody else's does.
