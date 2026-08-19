@@ -3,7 +3,7 @@
 **Is this local model any good - on your machine?**
 
 A new model drops. You want one answer, in about 15 minutes, that is true for
-*your* hardware rather than for someone's A100:
+*your* hardware rather than for someone's B200:
 
 ```bash
 fitr run some-new-model:tag --full --pull
