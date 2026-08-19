@@ -14,7 +14,7 @@ Most tools do exactly one of those steps. None connect them. Benchmarks tell you
 a number and leave; catalogs tell you a model exists and leave; nothing says
 *"run this, at this quant, with these settings, and here is the evidence."*
 
-`run` is the engine of that loop, not the product. The product is the loop  - 
+`run` is the engine of that loop, not the product. The product is the loop -
 and the two commitments that make it worth trusting: measurements that are
 honest about their own resolution, and **a remedy attached to every negative
 verdict** (design rule 7).
@@ -56,7 +56,7 @@ verdict** (design rule 7).
 - The minimum detectable effect is now **printed on every run** - previously
   this roadmap claimed it was said out loud when it was only computed in a test
 - **A statistics engine built for n=3 to n=50**, documented with references in
-  STATS.md: Newcombe difference intervals as the sole arbiter of comparisons
+  docs/statistics.md: Newcombe difference intervals as the sole arbiter of comparisons
   (the intervals-overlap rule is an effective alpha of ~0.006 and was
   retired), Fieller ratio intervals with Welch df for "how many times faster",
   McNemar's exact test on paired instances via `--seedset` (with the
@@ -74,7 +74,7 @@ verdict** (design rule 7).
 
 | Limitation | Consequence |
 |---|---|
-| ~23 binary trials per default run | MDE ≈ 29pp. Better than the ~33pp of six tasks, still separates *broken* from *working*, not *good* from *slightly better*. `-k 3` on checks triples the sample. |
+| ~23 binary trials per default run | MDE ~ 29pp. Better than the ~33pp of six tasks, still separates *broken* from *working*, not *good* from *slightly better*. `-k 3` on checks triples the sample. |
 | OpenAI-backend timings are client-derived | usage gives counts, not server timings; decode/prefill rates there are wall-clock estimates |
 | Cold/warm TTFT split not yet applied | cached-token counts are now recorded on llama-server; the speed phase does not use them yet |
 | No compaction watchdog in the agentic loop | 40 turns now, but a model that never manages its context is not yet caught before the window fills |
@@ -108,7 +108,7 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
 - [ ] **Exploit the cold/warm receipt** - `CachedTokens` is recorded but the
       speed phase does not yet split cold vs warm TTFT on backends that
       report it. That split is the single biggest measurement error available.
-- [x] **Generic OpenAI-compatible adapter** for LM Studio / vLLM / SGLang  - 
+- [x] **Generic OpenAI-compatible adapter** for LM Studio / vLLM / SGLang -
       `/v1/completions` streaming with a chat fallback, usage-derived token
       counts, client-derived timings labeled as such, and the shared OpenAI
       wire mapping (`internal/oai`) both it and llama-server use. Tool support

@@ -7,6 +7,8 @@ document states every method fitr uses, why it was chosen over the obvious
 alternative, and what it refuses to compute. Each section follows the same
 shape: the situation, the method, the rejected alternative, the reference.
 
+<img src="assets/compare.svg" alt="fitr compare (mock data)" width="820">
+
 Two design rules govern everything below:
 
 1. Never fabricate precision. No error bar from one observation, no p-value
