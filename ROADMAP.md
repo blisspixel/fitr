@@ -64,7 +64,7 @@ verdict** (design rule 7).
 | Limitation | Consequence |
 |---|---|
 | ~23 binary trials per default run | MDE ≈ 29pp. Better than the ~33pp of six tasks, still separates *broken* from *working*, not *good* from *slightly better*. `-k 3` on checks triples the sample. |
-| Ollama + llama-server only | LM Studio, vLLM, MLX users still excluded until the generic OpenAI adapter lands |
+| OpenAI-backend timings are client-derived | usage gives counts, not server timings; decode/prefill rates there are wall-clock estimates |
 | Cold/warm TTFT split not yet applied | cached-token counts are now recorded on llama-server; the speed phase does not use them yet |
 | No compaction watchdog in the agentic loop | 40 turns now, but a model that never manages its context is not yet caught before the window fills |
 | 2 device profiles | `lappy` and an uncalibrated `default` |
@@ -97,9 +97,13 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
 - [ ] **Exploit the cold/warm receipt** — `CachedTokens` is recorded but the
       speed phase does not yet split cold vs warm TTFT on backends that
       report it. That split is the single biggest measurement error available.
-- [ ] **Generic OpenAI-compatible adapter** for LM Studio / vLLM / SGLang —
-      one adapter plus the capability probe, not N bespoke clients.
-- [ ] **Wider runtime discovery** — more than two well-known ports; notice
+- [x] **Generic OpenAI-compatible adapter** for LM Studio / vLLM / SGLang —
+      `/v1/completions` streaming with a chat fallback, usage-derived token
+      counts, client-derived timings labeled as such, and the shared OpenAI
+      wire mapping (`internal/oai`) both it and llama-server use. Tool support
+      is claimed optimistically and verified by the plumbing diagnostic;
+      vision is never claimed unverifiably.
+- [ ] **Wider runtime discovery** — more than three well-known ports; notice
       what is already running.
 - [ ] **GPU backend (Vulkan/CUDA/Metal/ROCm) in the fingerprint** — the
       runtime version implies it poorly; read it from the server where exposed.

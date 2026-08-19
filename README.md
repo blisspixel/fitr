@@ -128,7 +128,14 @@ a rewrite.
 
 `fitr` auto-detects what is running: Ollama at `OLLAMA_BASE_URL` (default
 `:11434`), then llama.cpp's `llama-server` at `LLAMA_SERVER_URL` (default
-`:8080`). Force one with `--backend ollama|llama-server`.
+`:8080`), then any **OpenAI-compatible server** - LM Studio, vLLM, SGLang - at
+`FITR_OPENAI_URL` (default `:1234`, LM Studio's port). Force one with
+`--backend ollama|llama-server|openai`.
+
+On the generic OpenAI backend, honesty notes: timings are **client-derived**
+(the surface exposes token counts but no server timings), tool support is
+claimed optimistically and then **verified by the plumbing diagnostic** before
+any tools verdict, and resident-memory needs SKIP.
 
 The llama-server backend is not just reach - it is measurement surface Ollama
 does not expose: per-request **cached-token counts** (the only honest cold/warm

@@ -28,6 +28,7 @@ import (
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/lock"
 	"github.com/blisspixel/fitr/internal/ollama"
+	"github.com/blisspixel/fitr/internal/openaicompat"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/score"
 	"github.com/blisspixel/fitr/internal/stats"
@@ -68,7 +69,7 @@ usage:
 
 flags:
   --display  auto|plain|json|none   output mode (default auto)
-  --backend  auto|ollama|llama-server   serving runtime (default auto-detect)
+  --backend  auto|ollama|llama-server|openai   serving runtime (default auto-detect)
   -k         repeats per noisy task (default 3, 1 with --quick)
              A single run is not a measurement: identical configs vary 10-20pp.
   -q         quiet (repeat for silent)      -v  verbose
@@ -158,7 +159,7 @@ func takesValue(flagArg string) bool {
 // newBackend resolves which serving runtime to measure through.
 // Selection order: --backend flag, then $FITR_BACKEND, then auto-probe
 // (Ollama first - it is the default URL people have running - then
-// llama-server).
+// llama-server, then any OpenAI-compatible server at the LM Studio port).
 func newBackend(ctx context.Context, model, kind string) (llm.Backend, int) {
 	if kind == "" || kind == "auto" {
 		kind = os.Getenv("FITR_BACKEND")
@@ -173,9 +174,14 @@ func newBackend(ctx context.Context, model, kind string) (llm.Backend, int) {
 		if l.Reachable(ctx) {
 			return checkModel(ctx, l, model)
 		}
+		g := openaicompat.New()
+		if g.Reachable(ctx) {
+			return checkModel(ctx, g, model)
+		}
 		errPrint("no serving runtime reachable",
-			fmt.Sprintf("tried Ollama at %s and llama-server at %s", o.URL(), l.URL()),
-			"start one, or point fitr at it: OLLAMA_BASE_URL, LLAMA_SERVER_URL, or --backend")
+			fmt.Sprintf("tried Ollama at %s, llama-server at %s, OpenAI-compatible at %s",
+				o.URL(), l.URL(), g.URL()),
+			"start one, or point fitr at it: OLLAMA_BASE_URL, LLAMA_SERVER_URL, FITR_OPENAI_URL, or --backend")
 		return nil, exitError
 	case "ollama":
 		o := ollama.New()
@@ -195,9 +201,18 @@ func newBackend(ctx context.Context, model, kind string) (llm.Backend, int) {
 			return nil, exitError
 		}
 		return checkModel(ctx, l, model)
+	case "openai":
+		g := openaicompat.New()
+		if !g.Reachable(ctx) {
+			errPrint("cannot reach an OpenAI-compatible server at "+g.URL(),
+				"every measurement needs a running server",
+				"start LM Studio / vLLM / SGLang, or set FITR_OPENAI_URL")
+			return nil, exitError
+		}
+		return checkModel(ctx, g, model)
 	default:
 		errPrint(fmt.Sprintf("unknown backend %q", kind), "",
-			"valid: auto, ollama, llama-server")
+			"valid: auto, ollama, llama-server, openai")
 		return nil, exitUsage
 	}
 }
@@ -251,6 +266,9 @@ func probeBackend(ctx context.Context) llm.Backend {
 	if l := llamaserver.New(); l.Reachable(ctx) {
 		return l
 	}
+	if g := openaicompat.New(); g.Reachable(ctx) {
+		return g
+	}
 	return o
 }
 
@@ -263,7 +281,7 @@ func cmdRun(ctx context.Context, args []string) int {
 	k := fs.Int("k", 0, "repeats per noisy task")
 	profileName := fs.String("profile", "", "device profile (default: auto-match)")
 	mode := fs.String("display", "auto", "auto|plain|json|none")
-	backend := fs.String("backend", "auto", "auto|ollama|llama-server")
+	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	quiet := fs.Int("q", 0, "quiet level")
 	verbose := fs.Bool("v", false, "verbose")
 	if err := fs.Parse(permute(args)); err != nil {
@@ -861,7 +879,7 @@ func trunc(s string, n int) string {
 func cmdDiag(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("diag", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	backend := fs.String("backend", "auto", "auto|ollama|llama-server")
+	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	if err := fs.Parse(permute(args)); err != nil {
 		return exitUsage
 	}
@@ -908,7 +926,7 @@ func cmdDoctor(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	n := fs.Int("n", 5, "identical generations per determinism probe")
-	backend := fs.String("backend", "auto", "auto|ollama|llama-server")
+	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	if err := fs.Parse(permute(args)); err != nil {
 		return exitUsage
 	}

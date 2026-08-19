@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/llm"
+	"github.com/blisspixel/fitr/internal/oai"
 	"github.com/blisspixel/fitr/internal/ollama"
 )
 
@@ -254,66 +255,11 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 }
 
 // ---------------------------------------------------------------- chat
-// oaiMessage is the OpenAI wire shape for one message.
-type oaiMessage struct {
-	Role             string        `json:"role"`
-	Content          string        `json:"content"`
-	ReasoningContent string        `json:"reasoning_content,omitempty"`
-	Name             string        `json:"name,omitempty"`
-	ToolCallID       string        `json:"tool_call_id,omitempty"`
-	ToolCalls        []oaiToolCall `json:"tool_calls,omitempty"`
-}
-
-type oaiToolCall struct {
-	ID       string `json:"id,omitempty"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
-}
-
 // Chat uses /v1/chat/completions - the code path every real agent framework
 // exercises against this server, which makes it the honest one to measure.
+// The wire mapping is shared with every OpenAI-shaped backend (internal/oai).
 func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) (ollama.Message, error) {
-	oai := make([]oaiMessage, 0, len(msgs))
-	for _, m := range msgs {
-		om := oaiMessage{
-			Role: m.Role, Content: m.Content,
-			ReasoningContent: m.Thinking,
-			ToolCallID:       m.ToolCallID,
-		}
-		if m.Role == "tool" {
-			om.Name = m.ToolName
-		}
-		for _, tc := range m.ToolCalls {
-			otc := oaiToolCall{ID: tc.ID, Type: "function"}
-			otc.Function.Name = tc.Function.Name
-			// OpenAI arguments are a STRING containing JSON; ours may be the
-			// object itself.
-			var asStr string
-			if json.Unmarshal(tc.Function.Arguments, &asStr) == nil {
-				otc.Function.Arguments = asStr
-			} else {
-				otc.Function.Arguments = string(tc.Function.Arguments)
-			}
-			om.ToolCalls = append(om.ToolCalls, otc)
-		}
-		oai = append(oai, om)
-	}
-
-	payload := map[string]any{
-		"model": model, "messages": oai, "stream": false,
-		"temperature": s.Temperature, "top_k": s.TopK, "seed": s.Seed,
-		"repeat_penalty": s.RepeatPenalty, "max_tokens": s.NumPredict,
-	}
-	if len(tools) > 0 {
-		payload["tools"] = tools
-	}
-	if s.Format == "json" {
-		payload["response_format"] = map[string]string{"type": "json_object"}
-	}
-	resp, err := c.post(ctx, "/v1/chat/completions", payload)
+	resp, err := c.post(ctx, "/v1/chat/completions", oai.ChatPayload(model, msgs, tools, s))
 	if err != nil {
 		return ollama.Message{}, err
 	}
@@ -323,7 +269,7 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 	}
 	var r struct {
 		Choices []struct {
-			Message oaiMessage `json:"message"`
+			Message oai.Message `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
@@ -332,25 +278,7 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 	if len(r.Choices) == 0 {
 		return ollama.Message{}, fmt.Errorf("llama-server: no choices in response")
 	}
-	got := r.Choices[0].Message
-	out := ollama.Message{Role: got.Role, Content: got.Content, Thinking: got.ReasoningContent}
-	for _, otc := range got.ToolCalls {
-		var tc ollama.ToolCall
-		tc.ID = otc.ID
-		tc.Function.Name = otc.Function.Name
-		// Normalize string-encoded arguments to the object bytes the harness
-		// parses; keep the raw string if it is not valid JSON, so a malformed
-		// call is COUNTED as malformed rather than laundered.
-		raw := strings.TrimSpace(otc.Function.Arguments)
-		if json.Valid([]byte(raw)) {
-			tc.Function.Arguments = json.RawMessage(raw)
-		} else {
-			quoted, _ := json.Marshal(otc.Function.Arguments)
-			tc.Function.Arguments = quoted
-		}
-		out.ToolCalls = append(out.ToolCalls, tc)
-	}
-	return out, nil
+	return oai.ToMessage(r.Choices[0].Message), nil
 }
 
 // ---------------------------------------------------------------- plumbing
