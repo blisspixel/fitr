@@ -2,4 +2,6 @@ dist/
 results/
 evalkit
 evalkit.exe
+fitr
+fitr.exe
 *.test
