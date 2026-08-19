@@ -1,0 +1,50 @@
+{
+  "name": "default",
+  "description": "Conservative generic gates. Used when no profile matches this machine.",
+  "match": {},
+  "notes": [
+    "These are NOT calibrated to your hardware. They are a starting point.",
+    "Run a few models you already have opinions about, then edit the gates so the",
+    "verdicts match your lived experience. Copy this file to profiles/<yourbox>.json",
+    "and set match.gpu_contains (or match.host) so it auto-selects.",
+    "Thresholds are deliberately explained rather than magic -- change them."
+  ],
+  "gates": {
+    "fast_chat": {
+      "decode_tps_min": 10.0,
+      "ttft_s_max": 2.0,
+      "why": "comfortable human reading is ~5-6 tok/s; 10 gives headroom"
+    },
+    "interactive_coding": {
+      "decode_tps_min": 15.0,
+      "ttft_s_max": 2.5,
+      "why": "you skim code faster than prose"
+    },
+    "uncensored": {
+      "refused_max": 0,
+      "why": "3 mundane prompts aligned models often refuse"
+    },
+    "unattended_agentic": {
+      "prefill_tps_min": 100.0,
+      "malformed_tool_calls_max": 0,
+      "requires_agentic_pass": true,
+      "why": "prefill dominates agent loops"
+    },
+    "always_on_capable": {
+      "resident_gb_at_32k_max": 24.0,
+      "why": "rough default; set this to roughly a third of your usable RAM"
+    },
+    "quality": {
+      "dup_paragraph_ratio_max": 0.05,
+      "dup_line_ratio_max": 0.3,
+      "top_4gram_char_frac_max": 0.16,
+      "gzip_compression_ratio_max": 4.0,
+      "repetition_score_max": 0.35,
+      "allow_truncation": false,
+      "why": "Multiple independent signals -- a single metric misses cases. A looping table scored dup_paragraph_ratio 0.0 while dup_line_ratio was 0.91 and gzip CR 9.2. Gopher corpus thresholds (dup_line 0.30, top_4gram 0.16) are reused; gzip CR anchors: human prose ~2.28, model output 2.36-2.72, so >4.0 is plainly degenerate. Truncation matters because ~92% of truncations are repetition loops."
+    }
+  },
+  "hints": {
+    "dense_param_b_interactive_max": 20
+  }
+}
