@@ -66,12 +66,15 @@ fail another, and one number cannot say that.
 | Need | Why separate |
 |---|---|
 | **fast + pretty good** | responsiveness; TTFT-dominated |
-| **great coding / reasoning** | executed assertions, never judged by a model |
+| **great coding / reasoning** | executed assertions plus computed-answer checks, never judged by a model |
+| **emits valid structured output** | quantization breaks JSON before prose - the earliest damage signal |
+| **follows exact instructions** | verifiable constraints, graded by code |
 | **no filtering / low refusal** | a first-class need, not a footnote |
 | **works unattended** | prefill-bound, not decode-bound |
 | **leaves tools alone when irrelevant** | the most common local tool failure |
 | **small enough to keep resident** | measured resident bytes, not file size |
 | **reads images** | a capability, not a grade |
+| **your tasks** | `~/.fitr/tasks/*.json` - the built-ins are defaults, your work is the point |
 
 Verdicts are **PASS / FAIL / SKIP / n/a / BLKD**. `SKIP` means not measured.
 `n/a` means the model never claimed it — a text-only model is not *bad at
@@ -126,6 +129,7 @@ needs in its spec, so adding Rust tasks would need `cargo`, not a rewrite.
 |---|---|
 | `fitr run <model> [--quick\|--full] [-k N]` | measure a model on this device |
 | `fitr board [--current]` | compare everything, grouped by device |
+| `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr compare <a> <b>` | paired comparison with propagated error |
 | `fitr device` / `fitr profiles` | fingerprint and gates |
@@ -133,8 +137,73 @@ needs in its spec, so adding Rust tasks would need `cargo`, not a rewrite.
 | Level | Runs | ~Time |
 |---|---|---|
 | `--quick` | speed, memory, coding, plumbing, tools | ~4 min |
-| *(default)* | + refusal battery | ~8 min |
-| `--full` | + 20-turn unattended agentic task | ~15 min |
+| *(default)* | + 16 generated checks + refusal battery | ~11 min |
+| `--full` | + 20-turn unattended agentic task | ~18 min |
+
+---
+
+## `fitr doctor` - is this box even measurable?
+
+Every benchmark silently assumes the stack under it is healthy. Nothing checks.
+`fitr doctor <model>` does, in about a minute:
+
+- **A real generated token, not an HTTP 200.** A misconfigured offload can
+  accept requests and emit nothing.
+- **Determinism, byte-compared.** N identical greedy requests in plain text
+  *and* in grammar-constrained JSON mode - which is a different code path and
+  is known to break seed reproducibility on some local stacks while plain text
+  reproduces. If your box does not reproduce, every single-run number anyone
+  quotes at you is noisier than it looks. Nondeterminism is reported as a
+  caveat, not a failure: repeats and intervals survive it; one-shot numbers do not.
+- **Served context.** A ~2.8K-token probe checks `prompt_eval_count` - the
+  receipt for whether the server actually evaluated what you sent.
+- **Placement.** `GPU 62%` means partial offload: a RAM-bandwidth benchmark
+  wearing a GPU badge.
+- **Config red flags** from the server's own log (authoritative over your
+  shell's environment): parallel slots divide the context, a second loaded
+  model contaminates timings.
+
+## Generated tasks: no answer strings, anywhere
+
+The check battery (JSON emission, schema conformance, tool-argument fidelity,
+CSV, format constraints, computed math, date arithmetic, state tracking) is
+**generated per run**. Each task is a parameterized family: names, numbers, and
+dates come from a seeded RNG, and the correct answer is **computed by the
+harness, never stored**. There is no answer string in this repo to leak into
+training data, every repeat is a genuinely independent trial for the Wilson
+intervals, and each result records its seed so any instance can be regenerated
+exactly. The battery also self-tests without a model: every family's computed
+canonical answer must pass its own grader.
+
+Grading is strict where strictness is the point - a reply that wraps JSON in
+commentary fails `structured_output`, because no pipeline can consume it - and
+lenient where it is not: reasoning tasks only require a final `Answer:` line,
+so a chatty-but-correct model is not punished for chattiness there.
+
+## Your own tasks, without forking
+
+Drop declarative tasks in `~/.fitr/tasks/*.json` (or `$FITR_TASKS`):
+
+```jsonc
+{
+  "id": "my_extraction",
+  "kind": "check",
+  "why": "the shape of my actual workload",
+  "family": "static",
+  "num_predict": 200,
+  "params": {
+    "prompt": "Extract the invoice total from: ... Reply with the number only.",
+    "grader": { "type": "number", "expected_number": 1249.5, "tolerance": 0.01 }
+  }
+}
+```
+
+Graders: `exact`, `contains`, `regex`, `json_object`, `number`. A user task can
+prompt and grade; it **cannot execute anything** - exec-style user tasks stay
+out until they can be sandboxed honestly. They score into their own
+`your tasks` row (all-must-pass by default), or pool into a built-in need via
+`"need"`. Malformed files are hard errors with the filename in them: silently
+dropping your own task would defeat the point of having one.
 
 ---
 
@@ -232,8 +301,10 @@ machine channel.
 
 ## Known limits
 
-- **Small battery.** ~6 tasks means a minimum detectable effect around 33 pp at
-  `-k 3`. It separates *broken* from *working*, not *good* from *slightly better*.
+- **Small battery.** ~23 binary trials per default run puts the minimum
+  detectable effect near 29 pp - and the run *says so*, out loud, every time.
+  It separates *broken* from *working*, not *good* from *slightly better*.
+  `-k 3` regenerates every check three times and roughly halves the MDE.
 - **Burst, not sustained.** A thin laptop throttles under multi-hour load.
 - **Shared memory.** On an iGPU the "GPU memory" is system RAM; a resident 19 GB
   model still costs 19 GB of your budget.
@@ -249,8 +320,11 @@ language is irrelevant to runtime. It is **distribution**: one static binary,
 no interpreter or package manager on the user's machine, ~10 ms startup, and
 trivial cross-compilation for every platform Ollama runs on.
 
-The eval definition lives in `spec/` as language-neutral JSON, generated rather
-than hand-written, so the spec is the contract and the harness is just glue.
+The eval definition lives in `spec/` as language-neutral JSON, so the spec is
+the contract and the harness is just glue. The classic tasks were extracted
+from a Python reference implementation and are held in lockstep by its tests;
+`check` tasks name a parameterized family whose instances - and answers - are
+computed at run time from a recorded seed.
 
 ## License
 
