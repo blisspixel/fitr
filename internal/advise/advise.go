@@ -6,9 +6,10 @@
 // number on the negative tiers - the consumer-grade thing NIM ships and
 // LM Studio / llmfit do not.
 //
-// Fit is estimated from GGUF architecture plus file size, not dummy-allocated
-// (llama.cpp --fit). The estimate is labeled as such and excludes compute
-// buffers. When a required input is missing the verdict is SKIP, never a
+// Fit prefers an observed resident size (Ollama /api/ps) over the weights+KV
+// estimate. Observation includes compute buffers; the estimate does not and
+// says so. llama.cpp --fit dummy allocation is still the missing gold
+// standard. When a required input is missing the verdict is SKIP, never a
 // fabricated GB number. Decode-speed class tracks *active* parameters, so a
 // 30B MoE (~3B active) is not treated as a 30B dense model.
 package advise
@@ -43,6 +44,11 @@ type Input struct {
 	Backend string // ollama | llama-server | openai | ""
 	Arch    Arch
 	Source  string // "GGUF metadata", "Ollama /api/show"
+	// ResidentB is the server's own allocation (Ollama /api/ps size). Zero
+	// means not observed. A running process is a measurement; file size is
+	// not substituted for it.
+	ResidentB   int64
+	ResidentSrc string
 }
 
 type Arch struct {
@@ -140,6 +146,7 @@ type Report struct {
 	NeedGB        float64  `json:"need_gb,omitempty"`
 	HaveGB        float64  `json:"have_gb,omitempty"`
 	WeightsGB     float64  `json:"weights_gb,omitempty"`
+	ObservedGB    float64  `json:"observed_gb,omitempty"`
 	KVGB          float64  `json:"kv_gb,omitempty"`
 	FitsGB        float64  `json:"fits_gb,omitempty"`
 	Ctx           int      `json:"ctx,omitempty"`
@@ -235,13 +242,54 @@ func Evaluate(in Input) Report {
 		r.Gaps = append(r.Gaps, "MoE detected but active params not sized (need expert FFN length)")
 	}
 
+	if in.ResidentB > 0 {
+		r.ObservedGB = round1(float64(in.ResidentB) / GiB)
+	}
+
 	if in.HaveGB <= 0 {
 		r.Tier = Skip
 		r.Why = "GPU memory was not measured"
+		if r.ObservedGB > 0 {
+			r.Why = fmt.Sprintf("GPU memory was not measured; model is resident at %s GB", trim1(r.ObservedGB))
+		}
 		r.Hint = "pass --vram-gb N, or run where nvidia-smi / unified memory / drm sysfs is readable"
 		return r
 	}
 	r.HaveGB = round1(in.HaveGB)
+	haveB := in.HaveGB * GiB
+
+	if in.ResidentB > 0 {
+		if float64(in.ResidentB) > haveB {
+			// The process is running. Calling that Incompatible would
+			// trust a budget reading over a live allocation.
+			r.Tier = Skip
+			r.Why = fmt.Sprintf("resident %s GB exceeds the %s GB budget reading; the process is running, so the budget is the suspect number",
+				trim1(r.ObservedGB), trim1(r.HaveGB))
+			r.Hint = "pass --vram-gb N if the card is larger than what fitr read"
+			r.Source = in.ResidentSrc
+			if r.Source == "" {
+				r.Source = "observed resident"
+			}
+			return r
+		}
+		// Observed fit at the current load. A requested --ctx still needs
+		// architecture to size; without one, this is the answer.
+		if in.Ctx <= 0 || !in.Arch.KVReady() {
+			r.Tier = Compatible
+			r.NeedGB = r.ObservedGB
+			r.Why = fmt.Sprintf("resident %s GB of %s GB available (measured)", trim1(r.ObservedGB), trim1(r.HaveGB))
+			r.Source = in.ResidentSrc
+			if r.Source == "" {
+				r.Source = "observed resident"
+			}
+			r.Gaps = append(r.Gaps, "resident includes compute buffers (measured, not estimated)")
+			if !in.Arch.KVReady() {
+				r.Gaps = append(r.Gaps, "other context lengths not sized (no GGUF architecture)")
+			}
+			return r
+		}
+		r.Gaps = append(r.Gaps, "current resident "+trim1(r.ObservedGB)+" GB (measured)")
+	}
 
 	if in.WeightsB <= 0 {
 		r.Tier = Skip
@@ -250,7 +298,6 @@ func Evaluate(in Input) Report {
 		return r
 	}
 	r.WeightsGB = round1(float64(in.WeightsB) / GiB)
-	haveB := in.HaveGB * GiB
 
 	if float64(in.WeightsB) > haveB {
 		r.Tier = Incompatible

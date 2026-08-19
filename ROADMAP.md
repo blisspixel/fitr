@@ -190,7 +190,7 @@ loop, closable on someone else's machine.
 | One-command install (curl / irm) | **done** (binary downloads need a `v*` tag) |
 | Honest measurement on Ollama, llama-server, OpenAI-compat | **done** (0.3) |
 | Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals, quant flips) | **mostly done** - check-battery calibration still needs hardware; flip machinery is in `compare` |
-| `fitr advise` names a model + settings with a remedy | **scaffolded** - three-tier + remedy from weights+KV; SKIP when it cannot measure; no catalog, no dummy allocation |
+| `fitr advise` names a model + settings with a remedy | **scaffolded** - observed resident when loaded, else weights+KV; SKIP when it cannot measure; no catalog, no dummy allocation |
 | A result can leave the terminal | **done** - `fitr export` / `fitr run --html`, opt-in, fingerprint in the page |
 | Community device profiles beyond `lappy` | **not started** |
 
@@ -207,10 +207,12 @@ The step that turns a chore into a product.
       memory (`try num_ctx=4096 -> fits in 21.3 GB`) / Incompatible. SKIP
       when VRAM, weights, or architecture cannot be measured - never a
       fabricated GB number, never a guess from the GPU's name.
-- [ ] **Measure fit, don't model it** - dummy-allocation style. Today's
-      number is weights + KV from GGUF metadata and says so; compute
-      buffers are excluded. `gguf-parser-go` is not vendored (zero-dep
-      binary; the estimate is small, tested arithmetic, not a black box).
+- [ ] **Measure fit, don't model it** - dummy-allocation style (`llama.cpp
+      --fit`). When the model is already loaded, advise now prefers the
+      server's own resident bytes (`/api/ps`) over the weights+KV estimate
+      and will not call a running process Incompatible just because the
+      VRAM reading is smaller. Unloaded models still get the estimate
+      (compute buffers excluded, labeled). `gguf-parser-go` is not vendored.
 - [x] Memory arithmetic that gets **MoE right** - decode tracks *active*
       parameters, not total. A 30B MoE (~3B active) at 24.8 tok/s beat an 8B
       dense at 14.6 on the same box; naive total-parameter math recommends

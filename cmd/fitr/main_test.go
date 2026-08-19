@@ -363,6 +363,15 @@ func writeGGUFString(buf *bytes.Buffer, s string) {
 	buf.WriteString(s)
 }
 
+func TestSameServedModelDoesNotGuess(t *testing.T) {
+	if !sameServedModel("qwen3:30b", "qwen3:30b") || !sameServedModel("qwen3:30b", "qwen3:30b:latest") {
+		t.Fatal("tag and :latest must match")
+	}
+	if sameServedModel("qwen3:30b", "qwen3:8b") || sameServedModel("qwen3:30b", "llama3:8b") {
+		t.Fatal("different tags must not match")
+	}
+}
+
 func TestNormalizeModelRefAcceptsPastedHFLinks(t *testing.T) {
 	cases := []struct {
 		in, want string

@@ -101,9 +101,12 @@ exit code is the machine channel.
 verdict: **compatible**, **low memory** (`try num_ctx=4096 -> fits in 19.4 GB`),
 or **incompatible**. Negative tiers carry the flag that fixes them.
 
-The number is **weights + KV**, from GGUF architecture (a `.gguf` path or
-Ollama `/api/show` `model_info`). Compute buffers are not included and the
-report says so. MoE decode class uses *active* parameters, not total.
+If the model is already loaded, the number is the server's own resident
+bytes (measured, compute buffers included). Otherwise it is **weights + KV**
+from GGUF architecture, and compute buffers are excluded and said so. A
+running process that exceeds the VRAM *reading* is SKIP, not Incompatible -
+the budget is the suspect number. MoE decode class uses *active* parameters,
+not total.
 
 SKIP, never a guess, when GPU memory was not measured, weights are unknown,
 or architecture metadata is missing. `--vram-gb N` supplies a budget; a GPU

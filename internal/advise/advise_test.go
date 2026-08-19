@@ -54,6 +54,51 @@ func TestMoEActiveUnknownWithoutFFN(t *testing.T) {
 	}
 }
 
+func TestObservedResidentBeatsEstimate(t *testing.T) {
+	r := Evaluate(Input{
+		Model: "qwen3:30b", HaveGB: 24, HaveSrc: "nvidia-smi",
+		ResidentB: 19 * GiB, ResidentSrc: "ollama /api/ps",
+	})
+	if r.Tier != Compatible {
+		t.Fatalf("tier = %s (%s), want compatible from a live resident", r.Tier, r.Why)
+	}
+	if r.ObservedGB != 19.0 || !strings.Contains(r.Why, "measured") {
+		t.Fatalf("must say the GB was measured: %+v", r)
+	}
+	if r.NeedGB != 19.0 {
+		t.Fatalf("need_gb = %v, want the observed 19, not an invented KV", r.NeedGB)
+	}
+	if strings.Contains(r.Why, "weights + KV") {
+		t.Fatal("observed path must not sell the estimate as the number")
+	}
+}
+
+func TestObservedExceedingBudgetIsSkipNotIncompatible(t *testing.T) {
+	r := Evaluate(Input{
+		HaveGB: 8, HaveSrc: "--vram-gb",
+		ResidentB: 19 * GiB, ResidentSrc: "ollama /api/ps",
+	})
+	if r.Tier != Skip {
+		t.Fatalf("tier = %s, want skip - the process is running", r.Tier)
+	}
+	if r.Remedy != "" {
+		t.Fatalf("must not invent a ctx flag when the budget reading is the suspect: %q", r.Remedy)
+	}
+	if !strings.Contains(r.Why, "suspect") {
+		t.Fatalf("why = %q, want the budget called out", r.Why)
+	}
+	if r.ExitCode() != 0 {
+		t.Fatal("SKIP is not a failed measurement")
+	}
+}
+
+func TestSkipWhenVRAMUnknownMentionsResident(t *testing.T) {
+	r := Evaluate(Input{ResidentB: 19 * GiB})
+	if r.Tier != Skip || !strings.Contains(r.Why, "19.0 GB") {
+		t.Fatalf("unmeasured VRAM should still disclose the resident size: %q", r.Why)
+	}
+}
+
 func TestSkipWhenVRAMUnknown(t *testing.T) {
 	r := Evaluate(Input{Model: "x", WeightsB: 5 * GiB, Arch: llama8B()})
 	if r.Tier != Skip {

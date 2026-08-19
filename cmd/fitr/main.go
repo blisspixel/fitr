@@ -343,6 +343,19 @@ func isLocalGGUF(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
+// sameServedModel treats "qwen3:30b" and "qwen3:30b:latest" as one tag.
+// It does not guess across different names.
+func sameServedModel(want, have string) bool {
+	if want == have {
+		return true
+	}
+	trim := func(s string) string {
+		s = strings.TrimSuffix(s, ":latest")
+		return strings.TrimSuffix(s, ":LATEST")
+	}
+	return trim(want) == trim(have)
+}
+
 // checkModel verifies the model label against what the backend serves. On
 // Ollama a missing model is a hard error with a pull hint - or an automatic
 // pull with progress when the caller allows it; a single-model server ignores
@@ -548,6 +561,16 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 		if in.Source == "" {
 			in.Source = c.Name() + " (no architecture metadata)"
+		}
+		if running, err := c.PS(ctx); err == nil {
+			for _, m := range running {
+				if !sameServedModel(model, m.Name) || m.Size <= 0 {
+					continue
+				}
+				in.ResidentB = m.Size
+				in.ResidentSrc = c.Name() + " /api/ps"
+				break
+			}
 		}
 	}
 
