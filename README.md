@@ -13,7 +13,9 @@ fitr run some-new-model:tag --full --pull
 fitr board                              # compare everything you have measured
 ```
 
-<img src="docs/assets/run.svg" alt="fitr run scorecard (mock data)" width="820">
+<img src="docs/assets/advise.svg" alt="fitr advise (demo data)" width="820">
+<img src="docs/assets/run.svg" alt="fitr run scorecard (demo data)" width="820">
+<img src="docs/assets/board.svg" alt="fitr board (demo data)" width="820">
 
 One run tells you, for this device and this config:
 
@@ -100,7 +102,7 @@ Pin a version with `FITR_VERSION=v0.2.0`, relocate with `FITR_BIN`.
 | [Usage](docs/usage.md) | flags, output modes, exit codes, device profiles |
 | [Roadmap](ROADMAP.md) | what is next and why |
 
-Screenshots use mock data and regenerate from the real renderer via
+Screenshots use demo data and regenerate from the real printers via
 `make screenshots`, so they cannot drift from what the tool prints.
 
 ## License

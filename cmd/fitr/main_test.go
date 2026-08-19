@@ -379,6 +379,25 @@ func TestProfilesNewWritesUncalibratedFile(t *testing.T) {
 	}
 }
 
+func TestScreenshotsWriteDemoSVGs(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_PROFILES", dir)
+	t.Setenv("FITR_RESULTS", t.TempDir())
+	if code := cmdScreenshots(context.Background(), []string{dir}); code != exitOK {
+		t.Fatalf("screenshots exited %d", code)
+	}
+	for _, name := range []string{"advise.svg", "run.svg", "board.svg"} {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := string(b)
+		if !strings.Contains(got, "<svg") || !strings.Contains(got, "$ fitr") {
+			t.Fatalf("%s is not a terminal screenshot:\n%.200s", name, got)
+		}
+	}
+}
+
 func TestTunePrintsProtocolWithoutSweeping(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()

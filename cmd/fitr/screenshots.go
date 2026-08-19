@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/advise"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/render"
@@ -40,7 +41,8 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		name string
 		fn   func(ctx context.Context) (string, error)
 	}{
-		{"run", shotRun}, {"doctor", shotDoctor}, {"compare", shotCompare},
+		{"advise", shotAdvise}, {"run", shotRun}, {"board", shotBoard},
+		{"doctor", shotDoctor}, {"compare", shotCompare},
 	}
 	for _, s := range shots {
 		text, err := captureStdout(ctx, s.fn)
@@ -73,8 +75,28 @@ func captureStdout(ctx context.Context, fn func(context.Context) (string, error)
 }
 
 // shotRun renders the golden fixture through the real scorecard renderer.
+// shotAdvise prints a Low-memory verdict through the real advise printer.
+// The numbers are demo: Qwen3-30B-A3B architecture, a 20 GB budget, 32k ctx.
+func shotAdvise(ctx context.Context) (string, error) {
+	in := advise.Input{
+		Model: "qwen3:30b", Quant: "Q4_K_M", Backend: "ollama",
+		WeightsB: 18 * advise.GiB, HaveGB: 20, HaveSrc: "demo (not your GPU)",
+		Ctx: 32768, Source: "demo GGUF metadata",
+		Arch: advise.Arch{
+			Name: "qwen3moe", Blocks: 48, Embed: 2048, Heads: 32, KVHeads: 4,
+			KeyLength: 128, ValLength: 128, MaxCtx: 40960,
+			Experts: 128, ExpertUsed: 8, FFN: 768, Vocab: 151936,
+			Params: 30532132864,
+		},
+	}
+	fmt.Println("$ fitr advise qwen3:30b")
+	fmt.Println()
+	advise.Write(os.Stdout, advise.Evaluate(in))
+	return "", nil
+}
+
 func shotRun(ctx context.Context) (string, error) {
-	b, err := os.ReadFile(filepath.Join("cmd", "fitr", "testdata", "golden_result.json"))
+	b, err := os.ReadFile(goldenResultPath())
 	if err != nil {
 		return "", fmt.Errorf("run from the repo root: %w", err)
 	}
@@ -97,7 +119,7 @@ func shotRun(ctx context.Context) (string, error) {
 		PrefillMean: res.PrefillSum.Mean, PrefillSD: res.PrefillSum.SD, PrefillN: res.PrefillSum.N,
 		Trials: trials, MDEpp: 100 * stats.MinDetectableEffect(trials, 1),
 	}
-	pre := "$ fitr run qwen3-coder:30b --full\n\n"
+	pre := "$ fitr run qwen3-coder:30b --full --pull\n\n"
 	disp := render.New("rich")
 	disp.Result(sc, meta)
 	return pre, nil
@@ -156,6 +178,52 @@ func shotCompare(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+func shotBoard(ctx context.Context) (string, error) {
+	dir, err := os.MkdirTemp("", "fitr_shots")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	os.Setenv("FITR_RESULTS", dir)
+	defer os.Unsetenv("FITR_RESULTS")
+
+	cur := device.Detect(ctx, probeBackend(ctx))
+	a := mockResult("qwen3:30b-q4", 23.16, 0.44, 226.64, 3.10, 6, 6, 14, 16)
+	a.ModelMeta.Details.ParameterSize = "30.5B"
+	a.Memory.ResidentGB = 20.34
+	a.Scorecard.Serves = []string{"fast_and_decent", "coding", "structured_output"}
+	b := mockResult("llama3.1:8b", 14.61, 0.52, 148.20, 4.70, 4, 6, 5, 16)
+	b.ModelMeta.Details.ParameterSize = "8.0B"
+	b.Memory.ResidentGB = 5.10
+	b.Scorecard.Serves = []string{"fast_and_decent", "low_footprint"}
+	// Same key as Detect so the board labels this block "this machine"
+	// instead of "different hardware" (the rows are demo; the grouping is real).
+	a.Device, a.DeviceKey = cur, cur.Key()
+	b.Device, b.DeviceKey = cur, cur.Key()
+	for _, r := range []*Result{a, b} {
+		if _, err := save(r); err != nil {
+			return "", err
+		}
+	}
+	fmt.Println("$ fitr board")
+	if code := cmdBoard(ctx, nil); code != exitOK {
+		return "", fmt.Errorf("cmdBoard exited %d", code)
+	}
+	return "", nil
+}
+
+func goldenResultPath() string {
+	for _, p := range []string{
+		filepath.Join("cmd", "fitr", "testdata", "golden_result.json"),
+		filepath.Join("testdata", "golden_result.json"),
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return filepath.Join("cmd", "fitr", "testdata", "golden_result.json")
+}
+
 // mockResult fabricates a plausible stored result for the compare screenshot.
 // The first checksN-checksPass generated checks fail, so two models sharing a
 // seedset produce clean discordant sets for the McNemar demo.
@@ -164,6 +232,11 @@ func mockResult(model string, dec, decSD, pre, preSD float64, codePass, codeN, c
 		SchemaVersion: 4, Model: model, StartedAt: "2026-08-19T09:00:00Z",
 		Level: "full", Repeats: 3, SeedSet: "shared1",
 		DeviceKey: "lappy|AMD Radeon(TM) 780M|32.0.31007.5012|0.32.14|1|f16",
+		Device: device.Fingerprint{
+			Host: "lappy", GPU: "AMD Radeon(TM) 780M",
+			GPUDriver: "32.0.31007.5012", Runtime: "0.32.14",
+			Config: map[string]string{"OLLAMA_KV_CACHE_TYPE": "f16", "OLLAMA_FLASH_ATTENTION": "1"},
+		},
 	}
 	r.DecodeSum = stats.Summary{Mean: dec, SD: decSD, N: 3, Min: dec - decSD, Max: dec + decSD}
 	r.PrefillSum = stats.Summary{Mean: pre, SD: preSD, N: 3, Min: pre - preSD, Max: pre + preSD}
