@@ -1,0 +1,21 @@
+{
+  "id": "speed",
+  "kind": "throughput",
+  "why": "decode is what you watch; prefill is what an agent loop pays per turn",
+  "decode": {
+    "prompt": "Write a detailed 400-word technical explanation of how a write-ahead log keeps a database durable across a crash. Plain prose, no bullet points, no headings.",
+    "num_predict": 200
+  },
+  "prefill": {
+    "prompt_template": "@build_2k_prompt",
+    "approx_prompt_tokens": 2800,
+    "num_predict": 64,
+    "nonce_required": true,
+    "nonce_why": "identical long prompts hit Ollama's prefix cache; repeats 2..K then report cache-hit fiction (observed 19444 tok/s on a device that does ~140). The nonce MUST vary per repeat."
+  },
+  "sampling": {
+    "temperature": 0.0,
+    "top_k": 1,
+    "seed": 42
+  }
+}

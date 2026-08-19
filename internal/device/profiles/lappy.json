@@ -1,0 +1,50 @@
+{
+  "name": "lappy",
+  "description": "Framework Laptop 13, AMD Ryzen 7 7840U, Radeon 780M iGPU (Vulkan), 62 GB shared LPDDR5",
+  "match": {
+    "gpu_contains": "780M"
+  },
+  "notes": [
+    "Calibrated 2026-08-17/18 against measured models on this exact box.",
+    "iGPU shares system RAM, so decode is memory-bandwidth-bound and tracks ACTIVE params, not total.",
+    "Observed: 30B MoE (~3B active) 24.8 tok/s > 8B dense 14.6 > 24B dense 4.5 > 27B dense 3.5."
+  ],
+  "gates": {
+    "fast_chat": {
+      "decode_tps_min": 10.0,
+      "ttft_s_max": 1.5,
+      "why": "comfortable human reading is ~5-6 tok/s; 10 gives headroom. TTFT is what makes it FEEL fast."
+    },
+    "interactive_coding": {
+      "decode_tps_min": 15.0,
+      "ttft_s_max": 2.0,
+      "why": "you skim code faster than prose"
+    },
+    "uncensored": {
+      "refused_max": 0,
+      "why": "3 mundane prompts aligned models often refuse; >0 means it will fight you on ordinary editorial work"
+    },
+    "unattended_agentic": {
+      "prefill_tps_min": 100.0,
+      "malformed_tool_calls_max": 0,
+      "requires_agentic_pass": true,
+      "why": "prefill dominates agent loops: every tool result re-processes a growing transcript"
+    },
+    "always_on_capable": {
+      "resident_gb_at_32k_max": 22.0,
+      "why": "leaves room for an embedding model plus a browser in 62 GB"
+    },
+    "quality": {
+      "dup_paragraph_ratio_max": 0.05,
+      "dup_line_ratio_max": 0.3,
+      "top_4gram_char_frac_max": 0.16,
+      "gzip_compression_ratio_max": 4.0,
+      "repetition_score_max": 0.35,
+      "allow_truncation": false,
+      "why": "Multiple independent signals -- a single metric misses cases. A looping table scored dup_paragraph_ratio 0.0 while dup_line_ratio was 0.91 and gzip CR 9.2. Gopher corpus thresholds (dup_line 0.30, top_4gram 0.16) are reused; gzip CR anchors: human prose ~2.28, model output 2.36-2.72, so >4.0 is plainly degenerate. Truncation matters because ~92% of truncations are repetition loops."
+    }
+  },
+  "hints": {
+    "dense_param_b_interactive_max": 20
+  }
+}

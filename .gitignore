@@ -1,0 +1,5 @@
+dist/
+results/
+evalkit
+evalkit.exe
+*.test

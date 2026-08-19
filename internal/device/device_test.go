@@ -1,0 +1,119 @@
+package device
+
+import "testing"
+
+func TestProfilesEmbedAndParse(t *testing.T) {
+	profs, err := LoadProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profs) < 2 {
+		t.Fatalf("expected default + at least one calibrated profile, got %d", len(profs))
+	}
+	var haveDefault bool
+	for _, p := range profs {
+		if p.Name == "default" {
+			haveDefault = true
+		}
+		if len(p.Gates) == 0 {
+			t.Fatalf("profile %q has no gates", p.Name)
+		}
+		// Every threshold must carry a `why` so it can be argued with rather
+		// than cargo-culted onto a machine it was never measured on.
+		for gname, g := range p.Gates {
+			if _, ok := g["why"]; !ok {
+				t.Fatalf("profile %q gate %q has no `why`", p.Name, gname)
+			}
+		}
+	}
+	if !haveDefault {
+		t.Fatal("a `default` profile must always exist as the fallback")
+	}
+}
+
+func TestSelectProfileMatchesOnGPU(t *testing.T) {
+	fp := Fingerprint{GPU: "AMD Radeon(TM) 780M", Host: "somebox"}
+	p, err := SelectProfile("", fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "lappy" {
+		t.Fatalf("gpu_contains match failed: got %q", p.Name)
+	}
+}
+
+func TestSelectProfileFallsBackToDefault(t *testing.T) {
+	fp := Fingerprint{GPU: "NVIDIA GeForce RTX 4090", Host: "blackbox"}
+	p, err := SelectProfile("", fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "default" {
+		t.Fatalf("unknown hardware should fall back to default, got %q", p.Name)
+	}
+}
+
+func TestSelectProfileExplicitNameWins(t *testing.T) {
+	fp := Fingerprint{GPU: "NVIDIA GeForce RTX 4090"}
+	p, err := SelectProfile("lappy", fp)
+	if err != nil || p.Name != "lappy" {
+		t.Fatalf("explicit --profile must win: %v %q", err, p.Name)
+	}
+	if _, err := SelectProfile("nope", fp); err == nil {
+		t.Fatal("an unknown profile name must be an error, not a silent default")
+	}
+}
+
+func TestFingerprintKeyChangesWithConfig(t *testing.T) {
+	// This is the whole comparability contract: change the driver or the KV
+	// cache dtype and prior results are explicitly void.
+	base := Fingerprint{Host: "h", GPU: "g", GPUDriver: "1.0", Ollama: "0.32",
+		Config: map[string]string{"OLLAMA_FLASH_ATTENTION": "1", "OLLAMA_KV_CACHE_TYPE": "f16"}}
+	same := base
+	if base.Key() != same.Key() {
+		t.Fatal("identical fingerprints must produce identical keys")
+	}
+	drv := base
+	drv.GPUDriver = "2.0"
+	if base.Key() == drv.Key() {
+		t.Fatal("a driver change MUST invalidate comparability")
+	}
+	kv := base
+	kv.Config = map[string]string{"OLLAMA_FLASH_ATTENTION": "1", "OLLAMA_KV_CACHE_TYPE": "q8_0"}
+	if base.Key() == kv.Key() {
+		t.Fatal("a KV cache dtype change MUST invalidate comparability")
+	}
+}
+
+func TestGateLookupMissingIsNotZero(t *testing.T) {
+	p := Profile{Gates: map[string]Gate{"fast_chat": {"decode_tps_min": 10.0}}}
+	if v, ok := p.Float("fast_chat", "decode_tps_min"); !ok || v != 10 {
+		t.Fatalf("got %v %v", v, ok)
+	}
+	// A missing gate must report "absent", never 0 -- 0 would silently pass
+	// every model instead of skipping the need.
+	if _, ok := p.Float("fast_chat", "nonexistent"); ok {
+		t.Fatal("a missing key must report absent")
+	}
+	if _, ok := p.Float("nonexistent_gate", "x"); ok {
+		t.Fatal("a missing gate must report absent")
+	}
+}
+
+func TestIsDenseAndBigIgnoresMoE(t *testing.T) {
+	p := Profile{Hints: map[string]any{"dense_param_b_interactive_max": 20.0}}
+	if !IsDenseAndBig("27B", "llama", p) {
+		t.Fatal("a dense 27B should be flagged on a bandwidth-bound device")
+	}
+	// Decode tracks ACTIVE parameters: a 30B MoE (~3B active) outruns an 8B
+	// dense model, so total size alone must not trigger the warning.
+	if IsDenseAndBig("30.5B", "qwen3moe", p) {
+		t.Fatal("MoE must not be flagged by total parameter count")
+	}
+	if IsDenseAndBig("8.0B", "llama", p) {
+		t.Fatal("a small dense model is fine")
+	}
+	if IsDenseAndBig("27B", "llama", Profile{}) {
+		t.Fatal("no hint in profile means no opinion")
+	}
+}

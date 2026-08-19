@@ -1,0 +1,79 @@
+{
+  "id": "tools",
+  "kind": "tool_loop",
+  "why": "valid JSON is necessary but not sufficient; the edit must be correct",
+  "prompt": "You are a coding agent working in a small Python project.\n\nBug: `percent_off(amount, pct)` is given a whole-number percentage\n(10 means 10%), but it multiplies by `pct` directly, so a 10% discount on\n100.0 returns -900.0 instead of 90.0.\n\nDo this, using the tools, one step at a time:\n1. list_files to see the project\n2. read_file on the file that defines percent_off\n3. write_file to fix that one function (keep the rest of the file intact)\n4. read_file on it again to confirm your edit landed\n\nWhen you have confirmed the fix, reply with the single word DONE.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "list_files",
+        "description": "List the files in the project directory.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read the full text contents of a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File name, e.g. cart.py"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "Overwrite a file with new contents.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File name to write"
+            },
+            "content": {
+              "type": "string",
+              "description": "Full new file contents"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    }
+  ],
+  "files": {
+    "discounts.py": "\"\"\"Discount helpers.\"\"\"\n\n\ndef percent_off(amount, pct):\n    \"\"\"Return `amount` after taking `pct` percent off it.\"\"\"\n    return amount - (amount * pct)\n\n\ndef clamp(v, lo, hi):\n    return max(lo, min(hi, v))\n",
+    "cart.py": "\"\"\"Shopping cart totals.\"\"\"\nfrom discounts import percent_off, clamp\n\n\ndef subtotal(items):\n    return sum(i[\"price\"] * i[\"qty\"] for i in items)\n\n\ndef total(items, discount_pct=0, tax_rate=0.0):\n    \"\"\"discount_pct is a whole-number percentage: 10 means 10% off.\"\"\"\n    s = subtotal(items)\n    s = percent_off(s, clamp(discount_pct, 0, 100))\n    return round(s * (1 + tax_rate), 2)\n",
+    "test_cart.py": "\nfrom cart import total, subtotal\nitems = [{\"price\": 25.0, \"qty\": 2}, {\"price\": 50.0, \"qty\": 1}]\nassert subtotal(items) == 100.0, subtotal(items)\nassert total(items) == 100.0, total(items)\nassert total(items, discount_pct=10) == 90.0, total(items, discount_pct=10)\nassert total(items, discount_pct=25) == 75.0, total(items, discount_pct=25)\nassert total(items, discount_pct=10, tax_rate=0.1) == 99.0, total(items, discount_pct=10, tax_rate=0.1)\nassert total(items, discount_pct=100) == 0.0, total(items, discount_pct=100)\nprint(\"CART_OK\")\n"
+  },
+  "max_turns": 8,
+  "time_budget_s": 1500,
+  "num_predict": 700,
+  "verify": {
+    "runner": [
+      "python",
+      "test_cart.py"
+    ],
+    "pass_if_stdout_contains": "CART_OK"
+  },
+  "expected_sequence_regex": "L.*R.*W.*R"
+}

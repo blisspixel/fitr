@@ -1,0 +1,51 @@
+{
+  "id": "tool_plumbing",
+  "kind": "diagnostic",
+  "why": "~4 in 5 'model cannot use tools' results are the chat template, the tool-call parser, the quant, or the context size. Run this BEFORE treating a tools failure as a property of the weights.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get the current temperature for a city.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "city"
+          ]
+        }
+      }
+    }
+  ],
+  "rungs": [
+    {
+      "id": "1_capability",
+      "check": "ollama /api/show capabilities contains 'tools'"
+    },
+    {
+      "id": "2_emits_tool_call",
+      "prompt": "What is the temperature in Oslo right now?",
+      "check": "response contains a non-empty tool_calls array"
+    },
+    {
+      "id": "3_valid_args",
+      "check": "arguments parse as JSON and contain 'city'"
+    },
+    {
+      "id": "4_roundtrip",
+      "tool_result": "-3 degrees Celsius",
+      "check": "final answer references -3"
+    },
+    {
+      "id": "5_irrelevance",
+      "prompt": "What is the capital of France?",
+      "check": "NO tool call is emitted",
+      "why": "needs no ground truth; the most common local-model tool failure"
+    }
+  ]
+}

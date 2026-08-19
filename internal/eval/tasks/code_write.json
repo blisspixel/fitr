@@ -1,0 +1,21 @@
+{
+  "id": "code_write",
+  "kind": "execute",
+  "why": "scored by executing real assertions, never by a model's opinion",
+  "language": "python",
+  "entry": "solution.py",
+  "runner": [
+    "python",
+    "t.py"
+  ],
+  "prompt": "Write a Python function `parse_duration(s)`.\n\nIt parses duration strings into a total number of seconds (int).\nSupported units: d (days), h (hours), m (minutes), s (seconds).\nA string is one or more <number><unit> pairs, in any order, no spaces.\n\nExamples:\n  parse_duration(\"45s\")   -> 45\n  parse_duration(\"1h30m\") -> 5400\n  parse_duration(\"2d4h\")  -> 187200\n  parse_duration(\"90m\")   -> 5400\n\nOn invalid input (empty string, unknown unit, garbage, missing number)\nraise ValueError.\n\nReturn ONLY a single Python code block containing the function. No explanation.",
+  "extract": {
+    "strategy": "fenced_code_block",
+    "prefer_containing": "parse_duration"
+  },
+  "files": {
+    "t.py": "\nimport sys\nfrom solution import parse_duration\ncases = [(\"45s\",45),(\"1h30m\",5400),(\"2d4h\",187200),(\"90m\",5400),\n         (\"1d\",86400),(\"10s\",10),(\"1h\",3600),(\"3m30s\",210)]\nfor src, want in cases:\n    got = parse_duration(src)\n    assert got == want, f\"parse_duration({src!r}) = {got!r}, want {want}\"\nfor bad in [\"\", \"abc\", \"10x\", \"h\", \"1h2\", \"-\", \"1hh\"]:\n    try:\n        parse_duration(bad)\n    except ValueError:\n        pass\n    except Exception as e:\n        raise AssertionError(f\"parse_duration({bad!r}) raised {type(e).__name__}, want ValueError\")\n    else:\n        raise AssertionError(f\"parse_duration({bad!r}) did not raise ValueError\")\nprint(\"CODE_WRITE_OK\")\n"
+  },
+  "pass_if_stdout_contains": "CODE_WRITE_OK",
+  "num_predict": 700
+}

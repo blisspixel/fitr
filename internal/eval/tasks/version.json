@@ -1,0 +1,6 @@
+{
+  "spec_version": 1,
+  "result_schema_version": 3,
+  "generated_from": "tasks_core.py, tasks_agentic.py",
+  "note": "Language-neutral definition of the eval. The harness may be written in any language; `runner` arrays name the interpreter needed to execute a task's fixtures, which is deliberately decoupled from the harness language."
+}

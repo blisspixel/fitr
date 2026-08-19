@@ -1,0 +1,31 @@
+{
+  "id": "code_fix",
+  "kind": "execute",
+  "why": "multi-file: the bug is in one file, the symptom surfaces in another",
+  "language": "python",
+  "runner": [
+    "python",
+    "test_cart.py"
+  ],
+  "prompt": "Here is a small Python project. `python test_cart.py` fails.\n\n--- discounts.py ---\n{{file:discounts.py}}\n--- cart.py ---\n{{file:cart.py}}\n--- test_cart.py ---\n{{file:test_cart.py}}\n\nThe test failure:\n  assert total(items, discount_pct=10) == 90.0   ->  got -900.0\n\nFind the root cause and fix it. The fix belongs in exactly one file.\nReply with ONLY one fenced code block containing the COMPLETE corrected\ncontents of the single file you changed, and put the filename on the fence\ninfo line, like: ```python discounts.py\nNo explanation outside the code block.",
+  "files": {
+    "discounts.py": "\"\"\"Discount helpers.\"\"\"\n\n\ndef percent_off(amount, pct):\n    \"\"\"Return `amount` after taking `pct` percent off it.\"\"\"\n    return amount - (amount * pct)\n\n\ndef clamp(v, lo, hi):\n    return max(lo, min(hi, v))\n",
+    "cart.py": "\"\"\"Shopping cart totals.\"\"\"\nfrom discounts import percent_off, clamp\n\n\ndef subtotal(items):\n    return sum(i[\"price\"] * i[\"qty\"] for i in items)\n\n\ndef total(items, discount_pct=0, tax_rate=0.0):\n    \"\"\"discount_pct is a whole-number percentage: 10 means 10% off.\"\"\"\n    s = subtotal(items)\n    s = percent_off(s, clamp(discount_pct, 0, 100))\n    return round(s * (1 + tax_rate), 2)\n",
+    "test_cart.py": "\nfrom cart import total, subtotal\nitems = [{\"price\": 25.0, \"qty\": 2}, {\"price\": 50.0, \"qty\": 1}]\nassert subtotal(items) == 100.0, subtotal(items)\nassert total(items) == 100.0, total(items)\nassert total(items, discount_pct=10) == 90.0, total(items, discount_pct=10)\nassert total(items, discount_pct=25) == 75.0, total(items, discount_pct=25)\nassert total(items, discount_pct=10, tax_rate=0.1) == 99.0, total(items, discount_pct=10, tax_rate=0.1)\nassert total(items, discount_pct=100) == 0.0, total(items, discount_pct=100)\nprint(\"CART_OK\")\n"
+  },
+  "editable_files": [
+    "discounts.py",
+    "cart.py"
+  ],
+  "extract": {
+    "strategy": "fenced_code_block_with_filename",
+    "default_file": "discounts.py"
+  },
+  "pass_if_stdout_contains": "CART_OK",
+  "num_predict": 900,
+  "prompt_substitution": {
+    "syntax": "{{file:NAME}}",
+    "source": "files",
+    "why": "The reference implementation formatted file contents into the prompt before sending. Extracting the raw template shipped a prompt full of unfilled placeholders, so models were asked to fix code they could not see -- and were then scored as failing. Substitution is now explicit and verifiable."
+  }
+}
