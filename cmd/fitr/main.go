@@ -23,6 +23,7 @@ import (
 
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
+	"github.com/blisspixel/fitr/internal/lock"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/score"
@@ -286,12 +287,25 @@ type Result struct {
 	Rep        score.Repetition               `json:"repetition"`
 	Density    score.Density                  `json:"density"`
 
+	// Contamination lists models that refused to unload. A non-empty value
+	// means every timing in this result is suspect.
+	Contamination []string `json:"contamination,omitempty"`
+
 	Scorecard score.Scorecard `json:"scorecard"`
 	Meta      render.Meta     `json:"-"`
 }
 
 func execute(ctx context.Context, c *ollama.Client, model, level, profileName string,
 	reps int, disp render.Display) (*Result, error) {
+
+	// Exactly one eval per machine at a time. Two runs against one inference
+	// server contaminate each other, and the damage is not recoverable after
+	// the fact -- the numbers still look plausible.
+	lk, err := lock.Acquire("eval", "eval of "+model)
+	if err != nil {
+		return nil, err
+	}
+	defer lk.Release() //nolint:errcheck // cleanup failure is not worth failing a run over
 
 	spec, err := eval.LoadSpec()
 	if err != nil {
@@ -336,7 +350,24 @@ func execute(ctx context.Context, c *ollama.Client, model, level, profileName st
 		return nil
 	}
 
-	c.StopAll(ctx) //nolint:errcheck // leftovers are warned about below
+	// One model resident at a time is non-negotiable between phases. A model
+	// that will not unload is recorded and warned about -- data marked suspect
+	// beats data silently trusted.
+	stopAll := func() {
+		left, err := c.StopAll(ctx)
+		if err != nil {
+			disp.Note("could not confirm models unloaded: "+err.Error(), "warn")
+			return
+		}
+		if len(left) == 0 {
+			return
+		}
+		res.Contamination = appendUnique(res.Contamination, left...)
+		disp.Note("still resident after unload: "+strings.Join(left, ", ")+
+			" - timings in this run may be contaminated", "warn")
+	}
+
+	stopAll()
 	if err := step("speed", fmt.Sprintf("x%d", reps), func() error {
 		for i := 0; i < reps; i++ {
 			// The nonce MUST vary: identical long prompts hit the prefix cache
@@ -424,7 +455,7 @@ func execute(ctx context.Context, c *ollama.Client, model, level, profileName st
 
 	if level == "full" {
 		if err := step("agentic", "20 unsupervised turns", func() error {
-			c.StopAll(ctx) //nolint:errcheck // leftovers are warned about below
+			stopAll()
 			a, err := eval.RunToolLoop(ctx, c, model, spec.Agentic, filepath.Join(work, "ag"))
 			if err != nil {
 				return err
@@ -453,7 +484,7 @@ func execute(ctx context.Context, c *ollama.Client, model, level, profileName st
 	// capped by design and would always look truncated.
 	res.Density = score.InformationDensity(longest)
 	res.WallSeconds = float64(int(time.Since(start).Seconds()*10)) / 10
-	c.StopAll(ctx) //nolint:errcheck // leftovers are warned about below
+	stopAll()
 
 	res.Scorecard = score.Score(measure(res), prof)
 	res.Meta = render.Meta{
@@ -840,4 +871,21 @@ func codeWilson(r *Result) stats.Interval {
 		}
 	}
 	return stats.Wilson(pass, n)
+}
+
+// appendUnique adds items not already present, preserving order.
+func appendUnique(dst []string, items ...string) []string {
+	for _, it := range items {
+		found := false
+		for _, have := range dst {
+			if have == it {
+				found = true
+				break
+			}
+		}
+		if !found {
+			dst = append(dst, it)
+		}
+	}
+	return dst
 }
