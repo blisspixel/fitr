@@ -37,7 +37,7 @@ need `cargo`, not a rewrite.
 | `fitr run <model> [--quick\|--full] [-k N]` | measure a model on this device |
 | `fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]` | does it fit here, and if not, which flag to try |
 | `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
-| `fitr export <model> [--out PATH]` | write a self-contained HTML scorecard (opt-in) |
+| `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
 | `fitr board [--current]` | compare everything, grouped by device |
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |

@@ -237,6 +237,13 @@ The step that turns a chore into a product.
       or `fitr run --html`. Never automatic: the page contains a hardware
       fingerprint and is not uploaded. Raw model output is omitted.
 
+## Optional sister: retonr
+
+- [x] **Opt-in handoff, no dependency.** `fitr export --retonr` writes
+      `fitr.retonr.evidence.v1` device-measurement JSON. A PATH hint appears
+      only if `retonr` is already installed. Missing retonr is never an
+      error. The file is not a qualification, activation, or license.
+
 ## Later, if they earn it
 
 - [ ] Exec-kind user tasks behind an explicit trust gate (they are arbitrary

@@ -32,6 +32,7 @@ import (
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/openaicompat"
 	"github.com/blisspixel/fitr/internal/render"
+	"github.com/blisspixel/fitr/internal/retonr"
 	"github.com/blisspixel/fitr/internal/score"
 	"github.com/blisspixel/fitr/internal/stats"
 )
@@ -64,7 +65,7 @@ usage:
   fitr run <model> [--quick|--full] [-k N] [--profile P] [--display MODE] [--html]
   fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]
   fitr tune [model-a model-b]
-  fitr export <model> [--out PATH]
+  fitr export <model> [--out PATH] [--retonr]
   fitr board [--current]
   fitr diag <model>
   fitr doctor <model> [-n N]
@@ -845,6 +846,9 @@ func cmdRun(ctx context.Context, args []string) int {
 		if !*htmlFlag {
 			fmt.Fprintf(os.Stderr, "         fitr export %s   for a shareable HTML scorecard\n", model)
 		}
+		if h := retonr.Hint(model); h != "" {
+			fmt.Fprintf(os.Stderr, "         %s\n", h)
+		}
 		if reps < 3 {
 			fmt.Fprintf(os.Stderr, "         fitr run %s -k 3   for a rankable result\n", model)
 		}
@@ -1442,11 +1446,12 @@ func cmdExport(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	out := fs.String("out", "", "HTML path (default: <results>/<model>.html)")
+	retonrFlag := fs.Bool("retonr", false, "also write opt-in evidence JSON for the retonr sister project")
 	if err := fs.Parse(permute(args)); err != nil {
 		return exitUsage
 	}
 	if fs.NArg() < 1 {
-		errPrint("missing model", "", "fitr export <model>  or  fitr export <model> --out scorecard.html")
+		errPrint("missing model", "", "fitr export <model>  or  fitr export <model> --retonr")
 		return exitUsage
 	}
 	model := normalizeModelRef(fs.Arg(0))
@@ -1470,13 +1475,44 @@ func cmdExport(ctx context.Context, args []string) int {
 	if path == "" {
 		path = "auto"
 	}
-	html, err := writeHTMLArtifact(r, path, "")
-	if err != nil {
-		errPrint("could not write HTML: "+err.Error(), "", "")
-		return exitError
+	if !*retonrFlag || *out != "" {
+		html, err := writeHTMLArtifact(r, path, "")
+		if err != nil {
+			errPrint("could not write HTML: "+err.Error(), "", "")
+			return exitError
+		}
+		fmt.Fprintf(os.Stderr, "  wrote  %s\n", html)
 	}
-	fmt.Fprintf(os.Stderr, "  wrote  %s\n", html)
+	if *retonrFlag {
+		evPath := filepath.Join(resultsDir(), safeName(r.Model)+".retonr.json")
+		if err := writeRetonrEvidence(r, evPath, ""); err != nil {
+			errPrint("could not write retonr evidence: "+err.Error(), "", "")
+			return exitError
+		}
+		fmt.Fprintf(os.Stderr, "  wrote  %s\n", evPath)
+		fmt.Fprintln(os.Stderr, "  note   evidence for https://github.com/blisspixel/retonr; not a qualification")
+	}
 	return exitOK
+}
+
+func writeRetonrEvidence(r *Result, dest, jsonPath string) error {
+	a, err := artifactFrom(r)
+	if err != nil {
+		return err
+	}
+	plumbing := ""
+	if r.Plumbing != nil {
+		plumbing = r.Plumbing.Verdict
+	}
+	ev := retonr.FromScorecard(version, r.Model,
+		r.ModelMeta.Details.QuantizationLevel, r.ModelMeta.Details.Family,
+		r.ModelMeta.Details.ParameterSize, r.Level, r.Repeats,
+		r.Device, r.DeviceKey, a.Profile, a.Scorecard, plumbing, jsonPath)
+	b, err := json.MarshalIndent(ev, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dest, append(b, '\n'), 0o644)
 }
 
 func artifactFrom(r *Result) (render.Artifact, error) {

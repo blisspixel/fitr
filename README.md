@@ -36,6 +36,11 @@ against **Ollama, llama.cpp's llama-server, or any OpenAI-compatible server**
 (LM Studio, vLLM, SGLang), auto-detected. Paste a Hugging Face GGUF URL and
 Ollama pulls it.
 
+Optional sister: [retonr](https://github.com/blisspixel/retonr) reconstructs
+drafts in your style under fidelity gates. fitr can export device-measurement
+evidence for it (`fitr export <model> --retonr`). **fitr works without
+retonr.** The export is not a qualification.
+
 ## Install
 
 macOS / Linux:
@@ -101,6 +106,7 @@ Pin a version with `FITR_VERSION=v0.2.0`, relocate with `FITR_BIN`.
 | [Backends](docs/backends.md) | Ollama, llama-server, OpenAI-compatible - and what each can measure honestly |
 | [Usage](docs/usage.md) | flags, output modes, exit codes, device profiles |
 | [Roadmap](ROADMAP.md) | what is next and why |
+| [retonr](docs/retonr.md) | optional sister project; fitr works without it |
 
 Screenshots use demo data and regenerate from the real printers via
 `make screenshots`, so they cannot drift from what the tool prints.

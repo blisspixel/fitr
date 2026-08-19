@@ -296,6 +296,9 @@ func TestUsageMentionsAdvise(t *testing.T) {
 	if !strings.Contains(got, "fitr calibrate") {
 		t.Fatalf("usage must list calibrate:\n%s", got)
 	}
+	if !strings.Contains(got, "--retonr") {
+		t.Fatalf("usage must mention the optional retonr export:\n%s", got)
+	}
 }
 
 func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
@@ -463,6 +466,48 @@ func TestWriteHTMLArtifactIsOptIn(t *testing.T) {
 	}
 	if path != "" {
 		t.Fatal("empty dest must not write a file")
+	}
+}
+
+func TestExportRetonrEvidenceIsNotAQualification(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	r := golden(t)
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldErr := os.Stderr
+	er, ew, _ := os.Pipe()
+	os.Stderr = ew
+	code := cmdExport(context.Background(), []string{"--retonr", r.Model})
+	ew.Close()
+	os.Stderr = oldErr
+	io.ReadAll(er)
+	if code != exitOK {
+		t.Fatalf("code = %d", code)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, safeName(r.Model)+".retonr.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{
+		`"schema": "fitr.retonr.evidence.v1"`,
+		`"kind": "device_measurement"`,
+		"not a retonr qualification",
+		"https://github.com/blisspixel/retonr",
+		r.DeviceKey,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("evidence missing %q", want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, safeName(r.Model)+".html")); err == nil {
+		t.Fatal("--retonr alone must not also write HTML")
 	}
 }
 
