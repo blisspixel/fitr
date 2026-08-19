@@ -27,6 +27,7 @@ import (
 
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/ollama"
+	"github.com/blisspixel/fitr/internal/stats"
 )
 
 type DoctorCheck struct {
@@ -196,11 +197,17 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 // reportDeterminism folds N identical requests into one verdict. Returns
 // whether all runs were byte-identical. Nondeterminism is a WARN, never a
 // FAIL: repeats-and-intervals survive it, single-run numbers do not.
+//
+// A clean streak is reported with the exact upper bound on what it proves:
+// zero divergences in n runs bounds the per-run divergence probability at
+// 1 - 0.05^(1/n), not at zero. Five identical runs still admit a 45% rate.
 func reportDeterminism(r *DoctorResult, id string, outputs []string, passWhy string) bool {
 	identical, distinct, firstDiff := Divergence(outputs)
 	if identical {
+		bound := 100 * stats.ZeroEventUpperBound(len(outputs))
 		r.Checks = append(r.Checks, DoctorCheck{ID: id, State: "PASS",
-			Detail: fmt.Sprintf("%d/%d runs byte-identical - %s", len(outputs), len(outputs), passWhy)})
+			Detail: fmt.Sprintf("%d/%d runs byte-identical - %s (bounds divergence <%.0f%% at 95%% CL; raise -n to tighten)",
+				len(outputs), len(outputs), passWhy, bound)})
 		return true
 	}
 	r.Checks = append(r.Checks, DoctorCheck{ID: id, State: "WARN",

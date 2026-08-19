@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -110,6 +111,8 @@ func run() int {
 		return cmdProfiles(ctx)
 	case "compare":
 		return cmdCompare(ctx, os.Args[2:])
+	case "screenshots": // dev-only: regenerate docs/assets from mock data
+		return cmdScreenshots(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return exitOK
@@ -150,7 +153,7 @@ func permute(args []string) []string {
 func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
-	case "k", "n", "profile", "display", "q", "backend":
+	case "k", "n", "profile", "display", "q", "backend", "seedset":
 		return true
 	}
 	return false
@@ -282,6 +285,10 @@ func cmdRun(ctx context.Context, args []string) int {
 	profileName := fs.String("profile", "", "device profile (default: auto-match)")
 	mode := fs.String("display", "auto", "auto|plain|json|none")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
+	seedset := fs.String("seedset", "", "pin the generated-instance seed set; two runs sharing "+
+		"a seedset face IDENTICAL task instances, enabling a paired comparison")
+	adaptive := fs.Bool("adaptive", false, "repeat generated checks until each gated need is "+
+		"decided against its gate (Wald SPRT, alpha=beta=0.05) or 6 rounds pass")
 	quiet := fs.Int("q", 0, "quiet level")
 	verbose := fs.Bool("v", false, "verbose")
 	if err := fs.Parse(permute(args)); err != nil {
@@ -327,7 +334,10 @@ func cmdRun(ctx context.Context, args []string) int {
 		checksReps = *k
 	}
 
-	res, err := execute(ctx, c, model, level, *profileName, reps, checksReps, disp)
+	res, err := execute(ctx, c, model, runOpts{
+		level: level, profile: *profileName, seedSet: *seedset,
+		reps: reps, checksReps: checksReps, adaptive: *adaptive,
+	}, disp)
 	if err != nil {
 		if ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "\ninterrupted")
@@ -359,16 +369,21 @@ func cmdRun(ctx context.Context, args []string) int {
 
 // ---------------------------------------------------------------- result
 type Result struct {
-	SchemaVersion int                `json:"schema_version"`
-	Model         string             `json:"model"`
-	StartedAt     string             `json:"started_at"`
-	Level         string             `json:"level"`
-	Repeats       int                `json:"repeats"`
-	WallSeconds   float64            `json:"wall_s"`
-	Device        device.Fingerprint `json:"device"`
-	DeviceKey     string             `json:"device_key"`
-	Profile       string             `json:"profile"`
-	ModelMeta     ollama.ModelInfo   `json:"model_meta"`
+	SchemaVersion int    `json:"schema_version"`
+	Model         string `json:"model"`
+	StartedAt     string `json:"started_at"`
+	Level         string `json:"level"`
+	// SeedSet names the instance set the generated checks were drawn from.
+	// Unique per run by default (contamination resistance); pinned via
+	// --seedset so two models can face IDENTICAL instances, which upgrades
+	// `fitr compare` from an unpaired comparison to a paired one.
+	SeedSet     string             `json:"seedset,omitempty"`
+	Repeats     int                `json:"repeats"`
+	WallSeconds float64            `json:"wall_s"`
+	Device      device.Fingerprint `json:"device"`
+	DeviceKey   string             `json:"device_key"`
+	Profile     string             `json:"profile"`
+	ModelMeta   ollama.ModelInfo   `json:"model_meta"`
 
 	Speed      []eval.SpeedResult             `json:"speed_repeats"`
 	DecodeSum  stats.Summary                  `json:"decode_summary"`
@@ -394,8 +409,18 @@ type Result struct {
 	Meta      render.Meta     `json:"-"`
 }
 
-func execute(ctx context.Context, c llm.Backend, model, level, profileName string,
-	reps, checksReps int, disp render.Display) (*Result, error) {
+// runOpts carries the run configuration so execute's signature stays legible.
+type runOpts struct {
+	level, profile, seedSet string
+	reps, checksReps        int
+	adaptive                bool
+}
+
+func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
+	disp render.Display) (*Result, error) {
+	level, profileName := opts.level, opts.profile
+	reps, checksReps := opts.reps, opts.checksReps
+	seedSet, adaptive := opts.seedSet, opts.adaptive
 
 	// Exactly one eval per machine at a time. Two runs against one inference
 	// server contaminate each other, and the damage is not recoverable after
@@ -436,6 +461,15 @@ func execute(ctx context.Context, c llm.Backend, model, level, profileName strin
 		StartedAt:     time.Now().Format(time.RFC3339),
 		Level:         level, Repeats: reps,
 		Device: fp, DeviceKey: fp.Key(), Profile: prof.Name, ModelMeta: info,
+	}
+	// Fresh instances every run by default; a pinned seedset trades that
+	// contamination resistance for pairing power, and says so.
+	res.SeedSet = seedSet
+	if res.SeedSet == "" {
+		res.SeedSet = res.StartedAt
+	} else {
+		disp.Note("seedset "+seedSet+" pinned - instances repeat across runs that share it; "+
+			"use a fresh one when you are not pairing runs", "")
 	}
 	if prof.Name == "default" {
 		disp.Note("using the UNCALIBRATED default profile - verdicts are rough; "+
@@ -504,6 +538,16 @@ func execute(ctx context.Context, c llm.Backend, model, level, profileName strin
 			disp.Note(fmt.Sprintf("prefill probe hit the prompt cache (%d tokens) despite the "+
 				"nonce - the prefill figure is partly fiction and should not be trusted", cached), "warn")
 		}
+		// Outlier census, hyperfine-style: flag, explain the likely cause,
+		// name the fix. Needs n>=5; below that the estimator is degenerate
+		// and stays silent rather than guessing.
+		for i, isOut := range stats.ModifiedZOutliers(dec) {
+			if isOut {
+				disp.Note(fmt.Sprintf("decode run %d (%.2f tok/s) is a statistical outlier vs "+
+					"median %.2f - another process likely interfered; the summary includes it, "+
+					"a re-run on a quiet system would not", i+1, dec[i], stats.Median(dec)), "warn")
+			}
+		}
 		return nil
 	}); err != nil {
 		return nil, err
@@ -538,22 +582,57 @@ func execute(ctx context.Context, c llm.Backend, model, level, profileName strin
 
 	// Generated checks: fresh instances per run, graded in pure Go. Skipped on
 	// --quick to keep the smoke test a smoke test.
+	//
+	// Adaptive mode replaces the fixed repeat count with Wald's SPRT per gated
+	// need: keep generating fresh instances until each pool's rate is decided
+	// against its gate at alpha=beta=0.05, or six rounds pass. Undecided at
+	// the cap is a real answer - the sample cannot separate the rate from the
+	// gate - and the scorecard's borderline annotation will say so.
 	if level != "quick" && len(spec.Checks) > 0 {
-		total := len(spec.Checks) * checksReps
-		if err := step("checks", fmt.Sprintf("%d generated tasks", total), func() error {
+		rounds := checksReps
+		var sprts map[string]*stats.SPRT
+		detail := fmt.Sprintf("%d generated tasks", len(spec.Checks)*checksReps)
+		if adaptive {
+			rounds = 6
+			detail = "adaptive (SPRT until decided)"
+			present := map[string]bool{}
 			for _, cs := range spec.Checks {
-				for rep := range checksReps {
-					seed := eval.InstanceSeed(res.StartedAt, cs.ID, rep)
+				present[cs.Need] = true
+			}
+			sprts = map[string]*stats.SPRT{}
+			for need := range present {
+				if minRate, ok := prof.Float(need, "pass_rate_min"); ok {
+					if s, err := stats.GateSPRT(minRate); err == nil {
+						sprts[need] = s
+					}
+				}
+			}
+		}
+		roundsRun := 0
+		if err := step("checks", detail, func() error {
+			for round := 0; round < rounds; round++ {
+				roundsRun = round + 1
+				for _, cs := range spec.Checks {
+					seed := eval.InstanceSeed(res.SeedSet, cs.ID, round)
 					o, err := eval.RunCheck(ctx, c, model, cs, seed)
 					if err != nil {
 						return err
 					}
 					res.Checks = append(res.Checks, o)
+					if s, ok := sprts[cs.Need]; ok {
+						s.Add(o.Pass)
+					}
+				}
+				if adaptive && allDecided(sprts) {
+					break
 				}
 			}
 			return nil
 		}); err != nil {
 			return nil, err
+		}
+		if adaptive {
+			disp.Note(adaptiveSummary(sprts, roundsRun, len(res.Checks)), "")
 		}
 	}
 
@@ -652,6 +731,43 @@ func execute(ctx context.Context, c llm.Backend, model, level, profileName strin
 		res.Meta.MDEpp = 100 * stats.MinDetectableEffect(trials, 1)
 	}
 	return res, nil
+}
+
+func allDecided(sprts map[string]*stats.SPRT) bool {
+	if len(sprts) == 0 {
+		return true
+	}
+	for _, s := range sprts {
+		if s.State() == stats.SPRTContinue {
+			return false
+		}
+	}
+	return true
+}
+
+// adaptiveSummary discloses the sequential decision in plain words: what was
+// decided, in how many trials, and what the sample could not separate.
+func adaptiveSummary(sprts map[string]*stats.SPRT, rounds, instances int) string {
+	if len(sprts) == 0 {
+		return fmt.Sprintf("adaptive: no gated pools to decide; ran %d round(s)", rounds)
+	}
+	var bits []string
+	for _, need := range []string{"structured_output", "instruction_precision", "user_tasks", "reasoning"} {
+		s, ok := sprts[need]
+		if !ok {
+			continue
+		}
+		switch s.State() {
+		case stats.SPRTAcceptH1:
+			bits = append(bits, fmt.Sprintf("%s decided above its gate in %d trials", need, s.N))
+		case stats.SPRTAcceptH0:
+			bits = append(bits, fmt.Sprintf("%s decided below its gate in %d trials", need, s.N))
+		default:
+			bits = append(bits, fmt.Sprintf("%s undecided after %d trials - the sample cannot separate it from the gate", need, s.N))
+		}
+	}
+	return fmt.Sprintf("adaptive: stopped after %d round(s), %d instances; %s",
+		rounds, instances, strings.Join(bits, "; "))
 }
 
 // measure folds raw results into what the scorer needs.
@@ -967,14 +1083,29 @@ func cmdDoctor(ctx context.Context, args []string) int {
 		errPrint(err.Error(), "", "")
 		return exitError
 	}
-	for _, ck := range r.Checks {
-		fmt.Printf("  [%-4s] %-18s %s\n", ck.State, ck.ID, render.Sanitize(ck.Detail))
-	}
-	fmt.Printf("  => %s\n", r.Verdict)
+	printDoctor(os.Stdout, r, false)
 	if !r.Healthy {
 		return exitGates
 	}
 	return exitOK
+}
+
+func printDoctor(w io.Writer, r eval.DoctorResult, color bool) {
+	for _, ck := range r.Checks {
+		tag := fmt.Sprintf("%-4s", ck.State)
+		if color {
+			switch ck.State {
+			case "PASS":
+				tag = "\x1b[32m" + tag + "\x1b[0m"
+			case "WARN":
+				tag = "\x1b[33m" + tag + "\x1b[0m"
+			case "FAIL":
+				tag = "\x1b[31m" + tag + "\x1b[0m"
+			}
+		}
+		fmt.Fprintf(w, "  [%s] %-18s %s\n", tag, ck.ID, render.Sanitize(ck.Detail))
+	}
+	fmt.Fprintf(w, "  => %s\n", r.Verdict)
 }
 
 // ---------------------------------------------------------------- device
@@ -1063,6 +1194,11 @@ func cmdCompare(ctx context.Context, args []string) int {
 	}
 
 	fmt.Printf("  %s  vs  %s\n\n", a.Model, b.Model)
+
+	// Throughput: Fieller's interval is the correct one for "how many times
+	// faster". When it cannot be computed honestly (single observation, or
+	// denominator not separated from zero), the ratio prints without an
+	// interval and therefore without a verdict.
 	for _, p := range []struct {
 		label string
 		x, y  stats.Summary
@@ -1070,33 +1206,134 @@ func cmdCompare(ctx context.Context, args []string) int {
 		{"decode tok/s", a.DecodeSum, b.DecodeSum},
 		{"prefill tok/s", a.PrefillSum, b.PrefillSum},
 	} {
-		ratio, sd, ok := stats.RatioWithError(p.x, p.y)
+		lo, hi, ratio, ok := stats.FiellerRatio(p.x, p.y)
 		if ok {
-			fmt.Printf("  %-15s %8.2f vs %8.2f   %.2fx +/-%.2f\n",
-				p.label, p.x.Mean, p.y.Mean, ratio, sd)
+			verdict := "~ cannot separate"
+			if lo > 1 {
+				verdict = "first is faster"
+			} else if hi < 1 {
+				verdict = "second is faster"
+			}
+			fmt.Printf("  %-22s %8.2f vs %8.2f   %.2fx [%.2f .. %.2f]  %s\n",
+				p.label, p.x.Mean, p.y.Mean, ratio, lo, hi, verdict)
 		} else {
-			fmt.Printf("  %-15s %8.2f vs %8.2f   %.2fx (no +/- : single observation)\n",
+			ratio, _, _ := stats.RatioWithError(p.x, p.y)
+			fmt.Printf("  %-22s %8.2f vs %8.2f   %.2fx (no interval - not enough data to support one)\n",
 				p.label, p.x.Mean, p.y.Mean, ratio)
 		}
 	}
 	fmt.Println()
-	wa := codeWilson(a)
-	wb := codeWilson(b)
-	fmt.Printf("  coding          %s\n", stats.Compare(a.Model, wa, b.Model, wb))
-	fmt.Println("\n  note  overlapping intervals mean the sample cannot separate them;")
-	fmt.Println("        that is a real answer, not a missing one.")
+
+	// Pass rates: the Newcombe difference interval is the sole arbiter. A
+	// difference is claimed if and only if the interval excludes zero.
+	for _, need := range []string{"coding", "structured_output", "instruction_precision", "user_tasks"} {
+		pa, pb := poolOf(a, need), poolOf(b, need)
+		if pa.N == 0 || pb.N == 0 {
+			continue
+		}
+		lo, hi, ok := stats.NewcombeDiff(pa.Passes, pa.N, pb.Passes, pb.N)
+		if !ok {
+			continue
+		}
+		d := float64(pa.Passes)/float64(pa.N) - float64(pb.Passes)/float64(pb.N)
+		verdict := "~ cannot separate"
+		if lo > 0 {
+			verdict = "first is better here"
+		} else if hi < 0 {
+			verdict = "second is better here"
+		}
+		fmt.Printf("  %-22s %d/%d vs %d/%d   diff %+.2f [%+.2f .. %+.2f]  %s\n",
+			need, pa.Passes, pa.N, pb.Passes, pb.N, d, lo, hi, verdict)
+	}
+
+	// Paired analysis: when both runs faced IDENTICAL generated instances,
+	// the item-level flips carry far more information than the two rates.
+	fmt.Println()
+	if a.SeedSet != "" && a.SeedSet == b.SeedSet {
+		pairedCompare(a, b)
+	} else if len(a.Checks) > 0 && len(b.Checks) > 0 {
+		fmt.Println("  unpaired: the runs faced different generated instances.")
+		fmt.Printf("  for a sharper paired test:  fitr run <model> --seedset shared1  (both models)\n")
+	}
+
+	fmt.Println("\n  note  a difference is claimed only when its 95% interval excludes zero;")
+	fmt.Println("        \"cannot separate\" is a real answer, not a missing one.")
 	return exitOK
 }
 
-func codeWilson(r *Result) stats.Interval {
-	pass, n := 0, 0
-	for _, x := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
-		n++
-		if x.Pass {
-			pass++
+// poolOf rebuilds the per-need trial pools from a stored result. coding pools
+// the executed code tasks with the generated reasoning checks, mirroring the
+// scorecard.
+func poolOf(r *Result, need string) (p score.Pool) {
+	if need == "coding" {
+		for _, x := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
+			p.N++
+			if x.Pass {
+				p.Passes++
+			}
 		}
 	}
-	return stats.Wilson(pass, n)
+	for _, ck := range r.Checks {
+		match := ck.Need == need || (need == "coding" && ck.Need == "reasoning")
+		if !match {
+			continue
+		}
+		p.N++
+		if ck.Pass {
+			p.Passes++
+		}
+	}
+	return p
+}
+
+// pairedCompare runs McNemar's exact test on instances both models faced.
+// Concordant instances carry no information about the difference; only the
+// flips decide, and with fewer than six of them no split can reach p<0.05 -
+// which is reported as exactly that, never as a near-miss.
+func pairedCompare(a, b *Result) {
+	aOut := map[string]bool{}
+	for _, ck := range a.Checks {
+		aOut[fmt.Sprintf("%s|%d", ck.TaskID, ck.Seed)] = ck.Pass
+	}
+	shared, aOnly, bOnly := 0, 0, 0
+	for _, ck := range b.Checks {
+		pa, ok := aOut[fmt.Sprintf("%s|%d", ck.TaskID, ck.Seed)]
+		if !ok {
+			continue
+		}
+		shared++
+		if pa && !ck.Pass {
+			aOnly++
+		} else if !pa && ck.Pass {
+			bOnly++
+		}
+	}
+	if shared == 0 {
+		fmt.Println("  paired: seedsets match but no shared instances were found.")
+		return
+	}
+	fmt.Printf("  paired on %d identical instances: %s alone passed %d, %s alone passed %d, agreed on %d\n",
+		shared, a.Model, aOnly, b.Model, bOnly, shared-aOnly-bOnly)
+	switch {
+	case aOnly+bOnly == 0:
+		fmt.Println("  identical outcomes on every shared instance - no evidence of any difference.")
+	default:
+		pExact, pMid, separable := stats.McNemarExact(aOnly, bOnly)
+		if !separable {
+			fmt.Printf("  %d discordant instance(s) - too few to separate at alpha=0.05 regardless of split.\n",
+				aOnly+bOnly)
+			return
+		}
+		winner := a.Model
+		if bOnly > aOnly {
+			winner = b.Model
+		}
+		if pExact < 0.05 {
+			fmt.Printf("  %s wins the flips (McNemar exact p=%.3f, mid-p %.3f)\n", winner, pExact, pMid)
+		} else {
+			fmt.Printf("  ~ the flips do not separate them (McNemar exact p=%.3f, mid-p %.3f)\n", pExact, pMid)
+		}
+	}
 }
 
 // appendUnique adds items not already present, preserving order.

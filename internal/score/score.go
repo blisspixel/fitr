@@ -442,7 +442,9 @@ func Score(m Measured, p device.Profile) Scorecard {
 
 // poolVerdict scores a pooled binary need against a pass_rate_min gate.
 // Unmeasured skips; a missing gate skips; the why always carries the Wilson
-// interval so a thin sample cannot masquerade as a confident verdict.
+// interval so a thin sample cannot masquerade as a confident verdict - and
+// when the gate itself sits inside the interval, the verdict says so: the
+// point estimate picked a side, the sample did not.
 func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
 	if pool.N == 0 {
 		return Verdict{Skip, "not measured"}
@@ -452,8 +454,12 @@ func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
 		return Verdict{Skip, "no " + gate + " gate in profile"}
 	}
 	wi := stats.Wilson(pool.Passes, pool.N)
-	return Verdict{state(pool.rate() >= minRate), fmt.Sprintf(
-		"%d/%d %s [%.2f-%.2f] (need >=%.2f)", pool.Passes, pool.N, verb, wi.Lo, wi.Hi, minRate)}
+	why := fmt.Sprintf("%d/%d %s [%.2f-%.2f] (need >=%.2f)",
+		pool.Passes, pool.N, verb, wi.Lo, wi.Hi, minRate)
+	if wi.Lo < minRate && minRate < wi.Hi {
+		why += " - borderline: gate inside the CI"
+	}
+	return Verdict{state(pool.rate() >= minRate), why}
 }
 
 func outputHealth(m Measured, p device.Profile) Verdict {

@@ -22,7 +22,7 @@ reports three tiers:
 | Tier | Meaning | What it tells you |
 |---|---|---|
 | Compatible | estimated VRAM fits | deploy |
-| **Low memory** | weights fit, full context does not | **runs with a reduced `--max-model-len` — and the listing includes a suggested value** |
+| **Low memory** | weights fit, full context does not | **runs with a reduced `--max-model-len` - and the listing includes a suggested value** |
 | Incompatible | weights alone exceed VRAM | raise TP, or use a quantized precision |
 
 Real output:
@@ -39,7 +39,7 @@ this. LM Studio says "Likely too large." `llmfit` says "Too Tight." Both are dea
 ends; NIM hands you the flag and the resulting number.
 
 **And it will not run on consumer hardware.** The NIM support matrix lists
-**zero GeForce SKUs** — an RTX 4090 gets "0 compatible profiles." The best
+**zero GeForce SKUs** - an RTX 4090 gets "0 compatible profiles." The best
 fit-and-fix UX in existence is gated to datacenter GPUs.
 
 We can do it *better* on the hardware NIM refuses to touch: llama.cpp's `--fit`
@@ -50,13 +50,13 @@ observed, not modelled.
 
 | Layer | Detects GPU | Recommends a *model* | Auto-configures |
 |---|---|---|---|
-| **NIM** (server) | yes — PCI ID, VRAM, count | picks a *profile*, not among models | backend, precision, TP/PP, KV budget, ctx suggestion |
+| **NIM** (server) | yes - PCI ID, VRAM, count | picks a *profile*, not among models | backend, precision, TP/PP, KV budget, ctx suggestion |
 | **TensorRT for RTX** v1.6 | yes | no | JIT per-SKU kernels; adaptive inference cut JIT 31.92s -> 1.95s |
 | **TensorRT-LLM** v1.2.1 | yes (kernel tactics) | no | **autotuner on by default**, KV = 90% of free VRAM |
-| **G-Assist** 0.2.2 | 6 GB floor | no — one fixed 8B model | user-toggled modes |
-| **NVIGI** | per-model `{"vram": 5124}` | no — "developer has full control" | no |
+| **G-Assist** 0.2.2 | 6 GB floor | no - one fixed 8B model | user-toggled modes |
+| **NVIGI** | per-model `{"vram": 5124}` | no - "developer has full control" | no |
 | **ChatRTX** | yes | yes | **deprecated 2026-01-21** |
-| **RTX AI Toolkit** | — | — | **deprecated 2025-11-21** |
+| **RTX AI Toolkit** | - | - | **deprecated 2025-11-21** |
 
 NVIDIA's flagship guide, *"How to Get Started With LLMs on NVIDIA RTX PCs"*
 (2025-10-01), recommends **Ollama, LM Studio and AnythingLLM** and contains
@@ -67,11 +67,11 @@ consumer model choice to third-party UIs.
 
 - NVIGI's own justification: **"Considering that 97% of gamers have <= 8GB of
   VRAM."** That is the market's memory budget, from NVIDIA. Most of the model
-  catalog is irrelevant to most of the market — an advisor should prune hard
+  catalog is irrelevant to most of the market - an advisor should prune hard
   toward what actually fits in 8 GB.
 - At COMPUTEX 2026-05-31 NVIDIA announced **RTX Spark** PCs (1 PFLOP, 128 GB
   unified) with the **OpenShell** runtime, which *"intelligently route[s]
-  queries to local models based on the user's privacy policies"* — the closest
+  queries to local models based on the user's privacy policies"* - the closest
   thing to automatic model selection on consumer NVIDIA hardware, and its
   criterion is **privacy, not hardware or quality**.
 
@@ -82,7 +82,7 @@ engines automatically. **The industry has decided that kernel-level tuning
 should be automatic and invisible.**
 
 Nobody has made the same decision about **quant level, KV dtype, context length,
-or draft model** — the settings that actually change what the model *says*.
+or draft model** - the settings that actually change what the model *says*.
 
 > The compute layer is solved and commoditized.
 > The decision layer is still a Reddit thread.

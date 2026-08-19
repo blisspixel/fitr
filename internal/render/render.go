@@ -67,7 +67,7 @@ type glyphs struct{ Dot, Dash, PM, Ell string }
 
 func pickGlyphs() glyphs {
 	if unicodeOK() {
-		return glyphs{" · ", "—", "±", "…"}
+		return glyphs{" · ", "-", "±", "…"}
 	}
 	return glyphs{" | ", "-", "+/-", "..."}
 }
@@ -249,7 +249,9 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 }
 
 // stat never prints "+/- 0.00". A single observation is not an estimate;
-// hyperfine relabels it rather than inventing a zero sigma.
+// hyperfine relabels it rather than inventing a zero sigma. When there is a
+// real spread, the coefficient of variation rides along: it is the one
+// dimensionless stability number that compares across devices.
 func stat(mean, sd float64, n int, mn, mx float64, g glyphs) string {
 	if n == 0 {
 		return "n/a"
@@ -257,8 +259,12 @@ func stat(mean, sd float64, n int, mn, mx float64, g glyphs) string {
 	if n < 2 || sd == 0 {
 		return fmt.Sprintf("%.2f (abs, n=1)", mean)
 	}
+	cv := ""
+	if mean != 0 {
+		cv = fmt.Sprintf(", CV %.1f%%", 100*sd/mean)
+	}
 	if mn != 0 || mx != 0 {
-		return fmt.Sprintf("%.2f %s%.2f (min %.2f, max %.2f)", mean, g.PM, sd, mn, mx)
+		return fmt.Sprintf("%.2f %s%.2f (min %.2f, max %.2f%s)", mean, g.PM, sd, mn, mx, cv)
 	}
 	return fmt.Sprintf("%.2f %s%.2f", mean, g.PM, sd)
 }

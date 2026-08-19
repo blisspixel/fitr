@@ -22,13 +22,13 @@ It is an emerging consensus:
 
 ### 2. Statistical rigor is table stakes, not an edge
 
-- `local-inference-lab/llm-inference-bench` (69*) — Wilson intervals **and**
+- `local-inference-lab/llm-inference-bench` (69*) - Wilson intervals **and**
   exact McNemar paired significance tests, plus live GPU temp / SM-util / watts
-- `uncSoft/anubis-oss` (200*, Apple-only) — the current bar. Returns
+- `uncSoft/anubis-oss` (200*, Apple-only) - the current bar. Returns
   `group_mean / stdev / ci_low / ci_high` for tok/s, TTFT **and watts-per-token**,
   2-20 reps with 95% bootstrap CIs, a seed toggle separating hardware variance
   from sampler variance, and a `methodology_version` column
-- `Inspect AI` — clustered standard errors
+- `Inspect AI` - clustered standard errors
 
 Keep the rigor. Stop selling it.
 
@@ -62,7 +62,7 @@ In order of defensibility:
    formulations returned zero repos. Not in promptfoo's assertion list.
    llama.cpp ships DRY/XTC/repeat-penalty samplers that *suppress* loops but
    never *report* them. Prior art is academic (`ari-holtzman/degen`, ICLR 2020)
-   or inflight cloud mitigation. **First-of-kind in a local harness** — and the
+   or inflight cloud mitigation. **First-of-kind in a local harness** - and the
    failure is hardware-specific: llama.cpp has open 2026 issues for garbled
    output tied to dual-GPU CUDA, batch size 512, Vulkan on specific gfx IDs,
    quantized KV cache, and long agentic sessions. This is the headline.
@@ -80,11 +80,11 @@ In order of defensibility:
 - **PocketPal's Glicko-2 pairwise matchups.** 10,989 submissions across 364
   devices. Only devices running the same model at the same config are compared;
   sorted by conservative rating (rating - 2*RD). This is a **more principled
-  answer to cross-device comparison than our flat refusal** — it extracts signal
+  answer to cross-device comparison than our flat refusal** - it extracts signal
   where a shared configuration exists instead of discarding it.
-- **`gpustack/gguf-parser-go`** (286*, Go, active) — vendor this rather than
+- **`gpustack/gguf-parser-go`** (286*, Go, active) - vendor this rather than
   rebuilding memory-fit estimation.
-- **`Blackwellboy/model-serving-minefield`** (86*) — a registry of serving-path
+- **`Blackwellboy/model-serving-minefield`** (86*) - a registry of serving-path
   traps that produce "confidently wrong measurements." Directly relevant to our
   own hard-won bugs (prompt-cache contamination, concurrent residency).
 
@@ -108,7 +108,7 @@ In order of defensibility:
 | Tool | Stars | Note |
 |---|---|---|
 | `llmfit` | 32,739 | The gorilla. Rust, releases every 1-2 weeks. |
-| `whichllm` | 6,345 | Owns the query "which local LLM for my hardware" — and **never runs a timed inference.** Pure bandwidth roofline. |
+| `whichllm` | 6,345 | Owns the query "which local LLM for my hardware" - and **never runs a timed inference.** Pure bandwidth roofline. |
 | `PocketPal` | 7,970 | Mobile-only. Best comparison methodology in the field. |
 | `BenchLocal` | 408 | |
 | `aidatatools` | 384 | 29,806 submissions from the worst methodology found: scrapes `ollama run --verbose`, **deliberately discards prompt eval rate**, no warmup, no repeats, no dedupe, mixes Ollama 0.19-0.32 in one ranking. Volume is not validity. |
@@ -134,7 +134,7 @@ because the corrections are more informative than a clean answer would be.
 ### Plumbing-vs-capability has more prior art than stated above
 
 The canonical metric predates all of this: **Aider's
-`percent_cases_well_formed`** — literally "did the model emit parseable edits,"
+`percent_cases_well_formed`** - literally "did the model emit parseable edits,"
 reported separately from whether tests passed, alongside
 `num_malformed_responses`, `syntax_errors`, `indentation_errors`,
 `exhausted_context_windows`, `lazy_comments` and `test_timeouts`. Also:
@@ -147,7 +147,7 @@ reported separately from whether tests passed, alongside
   as an unknown/flaky API error."*
 
 **But here is the crack, and it is the one that matters:** Harbor's taxonomy
-keys on *provider* error strings — Anthropic and OpenAI rate-limit and
+keys on *provider* error strings - Anthropic and OpenAI rate-limit and
 content-filter messages. Point it at a local vLLM or llama-server and
 `exception_stats` comes back near-empty.
 
@@ -159,7 +159,7 @@ That is the defensible version of the claim.
 ### Refusal rate is not a differentiator
 
 promptfoo ships an `is-refusal` assertion, Inspect counts refusals natively,
-Harbor has `AgentSafetyRefusalError`. Keep it as a **need axis** — it is one —
+Harbor has `AgentSafetyRefusalError`. Keep it as a **need axis** - it is one  - 
 but drop it from any novelty claim.
 
 ### Statistics: split the verdict, do not drop it
@@ -184,23 +184,23 @@ underserved. Just never claim Wilson intervals as novel.**
 Getting any major agentic benchmark to run against a local model is a minefield.
 This is *why* nobody publishes local agentic numbers:
 
-- **Harbor** — Terminus-2 runs on the host so `localhost` works, but
+- **Harbor** - Terminus-2 runs on the host so `localhost` works, but
   `claude-code`, `codex` and `openhands` run *inside* the container, and the
   compose templates ship **no `extra_hosts`**, so `host.docker.internal` fails
   on Linux. `hosted_vllm/` also rejects model names containing more than one `/`.
-- **BFCL** — `--model` must be a registered key with a hand-written handler. The
+- **BFCL** - `--model` must be a registered key with a hand-written handler. The
   generic `QuickTestingOSSHandler` is **imported but attached to zero registry
   entries**; an unlisted local model requires editing source.
-- **SWE-bench** — its inference module is fossilized at 12 hardcoded early-2024
+- **SWE-bench** - its inference module is fossilized at 12 hardcoded early-2024
   models with **no `--base_url` flag**. Usable only as a grader.
-- **Aider** — silently truncates unless `OLLAMA_CONTEXT_LENGTH` is set; its own
+- **Aider** - silently truncates unless `OLLAMA_CONTEXT_LENGTH` is set; its own
   docs warn Ollama defaults to 2k and *"silently discards context that exceeds
   the window."*
-- **Harbor GPU tasks** — impossible locally: `EnvironmentCapabilities.gpus` is
+- **Harbor GPU tasks** - impossible locally: `EnvironmentCapabilities.gpus` is
   never set by the Docker environment.
 
 > If `fitr` makes a 20-turn agentic task against a local endpoint work in one
-> command, that alone is worth the project — independent of any scoring
+> command, that alone is worth the project - independent of any scoring
 > innovation.
 
 **`fitr run <model> --full` already does this.** It is a shipped capability that
@@ -208,7 +208,7 @@ was not recognised as a differentiator.
 
 ## More dead references
 
-**LiveBench's public data is frozen at 2024-11-25** — 1,436 questions, all
+**LiveBench's public data is frozen at 2024-11-25** - 1,436 questions, all
 parquets `lastModified 2025-04-07`, README conceding *"not all questions for
 this release are public."* Its `agentic_coding` categories are not publicly
 runnable. A contamination-free benchmark that is publicly 21 months stale is
@@ -219,7 +219,7 @@ LocalBench Substack (10 posts, all April 2026), Aider's leaderboard (last
 updated Nov 2025), EQ-Bench 1-3, LocalScore.
 
 Live successors: **Terminal-Bench 3.0** (2026-07-23, 74 tasks, 510*) and
-**EQ-Bench 4** — the only self-runnable harness publishing 95% CIs.
+**EQ-Bench 4** - the only self-runnable harness publishing 95% CIs.
 
 ## Do not claim these
 
@@ -241,7 +241,7 @@ typed parsing errors (Inspect AI).
 2. **Quant x structured-output validity, per machine.** Prose survives
    quantization; JSON does not. KLD has a documented "silent zone" that cannot
    rank near-baseline quants. Measured evidence exists (23-point drop at Q4_K_M
-   for Llama-family, Qwen3 unmoved) — at 1 star.
+   for Llama-family, Qwen3 unmoved) - at 1 star.
 3. **A plumbing taxonomy built for local backends**, where cloud-error-string
    taxonomies go blind.
 4. **Local agentic eval that actually runs.**
@@ -253,6 +253,6 @@ typed parsing errors (Inspect AI).
 
 > `llmfit` tells you what fits.
 > Leaderboards tell you what's smart on someone else's machine.
-> **`fitr` tells you what's silently broken on yours** — the Q4 that still
+> **`fitr` tells you what's silently broken on yours** - the Q4 that still
 > writes clean prose but emits malformed tool calls, the parser that swallows
 > them, the loop your GPU triggers and nobody else's does.

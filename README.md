@@ -1,6 +1,6 @@
 # fitr
 
-**Is this local model any good — *on your machine*?**
+**Is this local model any good - *on your machine*?**
 
 A new model drops. You want one answer, in ~15 minutes, that is true for *your*
 hardware rather than for someone's A100.
@@ -11,25 +11,10 @@ fitr run some-new-model:tag --full
 fitr board
 ```
 
-```
-------------------------------------------------------------------------------
-model    qwen3-coder:30b
-size     30.5B  Q4_K_M  qwen3moe
-use for  daily driver (coding + agents), no-filter writing/chat, (small footprint)
-device   AMD Radeon(TM) 780M | driver 32.0.31007.5012 | GPU 100% | profile lappy
-------------------------------------------------------------------------------
-[PASS] fast + pretty good (chat)          23.16 tok/s (need >=10.0), TTFT 0.89s
-[PASS] great coding / reasoning           6/6 passes [0.61-1.00]
-[PASS] no filtering / low refusal         refused/partial 0/3 (need <=0)
-[PASS] works unattended (agent loop)      prefill 226.6 tok/s, unattended pass=true in 14 turns
-[PASS] leaves tools alone when irrelevant left tools alone on an unrelated question
-[PASS] small enough to keep resident      resident@32K 20.34 GB (need <=22)
-[n/a ] reads images                       text-only model - not what it is for
-[PASS] no degenerate output               gzip 2.39, dup_lines 0, top_4gram 0.036
+<img src="docs/assets/run.svg" alt="fitr run scorecard (mock data)" width="820">
 
-over 3 repeats   decode 23.16 +/-0.44 (min 22.71, max 23.60)   prefill 226.64 +/-3.10
-------------------------------------------------------------------------------
-```
+*(Screenshots use mock data and regenerate from the real renderer via `make
+screenshots`, so they cannot drift from what the tool prints.)*
 
 Single static binary. No Python, no venv, no package manager, no runtime.
 
@@ -53,7 +38,7 @@ The *same model*, *same tag*, on the *same laptop* went from **"crashes on
 load"** to **"daily driver"** because of a GPU driver update. Nothing about the
 model changed.
 
-Every result embeds a fingerprint — GPU, driver, Ollama version, inference
+Every result embeds a fingerprint - GPU, driver, Ollama version, inference
 backend, and the config that actually moves numbers (`OLLAMA_FLASH_ATTENTION`,
 `OLLAMA_KV_CACHE_TYPE`). `fitr board` groups by fingerprint and **refuses to
 rank across groups**. Change the driver and your old numbers are explicitly void.
@@ -77,12 +62,12 @@ fail another, and one number cannot say that.
 | **your tasks** | `~/.fitr/tasks/*.json` - the built-ins are defaults, your work is the point |
 
 Verdicts are **PASS / FAIL / SKIP / n/a / BLKD**. `SKIP` means not measured.
-`n/a` means the model never claimed it — a text-only model is not *bad at
+`n/a` means the model never claimed it - a text-only model is not *bad at
 vision*. `BLKD` means we could not fairly test it.
 
 ### 3. A single run is not a measurement
 
-Identical configs vary **10–20 percentage points** between runs. We watched the
+Identical configs vary **10-20 percentage points** between runs. We watched the
 same coding task pass on one run and fail on the next with nothing changed.
 
 So tasks repeat (`-k 3` default), results carry **Wilson score intervals**, and
@@ -154,7 +139,7 @@ will not rank across it.
 | `fitr board [--current]` | compare everything, grouped by device |
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
-| `fitr compare <a> <b>` | paired comparison with propagated error |
+| `fitr compare <a> <b>` | difference/ratio intervals; paired flips on shared instances |
 | `fitr device` / `fitr profiles` | fingerprint and gates |
 
 | Level | Runs | ~Time |
@@ -165,10 +150,41 @@ will not rank across it.
 
 ---
 
+## The statistics take small samples seriously
+
+Local benchmarking lives at n=3 to n=50, which is exactly where most benchmark
+statistics quietly stop being true. fitr's rules: never fabricate precision,
+and "cannot separate" is a real answer. Concretely:
+
+- Every pass rate carries a **Wilson interval**; every run prints its
+  **minimum detectable effect** so the sample's resolution is never implied.
+- `fitr compare` claims a difference only when the **Newcombe difference
+  interval** excludes zero - the folk "intervals overlap, no claim" rule is
+  an effective alpha of ~0.006 and silently misses real differences.
+- Speed ratios use **Fieller's theorem** (the correct interval for a ratio of
+  means), with Welch degrees of freedom, and refuse to print numbers when the
+  math degenerates.
+- Two runs sharing `--seedset` face **identical generated instances**, so
+  compare upgrades to **McNemar's exact test** on the item-level flips - and
+  says "too few flips to separate regardless of split" when that is the truth.
+- `fitr run --adaptive` repeats checks until each gated need is **decided by
+  Wald's SPRT** (the sequential test Stockfish's Fishtest has used for a
+  decade) or honestly reports that the sample cannot separate it.
+- `fitr doctor`'s "deterministic" claim carries its exact bound: 5 identical
+  runs proves divergence is below 45% at 95% confidence, and the output says
+  so rather than implying certainty.
+
+<img src="docs/assets/compare.svg" alt="fitr compare (mock data)" width="820">
+
+Every method, the rejected alternative, and the references are in
+**[STATS.md](STATS.md)**.
+
 ## `fitr doctor` - is this box even measurable?
 
 Every benchmark silently assumes the stack under it is healthy. Nothing checks.
 `fitr doctor <model>` does, in about a minute:
+
+<img src="docs/assets/doctor.svg" alt="fitr doctor (mock data)" width="820">
 
 - **A real generated token, not an HTTP 200.** A misconfigured offload can
   accept requests and emit nothing.
@@ -239,13 +255,13 @@ verdict on the model.**
 
 When a local model appears unable to use tools, roughly **4 times in 5** the
 cause is the chat template, the tool-call parser, the quant, or the context size
-— not the weights. Formats differ wildly (`<tool_call>{json}</tool_call>` vs XML
+ -  not the weights. Formats differ wildly (`<tool_call>{json}</tool_call>` vs XML
 `<function=name>` vs `<|python_tag|>`), and **the wrong parser produces zero tool
 calls and no error at all.**
 
 Not hypothetical: this tool once recorded a model as failing tool use. The
 plumbing diagnostic then showed it emits valid calls with valid arguments and
-consumes results correctly — it just fires them on irrelevant questions.
+consumes results correctly - it just fires them on irrelevant questions.
 *"Can't use tools"* was wrong; *"can't restrain tool use"* was right.
 
 So `run` executes the plumbing diagnostic **before** the tools test. If plumbing
@@ -294,7 +310,7 @@ Five independent deterministic signals, no model call: duplicate paragraph /
 line ratios, top-4-gram character share, gzip compression ratio, distinct-4-gram.
 
 **Why five and not one:** a local model once produced a 104 KB report that passed
-every structural check while 25% of its paragraphs were duplicates — it had
+every structural check while 25% of its paragraphs were duplicates - it had
 looped one table 11 times. Length correlated *negatively* with quality. And a
 single metric has blind spots: on a *short* looping sample the paragraph metric
 reads **0.0** while `dup_line_ratio` reads **0.91** and gzip ratio **9.2**.
@@ -310,7 +326,7 @@ NO_COLOR=1 fitr board        # honored (empty string means unset)
 FITR_ASCII=1 fitr board   # force ASCII glyphs
 ```
 
-Progress → **stderr**, results → **stdout**, so `fitr run m > out.txt` is
+Progress -> **stderr**, results -> **stdout**, so `fitr run m > out.txt` is
 clean. Errors are plain text on stderr even under `--json`; the exit code is the
 machine channel.
 
@@ -338,7 +354,7 @@ machine channel.
 
 ## Why Go
 
-Not performance — a run is ~99.9% blocked waiting on the model, so the harness
+Not performance - a run is ~99.9% blocked waiting on the model, so the harness
 language is irrelevant to runtime. It is **distribution**: one static binary,
 no interpreter or package manager on the user's machine, ~10 ms startup, and
 trivial cross-compilation for every platform Ollama runs on.
