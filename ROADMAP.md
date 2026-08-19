@@ -133,3 +133,6 @@ These are load-bearing. Changes that break them need a strong argument.
    ranking when intervals overlap.
 5. **Execution over opinion.** Pass/fail comes from running code wherever it can.
 6. **Say what was not measured.** An honest gap beats a confident guess.
+7. **A verdict without a remedy is half an answer.** "Too large" is a dead end.
+   `try --max-model-len=4096 to reduce to >=30 GB` is a product. Every negative
+   result should carry the flag that fixes it and the number that results.
