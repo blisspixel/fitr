@@ -178,6 +178,55 @@ func TestUsageMentionsAdvise(t *testing.T) {
 	if !strings.Contains(got, "fitr advise") {
 		t.Fatalf("usage must list advise:\n%s", got)
 	}
+	if !strings.Contains(got, "fitr export") {
+		t.Fatalf("usage must list export:\n%s", got)
+	}
+}
+
+func TestExportGoldenHTMLCarriesFingerprintAndEscapes(t *testing.T) {
+	r := golden(t)
+	dir := t.TempDir()
+	out := filepath.Join(dir, "scorecard.html")
+	path, err := writeHTMLArtifact(r, out, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{
+		r.DeviceKey,
+		r.Device.GPU,
+		"A number without its device is meaningless",
+		"PASS",
+		"n/a",
+		"min detectable effect",
+		"Written only because you asked",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("HTML missing %q", want)
+		}
+	}
+	// Raw model output lives in the JSON; the shareable page must not.
+	if strings.Contains(got, "parse_duration") || strings.Contains(got, "discounts.py") {
+		t.Fatal("HTML must not include raw model output")
+	}
+	if strings.Contains(got, ".fitr") {
+		t.Fatal("HTML must not leak the local results path")
+	}
+}
+
+func TestWriteHTMLArtifactIsOptIn(t *testing.T) {
+	r := golden(t)
+	path, err := writeHTMLArtifact(r, "", "ignored.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "" {
+		t.Fatal("empty dest must not write a file")
+	}
 }
 
 func TestAdviseMissingModelIsUsage(t *testing.T) {

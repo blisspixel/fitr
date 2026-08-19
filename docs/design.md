@@ -125,6 +125,8 @@ prints "not recommended."
 - **`advise` estimates, it does not dummy-allocate.** The number is weights
   plus KV from GGUF metadata. Compute buffers are excluded and said so.
   Unmeasured VRAM or architecture is SKIP, not a name-to-GB guess.
+- **Sharing is opt-in.** `fitr export` / `--html` write a self-contained
+  page that includes the fingerprint. JSON under `~/.fitr` stays local.
 
 ## Advise (design rule 7)
 

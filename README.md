@@ -64,6 +64,7 @@ GitHub release exists, the installer builds from source if Go is on PATH.
 |---|---|
 | `fitr run <model> [--quick\|--full] [-k N]` | measure a model on this device (~4 to ~18 min by level) |
 | `fitr advise <model>` | does it fit here, and if not, which flag to try |
+| `fitr export <model> [--out PATH]` | write a self-contained HTML scorecard (opt-in; contains the fingerprint) |
 | `fitr board [--current]` | compare everything, grouped by device |
 | `fitr doctor <model>` | can this box be measured fairly at all? (~1 min) |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips on shared instances |

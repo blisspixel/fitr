@@ -98,6 +98,8 @@ verdict** (design rule 7).
   with a remedy on the negative tiers. SKIP when VRAM, weights, or
   architecture cannot be measured; never a GB number guessed from the GPU
   name. MoE decode class uses active parameters, not total.
+- **Shareable HTML scorecard** - `fitr export` / `fitr run --html`. Opt-in,
+  self-contained, fingerprint on the page, raw model output omitted.
 
 **Honest limitations right now:**
 
@@ -107,7 +109,6 @@ verdict** (design rule 7).
 | OpenAI-backend timings are client-derived | usage gives counts, not server timings; decode/prefill rates there are wall-clock estimates |
 | 2 device profiles | `lappy` and an uncalibrated `default` |
 | `advise` is weights+KV, not dummy allocation | Compatible can still OOM on compute buffers; no model catalog |
-| Terminal output only | no shareable artifact |
 
 ---
 
@@ -187,7 +188,7 @@ loop, closable on someone else's machine.
 | Honest measurement on Ollama, llama-server, OpenAI-compat | **done** (0.3) |
 | Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals) | **mostly done** - check-battery calibration and quant-flip damage still open |
 | `fitr advise` names a model + settings with a remedy | **scaffolded** - three-tier + remedy from weights+KV; SKIP when it cannot measure; no catalog, no dummy allocation |
-| A result can leave the terminal | **not started** (0.5 artifact) |
+| A result can leave the terminal | **done** - `fitr export` / `fitr run --html`, opt-in, fingerprint in the page |
 | Community device profiles beyond `lappy` | **not started** |
 
 We do **not** ship 1.0 with an uncalibrated `advise`, a public leaderboard,
@@ -221,8 +222,9 @@ The step that turns a chore into a product.
 - [ ] **Community device profiles** - `rtx-4090`, `m3-max`, `strix-halo`. The
       network effect: the repo answers *"I have an M3 Max with 36 GB, what
       should I run?"*, which no leaderboard can structurally answer.
-- [ ] **Shareable result artifact** - self-contained HTML, or opt-in
-      submission. Never automatic: results contain a hardware fingerprint.
+- [x] **Shareable result artifact** - self-contained HTML via `fitr export`
+      or `fitr run --html`. Never automatic: the page contains a hardware
+      fingerprint and is not uploaded. Raw model output is omitted.
 
 ## Later, if they earn it
 

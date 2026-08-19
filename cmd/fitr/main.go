@@ -61,8 +61,9 @@ func usage() {
 	fmt.Fprint(os.Stderr, `fitr `+version+` - is this local model any good ON THIS DEVICE?
 
 usage:
-  fitr run <model> [--quick|--full] [-k N] [--profile P] [--display MODE]
+  fitr run <model> [--quick|--full] [-k N] [--profile P] [--display MODE] [--html]
   fitr advise <model> [--vram-gb N] [--ctx N]
+  fitr export <model> [--out PATH]
   fitr board [--current]
   fitr diag <model>
   fitr doctor <model> [-n N]
@@ -89,6 +90,7 @@ examples:
   fitr doctor qwen3-coder:30b
   fitr advise qwen3:30b
   fitr advise ./model.gguf --vram-gb 8
+  fitr export qwen3:30b --out scorecard.html
 `)
 }
 
@@ -107,6 +109,8 @@ func run() int {
 		return cmdRun(ctx, os.Args[2:])
 	case "advise":
 		return cmdAdvise(ctx, os.Args[2:])
+	case "export":
+		return cmdExport(ctx, os.Args[2:])
 	case "board":
 		return cmdBoard(ctx, os.Args[2:])
 	case "diag":
@@ -161,7 +165,7 @@ func permute(args []string) []string {
 func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
-	case "k", "n", "profile", "display", "q", "backend", "seedset", "vram-gb", "ctx":
+	case "k", "n", "profile", "display", "q", "backend", "seedset", "vram-gb", "ctx", "out":
 		return true
 	}
 	return false
@@ -583,6 +587,7 @@ func cmdRun(ctx context.Context, args []string) int {
 		"decided against its gate (Wald SPRT, alpha=beta=0.05) or 6 rounds pass")
 	pullFlag := fs.Bool("pull", false, "pull the model first if it is not installed "+
 		"(Ollama; supports hf.co/... and pasted Hugging Face URLs)")
+	htmlFlag := fs.Bool("html", false, "write a self-contained HTML artifact next to the JSON")
 	quiet := fs.Int("q", 0, "quiet level")
 	verbose := fs.Bool("v", false, "verbose")
 	if err := fs.Parse(permute(args)); err != nil {
@@ -648,9 +653,23 @@ func cmdRun(ctx context.Context, args []string) int {
 	res.Meta.SavedPath = path
 	disp.Result(res.Scorecard, res.Meta)
 
+	htmlDest := ""
+	if *htmlFlag {
+		htmlDest = "auto"
+	}
+	htmlFile, htmlErr := writeHTMLArtifact(res, htmlDest, path)
+	if htmlErr != nil {
+		errPrint("could not write HTML: "+htmlErr.Error(), "", "")
+	}
 	if *quiet == 0 && render.Resolve(*mode) != "json" {
 		fmt.Fprintf(os.Stderr, "\n  saved  %s\n", path)
+		if htmlFile != "" {
+			fmt.Fprintf(os.Stderr, "  html   %s\n", htmlFile)
+		}
 		fmt.Fprintf(os.Stderr, "  next   fitr board\n")
+		if !*htmlFlag {
+			fmt.Fprintf(os.Stderr, "         fitr export %s   for a shareable HTML scorecard\n", model)
+		}
 		if reps < 3 {
 			fmt.Fprintf(os.Stderr, "         fitr run %s -k 3   for a rankable result\n", model)
 		}
@@ -1235,6 +1254,126 @@ func loadResults() ([]*Result, error) {
 		}
 	}
 	return out, nil
+}
+
+// ---------------------------------------------------------------- export
+// cmdExport writes a self-contained HTML scorecard from a saved result.
+// Never automatic: the JSON in ~/.fitr is local storage; HTML is what you
+// share, and it contains a hardware fingerprint.
+func cmdExport(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	out := fs.String("out", "", "HTML path (default: <results>/<model>.html)")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() < 1 {
+		errPrint("missing model", "", "fitr export <model>  or  fitr export <model> --out scorecard.html")
+		return exitUsage
+	}
+	model := normalizeModelRef(fs.Arg(0))
+	results, err := loadResults()
+	if err != nil || len(results) == 0 {
+		errPrint("no results yet", "", "fitr run "+model+" --full")
+		return exitError
+	}
+	var r *Result
+	for i := range results {
+		if results[i].Model == model {
+			r = results[i]
+		}
+	}
+	if r == nil {
+		errPrint(fmt.Sprintf("no stored result for %q", model), "",
+			"fitr run "+model+" --full")
+		return exitError
+	}
+	path := *out
+	if path == "" {
+		path = "auto"
+	}
+	html, err := writeHTMLArtifact(r, path, "")
+	if err != nil {
+		errPrint("could not write HTML: "+err.Error(), "", "")
+		return exitError
+	}
+	fmt.Fprintf(os.Stderr, "  wrote  %s\n", html)
+	return exitOK
+}
+
+func artifactFrom(r *Result) (render.Artifact, error) {
+	prof, err := device.SelectProfile(r.Profile, r.Device)
+	if err != nil {
+		return render.Artifact{}, err
+	}
+	sc := score.Score(measure(r), prof)
+	trials := len(r.CodeWrite) + len(r.CodeFix) + len(r.Tools) + len(r.Checks)
+	if r.Agentic != nil {
+		trials++
+	}
+	meta := render.Meta{
+		ParamSize: r.ModelMeta.Details.ParameterSize,
+		Quant:     r.ModelMeta.Details.QuantizationLevel,
+		Family:    r.ModelMeta.Details.Family,
+		GPU:       r.Device.GPU, Driver: r.Device.GPUDriver,
+		Device: r.Device.InferenceDevice, Profile: prof.Name,
+		Repeats:    r.Repeats,
+		DecodeMean: r.DecodeSum.Mean, DecodeSD: r.DecodeSum.SD,
+		DecodeMin: r.DecodeSum.Min, DecodeMax: r.DecodeSum.Max,
+		DecodeN:     r.DecodeSum.N,
+		PrefillMean: r.PrefillSum.Mean, PrefillSD: r.PrefillSum.SD,
+		PrefillN: r.PrefillSum.N,
+	}
+	if trials > 0 {
+		meta.Trials = trials
+		meta.MDEpp = 100 * stats.MinDetectableEffect(trials, 1)
+	}
+	return render.Artifact{
+		FitrVersion:   version,
+		SchemaVersion: r.SchemaVersion,
+		Model:         r.Model,
+		StartedAt:     r.StartedAt,
+		Level:         r.Level,
+		Repeats:       r.Repeats,
+		WallSeconds:   r.WallSeconds,
+		Device:        r.Device,
+		DeviceKey:     r.DeviceKey,
+		Profile:       prof.Name,
+		Scorecard:     sc,
+		Meta:          meta,
+		Contamination: r.Contamination,
+	}, nil
+}
+
+// writeHTMLArtifact is a no-op unless the caller asked. dest "auto" writes
+// next to the JSON result; an explicit path is used as-is.
+func writeHTMLArtifact(r *Result, dest, jsonPath string) (string, error) {
+	if dest == "" {
+		return "", nil
+	}
+	a, err := artifactFrom(r)
+	if err != nil {
+		return "", err
+	}
+	if dest == "auto" {
+		if jsonPath != "" {
+			dest = strings.TrimSuffix(jsonPath, ".json") + ".html"
+		} else {
+			dest = filepath.Join(resultsDir(), safeName(r.Model)+".html")
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", err
+	}
+	f, err := os.Create(dest)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if err := render.WriteHTML(f, a); err != nil {
+		return "", err
+	}
+	return dest, nil
 }
 
 // ---------------------------------------------------------------- board

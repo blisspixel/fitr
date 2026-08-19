@@ -36,6 +36,7 @@ need `cargo`, not a rewrite.
 |---|---|
 | `fitr run <model> [--quick\|--full] [-k N]` | measure a model on this device |
 | `fitr advise <model> [--vram-gb N] [--ctx N]` | does it fit here, and if not, which flag to try |
+| `fitr export <model> [--out PATH]` | write a self-contained HTML scorecard (opt-in) |
 | `fitr board [--current]` | compare everything, grouped by device |
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
@@ -68,6 +69,10 @@ need `cargo`, not a rewrite.
   one. Unmeasured VRAM is a SKIP, never a guess from the GPU's name.
 - `--ctx N` (advise) is the context to size against; default is the model's
   max from GGUF metadata.
+- `--html` (run) writes a self-contained HTML scorecard next to the JSON.
+  Off unless you pass it. `fitr export <model> [--out PATH]` does the same
+  from a saved result. The page carries the hardware fingerprint; do not
+  rank it against another device. Never uploaded.
 
 ## Output modes and exit codes
 
