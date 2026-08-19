@@ -35,6 +35,7 @@ need `cargo`, not a rewrite.
 | Command | Does |
 |---|---|
 | `fitr run <model> [--quick\|--full] [-k N]` | measure a model on this device |
+| `fitr advise <model> [--vram-gb N] [--ctx N]` | does it fit here, and if not, which flag to try |
 | `fitr board [--current]` | compare everything, grouped by device |
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
@@ -63,6 +64,10 @@ need `cargo`, not a rewrite.
 - `--pull` fetches a missing Ollama tag before measuring. Pasted Hugging
   Face GGUF URLs pull automatically (they *are* the request to fetch).
 - `--profile P` forces a device profile instead of auto-matching.
+- `--vram-gb N` (advise) supplies the memory budget when fitr cannot read
+  one. Unmeasured VRAM is a SKIP, never a guess from the GPU's name.
+- `--ctx N` (advise) is the context to size against; default is the model's
+  max from GGUF metadata.
 
 ## Output modes and exit codes
 
@@ -79,11 +84,26 @@ exit code is the machine channel.
 
 | Exit | Meaning |
 |---|---|
-| 0 | ran, every measured need passed |
+| 0 | ran, every measured need passed (`advise`: compatible or SKIP) |
 | 1 | error |
 | 2 | usage |
-| 3 | ran fine, a need FAILED (use as a CI gate) |
+| 3 | ran fine, a need FAILED (`advise`: low memory or incompatible) |
 | 130 | interrupted |
+
+## Advise
+
+`fitr advise <model>` sizes a model against this box and prints a three-tier
+verdict: **compatible**, **low memory** (`try num_ctx=4096 -> fits in 19.4 GB`),
+or **incompatible**. Negative tiers carry the flag that fixes them.
+
+The number is **weights + KV**, from GGUF architecture (a `.gguf` path or
+Ollama `/api/show` `model_info`). Compute buffers are not included and the
+report says so. MoE decode class uses *active* parameters, not total.
+
+SKIP, never a guess, when GPU memory was not measured, weights are unknown,
+or architecture metadata is missing. `--vram-gb N` supplies a budget; a GPU
+name is never turned into a VRAM number. There is no catalog of models to
+pick from - advise answers "does THIS fit", not "what exists".
 
 ## Device profiles
 

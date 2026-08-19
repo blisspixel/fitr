@@ -225,6 +225,9 @@ func TestShowReadsCapabilitiesFromProps(t *testing.T) {
 	if v := c.Version(context.Background()); v != "llama-server b6142-abc123" {
 		t.Fatalf("version = %q", v)
 	}
+	if mi.Path != "/models/qwen3.gguf" {
+		t.Fatalf("Path = %q, want the /props model_path so advise can read the GGUF", mi.Path)
+	}
 }
 
 func TestAccelReadsDevicesAndSystemInfo(t *testing.T) {

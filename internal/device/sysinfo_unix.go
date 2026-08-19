@@ -5,6 +5,7 @@ package device
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -63,6 +64,44 @@ func cpuName() string {
 		return strings.TrimSpace(m[1])
 	}
 	return runtime.GOARCH
+}
+
+func vramInfo() (float64, string) {
+	if gb := nvidiaSMIMemory(); gb > 0 {
+		return gb, "nvidia-smi"
+	}
+	if runtime.GOOS == "darwin" {
+		if r := ramGB(); r > 0 {
+			return r, "unified memory (system RAM)"
+		}
+	}
+	if gb := drmVRAM(); gb > 0 {
+		return gb, "drm sysfs"
+	}
+	return 0, ""
+}
+
+func drmVRAM() float64 {
+	matches, err := filepath.Glob("/sys/class/drm/card*/device/mem_info_vram_total")
+	if err != nil {
+		return 0
+	}
+	var best float64
+	for _, p := range matches {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+		if err != nil || n <= 0 {
+			continue
+		}
+		gb := float64(n) / GB
+		if gb > best {
+			best = gb
+		}
+	}
+	return best
 }
 
 func ramGB() float64 {

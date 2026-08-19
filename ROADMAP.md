@@ -94,6 +94,10 @@ verdict** (design rule 7).
   `/v1/models`, extra well-known local ports, `$FITR_DISCOVER_URLS`
 - **GPU backend in the fingerprint** (cuda/metal/vulkan/rocm/...); `board`
   refuses to rank a Vulkan run against a CUDA one of the same binary
+- **`fitr advise`** - three-tier fit (Compatible / Low memory / Incompatible)
+  with a remedy on the negative tiers. SKIP when VRAM, weights, or
+  architecture cannot be measured; never a GB number guessed from the GPU
+  name. MoE decode class uses active parameters, not total.
 
 **Honest limitations right now:**
 
@@ -102,6 +106,7 @@ verdict** (design rule 7).
 | ~23 binary trials per default run | MDE ~ 29pp. Better than the ~33pp of six tasks, still separates *broken* from *working*, not *good* from *slightly better*. `-k 3` on checks triples the sample. |
 | OpenAI-backend timings are client-derived | usage gives counts, not server timings; decode/prefill rates there are wall-clock estimates |
 | 2 device profiles | `lappy` and an uncalibrated `default` |
+| `advise` is weights+KV, not dummy allocation | Compatible can still OOM on compute buffers; no model catalog |
 | Terminal output only | no shareable artifact |
 
 ---
@@ -181,32 +186,35 @@ loop, closable on someone else's machine.
 | One-command install (curl / irm) | **done** (binary downloads need a `v*` tag) |
 | Honest measurement on Ollama, llama-server, OpenAI-compat | **done** (0.3) |
 | Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals) | **mostly done** - check-battery calibration and quant-flip damage still open |
-| `fitr advise` names a model + settings with a remedy | **not started** (0.4) - design rule 7; do not ship 1.0 without it |
+| `fitr advise` names a model + settings with a remedy | **scaffolded** - three-tier + remedy from weights+KV; SKIP when it cannot measure; no catalog, no dummy allocation |
 | A result can leave the terminal | **not started** (0.5 artifact) |
 | Community device profiles beyond `lappy` | **not started** |
 
 We do **not** ship 1.0 with an uncalibrated `advise`, a public leaderboard,
-or LLM-as-judge. The next 1.0-blocking work is battery calibration, then
-`advise`. `tune` can trail advise: a one-line remedy ("try num_ctx=4096")
-is advise; sweeping knobs is tune.
+or LLM-as-judge. Battery calibration still needs hardware. `tune` can trail
+advise: a one-line remedy ("try num_ctx=4096") is advise; sweeping knobs is
+tune.
 
 ## 0.4 - `fitr advise`
 
 The step that turns a chore into a product.
 
-- [ ] Three-tier verdict with remediation in one line - Compatible / Low
-      memory (`try num_ctx=4096 -> fits in 21.3 GB`) / Incompatible. The one
-      consumer-grade thing nobody ships: LM Studio says "Likely too large",
-      `llmfit` says "Too Tight"; both are dead ends.
-- [ ] **Measure fit, don't model it** - dummy-allocation style, vendoring
-      `gguf-parser-go` for the arithmetic rather than rebuilding it.
-- [ ] Memory arithmetic that gets **MoE right** - decode tracks *active*
+- [x] Three-tier verdict with remediation in one line - Compatible / Low
+      memory (`try num_ctx=4096 -> fits in 21.3 GB`) / Incompatible. SKIP
+      when VRAM, weights, or architecture cannot be measured - never a
+      fabricated GB number, never a guess from the GPU's name.
+- [ ] **Measure fit, don't model it** - dummy-allocation style. Today's
+      number is weights + KV from GGUF metadata and says so; compute
+      buffers are excluded. `gguf-parser-go` is not vendored (zero-dep
+      binary; the estimate is small, tested arithmetic, not a black box).
+- [x] Memory arithmetic that gets **MoE right** - decode tracks *active*
       parameters, not total. A 30B MoE (~3B active) at 24.8 tok/s beat an 8B
       dense at 14.6 on the same box; naive total-parameter math recommends
-      exactly the wrong thing.
+      exactly the wrong thing. Pinned against Qwen3-30B-A3B architecture.
 - [ ] Honest open question, still deliberately open: a static binary cannot
       know what models exist. Curated catalog that ages vs live index vs model
-      reasoning - pick deliberately; do not default.
+      reasoning - pick deliberately; do not default. `advise` answers "does
+      THIS fit", not "what should I download".
 
 ## 0.5 - Share the map
 

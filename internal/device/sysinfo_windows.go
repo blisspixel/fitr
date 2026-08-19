@@ -46,6 +46,20 @@ func cpuName() string {
 	return ps(`(Get-CimInstance Win32_Processor | Select-Object -First 1).Name`)
 }
 
+func vramInfo() (float64, string) {
+	if gb := nvidiaSMIMemory(); gb > 0 {
+		return gb, "nvidia-smi"
+	}
+	// AdapterRAM is a uint32 and silently caps at 4 GB. qwMemorySize is the
+	// 64-bit figure the driver actually registered.
+	raw := ps(`Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0*' -ErrorAction SilentlyContinue | Where-Object { $_.'HardwareInformation.qwMemorySize' -gt 1GB } | Select-Object -First 1 -ExpandProperty 'HardwareInformation.qwMemorySize'`)
+	n, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err == nil && n > 0 {
+		return float64(n) / GB, "registry qwMemorySize"
+	}
+	return 0, ""
+}
+
 func ramGB() float64 {
 	n, err := strconv.ParseInt(ps(`(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory`), 10, 64)
 	if err != nil {

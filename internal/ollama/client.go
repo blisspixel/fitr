@@ -300,7 +300,14 @@ type ModelInfo struct {
 	Name         string   `json:"name"`
 	Size         int64    `json:"size"`
 	Capabilities []string `json:"capabilities"`
-	Details      struct {
+	// Path is a local GGUF path when the runtime exposes one (llama-server
+	// /props model_path). Empty on Ollama tags.
+	Path string `json:"path,omitempty"`
+	// Info is GGUF metadata from Ollama /api/show (architecture, expert
+	// counts, context length). Absent fields stay missing; callers must not
+	// invent them.
+	Info    map[string]any `json:"model_info,omitempty"`
+	Details struct {
 		ParameterSize     string `json:"parameter_size"`
 		QuantizationLevel string `json:"quantization_level"`
 		Family            string `json:"family"`

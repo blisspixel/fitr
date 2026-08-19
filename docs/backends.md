@@ -57,6 +57,12 @@ The GPU compute API (CUDA / Metal / Vulkan / ROCm) is read from `/props`
 when the build exposes it, and is part of the device fingerprint: a Vulkan
 run and a CUDA run of the same binary are not comparable.
 
+**`fitr advise`** sizes a model from GGUF architecture: a local `.gguf`,
+Ollama `/api/show` `model_info`, or llama-server's `model_path` when that
+file is readable. OpenAI-compatible servers do not expose GGUF metadata, so
+advise SKIPs the KV cache (and says so) unless you pass a `.gguf` path.
+Unmeasured GPU memory is SKIP, never a card-from-name number.
+
 **Generic OpenAI-compatible** covers roughly ten of the twelve relevant
 local runtimes with one adapter. Its honesty notes: timings are
 **client-derived** (the surface exposes token counts but no server timings,

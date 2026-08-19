@@ -122,6 +122,17 @@ prints "not recommended."
   work", not the full alignment surface.
 - **One model at a time.** Concurrent models contaminate timings enough to
   invalidate a run; every phase clears residents first.
+- **`advise` estimates, it does not dummy-allocate.** The number is weights
+  plus KV from GGUF metadata. Compute buffers are excluded and said so.
+  Unmeasured VRAM or architecture is SKIP, not a name-to-GB guess.
+
+## Advise (design rule 7)
+
+A verdict without a remedy is half an answer. `fitr advise` prints
+Compatible / Low memory / Incompatible, and every negative tier carries the
+flag that fixes it and the GB that results (`try num_ctx=4096 -> fits in
+19.4 GB`). "Too large" is a dead end; the flag is the product. MoE decode
+class uses active parameters, not total.
 
 ## Why Go
 

@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -160,6 +164,94 @@ func TestMDEIsSaidOutLoud(t *testing.T) {
 	if mde < 20 || mde > 40 {
 		t.Fatalf("MDE at 23 trials = %.1fpp - expected roughly 29pp; the formula changed", mde)
 	}
+}
+
+func TestUsageMentionsAdvise(t *testing.T) {
+	old := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	usage()
+	w.Close()
+	os.Stderr = old
+	out, _ := io.ReadAll(r)
+	got := string(out)
+	if !strings.Contains(got, "fitr advise") {
+		t.Fatalf("usage must list advise:\n%s", got)
+	}
+}
+
+func TestAdviseMissingModelIsUsage(t *testing.T) {
+	if code := cmdAdvise(context.Background(), nil); code != exitUsage {
+		t.Fatalf("code = %d, want usage", code)
+	}
+}
+
+func TestAdviseLocalGGUFDoesNotNeedAServer(t *testing.T) {
+	// A metadata-only fixture is tiny; with --vram-gb the weights fit and KV
+	// is sized. The point is the command runs without a serving runtime.
+	path := writeMiniGGUF(t)
+	oldOut, oldErr := os.Stdout, os.Stderr
+	or, ow, _ := os.Pipe()
+	er, ew, _ := os.Pipe()
+	os.Stdout, os.Stderr = ow, ew
+	code := cmdAdvise(context.Background(), []string{"--vram-gb=8", "--ctx=4096", "--display=json", path})
+	ow.Close()
+	ew.Close()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	io.ReadAll(er)
+	out, _ := io.ReadAll(or)
+	if code != exitOK && code != exitGates {
+		t.Fatalf("code = %d, output:\n%s", code, out)
+	}
+	if !strings.Contains(string(out), `"tier"`) {
+		t.Fatalf("json report missing:\n%s", out)
+	}
+	if strings.Contains(string(out), `"tier": "skip"`) && strings.Contains(string(out), "GPU memory was not measured") {
+		t.Fatalf(" --vram-gb was ignored:\n%s", out)
+	}
+}
+
+func writeMiniGGUF(t *testing.T) string {
+	t.Helper()
+	// Minimal valid GGUF with the fields Evaluate needs to size KV.
+	// File size is the "weights"; that's honest for a fixture.
+	buf := new(bytes.Buffer)
+	buf.WriteString("GGUF")
+	binary.Write(buf, binary.LittleEndian, uint32(3))
+	binary.Write(buf, binary.LittleEndian, uint64(0))
+	kvs := []struct {
+		k string
+		v uint64
+	}{
+		{"llama.block_count", 32},
+		{"llama.embedding_length", 4096},
+		{"llama.attention.head_count", 32},
+		{"llama.attention.head_count_kv", 8},
+		{"llama.attention.key_length", 128},
+		{"llama.attention.value_length", 128},
+		{"llama.context_length", 8192},
+	}
+	// general.architecture is a string, written separately.
+	binary.Write(buf, binary.LittleEndian, uint64(len(kvs)+1))
+	writeGGUFString(buf, "general.architecture")
+	binary.Write(buf, binary.LittleEndian, uint32(8)) // string
+	writeGGUFString(buf, "llama")
+	for _, kv := range kvs {
+		writeGGUFString(buf, kv.k)
+		binary.Write(buf, binary.LittleEndian, uint32(10)) // uint64
+		binary.Write(buf, binary.LittleEndian, kv.v)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mini-Q4_K_M.gguf")
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeGGUFString(buf *bytes.Buffer, s string) {
+	binary.Write(buf, binary.LittleEndian, uint64(len(s)))
+	buf.WriteString(s)
 }
 
 func TestNormalizeModelRefAcceptsPastedHFLinks(t *testing.T) {

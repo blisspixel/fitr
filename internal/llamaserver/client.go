@@ -183,7 +183,7 @@ func (c *Client) infoFromProps(p props) ollama.ModelInfo {
 	if p.Modalities.Vision {
 		caps = append(caps, "vision")
 	}
-	return ollama.ModelInfo{Name: modelName(p), Capabilities: caps}
+	return ollama.ModelInfo{Name: modelName(p), Path: p.ModelPath, Capabilities: caps}
 }
 
 // PS reports the single resident model. Sizes are zero: llama-server does not

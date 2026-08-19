@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"regexp"
 	"runtime"
@@ -151,7 +152,12 @@ type Fingerprint struct {
 	// GPUBackend is cuda|metal|vulkan|rocm|sycl|opencl|cpu - the compute
 	// API the server is actually using. The runtime version implies it
 	// poorly (a Vulkan llama-server and a CUDA one share a build number).
-	GPUBackend string            `json:"gpu_backend,omitempty"`
+	GPUBackend string `json:"gpu_backend,omitempty"`
+	// VRAMGb is the measured GPU (or unified) memory budget. Zero with an
+	// empty VRAMSource means it was not measured - callers must SKIP, not
+	// invent a card-from-name number.
+	VRAMGb     float64           `json:"vram_gb,omitempty"`
+	VRAMSource string            `json:"vram_source,omitempty"`
 	Config     map[string]string `json:"config"`
 }
 
@@ -192,12 +198,56 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	if a, ok := b.(interface{ Accel(context.Context) string }); ok {
 		accel = NormalizeAccel(a.Accel(ctx))
 	}
+	vram, vsrc := vramInfo()
 	return Fingerprint{
 		Host: host, OS: runtime.GOOS, CPU: cpuName(), RAMGb: ramGB(),
 		GPU: gpu, GPUDriver: drv, GPUDriverDate: date,
 		Runtime: version, InferenceDevice: inferenceDevice(ctx, b, ""),
-		GPUBackend: accel, Config: cfg,
+		GPUBackend: accel, VRAMGb: vram, VRAMSource: vsrc, Config: cfg,
 	}
+}
+
+// FormatVRAM renders a memory budget. Unmeasured is said out loud; 0.0 is
+// never printed as if it were a reading.
+func FormatVRAM(gb float64, source string) string {
+	if gb <= 0 || source == "" {
+		return "unknown (not measured)"
+	}
+	return fmt.Sprintf("%.1f (%s)", gb, source)
+}
+
+func nvidiaSMIMemory() float64 {
+	if _, err := exec.LookPath("nvidia-smi"); err != nil {
+		return 0
+	}
+	out, err := exec.Command("nvidia-smi",
+		"--query-gpu=memory.total", "--format=csv,noheader,nounits").Output()
+	if err != nil {
+		return 0
+	}
+	return ParseNvidiaSMIMemory(string(out))
+}
+
+// ParseNvidiaSMIMemory reads nvidia-smi memory.total CSV (MiB per line) and
+// returns the largest card in GiB. Multiple GPUs take the max so an iGPU
+// 128 MiB line cannot hide a 8 GiB dGPU.
+func ParseNvidiaSMIMemory(out string) float64 {
+	var best float64
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(strings.Split(line, ",")[0])
+		if line == "" {
+			continue
+		}
+		mib, err := strconv.ParseFloat(line, 64)
+		if err != nil || mib <= 0 {
+			continue
+		}
+		gb := mib * 1024 * 1024 / GB
+		if gb > best {
+			best = gb
+		}
+	}
+	return best
 }
 
 // NormalizeAccel maps a free-form build/log string onto the small set of

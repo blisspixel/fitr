@@ -123,6 +123,31 @@ func TestGateLookupMissingIsNotZero(t *testing.T) {
 	}
 }
 
+func TestParseNvidiaSMIMemoryTakesLargestCard(t *testing.T) {
+	got := ParseNvidiaSMIMemory("128\n8192\n")
+	if got != 8.0 {
+		t.Fatalf("got %v, want 8.0 (the 8 GiB card, not the 128 MiB iGPU)", got)
+	}
+	if ParseNvidiaSMIMemory("") != 0 {
+		t.Fatal("empty nvidia-smi output is unmeasured, not zero-as-a-reading")
+	}
+	if ParseNvidiaSMIMemory("[NVIDIA]\nfailed") != 0 {
+		t.Fatal("garbage must not parse as a budget")
+	}
+}
+
+func TestFormatVRAMDoesNotPrintZeroAsAReading(t *testing.T) {
+	if got := FormatVRAM(0, ""); got != "unknown (not measured)" {
+		t.Fatalf("got %q", got)
+	}
+	if got := FormatVRAM(8, ""); got != "unknown (not measured)" {
+		t.Fatalf("a number without a source is unmeasured, got %q", got)
+	}
+	if got := FormatVRAM(8.0, "nvidia-smi"); got != "8.0 (nvidia-smi)" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestIsDenseAndBigIgnoresMoE(t *testing.T) {
 	p := Profile{Hints: map[string]any{"dense_param_b_interactive_max": 20.0}}
 	if !IsDenseAndBig("27B", "llama", p) {

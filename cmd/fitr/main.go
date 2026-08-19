@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blisspixel/fitr/internal/advise"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/llamaserver"
@@ -61,6 +62,7 @@ func usage() {
 
 usage:
   fitr run <model> [--quick|--full] [-k N] [--profile P] [--display MODE]
+  fitr advise <model> [--vram-gb N] [--ctx N]
   fitr board [--current]
   fitr diag <model>
   fitr doctor <model> [-n N]
@@ -85,6 +87,8 @@ examples:
   fitr run some-new-model:tag -k 3 --pull
   fitr diag dolphin3:8b
   fitr doctor qwen3-coder:30b
+  fitr advise qwen3:30b
+  fitr advise ./model.gguf --vram-gb 8
 `)
 }
 
@@ -101,6 +105,8 @@ func run() int {
 	switch os.Args[1] {
 	case "run":
 		return cmdRun(ctx, os.Args[2:])
+	case "advise":
+		return cmdAdvise(ctx, os.Args[2:])
 	case "board":
 		return cmdBoard(ctx, os.Args[2:])
 	case "diag":
@@ -155,7 +161,7 @@ func permute(args []string) []string {
 func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
-	case "k", "n", "profile", "display", "q", "backend", "seedset":
+	case "k", "n", "profile", "display", "q", "backend", "seedset", "vram-gb", "ctx":
 		return true
 	}
 	return false
@@ -325,6 +331,14 @@ func isQuantTag(s string) bool {
 
 func isHFRef(model string) bool { return strings.HasPrefix(model, "hf.co/") }
 
+func isLocalGGUF(p string) bool {
+	if !strings.HasSuffix(strings.ToLower(p), ".gguf") {
+		return false
+	}
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
+
 // checkModel verifies the model label against what the backend serves. On
 // Ollama a missing model is a hard error with a pull hint - or an automatic
 // pull with progress when the caller allows it; a single-model server ignores
@@ -435,6 +449,122 @@ func backendAt(kind, url string) llm.Backend {
 		}
 		return c
 	}
+}
+
+// ---------------------------------------------------------------- advise
+// cmdAdvise answers: does this model fit on this box, and if not, which
+// flag to try? SKIP when fit cannot be measured (no VRAM reading, no
+// weights, no architecture) - never a fabricated GB number.
+func cmdAdvise(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("advise", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	vram := fs.Float64("vram-gb", -1, "available GPU memory in GB (skip detection)")
+	ctxSize := fs.Int("ctx", 0, "requested context length (default: model's max)")
+	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
+	mode := fs.String("display", "auto", "auto|plain|json|none")
+	pullFlag := fs.Bool("pull", false, "pull the model first if it is not installed")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() < 1 {
+		errPrint("missing model", "", "fitr advise <model>  or  fitr advise ./model.gguf")
+		return exitUsage
+	}
+	raw := fs.Arg(0)
+	model := normalizeModelRef(raw)
+
+	in := advise.Input{Model: model, Ctx: *ctxSize}
+	if *backend != "" && *backend != "auto" {
+		in.Backend = *backend
+	}
+	if *vram >= 0 {
+		in.HaveGB = *vram
+		in.HaveSrc = "--vram-gb"
+	} else {
+		fp := device.Detect(ctx, nil)
+		in.HaveGB = fp.VRAMGb
+		in.HaveSrc = fp.VRAMSource
+	}
+	if kv := os.Getenv("OLLAMA_KV_CACHE_TYPE"); kv != "" {
+		if n, ok := advise.KVElemBytes(kv); ok {
+			in.KVBytes = n
+			in.KVSrc = "OLLAMA_KV_CACHE_TYPE=" + kv
+		}
+	}
+
+	if isLocalGGUF(raw) {
+		kvs, size, err := advise.OpenGGUF(raw)
+		if err != nil {
+			errPrint("could not read GGUF: "+err.Error(), "", "")
+			return exitError
+		}
+		in.Model = raw
+		in.Arch = advise.ArchFromKVs(kvs)
+		in.WeightsB = size
+		in.Source = "GGUF metadata"
+		if q := quantFromFilename(raw); isQuantTag(q) {
+			in.Quant = strings.ToUpper(q)
+		}
+	} else {
+		c, code := newBackend(ctx, model, *backend, *pullFlag)
+		if code != exitOK {
+			return code
+		}
+		in.Backend = c.Name()
+		fp := device.Detect(ctx, c)
+		if *vram < 0 {
+			in.HaveGB = fp.VRAMGb
+			in.HaveSrc = fp.VRAMSource
+		}
+		if kv := fp.Config["OLLAMA_KV_CACHE_TYPE"]; kv != "" {
+			if n, ok := advise.KVElemBytes(kv); ok {
+				in.KVBytes = n
+				in.KVSrc = "OLLAMA_KV_CACHE_TYPE=" + kv
+			}
+		}
+		info, err := c.Show(ctx, model)
+		if err == nil {
+			in.Quant = info.Details.QuantizationLevel
+			if info.Size > 0 {
+				in.WeightsB = info.Size
+			}
+			if len(info.Info) > 0 {
+				in.Arch = advise.ArchFromKVs(info.Info)
+				in.Source = "Ollama /api/show"
+			}
+			if !in.Arch.KVReady() && info.Path != "" {
+				if kvs, size, err := advise.OpenGGUF(info.Path); err == nil {
+					in.Arch = advise.ArchFromKVs(kvs)
+					if in.WeightsB == 0 {
+						in.WeightsB = size
+					}
+					in.Source = "GGUF at " + info.Path
+				}
+			}
+		}
+		if in.Source == "" {
+			in.Source = c.Name() + " (no architecture metadata)"
+		}
+	}
+
+	rep := advise.Evaluate(in)
+	switch render.Resolve(*mode) {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			errPrint(err.Error(), "", "")
+			return exitError
+		}
+	case "none":
+		// machine channel is the exit code
+	default:
+		advise.Write(os.Stdout, rep)
+		if rep.Tier == advise.Compatible || rep.Tier == advise.LowMemory {
+			fmt.Fprintf(os.Stderr, "\n  next   fitr run %s --full\n", in.Model)
+		}
+	}
+	return rep.ExitCode()
 }
 
 // ---------------------------------------------------------------- run
@@ -1319,6 +1449,7 @@ func cmdDevice(ctx context.Context, args []string) int {
 	fmt.Printf("  os                 %s\n", fp.OS)
 	fmt.Printf("  cpu                %s\n", fp.CPU)
 	fmt.Printf("  ram_gb             %.1f\n", fp.RAMGb)
+	fmt.Printf("  vram_gb            %s\n", device.FormatVRAM(fp.VRAMGb, fp.VRAMSource))
 	fmt.Printf("  gpu                %s\n", fp.GPU)
 	fmt.Printf("  gpu_driver         %s  (%s)\n", fp.GPUDriver, fp.GPUDriverDate)
 	fmt.Printf("  ollama             %s\n", fp.Runtime)
