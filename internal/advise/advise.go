@@ -49,6 +49,15 @@ type Input struct {
 	// not substituted for it.
 	ResidentB   int64
 	ResidentSrc string
+	// FitB is llama-fit-params dummy allocation at Ctx. Zero means the
+	// binary was not run. A projection from the allocator beats weights+KV
+	// and loses to a live resident.
+	FitB      int64
+	FitSrc    string
+	FitCannot bool // llama-fit-params could not stay inside device memory
+	// LoadErr is set when --load was asked and the server refused. That is
+	// a measurement (the box could not take the model), not a skip.
+	LoadErr string
 }
 
 type Arch struct {
@@ -258,6 +267,14 @@ func Evaluate(in Input) Report {
 	r.HaveGB = round1(in.HaveGB)
 	haveB := in.HaveGB * GiB
 
+	if in.LoadErr != "" {
+		r.Tier = Incompatible
+		r.Why = "server refused the load: " + in.LoadErr
+		r.Remedy = "try a smaller quant, or a shorter context (num_ctx=2048)"
+		r.Source = "observed load failure"
+		return r
+	}
+
 	if in.ResidentB > 0 {
 		if float64(in.ResidentB) > haveB {
 			// The process is running. Calling that Incompatible would
@@ -289,6 +306,48 @@ func Evaluate(in Input) Report {
 			return r
 		}
 		r.Gaps = append(r.Gaps, "current resident "+trim1(r.ObservedGB)+" GB (measured)")
+	}
+
+	if in.FitB > 0 {
+		r.NeedGB = round1(float64(in.FitB) / GiB)
+		if in.FitSrc != "" {
+			r.Source = in.FitSrc
+		}
+		r.Gaps = append(r.Gaps, "dummy allocation (includes compute buffers)")
+		fits := float64(in.FitB) <= haveB && !in.FitCannot
+		if fits {
+			r.Tier = Compatible
+			r.Why = fmt.Sprintf("dummy allocation %s GB of %s GB available", trim1(r.NeedGB), trim1(r.HaveGB))
+			return r
+		}
+		r.Why = fmt.Sprintf("dummy allocation %s GB; %s GB available", trim1(r.NeedGB), trim1(r.HaveGB))
+		if in.WeightsB <= 0 || !in.Arch.KVReady() {
+			r.Tier = Incompatible
+			r.Remedy = "try a smaller quant, or a shorter context"
+			return r
+		}
+		// Allocator said this ctx does not fit; KV math still names a shorter window.
+		elem, _, _ := kvElemBytes(in)
+		perTok := in.Arch.kvBytesPerToken(elem)
+		if perTok <= 0 {
+			r.Tier = Incompatible
+			r.Remedy = "try a smaller quant, or a shorter context"
+			return r
+		}
+		fitCtx := int((haveB - float64(in.WeightsB)) / perTok)
+		fitCtx = (fitCtx / 256) * 256
+		if fitCtx < 512 {
+			r.Tier = Incompatible
+			r.Remedy = "try a smaller quant; even a 512-token window does not fit next to the weights"
+			return r
+		}
+		fitB := float64(in.WeightsB) + perTok*float64(fitCtx)
+		r.Tier = LowMemory
+		r.Flag = ContextFlag(in.Backend)
+		r.FlagValue = fitCtx
+		r.FitsGB = round1(fitB / GiB)
+		r.Remedy = remedyLine(r.Flag, fitCtx, r.FitsGB)
+		return r
 	}
 
 	if in.WeightsB <= 0 {

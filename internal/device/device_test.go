@@ -90,6 +90,24 @@ func TestFingerprintKeyChangesWithConfig(t *testing.T) {
 	}
 }
 
+func TestFingerprintDiffNamesTheKnob(t *testing.T) {
+	a := Fingerprint{Host: "h", GPU: "g", GPUDriver: "1.0", Runtime: "0.32",
+		GPUBackend: "cuda",
+		Config:     map[string]string{"OLLAMA_KV_CACHE_TYPE": "f16"}}
+	b := a
+	b.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "q8_0"}
+	d := a.Diff(b)
+	if len(d) != 1 || d[0][0] != "config.OLLAMA_KV_CACHE_TYPE" {
+		t.Fatalf("diff = %v, want the KV dtype knob", d)
+	}
+	if d[0][1] != "f16" || d[0][2] != "q8_0" {
+		t.Fatalf("diff values = %v", d)
+	}
+	if len(a.Diff(a)) != 0 {
+		t.Fatal("identical fingerprints must have an empty diff")
+	}
+}
+
 func TestNormalizeAccelPrefersGPUOverCPU(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"CUDA : ARCHS = 890 | CPU : AVX = 1", "cuda"},

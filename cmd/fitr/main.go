@@ -62,7 +62,8 @@ func usage() {
 
 usage:
   fitr run <model> [--quick|--full] [-k N] [--profile P] [--display MODE] [--html]
-  fitr advise <model> [--vram-gb N] [--ctx N]
+  fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]
+  fitr tune [model-a model-b]
   fitr export <model> [--out PATH]
   fitr board [--current]
   fitr diag <model>
@@ -89,7 +90,9 @@ examples:
   fitr diag dolphin3:8b
   fitr doctor qwen3-coder:30b
   fitr advise qwen3:30b
-  fitr advise ./model.gguf --vram-gb 8
+  fitr advise ./model.gguf --vram-gb 8 --fit
+  fitr tune
+  fitr tune qwen3:30b qwen3:30b-q8
   fitr export qwen3:30b --out scorecard.html
 `)
 }
@@ -109,6 +112,8 @@ func run() int {
 		return cmdRun(ctx, os.Args[2:])
 	case "advise":
 		return cmdAdvise(ctx, os.Args[2:])
+	case "tune":
+		return cmdTune(ctx, os.Args[2:])
 	case "export":
 		return cmdExport(ctx, os.Args[2:])
 	case "board":
@@ -480,6 +485,8 @@ func cmdAdvise(ctx context.Context, args []string) int {
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	mode := fs.String("display", "auto", "auto|plain|json|none")
 	pullFlag := fs.Bool("pull", false, "pull the model first if it is not installed")
+	loadFlag := fs.Bool("load", false, "load the model on Ollama and read resident size (dummy allocation)")
+	fitFlag := fs.Bool("fit", false, "run llama-fit-params on a GGUF if it is on PATH")
 	if err := fs.Parse(permute(args)); err != nil {
 		return exitUsage
 	}
@@ -509,6 +516,8 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 	}
 
+	var c llm.Backend
+	ggufPath := ""
 	if isLocalGGUF(raw) {
 		kvs, size, err := advise.OpenGGUF(raw)
 		if err != nil {
@@ -519,11 +528,13 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		in.Arch = advise.ArchFromKVs(kvs)
 		in.WeightsB = size
 		in.Source = "GGUF metadata"
+		ggufPath = raw
 		if q := quantFromFilename(raw); isQuantTag(q) {
 			in.Quant = strings.ToUpper(q)
 		}
 	} else {
-		c, code := newBackend(ctx, model, *backend, *pullFlag)
+		var code int
+		c, code = newBackend(ctx, model, *backend, *pullFlag)
 		if code != exitOK {
 			return code
 		}
@@ -548,6 +559,9 @@ func cmdAdvise(ctx context.Context, args []string) int {
 			if len(info.Info) > 0 {
 				in.Arch = advise.ArchFromKVs(info.Info)
 				in.Source = "Ollama /api/show"
+			}
+			if info.Path != "" {
+				ggufPath = info.Path
 			}
 			if !in.Arch.KVReady() && info.Path != "" {
 				if kvs, size, err := advise.OpenGGUF(info.Path); err == nil {
@@ -574,6 +588,61 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 	}
 
+	if *fitFlag {
+		if ggufPath == "" {
+			errPrint("--fit needs a GGUF path", "", "pass ./model.gguf, or an Ollama model whose blob path is known")
+			return exitUsage
+		}
+		fmt.Fprintf(os.Stderr, "  llama-fit-params %s\n", ggufPath)
+		used, cannot, err := advise.RunFitParams(ctx, ggufPath, *ctxSize)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, " note: llama-fit-params not used: %s\n", err)
+		} else {
+			in.FitB, in.FitCannot, in.FitSrc = used, cannot, "llama-fit-params"
+		}
+	}
+
+	if *loadFlag {
+		if c == nil || c.Name() != "ollama" {
+			errPrint("--load needs a running Ollama", "",
+				"pass an Ollama model tag; llama-server is already loaded, and a bare .gguf needs --fit")
+			return exitUsage
+		}
+		if in.ResidentB == 0 {
+			if in.WeightsB > 0 && in.HaveGB > 0 && float64(in.WeightsB) > in.HaveGB*advise.GiB {
+				fmt.Fprintf(os.Stderr, " note: not loading: weights alone exceed the budget\n")
+			} else {
+				lk, err := lock.Acquire("eval", "advise --load "+model)
+				if err != nil {
+					errPrint(err.Error(), "", "")
+					return exitError
+				}
+				defer lk.Release() //nolint:errcheck
+				ctxLen := *ctxSize
+				if ctxLen <= 0 {
+					ctxLen = 2048
+				}
+				fmt.Fprintf(os.Stderr, "  loading %s at num_ctx=%d to measure resident size\n", model, ctxLen)
+				_, _, err = c.Generate(ctx, model, ".", ollama.Deterministic(1, ctxLen))
+				if err != nil {
+					in.LoadErr = err.Error()
+				} else if running, err := c.PS(ctx); err == nil {
+					for _, m := range running {
+						if !sameServedModel(model, m.Name) || m.Size <= 0 {
+							continue
+						}
+						in.ResidentB = m.Size
+						in.ResidentSrc = "ollama /api/ps after --load"
+						break
+					}
+				}
+				if left, err := c.StopAll(ctx); err == nil && len(left) > 0 {
+					fmt.Fprintf(os.Stderr, " note: still resident: %s\n", strings.Join(left, ", "))
+				}
+			}
+		}
+	}
+
 	rep := advise.Evaluate(in)
 	switch render.Resolve(*mode) {
 	case "json":
@@ -592,6 +661,84 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 	}
 	return rep.ExitCode()
+}
+
+// ---------------------------------------------------------------- tune
+// cmdTune does not run a sweep. llama-bench already owns throughput-only
+// points, and a documented flash-attention quality regression is why
+// throughput-only is not enough. Until fitr can restart a server, tune
+// prints the request-level knobs and diffs two observed fingerprints.
+func cmdTune(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("tune", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	fmt.Fprint(os.Stdout, `  request-level knobs (no server restart):
+    num_ctx / --ctx-size     KV cache size; this is what advise already names
+    num_batch / -b           prefill chunk; quality can move with it
+    num_gpu / -ngl           offload; partial GPU is a RAM benchmark wearing a GPU badge
+
+  server-level (needs a restart fitr will not orchestrate):
+    OLLAMA_FLASH_ATTENTION   documented quality regression at some settings
+    OLLAMA_KV_CACHE_TYPE     f16 vs q8_0 vs q4_0; changes the fingerprint
+
+  measure a point: set the knob, then
+    fitr run <model> --full
+    fitr compare <a> <b>
+  score quality + degeneracy + throughput jointly. llama-bench already owns
+  throughput-only sweeps.
+
+`)
+	if fs.NArg() == 0 {
+		fmt.Fprintln(os.Stdout, "  next   fitr tune <model-a> <model-b>   to diff two saved fingerprints")
+		return exitOK
+	}
+	if fs.NArg() != 2 {
+		errPrint("tune diffs two saved results", "", "fitr tune <model-a> <model-b>")
+		return exitUsage
+	}
+	all, err := loadResults()
+	if err != nil || len(all) == 0 {
+		errPrint("no saved results", "", "run `fitr run` on both configs first")
+		return exitError
+	}
+	a := latestNamed(all, fs.Arg(0))
+	b := latestNamed(all, fs.Arg(1))
+	if a == nil || b == nil {
+		errPrint("need two saved results", "", "fitr board lists what is on disk")
+		return exitUsage
+	}
+	fmt.Fprintf(os.Stdout, "  %s  vs  %s\n", a.Model, b.Model)
+	d := a.Device.Diff(b.Device)
+	if len(d) == 0 {
+		fmt.Fprintln(os.Stdout, "  same fingerprint - quality is `fitr compare`'s job, not a device change")
+		return exitOK
+	}
+	fmt.Fprintln(os.Stdout, "  fingerprint diffs (these runs are not comparable):")
+	for _, x := range d {
+		fmt.Fprintf(os.Stdout, "    %-22s  %s  ->  %s\n", x[0], emptyDash(x[1]), emptyDash(x[2]))
+	}
+	return exitOK
+}
+
+func emptyDash(s string) string {
+	if s == "" {
+		return "(empty)"
+	}
+	return s
+}
+
+func latestNamed(all []*Result, name string) *Result {
+	var hit *Result
+	for _, r := range all {
+		if r.Model == name || strings.Contains(r.Model, name) {
+			if hit == nil || r.StartedAt > hit.StartedAt {
+				hit = r
+			}
+		}
+	}
+	return hit
 }
 
 // ---------------------------------------------------------------- run

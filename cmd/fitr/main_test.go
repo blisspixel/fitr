@@ -279,6 +279,31 @@ func TestUsageMentionsAdvise(t *testing.T) {
 	if !strings.Contains(got, "fitr export") {
 		t.Fatalf("usage must list export:\n%s", got)
 	}
+	if !strings.Contains(got, "fitr tune") {
+		t.Fatalf("usage must list tune:\n%s", got)
+	}
+}
+
+func TestTunePrintsProtocolWithoutSweeping(t *testing.T) {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	code := cmdTune(context.Background(), nil)
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	got := string(out)
+	if code != exitOK {
+		t.Fatalf("code = %d", code)
+	}
+	for _, want := range []string{"num_ctx", "OLLAMA_FLASH_ATTENTION", "llama-bench", "quality + degeneracy + throughput"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("tune protocol missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "sweeping") && strings.Contains(got, "please wait") {
+		t.Fatal("tune must not pretend to run a sweep")
+	}
 }
 
 func TestExportGoldenHTMLCarriesFingerprintAndEscapes(t *testing.T) {

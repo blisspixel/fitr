@@ -20,6 +20,7 @@ import (
 	"path"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -163,6 +164,39 @@ type Fingerprint struct {
 
 // Key is what decides comparability. Two results may only be ranked against
 // each other if this matches exactly.
+// Diff lists fields that disagree. Used by `fitr tune` so a knob change is
+// visible as a fingerprint delta rather than a silent incomparability.
+func (f Fingerprint) Diff(o Fingerprint) [][3]string {
+	var out [][3]string
+	add := func(name, a, b string) {
+		if a != b {
+			out = append(out, [3]string{name, a, b})
+		}
+	}
+	add("host", f.Host, o.Host)
+	add("gpu", f.GPU, o.GPU)
+	add("gpu_driver", f.GPUDriver, o.GPUDriver)
+	add("gpu_backend", f.GPUBackend, o.GPUBackend)
+	add("runtime", f.Runtime, o.Runtime)
+	add("inference_device", f.InferenceDevice, o.InferenceDevice)
+	keys := map[string]bool{}
+	for k := range f.Config {
+		keys[k] = true
+	}
+	for k := range o.Config {
+		keys[k] = true
+	}
+	var names []string
+	for k := range keys {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		add("config."+k, f.Config[k], o.Config[k])
+	}
+	return out
+}
+
 func (f Fingerprint) Key() string {
 	c := f.Config
 	return strings.Join([]string{

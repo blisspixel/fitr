@@ -108,7 +108,7 @@ verdict** (design rule 7).
 | ~23 binary trials per default run | MDE ~ 29pp. Better than the ~33pp of six tasks, still separates *broken* from *working*, not *good* from *slightly better*. `-k 3` on checks triples the sample. |
 | OpenAI-backend timings are client-derived | usage gives counts, not server timings; decode/prefill rates there are wall-clock estimates |
 | 2 device profiles | `lappy` and an uncalibrated `default` |
-| `advise` is weights+KV, not dummy allocation | Compatible can still OOM on compute buffers; no model catalog |
+| `advise` default is still weights+KV | `--load` / `--fit` measure; without them, Compatible can still OOM on compute buffers. No model catalog. |
 
 ---
 
@@ -169,14 +169,14 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
       discriminate still needs a live calibration pass.
 - [ ] **Quant-flip calibration on hardware.** Drop check items that never
       flip between known-good and known-degraded quants of the same model.
-- [ ] **`fitr tune`, re-scoped.** Sweep the *request-level* knobs first
-      (`num_ctx`, `num_batch`, `num_gpu`) - no restart needed - and score
-      **quality + degeneracy + throughput jointly** per point; llama-bench
-      already owns throughput-only sweeps, and a documented flash-attention
-      quality regression proves throughput-only sweeps miss what matters.
-      Server-level env sweeps (`OLLAMA_FLASH_ATTENTION`, `KV_CACHE_TYPE`) need
-      restart orchestration fitr does not have; until it does, `tune` prints
-      the variant instructions and diffs the fingerprints it observes.
+- [x] **`fitr tune`, first honest cut.** Prints the request-level knobs
+      (`num_ctx`, `num_batch`, `num_gpu`) and diffs two saved fingerprints.
+      It does **not** sweep: llama-bench owns throughput-only points, and a
+      flash-attention quality regression is why throughput-only is not
+      enough. Server-level env (`OLLAMA_FLASH_ATTENTION`, `KV_CACHE_TYPE`)
+      still needs restart orchestration fitr does not have.
+- [ ] **`fitr tune` sweeps** quality + degeneracy + throughput jointly per
+      request-level point, once restart orchestration exists for server env.
 
 ## Path to 1.0
 
@@ -190,7 +190,7 @@ loop, closable on someone else's machine.
 | One-command install (curl / irm) | **done** (binary downloads need a `v*` tag) |
 | Honest measurement on Ollama, llama-server, OpenAI-compat | **done** (0.3) |
 | Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals, quant flips) | **mostly done** - check-battery calibration still needs hardware; flip machinery is in `compare` |
-| `fitr advise` names a model + settings with a remedy | **scaffolded** - observed resident when loaded, else weights+KV; SKIP when it cannot measure; no catalog, no dummy allocation |
+| `fitr advise` names a model + settings with a remedy | **done** for the NIM-shaped verdict; `--load`/`--fit` dummy-allocate; still no catalog |
 | A result can leave the terminal | **done** - `fitr export` / `fitr run --html`, opt-in, fingerprint in the page |
 | Community device profiles beyond `lappy` | **not started** |
 
@@ -207,12 +207,12 @@ The step that turns a chore into a product.
       memory (`try num_ctx=4096 -> fits in 21.3 GB`) / Incompatible. SKIP
       when VRAM, weights, or architecture cannot be measured - never a
       fabricated GB number, never a guess from the GPU's name.
-- [ ] **Measure fit, don't model it** - dummy-allocation style (`llama.cpp
-      --fit`). When the model is already loaded, advise now prefers the
-      server's own resident bytes (`/api/ps`) over the weights+KV estimate
-      and will not call a running process Incompatible just because the
-      VRAM reading is smaller. Unloaded models still get the estimate
-      (compute buffers excluded, labeled). `gguf-parser-go` is not vendored.
+- [x] **Measure fit, don't model it** - `advise --load` observes Ollama
+      resident size (compute buffers included); `advise --fit` runs
+      `llama-fit-params` on a GGUF when present. Live resident still beats
+      dummy allocation, which still beats weights+KV. Missing
+      `llama-fit-params` is a note, not a fabricated GB. `gguf-parser-go`
+      is not vendored: the allocator binary is the measurement.
 - [x] Memory arithmetic that gets **MoE right** - decode tracks *active*
       parameters, not total. A 30B MoE (~3B active) at 24.8 tok/s beat an 8B
       dense at 14.6 on the same box; naive total-parameter math recommends

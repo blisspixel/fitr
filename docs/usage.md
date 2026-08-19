@@ -35,7 +35,8 @@ need `cargo`, not a rewrite.
 | Command | Does |
 |---|---|
 | `fitr run <model> [--quick\|--full] [-k N]` | measure a model on this device |
-| `fitr advise <model> [--vram-gb N] [--ctx N]` | does it fit here, and if not, which flag to try |
+| `fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]` | does it fit here, and if not, which flag to try |
+| `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
 | `fitr export <model> [--out PATH]` | write a self-contained HTML scorecard (opt-in) |
 | `fitr board [--current]` | compare everything, grouped by device |
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
@@ -62,6 +63,10 @@ need `cargo`, not a rewrite.
   paired test. Fresh instances per run remain the default.
 - `--backend auto|ollama|llama-server|openai` picks the serving runtime;
   see [backends.md](backends.md). Extra listen URLs: `$FITR_DISCOVER_URLS`.
+- `--load` (advise) loads an Ollama model and reads `/api/ps` so fit includes
+  compute buffers. `--fit` runs `llama-fit-params` on a GGUF when that
+  binary is on PATH. Both are dummy allocation; the weights+KV estimate is
+  the default and is labeled as such.
 - `--pull` fetches a missing Ollama tag before measuring. Pasted Hugging
   Face GGUF URLs pull automatically (they *are* the request to fetch).
 - `--profile P` forces a device profile instead of auto-matching.
