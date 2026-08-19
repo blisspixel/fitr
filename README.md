@@ -118,10 +118,26 @@ make install
 # or grab a binary for your platform from Releases
 ```
 
-Needs Go 1.25+ to build, a running Ollama to measure, and `python3` on PATH
-**only** to execute the Python coding fixtures. The harness language and the
-task language are deliberately separate: a task declares the interpreter it
-needs in its spec, so adding Rust tasks would need `cargo`, not a rewrite.
+Needs Go 1.25+ to build, a running **Ollama or llama-server** to measure, and
+`python3` on PATH **only** to execute the Python coding fixtures. The harness
+language and the task language are deliberately separate: a task declares the
+interpreter it needs in its spec, so adding Rust tasks would need `cargo`, not
+a rewrite.
+
+## Backends
+
+`fitr` auto-detects what is running: Ollama at `OLLAMA_BASE_URL` (default
+`:11434`), then llama.cpp's `llama-server` at `LLAMA_SERVER_URL` (default
+`:8080`). Force one with `--backend ollama|llama-server`.
+
+The llama-server backend is not just reach - it is measurement surface Ollama
+does not expose: per-request **cached-token counts** (the only honest cold/warm
+prefill split), and a **capability probe** (`/props`) so tool/vision support is
+read from the endpoint, never guessed from the model's name. Resident-memory
+needs SKIP on llama-server - it does not report resident bytes, and a made-up
+number would be worse than a gap. The runtime and its version are part of the
+device fingerprint: a backend change is a different measurement, and `board`
+will not rank across it.
 
 ## Commands
 

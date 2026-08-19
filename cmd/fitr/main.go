@@ -24,6 +24,8 @@ import (
 
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
+	"github.com/blisspixel/fitr/internal/llamaserver"
+	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/lock"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/render"
@@ -146,46 +148,109 @@ func permute(args []string) []string {
 func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
-	case "k", "n", "profile", "display", "q":
+	case "k", "n", "profile", "display", "q", "backend":
 		return true
 	}
 	return false
 }
 
-func newClient(ctx context.Context, model string) (*ollama.Client, int) {
-	c := ollama.New()
-	if !c.Reachable(ctx) {
-		errPrint("cannot reach Ollama at "+c.BaseURL,
-			"every measurement needs a running server",
-			"start it with `ollama serve`, or set OLLAMA_BASE_URL")
-		return nil, exitError
+// newBackend resolves which serving runtime to measure through.
+// Selection order: --backend flag, then $FITR_BACKEND, then auto-probe
+// (Ollama first - it is the default URL people have running - then
+// llama-server).
+func newBackend(ctx context.Context, model, kind string) (llm.Backend, int) {
+	if kind == "" || kind == "auto" {
+		kind = os.Getenv("FITR_BACKEND")
 	}
-	if model != "" {
-		tags, err := c.Tags(ctx)
-		if err == nil && len(tags) > 0 {
-			found := false
-			var near []string
-			base := strings.SplitN(model, ":", 2)[0]
-			for _, t := range tags {
-				if t.Name == model {
-					found = true
-				}
-				if strings.Contains(t.Name, base) {
-					near = append(near, t.Name)
-				}
-			}
-			if !found {
-				hint := "pull it first: `ollama pull " + model + "`"
-				if len(near) > 0 {
-					hint = "did you mean: " + strings.Join(near, ", ")
-				}
-				errPrint(fmt.Sprintf("model %q is not installed", model),
-					fmt.Sprintf("%d model(s) available", len(tags)), hint)
-				return nil, exitUsage
-			}
+	switch kind {
+	case "", "auto":
+		o := ollama.New()
+		if o.Reachable(ctx) {
+			return checkModel(ctx, o, model)
+		}
+		l := llamaserver.New()
+		if l.Reachable(ctx) {
+			return checkModel(ctx, l, model)
+		}
+		errPrint("no serving runtime reachable",
+			fmt.Sprintf("tried Ollama at %s and llama-server at %s", o.URL(), l.URL()),
+			"start one, or point fitr at it: OLLAMA_BASE_URL, LLAMA_SERVER_URL, or --backend")
+		return nil, exitError
+	case "ollama":
+		o := ollama.New()
+		if !o.Reachable(ctx) {
+			errPrint("cannot reach Ollama at "+o.URL(),
+				"every measurement needs a running server",
+				"start it with `ollama serve`, or set OLLAMA_BASE_URL")
+			return nil, exitError
+		}
+		return checkModel(ctx, o, model)
+	case "llama-server", "llamaserver":
+		l := llamaserver.New()
+		if !l.Reachable(ctx) {
+			errPrint("cannot reach llama-server at "+l.URL(),
+				"every measurement needs a running server",
+				"start it with `llama-server -m model.gguf`, or set LLAMA_SERVER_URL")
+			return nil, exitError
+		}
+		return checkModel(ctx, l, model)
+	default:
+		errPrint(fmt.Sprintf("unknown backend %q", kind), "",
+			"valid: auto, ollama, llama-server")
+		return nil, exitUsage
+	}
+}
+
+// checkModel verifies the model label against what the backend serves. On
+// Ollama a missing model is a hard error with a pull hint; a single-model
+// server ignores the label at request time, so a mismatch there is a warning
+// - the results would otherwise be filed under a name the server never saw.
+func checkModel(ctx context.Context, b llm.Backend, model string) (llm.Backend, int) {
+	if model == "" {
+		return b, exitOK
+	}
+	tags, err := b.Tags(ctx)
+	if err != nil || len(tags) == 0 {
+		return b, exitOK
+	}
+	found := false
+	var near []string
+	base := strings.SplitN(model, ":", 2)[0]
+	for _, t := range tags {
+		if t.Name == model {
+			found = true
+		}
+		if strings.Contains(t.Name, base) {
+			near = append(near, t.Name)
 		}
 	}
-	return c, exitOK
+	if found {
+		return b, exitOK
+	}
+	if b.Name() != "ollama" {
+		fmt.Fprintf(os.Stderr, "! %s serves %q, not %q - results will be recorded under %q\n",
+			b.Name(), tags[0].Name, model, model)
+		return b, exitOK
+	}
+	hint := "pull it first: `ollama pull " + model + "`"
+	if len(near) > 0 {
+		hint = "did you mean: " + strings.Join(near, ", ")
+	}
+	errPrint(fmt.Sprintf("model %q is not installed", model),
+		fmt.Sprintf("%d model(s) available", len(tags)), hint)
+	return nil, exitUsage
+}
+
+// probeBackend is the no-error variant for commands that merely display state.
+func probeBackend(ctx context.Context) llm.Backend {
+	o := ollama.New()
+	if o.Reachable(ctx) {
+		return o
+	}
+	if l := llamaserver.New(); l.Reachable(ctx) {
+		return l
+	}
+	return o
 }
 
 // ---------------------------------------------------------------- run
@@ -197,6 +262,7 @@ func cmdRun(ctx context.Context, args []string) int {
 	k := fs.Int("k", 0, "repeats per noisy task")
 	profileName := fs.String("profile", "", "device profile (default: auto-match)")
 	mode := fs.String("display", "auto", "auto|plain|json|none")
+	backend := fs.String("backend", "auto", "auto|ollama|llama-server")
 	quiet := fs.Int("q", 0, "quiet level")
 	verbose := fs.Bool("v", false, "verbose")
 	if err := fs.Parse(permute(args)); err != nil {
@@ -227,7 +293,7 @@ func cmdRun(ctx context.Context, args []string) int {
 		*mode = "plain"
 	}
 
-	c, code := newClient(ctx, model)
+	c, code := newBackend(ctx, model, *backend)
 	if code != exitOK {
 		return code
 	}
@@ -309,7 +375,7 @@ type Result struct {
 	Meta      render.Meta     `json:"-"`
 }
 
-func execute(ctx context.Context, c *ollama.Client, model, level, profileName string,
+func execute(ctx context.Context, c llm.Backend, model, level, profileName string,
 	reps, checksReps int, disp render.Display) (*Result, error) {
 
 	// Exactly one eval per machine at a time. Two runs against one inference
@@ -717,8 +783,7 @@ func cmdBoard(ctx context.Context, args []string) int {
 		errPrint("no results yet", "", "run one first: fitr run <model> --full")
 		return exitError
 	}
-	c := ollama.New()
-	cur := device.Detect(ctx, c).Key()
+	cur := device.Detect(ctx, probeBackend(ctx)).Key()
 
 	// Group by fingerprint. Rows measured under different hardware/config are
 	// NOT comparable and must never be ranked against each other.
@@ -787,12 +852,18 @@ func trunc(s string, n int) string {
 
 // ---------------------------------------------------------------- diag
 func cmdDiag(ctx context.Context, args []string) int {
-	if len(args) < 1 {
+	fs := flag.NewFlagSet("diag", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	backend := fs.String("backend", "auto", "auto|ollama|llama-server")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() < 1 {
 		errPrint("missing model", "", "fitr diag <model>")
 		return exitUsage
 	}
-	model := args[0]
-	c, code := newClient(ctx, model)
+	model := fs.Arg(0)
+	c, code := newBackend(ctx, model, *backend)
 	if code != exitOK {
 		return code
 	}
@@ -830,6 +901,7 @@ func cmdDoctor(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	n := fs.Int("n", 5, "identical generations per determinism probe")
+	backend := fs.String("backend", "auto", "auto|ollama|llama-server")
 	if err := fs.Parse(permute(args)); err != nil {
 		return exitUsage
 	}
@@ -838,7 +910,7 @@ func cmdDoctor(ctx context.Context, args []string) int {
 		return exitUsage
 	}
 	model := fs.Arg(0)
-	c, code := newClient(ctx, model)
+	c, code := newBackend(ctx, model, *backend)
 	if code != exitOK {
 		return code
 	}
@@ -855,7 +927,7 @@ func cmdDoctor(ctx context.Context, args []string) int {
 	}
 
 	fp := device.Detect(ctx, c)
-	fmt.Printf("doctor: %s on %s (%s)\n", model, fp.GPU, fp.Ollama)
+	fmt.Printf("doctor: %s on %s (%s)\n", model, fp.GPU, fp.Runtime)
 	r, err := eval.RunDoctor(ctx, c, model, *n, eval.DoctorOpts{
 		Config: fp.Config,
 		Placement: func(ctx context.Context) string {
@@ -882,8 +954,7 @@ func cmdDoctor(ctx context.Context, args []string) int {
 
 // ---------------------------------------------------------------- device
 func cmdDevice(ctx context.Context, args []string) int {
-	c := ollama.New()
-	fp := device.Detect(ctx, c)
+	fp := device.Detect(ctx, probeBackend(ctx))
 	prof, _ := device.SelectProfile("", fp)
 	if len(args) > 0 && args[0] == "--display=json" {
 		b, _ := json.MarshalIndent(map[string]any{
@@ -897,7 +968,7 @@ func cmdDevice(ctx context.Context, args []string) int {
 	fmt.Printf("  ram_gb             %.1f\n", fp.RAMGb)
 	fmt.Printf("  gpu                %s\n", fp.GPU)
 	fmt.Printf("  gpu_driver         %s  (%s)\n", fp.GPUDriver, fp.GPUDriverDate)
-	fmt.Printf("  ollama             %s\n", fp.Ollama)
+	fmt.Printf("  ollama             %s\n", fp.Runtime)
 	fmt.Printf("  inference_device   %s\n", fp.InferenceDevice)
 	fmt.Println("  config")
 	keys := make([]string, 0, len(fp.Config))
@@ -918,8 +989,7 @@ func cmdDevice(ctx context.Context, args []string) int {
 }
 
 func cmdProfiles(ctx context.Context) int {
-	c := ollama.New()
-	fp := device.Detect(ctx, c)
+	fp := device.Detect(ctx, probeBackend(ctx))
 	active, _ := device.SelectProfile("", fp)
 	profs, err := device.LoadProfiles()
 	if err != nil {

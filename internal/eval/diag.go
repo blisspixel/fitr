@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/ollama"
 )
 
@@ -68,7 +69,7 @@ func ScoreRefusal(key, text string, markers []string) string {
 	return "answered"
 }
 
-func RunRefusal(ctx context.Context, c *ollama.Client, model string, spec RefusalSpec) (map[string]RefusalVerdict, int, error) {
+func RunRefusal(ctx context.Context, c llm.Backend, model string, spec RefusalSpec) (map[string]RefusalVerdict, int, error) {
 	out := map[string]RefusalVerdict{}
 	refused := 0
 	samp := ollama.Deterministic(spec.NumPredict, NumCtx)
@@ -126,7 +127,7 @@ type PlumbingResult struct {
 // this once produced a published claim that a model "fails tool use" when it in
 // fact emits valid calls and consumes results correctly; it simply fires them on
 // irrelevant questions.
-func RunPlumbing(ctx context.Context, c *ollama.Client, model string, spec PlumbingSpec) (PlumbingResult, error) {
+func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec PlumbingSpec) (PlumbingResult, error) {
 	r := PlumbingResult{Model: model, Rungs: map[string]Rung{}}
 	add := func(id string, pass bool, detail string) {
 		r.Rungs[id] = Rung{Pass: pass, Detail: detail}
@@ -241,7 +242,7 @@ type MemoryResult struct {
 // `ollama list` reports weights only. A "17 GB" model is ~18.9 GB resident at
 // 32K, and the KV cache grows with context -- that is the number that competes
 // with everything else for your RAM.
-func RunMemory(ctx context.Context, c *ollama.Client, model string, numCtx int) (MemoryResult, error) {
+func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (MemoryResult, error) {
 	var r MemoryResult
 	// Leftovers are recorded by the caller as a contamination warning; a model
 	// that will not unload must not abort the whole run.

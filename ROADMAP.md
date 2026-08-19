@@ -64,9 +64,9 @@ verdict** (design rule 7).
 | Limitation | Consequence |
 |---|---|
 | ~23 binary trials per default run | MDE ≈ 29pp. Better than the ~33pp of six tasks, still separates *broken* from *working*, not *good* from *slightly better*. `-k 3` on checks triples the sample. |
-| Ollama only | excludes llama.cpp server, LM Studio, vLLM, MLX users — likely the majority of serious local users |
-| Cold/warm TTFT cannot be split on Ollama | the API exposes no cache counter; the fix is the llama-server adapter, not more code here |
-| 20-turn agentic ceiling, `reasoning_content` dropped | both flagged in docs/inference-frontier as exposed; long-horizon agent verdicts are optimistic |
+| Ollama + llama-server only | LM Studio, vLLM, MLX users still excluded until the generic OpenAI adapter lands |
+| Cold/warm TTFT split not yet applied | cached-token counts are now recorded on llama-server; the speed phase does not use them yet |
+| No compaction watchdog in the agentic loop | 40 turns now, but a model that never manages its context is not yet caught before the window fills |
 | 2 device profiles | `lappy` and an uncalibrated `default` |
 | Terminal output only | no shareable artifact |
 
@@ -74,30 +74,43 @@ verdict** (design rule 7).
 
 ## 0.3 — Meet people where their models already are
 
-Promoted above everything else that remains, for two reasons found in the
+Promoted above everything else that remained, for two reasons found in the
 August 2026 research pass: it roughly **triples the addressable users**, and
-several measurements are **blocked** on it — llama.cpp's server uniquely
-exposes `timings.cache_n` (the only honest cold/warm TTFT split), logprobs,
-`tool_choice`, and a chat-template capability probe. Ollama exposes none of
-those, and some numbers cannot be measured correctly without them.
+several measurements were **blocked** on it — llama.cpp's server uniquely
+exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
+`tool_choice`, and a chat-template capability probe.
 
-- [ ] **llama-server adapter first**, then one generic OpenAI-compatible
-      adapter plus a capability probe — not N bespoke clients. Roughly 10 of 12
-      relevant runtimes are OpenAI-shaped.
-- [ ] **Capability probe over hardcoded knowledge.** Read what the endpoint
-      says it supports (tools/thinking/vision); never infer from a model's
-      name. The case study in docs/ records a shipped bug from a name-prefix
-      guess.
-- [ ] **Backend in the fingerprint.** Vulkan vs CUDA vs Metal vs ROCm is not a
-      footnote; it is a different measurement.
-- [ ] **Native runtime detection** — notice what is already running rather
-      than demanding a flag; do not hardcode ports.
+- [x] **llama-server backend** behind a serving-backend interface
+      (`internal/llm`). Native `/completion` for generation (server timings +
+      cached-token counts land in every Metrics), OpenAI `/v1/chat/completions`
+      for tool calling — the code path real agent frameworks exercise. String
+      -encoded tool arguments are normalized; *malformed* ones survive as
+      malformed so the tool loop counts them instead of laundering them.
+- [x] **Capability probe over hardcoded knowledge** — tools/vision read from
+      `/props` (`chat_template_caps` when the build exposes it), never from
+      the model's name. The case study in docs/ records a shipped bug from a
+      name-prefix guess.
+- [x] **Runtime in the fingerprint** — "llama-server b6xxx" vs "0.32.14";
+      `board` refuses to rank across them.
+- [x] **Auto-detection** — probes Ollama then llama-server; `--backend` and
+      `$FITR_BACKEND` to force.
+- [ ] **Exploit the cold/warm receipt** — `CachedTokens` is recorded but the
+      speed phase does not yet split cold vs warm TTFT on backends that
+      report it. That split is the single biggest measurement error available.
+- [ ] **Generic OpenAI-compatible adapter** for LM Studio / vLLM / SGLang —
+      one adapter plus the capability probe, not N bespoke clients.
+- [ ] **Wider runtime discovery** — more than two well-known ports; notice
+      what is already running.
+- [ ] **GPU backend (Vulkan/CUDA/Metal/ROCm) in the fingerprint** — the
+      runtime version implies it poorly; read it from the server where exposed.
 
 ## 0.2.x — finish making the measurement trustworthy
 
-- [ ] **Raise the agentic floor to 40 turns** with a compaction watchdog, and
-      **round-trip `reasoning_content`** in the loop. Both are documented
-      exposures that make `--full` optimistic for thinking models.
+- [x] **40-turn agentic floor** (was 20 — that measured early-abort behaviour)
+      and **`reasoning_content` round-trip** in the loop; the Message struct
+      simply had no field for it, so re-serializing the transcript deleted it.
+- [ ] **Compaction watchdog** — flag a model that lets the transcript grow
+      to the context limit without managing it.
 - [ ] **Calibrate the check battery** by adversarial filtering: run it across
       known-good and known-degraded quants of the same model; drop items that
       never discriminate. (The Aider polyglot redesign kept 225 of 697

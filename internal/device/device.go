@@ -16,14 +16,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 
-	"github.com/blisspixel/fitr/internal/ollama"
+	"github.com/blisspixel/fitr/internal/llm"
 )
 
 //go:embed all:profiles
@@ -136,14 +135,18 @@ func SelectProfile(name string, fp Fingerprint) (Profile, error) {
 
 // ---------------------------------------------------------------- fingerprint
 type Fingerprint struct {
-	Host            string            `json:"host"`
-	OS              string            `json:"os"`
-	CPU             string            `json:"cpu"`
-	RAMGb           float64           `json:"ram_gb"`
-	GPU             string            `json:"gpu"`
-	GPUDriver       string            `json:"gpu_driver"`
-	GPUDriverDate   string            `json:"gpu_driver_date"`
-	Ollama          string            `json:"ollama"`
+	Host          string  `json:"host"`
+	OS            string  `json:"os"`
+	CPU           string  `json:"cpu"`
+	RAMGb         float64 `json:"ram_gb"`
+	GPU           string  `json:"gpu"`
+	GPUDriver     string  `json:"gpu_driver"`
+	GPUDriverDate string  `json:"gpu_driver_date"`
+	// Runtime is the serving runtime and version - "0.32.14" for Ollama
+	// (bare, for continuity with results recorded before other backends
+	// existed; hence the json tag), "llama-server b6xxx" otherwise. A runtime
+	// change is a different measurement.
+	Runtime         string            `json:"ollama"`
 	InferenceDevice string            `json:"inference_device"`
 	Config          map[string]string `json:"config"`
 }
@@ -153,7 +156,7 @@ type Fingerprint struct {
 func (f Fingerprint) Key() string {
 	c := f.Config
 	return strings.Join([]string{
-		f.Host, f.GPU, f.GPUDriver, f.Ollama,
+		f.Host, f.GPU, f.GPUDriver, f.Runtime,
 		c["OLLAMA_FLASH_ATTENTION"], c["OLLAMA_KV_CACHE_TYPE"],
 	}, "|")
 }
@@ -164,20 +167,27 @@ var configKeys = []string{
 	"OLLAMA_CONTEXT_LENGTH", "LLAMA_ARG_FIT",
 }
 
-func Detect(ctx context.Context, c *ollama.Client) Fingerprint {
+func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	host, _ := os.Hostname()
 	gpu, drv, date := gpuInfo()
 	cfg := map[string]string{}
-	for _, k := range configKeys {
-		cfg[k] = os.Getenv(k)
+	version := ""
+	isOllama := b != nil && b.Name() == "ollama"
+	if isOllama {
+		for _, k := range configKeys {
+			cfg[k] = os.Getenv(k)
+		}
+		// The server log is authoritative for how Ollama was actually started,
+		// which frequently differs from this process's environment.
+		mergeServerLogConfig(cfg)
 	}
-	// The server log is authoritative for how Ollama was actually started,
-	// which frequently differs from this process's environment.
-	mergeServerLogConfig(cfg)
+	if b != nil {
+		version = b.Version(ctx)
+	}
 	return Fingerprint{
 		Host: host, OS: runtime.GOOS, CPU: cpuName(), RAMGb: ramGB(),
 		GPU: gpu, GPUDriver: drv, GPUDriverDate: date,
-		Ollama: ollamaVersion(), InferenceDevice: inferenceDevice(ctx, c, ""),
+		Runtime: version, InferenceDevice: inferenceDevice(ctx, b, ""),
 		Config: cfg,
 	}
 }
@@ -187,9 +197,9 @@ func Detect(ctx context.Context, c *ollama.Client) Fingerprint {
 // /api/ps is authoritative and cross-platform: size_vram > 0 means the weights
 // are on the GPU. Log parsing is only a fallback -- it is platform-specific and
 // the startup line scrolls out of a busy log surprisingly fast.
-func inferenceDevice(ctx context.Context, c *ollama.Client, model string) string {
-	if c != nil {
-		if running, err := c.PS(ctx); err == nil {
+func inferenceDevice(ctx context.Context, b llm.Backend, model string) string {
+	if b != nil {
+		if running, err := b.PS(ctx); err == nil {
 			for _, m := range running {
 				if model != "" && m.Name != model {
 					continue
@@ -203,27 +213,22 @@ func inferenceDevice(ctx context.Context, c *ollama.Client, model string) string
 			}
 		}
 	}
-	if line := lastLogMatch(`msg="inference compute".*`); line != "" {
-		lib := submatch(`library=(\S+)`, line)
-		desc := submatch(`description="([^"]*)"`, line)
-		if lib != "" || desc != "" {
-			return strings.TrimSpace(lib + " / " + desc)
+	// Log parsing is an Ollama-only fallback; other runtimes do not write this log.
+	if b != nil && b.Name() == "ollama" {
+		if line := lastLogMatch(`msg="inference compute".*`); line != "" {
+			lib := submatch(`library=(\S+)`, line)
+			desc := submatch(`description="([^"]*)"`, line)
+			if lib != "" || desc != "" {
+				return strings.TrimSpace(lib + " / " + desc)
+			}
 		}
 	}
 	return "unknown"
 }
 
 // InferenceDeviceFor re-checks placement for a specific loaded model.
-func InferenceDeviceFor(ctx context.Context, c *ollama.Client, model string) string {
-	return inferenceDevice(ctx, c, model)
-}
-
-func ollamaVersion() string {
-	out, err := exec.Command("ollama", "--version").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(strings.ReplaceAll(string(out), "ollama version is ", ""))
+func InferenceDeviceFor(ctx context.Context, b llm.Backend, model string) string {
+	return inferenceDevice(ctx, b, model)
 }
 
 func serverLogPath() string {

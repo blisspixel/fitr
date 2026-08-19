@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/ollama"
 )
 
@@ -58,7 +59,7 @@ const doctorJSONPrompt = "Return a JSON object with a single key \"planets\" who
 
 // RunDoctor executes the health battery. Cheap by design: a few dozen short
 // generations, so it is reasonable to run before trusting anything else.
-func RunDoctor(ctx context.Context, c *ollama.Client, model string, runs int, opts DoctorOpts) (DoctorResult, error) {
+func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts DoctorOpts) (DoctorResult, error) {
 	if runs < 2 {
 		runs = 2
 	}

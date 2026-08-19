@@ -67,7 +67,7 @@ func TestSelectProfileExplicitNameWins(t *testing.T) {
 func TestFingerprintKeyChangesWithConfig(t *testing.T) {
 	// This is the whole comparability contract: change the driver or the KV
 	// cache dtype and prior results are explicitly void.
-	base := Fingerprint{Host: "h", GPU: "g", GPUDriver: "1.0", Ollama: "0.32",
+	base := Fingerprint{Host: "h", GPU: "g", GPUDriver: "1.0", Runtime: "0.32",
 		Config: map[string]string{"OLLAMA_FLASH_ATTENTION": "1", "OLLAMA_KV_CACHE_TYPE": "f16"}}
 	same := base
 	if base.Key() != same.Key() {

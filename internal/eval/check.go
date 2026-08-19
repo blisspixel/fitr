@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/ollama"
 )
 
@@ -103,7 +104,7 @@ type CheckOutcome struct {
 
 // RunCheck generates the instance, prompts the model once, and grades the
 // reply in pure Go. Pass/fail is programmatic, never a model's opinion.
-func RunCheck(ctx context.Context, c *ollama.Client, model string, cs CheckSpec, seed uint64) (CheckOutcome, error) {
+func RunCheck(ctx context.Context, c llm.Backend, model string, cs CheckSpec, seed uint64) (CheckOutcome, error) {
 	out := CheckOutcome{TaskID: cs.ID, Family: cs.Family, Need: cs.Need, Origin: cs.Origin, Seed: seed}
 	inst := Generate(cs, seed)
 	samp := ollama.Deterministic(cs.NumPredict, NumCtx)

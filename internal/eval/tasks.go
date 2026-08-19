@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/ollama"
 )
 
@@ -33,7 +34,7 @@ type SpeedResult struct {
 // identical long prompt means runs 2..K never actually prefill and the reported
 // figure becomes fiction -- observed at 19444 tok/s on a device that genuinely
 // does ~140.
-func RunSpeed(ctx context.Context, c *ollama.Client, model string, s *Spec, nonce string) (SpeedResult, error) {
+func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce string) (SpeedResult, error) {
 	var out SpeedResult
 	// Warm the model first. TTFT must measure time-to-first-token for a LOADED
 	// model; including a cold load reported 4.33s where the warm figure is 0.97s.
@@ -179,7 +180,7 @@ func extractCode(text, prefer string) string {
 
 // RunExec writes fixtures, asks the model, applies its code, and EXECUTES the
 // tests. Pass/fail is execution, never a model's opinion about its own work.
-func RunExec(ctx context.Context, c *ollama.Client, model string, spec ExecSpec, dir string) (ExecResult, error) {
+func RunExec(ctx context.Context, c llm.Backend, model string, spec ExecSpec, dir string) (ExecResult, error) {
 	var r ExecResult
 	prompt, err := RenderPrompt(spec.Prompt, spec.Files)
 	if err != nil {
@@ -282,7 +283,7 @@ var seqCode = map[string]string{
 // RunToolLoop drives a real tool loop and verifies the RESULT, not the chatter.
 // Scored on what actually breaks unattended runs: malformed calls, looping on
 // an identical action, and failing to terminate.
-func RunToolLoop(ctx context.Context, c *ollama.Client, model string, spec ToolLoopSpec, dir string) (ToolLoopResult, error) {
+func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoopSpec, dir string) (ToolLoopResult, error) {
 	r := ToolLoopResult{Ended: "turn_cap"}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return r, err

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -83,6 +84,11 @@ type Metrics struct {
 	PrefillTPS   float64 `json:"prefill_tps"`
 	LoadSeconds  float64 `json:"load_s"`
 	DoneReason   string  `json:"done_reason"`
+	// CachedTokens is how much of the prompt was served from the prefix cache
+	// rather than evaluated - the receipt that separates a warm TTFT from a
+	// cold one, which differ by 70-200x. Ollama does not report it (always 0);
+	// llama-server does.
+	CachedTokens int `json:"cached_tokens,omitempty"`
 	// Truncated means the model hit the token cap. Worth scoring as a failure:
 	// roughly 92% of truncations are repetition loops wearing a cap.
 	Truncated bool `json:"truncated"`
@@ -379,6 +385,32 @@ func (c *Client) StopAll(ctx context.Context) ([]string, error) {
 		names = append(names, m.Name)
 	}
 	return names, nil
+}
+
+func (c *Client) Name() string { return "ollama" }
+func (c *Client) URL() string  { return c.BaseURL }
+
+// Version asks the server, falling back to the CLI. The server's answer wins:
+// the fingerprint must describe the process that served the tokens, and that
+// frequently differs from whatever binary happens to be first on PATH.
+func (c *Client) Version(ctx context.Context) string {
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/version", nil)
+	if resp, err := c.HTTP.Do(req); err == nil {
+		defer resp.Body.Close()
+		var v struct {
+			Version string `json:"version"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&v) == nil && v.Version != "" {
+			return v.Version
+		}
+	}
+	out, err := exec.Command("ollama", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.ReplaceAll(string(out), "ollama version is ", ""))
 }
 
 func (c *Client) Reachable(ctx context.Context) bool {
