@@ -10,11 +10,13 @@ quant. The leaderboard was someone else's hardware.
 ```bash
 fitr advise some-new-model:tag          # does it fit, which flag if not
 fitr run some-new-model:tag --full --pull
+fitr apply some-new-model:tag           # print how to persist the measured ctx
 fitr board                              # compare everything you have measured
 ```
 
 <img src="docs/assets/advise.svg" alt="fitr advise (demo data)" width="820">
 <img src="docs/assets/run.svg" alt="fitr run scorecard (demo data)" width="820">
+<img src="docs/assets/apply.svg" alt="fitr apply (demo data)" width="820">
 <img src="docs/assets/board.svg" alt="fitr board (demo data)" width="820">
 
 One run tells you, for this device and this config:
@@ -61,6 +63,7 @@ Then:
 fitr                             # what this box is, what is already serving
 fitr advise qwen3:30b            # does it fit, and if not, which flag to try
 fitr run qwen3:30b --ctx 8192 --full
+fitr apply qwen3:30b             # print how to persist the measured ctx
 fitr board
 ```
 
@@ -71,8 +74,9 @@ Pin a version with `FITR_VERSION=v0.2.0`, relocate with `FITR_BIN`.
 
 | Command | Does |
 |---|---|
-| `fitr run <model> [--quick\|--full] [-k N]` | measure a model on this device (~4 to ~18 min by level) |
+| `fitr run <model> [--quick\|--full] [-k N] [--ctx N]` | measure a model on this device (~4 to ~18 min by level) |
 | `fitr advise <model>` | does it fit here, and if not, which flag to try (`--load` / `--fit` to measure) |
+| `fitr apply [model]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | request-level knobs; fingerprint diff of two saved runs (no silent sweep) |
 | `fitr export <model> [--out PATH]` | write a self-contained HTML scorecard (opt-in; contains the fingerprint) |
 | `fitr board [--current]` | compare everything, grouped by device |

@@ -133,8 +133,11 @@ prints "not recommended."
 A verdict without a remedy is half an answer. `fitr advise` prints
 Compatible / Low memory / Incompatible, and every negative tier carries the
 flag that fixes it and the GB that results (`try num_ctx=4096 -> fits in
-19.4 GB`). "Too large" is a dead end; the flag is the product. MoE decode
-class uses active parameters, not total.
+19.4 GB`). `fitr run --ctx 4096` measures that setting; `fitr apply` prints
+how to persist it and does not restart the server. "Too large" is a dead
+end; the flag is the product. MoE decode class uses active parameters, not
+total. The request context is on the scorecard, the HTML fingerprint, and
+the board header, because a number without its config is meaningless.
 
 ## Why Go
 

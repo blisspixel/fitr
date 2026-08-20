@@ -98,6 +98,10 @@ verdict** (design rule 7).
   with a remedy on the negative tiers. SKIP when VRAM, weights, or
   architecture cannot be measured; never a GB number guessed from the GPU
   name. MoE decode class uses active parameters, not total.
+- **`fitr apply`** - prints how to persist a measured `num_ctx`. Never
+  restarts the server. Scorecard, HTML, and board all show the request
+  context; a ctx-only split is this machine at a different window, not
+  different hardware.
 - **Shareable HTML scorecard** - `fitr export` / `fitr run --html`. Opt-in,
   self-contained, fingerprint on the page, raw model output omitted.
 
@@ -173,11 +177,16 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
 - [ ] **Quant-flip calibration on hardware.** Drop check items that never
       flip between known-good and known-degraded quants of the same model.
 - [x] **`fitr tune`, first honest cut.** Prints the request-level knobs
-      (`num_ctx`, `num_batch`, `num_gpu`) and diffs two saved fingerprints.
-      It does **not** sweep: llama-bench owns throughput-only points, and a
-      flash-attention quality regression is why throughput-only is not
-      enough. Server-level env (`OLLAMA_FLASH_ATTENTION`, `KV_CACHE_TYPE`)
-      still needs restart orchestration fitr does not have.
+      (`num_ctx`, `num_batch`, `num_gpu`) and diffs two saved fingerprints
+      (including a `num_ctx` split). It does **not** sweep: llama-bench owns
+      throughput-only points, and a flash-attention quality regression is why
+      throughput-only is not enough. Server-level env (`OLLAMA_FLASH_ATTENTION`,
+      `KV_CACHE_TYPE`) still needs restart orchestration fitr does not have.
+- [x] **`fitr apply`.** Prints the copy-paste to persist a measured context
+      (Ollama Modelfile / llama-server `--ctx-size` / openai-compat launch
+      flags). Never mutates or restarts the server. The scorecard, HTML
+      artifact, and board all show `num_ctx`; a ctx-only split is labeled as
+      this machine at a different context, not as different hardware.
 - [ ] **`fitr tune` sweeps** quality + degeneracy + throughput jointly per
       request-level point, once restart orchestration exists for server env.
 
@@ -194,13 +203,15 @@ loop, closable on someone else's machine.
 | Honest measurement on Ollama, llama-server, OpenAI-compat | **done** (0.3) |
 | Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals, quant flips) | **mostly done** - check-battery calibration still needs hardware; flip machinery is in `compare` |
 | `fitr advise` names a model + settings with a remedy | **done** for the NIM-shaped verdict; `--load`/`--fit` dummy-allocate; still no catalog |
+| Persist a measured setting without silent mutation | **done** - `fitr apply` prints the command; never restarts the server |
 | A result can leave the terminal | **done** - `fitr export` / `fitr run --html`, opt-in, fingerprint in the page |
 | Community device profiles beyond `lappy` | **scaffolded** - `fitr profiles new` writes an UNCALIBRATED local copy; no invented rtx-4090 numbers in the repo |
 
 We do **not** ship 1.0 with an uncalibrated `advise`, a public leaderboard,
 or LLM-as-judge. Battery calibration still needs hardware. `tune` can trail
 advise: a one-line remedy (`try num_ctx=4096`) is advise; `fitr run --ctx 4096`
-applies it. Sweeping knobs is tune.
+measures it; `fitr apply` prints how to persist it (and never restarts the
+server). Sweeping knobs is tune.
 
 ## 0.4 - `fitr advise`
 
@@ -209,7 +220,8 @@ The step that turns a chore into a product.
 - [x] Three-tier verdict with remediation in one line - Compatible / Low
       memory (`try num_ctx=4096 -> fits in 21.3 GB`) / Incompatible. SKIP
       when VRAM, weights, or architecture cannot be measured - never a
-      fabricated GB number, never a guess from the GPU's name.
+      fabricated GB number, never a guess from the GPU's name. Next line is
+      `fitr run --ctx N --full`; `fitr apply` prints how to persist N.
 - [x] **Measure fit, don't model it** - `advise --load` observes Ollama
       resident size (compute buffers included); `advise --fit` runs
       `llama-fit-params` on a GGUF when present. Live resident still beats

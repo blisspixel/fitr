@@ -500,6 +500,98 @@ func formatParams(r Report) string {
 	return ""
 }
 
+// ApplyPlan is the copy-paste to persist a measured context. Mutates is
+// always false: fitr prints these commands, it never restarts a server.
+type ApplyPlan struct {
+	Model   string   `json:"model,omitempty"`
+	Ctx     int      `json:"ctx"`
+	Backend string   `json:"backend,omitempty"`
+	Mutates bool     `json:"mutates"`
+	Note    string   `json:"note"`
+	Steps   []string `json:"steps"`
+}
+
+// PlanApply names the commands that persist ctx on a serving runtime.
+// Unknown or empty backend prints every known recipe rather than guessing.
+func PlanApply(backend, model string, ctxN int) ApplyPlan {
+	p := ApplyPlan{
+		Model:   model,
+		Ctx:     ctxN,
+		Backend: strings.ToLower(backend),
+		Mutates: false,
+		Note:    "fitr does not restart or mutate the serving process",
+	}
+	switch p.Backend {
+	case "ollama":
+		p.Steps = applyOllama(model, ctxN)
+	case "llama-server", "llamaserver":
+		p.Backend = "llama-server"
+		p.Steps = applyLlama(ctxN)
+	case "openai":
+		p.Steps = applyOpenAI(ctxN)
+	default:
+		p.Backend = ""
+		p.Steps = append(p.Steps, "ollama:")
+		p.Steps = append(p.Steps, applyOllama(model, ctxN)...)
+		p.Steps = append(p.Steps, "llama-server:")
+		p.Steps = append(p.Steps, applyLlama(ctxN)...)
+		p.Steps = append(p.Steps, "openai-compat:")
+		p.Steps = append(p.Steps, applyOpenAI(ctxN)...)
+	}
+	return p
+}
+
+func applyOllama(model string, ctxN int) []string {
+	from := model
+	if from == "" {
+		from = "<model>"
+	}
+	tag := fmt.Sprintf("%s-ctx%d", from, ctxN)
+	return []string{
+		fmt.Sprintf("per-request: already what `fitr run --ctx %d` sends as options.num_ctx", ctxN),
+		fmt.Sprintf("persist a derived tag: write a Modelfile with FROM %s and PARAMETER num_ctx %d", from, ctxN),
+		fmt.Sprintf("then: ollama create %s -f Modelfile", tag),
+	}
+}
+
+func applyLlama(ctxN int) []string {
+	return []string{
+		"KV is allocated at launch; a per-request n_ctx cannot grow it",
+		fmt.Sprintf("restart with: llama-server -m <your.gguf> --ctx-size %d", ctxN),
+	}
+}
+
+func applyOpenAI(ctxN int) []string {
+	return []string{
+		"context is launch-time on these servers; flag names differ",
+		fmt.Sprintf("vLLM: --max-model-len %d", ctxN),
+		fmt.Sprintf("SGLang: --context-length %d", ctxN),
+		"LM Studio: set context length in the server UI",
+	}
+}
+
+// WriteApply prints the human form. Never claims fitr ran the commands.
+func WriteApply(w io.Writer, p ApplyPlan) {
+	fmt.Fprintln(w, "  apply prints how to persist a measured context.")
+	fmt.Fprintln(w, "  "+p.Note+".")
+	fmt.Fprintln(w)
+	if p.Model != "" {
+		fmt.Fprintf(w, "  model          %s\n", p.Model)
+	}
+	fmt.Fprintf(w, "  ctx            %d\n", p.Ctx)
+	if p.Backend != "" {
+		fmt.Fprintf(w, "  runtime        %s\n", p.Backend)
+	}
+	fmt.Fprintln(w)
+	for _, s := range p.Steps {
+		if strings.HasSuffix(s, ":") && !strings.Contains(s, " ") {
+			fmt.Fprintf(w, "  %s\n", s)
+			continue
+		}
+		fmt.Fprintf(w, "    %s\n", s)
+	}
+}
+
 // ArchFromKVs reads GGUF-style metadata keys, including the architecture
 // prefix Ollama exposes as model_info. Missing fields stay zero; Evaluate
 // SKIPs when they are required.

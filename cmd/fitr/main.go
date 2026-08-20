@@ -64,6 +64,7 @@ func usage() {
 usage:
   fitr run <model> [--quick|--full] [-k N] [--ctx N] [--profile P] [--display MODE] [--html]
   fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]
+  fitr apply [model] [--ctx N]
   fitr tune [model-a model-b]
   fitr export <model> [--out PATH] [--retonr]
   fitr board [--current]
@@ -93,6 +94,8 @@ examples:
   fitr doctor qwen3-coder:30b
   fitr advise qwen3:30b
   fitr advise ./model.gguf --vram-gb 8 --fit
+  fitr run qwen3:30b --ctx 4096 --full
+  fitr apply qwen3:30b
   fitr tune
   fitr tune qwen3:30b qwen3:30b-q8
   fitr export qwen3:30b --out scorecard.html
@@ -117,6 +120,8 @@ func run() int {
 		return cmdRun(ctx, os.Args[2:])
 	case "advise":
 		return cmdAdvise(ctx, os.Args[2:])
+	case "apply":
+		return cmdApply(ctx, os.Args[2:])
 	case "tune":
 		return cmdTune(ctx, os.Args[2:])
 	case "export":
@@ -669,9 +674,72 @@ func cmdAdvise(ctx context.Context, args []string) int {
 				next = fmt.Sprintf("fitr run %s --ctx %d --full", in.Model, rep.FlagValue)
 			}
 			fmt.Fprintf(os.Stderr, "\n  next   %s\n", next)
+			if rep.FlagValue > 0 {
+				fmt.Fprintf(os.Stderr, "         fitr apply %s   after a passing run, to persist num_ctx=%d\n",
+					in.Model, rep.FlagValue)
+			}
 		}
 	}
 	return rep.ExitCode()
+}
+
+// ---------------------------------------------------------------- apply
+// cmdApply prints the command to persist a measured context. It never
+// restarts or mutates the serving process; that is the whole point.
+func cmdApply(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	ctxSize := fs.Int("ctx", 0, "context to persist (default: latest result, else 4096 as the worked example)")
+	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
+	mode := fs.String("display", "auto", "auto|plain|json|none")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	model := ""
+	if fs.NArg() > 0 {
+		model = normalizeModelRef(fs.Arg(0))
+	}
+	kind := *backend
+	n := *ctxSize
+	if model != "" && n <= 0 {
+		if all, err := loadResults(); err == nil {
+			if r := latestNamed(all, model); r != nil {
+				n = resultNumCtx(r)
+			}
+		}
+		if n <= 0 {
+			errPrint("no saved result for this model", "",
+				"fitr run "+model+" --full   or   fitr apply "+model+" --ctx 4096")
+			return exitError
+		}
+	}
+	if kind == "" || kind == "auto" {
+		if found := llm.Discover(ctx); len(found) > 0 {
+			kind = found[0].Kind
+		} else {
+			kind = ""
+		}
+	}
+	if n <= 0 {
+		n = 4096
+	}
+	plan := advise.PlanApply(kind, model, n)
+	switch render.Resolve(*mode) {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(plan); err != nil {
+			errPrint(err.Error(), "", "")
+			return exitError
+		}
+	case "none":
+	default:
+		advise.WriteApply(os.Stdout, plan)
+		if model == "" {
+			fmt.Fprintln(os.Stdout, "\n  next   fitr apply <model> [--ctx N]   to pin a measured run")
+		}
+	}
+	return exitOK
 }
 
 // ---------------------------------------------------------------- tune
@@ -695,10 +763,10 @@ func cmdTune(ctx context.Context, args []string) int {
     OLLAMA_KV_CACHE_TYPE     f16 vs q8_0 vs q4_0; changes the fingerprint
 
   measure a point: set the knob, then
-    fitr run <model> --full
+    fitr run <model> [--ctx N] --full
     fitr compare <a> <b>
   score quality + degeneracy + throughput jointly. llama-bench already owns
-  throughput-only sweeps.
+  throughput-only sweeps. Persist a measured ctx with fitr apply.
 
 `)
 	if fs.NArg() == 0 {
@@ -722,6 +790,9 @@ func cmdTune(ctx context.Context, args []string) int {
 	}
 	fmt.Fprintf(os.Stdout, "  %s  vs  %s\n", a.Model, b.Model)
 	d := a.Device.Diff(b.Device)
+	if ca, cb := resultNumCtx(a), resultNumCtx(b); ca != cb {
+		d = append([][3]string{{"num_ctx", fmt.Sprintf("%d", ca), fmt.Sprintf("%d", cb)}}, d...)
+	}
 	if len(d) == 0 {
 		fmt.Fprintln(os.Stdout, "  same fingerprint - quality is `fitr compare`'s job, not a device change")
 		return exitOK
@@ -853,6 +924,9 @@ func cmdRun(ctx context.Context, args []string) int {
 		if !*htmlFlag {
 			fmt.Fprintf(os.Stderr, "         fitr export %s   for a shareable HTML scorecard\n", model)
 		}
+		if req := eval.ResolvedCtx(*ctxSize); req != eval.NumCtx {
+			fmt.Fprintf(os.Stderr, "         fitr apply %s   to persist num_ctx=%d on the server\n", model, req)
+		}
 		if h := retonr.Hint(model); h != "" {
 			fmt.Fprintf(os.Stderr, "         %s\n", h)
 		}
@@ -966,8 +1040,8 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		Level:         level, Repeats: reps, NumCtx: reqCtx,
 		Device: fp, DeviceKey: fp.Key(), Profile: prof.Name, ModelMeta: info,
 	}
-	if reqCtx != eval.NumCtx {
-		res.DeviceKey = res.DeviceKey + fmt.Sprintf("|ctx=%d", reqCtx)
+	if suf := eval.CtxKeySuffix(reqCtx); suf != "" {
+		res.DeviceKey = res.DeviceKey + suf
 		disp.Note(fmt.Sprintf("num_ctx=%d (advise remedy applied; default is %d)", reqCtx, eval.NumCtx), "")
 	}
 	// Fresh instances every run by default; a pinned seedset trades that
@@ -1229,7 +1303,8 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	res.Meta = render.Meta{
 		ParamSize: info.Details.ParameterSize, Quant: info.Details.QuantizationLevel,
 		Family: info.Details.Family, GPU: fp.GPU, Driver: fp.GPUDriver,
-		Device: res.Device.InferenceDevice, Profile: prof.Name, Repeats: reps,
+		Device: res.Device.InferenceDevice, Profile: prof.Name,
+		NumCtx: reqCtx, Repeats: reps,
 		DecodeMean: res.DecodeSum.Mean, DecodeSD: res.DecodeSum.SD,
 		DecodeMin: res.DecodeSum.Min, DecodeMax: res.DecodeSum.Max,
 		DecodeN:     res.DecodeSum.N,
@@ -1546,6 +1621,7 @@ func artifactFrom(r *Result) (render.Artifact, error) {
 		Family:    r.ModelMeta.Details.Family,
 		GPU:       r.Device.GPU, Driver: r.Device.GPUDriver,
 		Device: r.Device.InferenceDevice, Profile: prof.Name,
+		NumCtx:     resultNumCtx(r),
 		Repeats:    r.Repeats,
 		DecodeMean: r.DecodeSum.Mean, DecodeSD: r.DecodeSum.SD,
 		DecodeMin: r.DecodeSum.Min, DecodeMax: r.DecodeSum.Max,
@@ -1620,9 +1696,11 @@ func cmdBoard(ctx context.Context, args []string) int {
 		return exitError
 	}
 	cur := device.Detect(ctx, probeBackend(ctx)).Key()
+	curHW := eval.HardwareKey(cur)
 
 	// Group by fingerprint. Rows measured under different hardware/config are
-	// NOT comparable and must never be ranked against each other.
+	// NOT comparable and must never be ranked against each other. A |ctx=N
+	// suffix is a config split, not a different box - labeled as such below.
 	groups := map[string][]*Result{}
 	var order []string
 	for _, r := range results {
@@ -1639,19 +1717,27 @@ func cmdBoard(ctx context.Context, args []string) int {
 		return exitOK
 	}
 
+	shown := 0
 	for _, key := range order {
 		rows := groups[key]
-		if *current && key != cur {
+		hw := eval.HardwareKey(key)
+		if *current && hw != curHW {
 			continue
 		}
 		g := rows[len(rows)-1]
+		nctx := resultNumCtx(g)
 		note := "different hardware/config - not comparable to other blocks"
-		if key == cur {
-			note = "this machine, current config"
+		if hw == curHW {
+			if nctx != eval.NumCtx {
+				note = fmt.Sprintf("this machine, num_ctx=%d - not comparable to other context lengths", nctx)
+			} else {
+				note = "this machine, current config"
+			}
 		}
-		fmt.Printf("\n%s | driver %s | KV %s\n", g.Device.GPU, g.Device.GPUDriver,
-			g.Device.Config["OLLAMA_KV_CACHE_TYPE"])
+		fmt.Printf("\n%s | driver %s | KV %s | ctx %d\n", g.Device.GPU, g.Device.GPUDriver,
+			g.Device.Config["OLLAMA_KV_CACHE_TYPE"], nctx)
 		fmt.Printf("  %s\n", note)
+		shown++
 		sort.Slice(rows, func(i, j int) bool {
 			return rows[i].DecodeSum.Mean > rows[j].DecodeSum.Mean
 		})
@@ -1673,10 +1759,23 @@ func cmdBoard(ctx context.Context, args []string) int {
 		}
 	}
 	fmt.Println("\n  k = repeats. k<3 is a smoke test, not a rankable result.")
-	if len(order) > 1 && !*current {
-		fmt.Println("  blocks differ in hardware/config - re-measure rather than ranking across them")
+	if shown > 1 && !*current {
+		fmt.Println("  blocks differ in hardware/config (including request context) - re-measure rather than ranking across them")
 	}
 	return exitOK
+}
+
+func resultNumCtx(r *Result) int {
+	if r == nil {
+		return eval.NumCtx
+	}
+	if r.NumCtx > 0 {
+		return r.NumCtx
+	}
+	if n := eval.ParseKeyCtx(r.DeviceKey); n > 0 {
+		return n
+	}
+	return eval.NumCtx
 }
 
 func trunc(s string, n int) string {
@@ -1841,6 +1940,7 @@ func cmdStatus(ctx context.Context) int {
 	fmt.Println("  next      fitr advise <model>          # does this quant fit")
 	fmt.Println("            fitr doctor <model>          # can this box be measured fairly")
 	fmt.Println("            fitr run <model> --full      # then compare with fitr board")
+	fmt.Println("            fitr apply <model>           # print how to persist a measured ctx")
 	if h := retonr.Hint("<model>"); h != "" {
 		fmt.Printf("            %s\n", h)
 	}
@@ -2030,6 +2130,13 @@ func cmdCompare(ctx context.Context, args []string) int {
 		}
 	}
 	if a.DeviceKey != b.DeviceKey {
+		if eval.HardwareKey(a.DeviceKey) == eval.HardwareKey(b.DeviceKey) {
+			errPrint("these results used different request context",
+				fmt.Sprintf("num_ctx %d vs %d; tok/s and quality both move with KV size",
+					resultNumCtx(a), resultNumCtx(b)),
+				"compare two runs at the same --ctx, or re-measure")
+			return exitError
+		}
 		errPrint("these results were measured on different hardware/config",
 			"tok/s is device-specific; the comparison would be meaningless",
 			"re-measure both on this machine")

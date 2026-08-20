@@ -129,6 +129,7 @@ type Meta struct {
 	ParamSize, Quant, Family string
 	GPU, Driver, Device      string
 	Profile                  string
+	NumCtx                   int
 	Repeats                  int
 	DecodeMean, DecodeSD     float64
 	DecodeMin, DecodeMax     float64
@@ -214,6 +215,9 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	fmt.Fprintln(w, rule)
 	fmt.Fprintf(w, "model    %s\n", Sanitize(sc.Model))
 	fmt.Fprintf(w, "size     %s  %s  %s\n", m.ParamSize, m.Quant, m.Family)
+	if m.NumCtx > 0 {
+		fmt.Fprintf(w, "ctx      %d\n", m.NumCtx)
+	}
 	fmt.Fprintf(w, "use for  %s\n", d.pal.wrap(d.pal.Accent, Sanitize(sc.UseFor)))
 	fmt.Fprintf(w, "device   %s%sdriver %s%s%s%sprofile %s\n",
 		m.GPU, d.g.Dot, m.Driver, d.g.Dot, m.Device, d.g.Dot, m.Profile)
@@ -300,7 +304,7 @@ func (d *jsonDisplay) Result(sc score.Scorecard, m Meta) {
 		"event": "result", "model": sc.Model, "profile": sc.Profile,
 		"use_for": sc.UseFor, "serves": sc.Serves, "needs": states,
 		"passes": sc.Passes, "fails": sc.Fails, "unproven": sc.Unproven,
-		"repeats": m.Repeats, "saved": m.SavedPath,
+		"repeats": m.Repeats, "num_ctx": m.NumCtx, "saved": m.SavedPath,
 	})
 }
 func (d *jsonDisplay) Emit(v any) { d.emit(v) }

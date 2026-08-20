@@ -105,7 +105,7 @@ func TestGoldenResultRendersCleanly(t *testing.T) {
 	meta := render.Meta{
 		ParamSize: "30.5B", Quant: "Q4_K_M", Family: "qwen3moe",
 		GPU: r.Device.GPU, Driver: r.Device.GPUDriver, Device: "GPU 100%",
-		Profile: "lappy", Repeats: 3,
+		Profile: "lappy", NumCtx: resultNumCtx(r), Repeats: 3,
 		DecodeMean: r.DecodeSum.Mean, DecodeSD: r.DecodeSum.SD,
 		DecodeMin: r.DecodeSum.Min, DecodeMax: r.DecodeSum.Max, DecodeN: r.DecodeSum.N,
 		PrefillMean: r.PrefillSum.Mean, PrefillSD: r.PrefillSum.SD, PrefillN: r.PrefillSum.N,
@@ -124,6 +124,7 @@ func TestGoldenResultRendersCleanly(t *testing.T) {
 
 	for _, want := range []string{
 		"[PASS]", "[n/a ]",
+		"ctx      8192",
 		"emits valid structured output",
 		"follows exact instructions",
 		"min detectable effect",
@@ -313,6 +314,9 @@ func TestUsageMentionsAdvise(t *testing.T) {
 	if !strings.Contains(got, "fitr calibrate") {
 		t.Fatalf("usage must list calibrate:\n%s", got)
 	}
+	if !strings.Contains(got, "fitr apply") {
+		t.Fatalf("usage must list apply:\n%s", got)
+	}
 	if !strings.Contains(got, "--retonr") {
 		t.Fatalf("usage must mention the optional retonr export:\n%s", got)
 	}
@@ -406,7 +410,7 @@ func TestScreenshotsWriteDemoSVGs(t *testing.T) {
 	if code := cmdScreenshots(context.Background(), []string{dir}); code != exitOK {
 		t.Fatalf("screenshots exited %d", code)
 	}
-	for _, name := range []string{"advise.svg", "run.svg", "board.svg"} {
+	for _, name := range []string{"advise.svg", "run.svg", "apply.svg", "board.svg"} {
 		b, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatal(err)
@@ -457,6 +461,8 @@ func TestExportGoldenHTMLCarriesFingerprintAndEscapes(t *testing.T) {
 		r.DeviceKey,
 		r.Device.GPU,
 		"A number without its device is meaningless",
+		"num_ctx",
+		"8192",
 		"PASS",
 		"n/a",
 		"min detectable effect",
@@ -643,5 +649,177 @@ func TestNormalizeModelRefAcceptsPastedHFLinks(t *testing.T) {
 	}
 	if isHFRef("qwen3-coder:30b") {
 		t.Fatal("an Ollama tag is not an HF ref")
+	}
+}
+
+func TestApplyPrintsWithoutMutating(t *testing.T) {
+	oldOut, oldErr := os.Stdout, os.Stderr
+	or, ow, _ := os.Pipe()
+	er, ew, _ := os.Pipe()
+	os.Stdout, os.Stderr = ow, ew
+	code := cmdApply(context.Background(), []string{"--backend=ollama", "--ctx=4096", "qwen3:30b"})
+	ow.Close()
+	ew.Close()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	io.ReadAll(er)
+	out, _ := io.ReadAll(or)
+	got := string(out)
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s", code, got)
+	}
+	for _, want := range []string{"does not restart", "num_ctx 4096", "ollama create qwen3:30b-ctx4096"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("apply missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestApplyJSONSaysMutatesFalse(t *testing.T) {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	code := cmdApply(context.Background(), []string{"--display=json", "--backend=llama-server", "--ctx=2048"})
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s", code, out)
+	}
+	var plan struct {
+		Mutates bool     `json:"mutates"`
+		Ctx     int      `json:"ctx"`
+		Steps   []string `json:"steps"`
+	}
+	if err := json.Unmarshal(out, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Mutates || plan.Ctx != 2048 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	joined := strings.Join(plan.Steps, "\n")
+	if !strings.Contains(joined, "--ctx-size 2048") {
+		t.Fatalf("steps = %s", joined)
+	}
+}
+
+func TestBoardLabelsCtxSplitAsThisMachine(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	cur := device.Detect(context.Background(), probeBackend(context.Background()))
+	a := golden(t)
+	a.Model = "aa-default"
+	a.NumCtx = eval.NumCtx
+	a.Device, a.DeviceKey = cur, cur.Key()
+	b := golden(t)
+	b.Model = "bb-ctx4k"
+	b.NumCtx = 4096
+	b.Device = cur
+	b.DeviceKey = cur.Key() + eval.CtxKeySuffix(4096)
+	for _, r := range []*Result{a, b} {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldOut, oldErr := os.Stdout, os.Stderr
+	or, ow, _ := os.Pipe()
+	er, ew, _ := os.Pipe()
+	os.Stdout, os.Stderr = ow, ew
+	code := cmdBoard(context.Background(), nil)
+	ow.Close()
+	ew.Close()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	io.ReadAll(er)
+	out, _ := io.ReadAll(or)
+	got := string(out)
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s", code, got)
+	}
+	if !strings.Contains(got, "num_ctx=4096") {
+		t.Fatalf("ctx split must be labeled as context, not a different box:\n%s", got)
+	}
+	if strings.Count(got, "different hardware/config - not comparable to other blocks") != 0 {
+		t.Fatalf("a ctx-only split on this machine must not read as different hardware:\n%s", got)
+	}
+	if !strings.Contains(got, "ctx 4096") || !strings.Contains(got, "ctx 8192") {
+		t.Fatalf("board header must show ctx:\n%s", got)
+	}
+}
+
+func TestCompareCtxSplitNamesTheKnob(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "aa", "bb"
+	b.NumCtx = 4096
+	b.DeviceKey = a.DeviceKey + eval.CtxKeySuffix(4096)
+	for _, r := range []*Result{a, b} {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := os.Stderr
+	er, ew, _ := os.Pipe()
+	os.Stderr = ew
+	code := cmdCompare(context.Background(), []string{"aa", "bb"})
+	ew.Close()
+	os.Stderr = old
+	errOut, _ := io.ReadAll(er)
+	got := string(errOut)
+	if code != exitError {
+		t.Fatalf("code = %d, want error", code)
+	}
+	if !strings.Contains(got, "different request context") {
+		t.Fatalf("compare must name the ctx split:\n%s", got)
+	}
+}
+
+func TestTuneDiffsNumCtx(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "aa", "bb"
+	a.NumCtx, b.NumCtx = eval.NumCtx, 4096
+	for _, r := range []*Result{a, b} {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := os.Stdout
+	or, ow, _ := os.Pipe()
+	os.Stdout = ow
+	code := cmdTune(context.Background(), []string{"aa", "bb"})
+	ow.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(or)
+	got := string(out)
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s", code, got)
+	}
+	if !strings.Contains(got, "8192") || !strings.Contains(got, "->") || !strings.Contains(got, "4096") {
+		t.Fatalf("tune must show the ctx delta:\n%s", got)
+	}
+}
+
+func TestResultNumCtxFallsBackToDefault(t *testing.T) {
+	if resultNumCtx(&Result{}) != eval.NumCtx {
+		t.Fatal("empty result is the default ctx")
+	}
+	if resultNumCtx(&Result{NumCtx: 4096}) != 4096 {
+		t.Fatal("recorded num_ctx wins")
+	}
+	if resultNumCtx(&Result{DeviceKey: "host|gpu|ctx=2048"}) != 2048 {
+		t.Fatal("legacy key suffix must still parse")
 	}
 }

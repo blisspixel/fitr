@@ -65,10 +65,13 @@ func TestGenerateParsesSSEStreamAndTimings(t *testing.T) {
 		t.Fatal("eos stop must not read as truncation")
 	}
 	// The sampling knobs that decide reproducibility must actually be sent.
-	for _, k := range []string{"temperature", "top_k", "seed", "repeat_penalty", "n_predict"} {
+	for _, k := range []string{"temperature", "top_k", "seed", "repeat_penalty", "n_predict", "n_ctx"} {
 		if _, ok := gotPayload[k]; !ok {
 			t.Errorf("payload missing %s", k)
 		}
+	}
+	if n, _ := gotPayload["n_ctx"].(float64); n != 8192 {
+		t.Errorf("n_ctx = %v, want 8192", gotPayload["n_ctx"])
 	}
 	if _, ok := gotPayload["json_schema"]; ok {
 		t.Error("plain generation must not be grammar-constrained")

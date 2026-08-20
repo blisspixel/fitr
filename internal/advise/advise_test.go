@@ -316,3 +316,40 @@ func TestContextFlag(t *testing.T) {
 		t.Fatal("openai must not guess a flag")
 	}
 }
+
+func TestPlanApplyNeverMutates(t *testing.T) {
+	p := PlanApply("ollama", "qwen3:30b", 4096)
+	if p.Mutates {
+		t.Fatal("apply must not claim to mutate the server")
+	}
+	if !strings.Contains(p.Note, "does not restart") {
+		t.Fatalf("note = %q", p.Note)
+	}
+	joined := strings.Join(p.Steps, "\n")
+	for _, want := range []string{"num_ctx 4096", "ollama create qwen3:30b-ctx4096"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("ollama plan missing %q:\n%s", want, joined)
+		}
+	}
+	llama := PlanApply("llama-server", "", 4096)
+	if llama.Mutates || !strings.Contains(strings.Join(llama.Steps, "\n"), "--ctx-size 4096") {
+		t.Fatalf("llama-server plan: %+v", llama)
+	}
+	if strings.Contains(strings.Join(llama.Steps, "\n"), "ollama create") {
+		t.Fatal("a llama-server plan must not print Ollama commands")
+	}
+	open := PlanApply("openai", "", 4096)
+	if !strings.Contains(strings.Join(open.Steps, "\n"), "--max-model-len 4096") {
+		t.Fatalf("openai plan: %+v", open)
+	}
+	all := PlanApply("", "m", 2048)
+	if all.Backend != "" || all.Mutates {
+		t.Fatal("unknown backend must print every recipe, still without mutating")
+	}
+	var buf strings.Builder
+	WriteApply(&buf, p)
+	out := buf.String()
+	if !strings.Contains(out, "does not restart") || !strings.Contains(out, "qwen3:30b") {
+		t.Fatalf("WriteApply:\n%s", out)
+	}
+}

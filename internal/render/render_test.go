@@ -145,3 +145,27 @@ func TestNoneDisplayIsSilent(t *testing.T) {
 	d.Result(score.Scorecard{}, Meta{})
 	d.Close() // must not panic
 }
+
+func TestScorecardPrintsNumCtx(t *testing.T) {
+	var buf strings.Builder
+	d := &textDisplay{out: &buf, err: &buf, pal: palette{}, g: glyphs{" | ", "-", "+/-", "..."}}
+	d.Result(score.Scorecard{Model: "qwen3:30b", UseFor: "chat"}, Meta{
+		ParamSize: "30.5B", Quant: "Q4_K_M", Family: "qwen3moe",
+		GPU: "demo-gpu", Driver: "1", Device: "GPU", Profile: "lappy",
+		NumCtx: 4096,
+	})
+	got := buf.String()
+	if !strings.Contains(got, "ctx      4096") {
+		t.Fatalf("scorecard must print the request context:\n%s", got)
+	}
+}
+
+func TestJSONResultIncludesNumCtx(t *testing.T) {
+	var buf strings.Builder
+	d := &jsonDisplay{out: &buf}
+	d.Result(score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}}, Meta{NumCtx: 4096})
+	got := buf.String()
+	if !strings.Contains(got, `"num_ctx":4096`) {
+		t.Fatalf("json result missing num_ctx:\n%s", got)
+	}
+}

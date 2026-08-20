@@ -53,6 +53,7 @@ type htmlData struct {
 	Runtime       string
 	Inference     string
 	GPUBackend    string
+	NumCtx        string
 	Config        []htmlKV
 	Needs         []htmlNeed
 	Gaps          []htmlNeed
@@ -102,7 +103,7 @@ var artifactTmpl = template.Must(template.New("artifact").Parse(`<!DOCTYPE html>
 <p class="use">{{.UseFor}}</p>
 
 <div class="banner"><strong>A number without its device is meaningless.</strong>
-Do not rank this result against a different fingerprint. Change the GPU, driver, runtime, or KV dtype and these numbers are void.</div>
+Do not rank this result against a different fingerprint. Change the GPU, driver, runtime, KV dtype, or request context and these numbers are void.</div>
 
 <h2>Fingerprint</h2>
 <table>
@@ -116,6 +117,7 @@ Do not rank this result against a different fingerprint. Change the GPU, driver,
 <tr><th class="k">runtime</th><td>{{.Runtime}}</td></tr>
 <tr><th class="k">placement</th><td>{{.Inference}}</td></tr>
 {{if .GPUBackend}}<tr><th class="k">gpu backend</th><td>{{.GPUBackend}}</td></tr>{{end}}
+{{if .NumCtx}}<tr><th class="k">num_ctx</th><td>{{.NumCtx}}</td></tr>{{end}}
 {{range .Config}}<tr><th class="k">{{.K}}</th><td>{{.V}}</td></tr>{{end}}
 </table>
 
@@ -192,6 +194,9 @@ func htmlDataFrom(a Artifact) htmlData {
 		Schema:        a.SchemaVersion,
 		Version:       a.FitrVersion,
 		RepeatsWarn:   a.Meta.Repeats > 0 && a.Meta.Repeats < 3,
+	}
+	if a.Meta.NumCtx > 0 {
+		d.NumCtx = fmt.Sprintf("%d", a.Meta.NumCtx)
 	}
 	if a.Device.RAMGb > 0 {
 		d.RAM = fmt.Sprintf("%.1f GB", a.Device.RAMGb)

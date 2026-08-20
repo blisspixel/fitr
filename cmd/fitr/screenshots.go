@@ -41,8 +41,8 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		name string
 		fn   func(ctx context.Context) (string, error)
 	}{
-		{"advise", shotAdvise}, {"run", shotRun}, {"board", shotBoard},
-		{"doctor", shotDoctor}, {"compare", shotCompare},
+		{"advise", shotAdvise}, {"run", shotRun}, {"apply", shotApply},
+		{"board", shotBoard}, {"doctor", shotDoctor}, {"compare", shotCompare},
 	}
 	for _, s := range shots {
 		text, err := captureStdout(ctx, s.fn)
@@ -95,6 +95,13 @@ func shotAdvise(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+func shotApply(ctx context.Context) (string, error) {
+	fmt.Println("$ fitr apply qwen3:30b")
+	fmt.Println()
+	advise.WriteApply(os.Stdout, advise.PlanApply("ollama", "qwen3:30b", 4096))
+	return "", nil
+}
+
 func shotRun(ctx context.Context) (string, error) {
 	b, err := os.ReadFile(goldenResultPath())
 	if err != nil {
@@ -113,7 +120,8 @@ func shotRun(ctx context.Context) (string, error) {
 	meta := render.Meta{
 		ParamSize: res.ModelMeta.Details.ParameterSize, Quant: res.ModelMeta.Details.QuantizationLevel,
 		Family: res.ModelMeta.Details.Family, GPU: res.Device.GPU, Driver: res.Device.GPUDriver,
-		Device: res.Device.InferenceDevice, Profile: res.Profile, Repeats: res.Repeats,
+		Device: res.Device.InferenceDevice, Profile: res.Profile,
+		NumCtx: resultNumCtx(&res), Repeats: res.Repeats,
 		DecodeMean: res.DecodeSum.Mean, DecodeSD: res.DecodeSum.SD,
 		DecodeMin: res.DecodeSum.Min, DecodeMax: res.DecodeSum.Max, DecodeN: res.DecodeSum.N,
 		PrefillMean: res.PrefillSum.Mean, PrefillSD: res.PrefillSum.SD, PrefillN: res.PrefillSum.N,
@@ -230,7 +238,7 @@ func goldenResultPath() string {
 func mockResult(model string, dec, decSD, pre, preSD float64, codePass, codeN, checksPass, checksN int) *Result {
 	r := &Result{
 		SchemaVersion: 4, Model: model, StartedAt: "2026-08-19T09:00:00Z",
-		Level: "full", Repeats: 3, SeedSet: "shared1",
+		Level: "full", Repeats: 3, NumCtx: eval.NumCtx, SeedSet: "shared1",
 		DeviceKey: "lappy|AMD Radeon(TM) 780M|32.0.31007.5012|0.32.14|1|f16",
 		Device: device.Fingerprint{
 			Host: "lappy", GPU: "AMD Radeon(TM) 780M",

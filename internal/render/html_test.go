@@ -43,6 +43,7 @@ func sampleArtifact() Artifact {
 		},
 		Meta: Meta{
 			ParamSize: "30.5B", Quant: "Q4_K_M", Family: "qwen3moe",
+			NumCtx:  4096,
 			Repeats: 3, DecodeMean: 23.16, DecodeSD: 0.44, DecodeN: 3,
 			DecodeMin: 22.71, DecodeMax: 23.6, PrefillMean: 226.6, PrefillN: 3,
 			Trials: 23, MDEpp: 29,
@@ -62,7 +63,10 @@ func TestHTMLContainsFingerprintAndMDE(t *testing.T) {
 		"A number without its device is meaningless",
 		"Do not rank",
 		"vulkan",
+		"num_ctx",
+		"4096",
 		"OLLAMA_KV_CACHE_TYPE",
+		"request context",
 		"min detectable effect",
 		"PASS",
 		"n/a",

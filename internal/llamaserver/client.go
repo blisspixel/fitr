@@ -225,6 +225,12 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 		"n_predict": s.NumPredict, "temperature": s.Temperature,
 		"top_k": s.TopK, "seed": s.Seed, "repeat_penalty": s.RepeatPenalty,
 	}
+	if s.NumCtx > 0 {
+		// Sent so a --ctx run is not a silent no-op. llama-server allocates
+		// KV at launch; n_ctx cannot grow past --ctx-size. Extra fields are
+		// ignored on builds that do not honor it.
+		payload["n_ctx"] = s.NumCtx
+	}
 	if s.Format == "json" {
 		payload["json_schema"] = map[string]any{"type": "object"}
 	}

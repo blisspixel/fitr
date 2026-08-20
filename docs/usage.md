@@ -37,6 +37,7 @@ need `cargo`, not a rewrite.
 | `fitr` | status: hardware, reachable runtimes, next command |
 | `fitr run <model> [--quick\|--full] [-k N] [--ctx N]` | measure a model on this device |
 | `fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]` | does it fit here, and if not, which flag to try |
+| `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
 | `fitr board [--current]` | compare everything, grouped by device |
@@ -65,10 +66,11 @@ need `cargo`, not a rewrite.
   paired test. Fresh instances per run remain the default.
 - `--backend auto|ollama|llama-server|openai` picks the serving runtime;
   see [backends.md](backends.md). Extra listen URLs: `$FITR_DISCOVER_URLS`.
-- `--ctx N` sets the request context (default 8192). This is how you *apply*
+- `--ctx N` sets the request context (default 8192). This is how you *measure*
   an `advise` remedy: `fitr run m --ctx 4096 --full`. A non-default ctx is
-  recorded on the result and in the fingerprint key, so `board` will not
-  rank it against default-ctx runs.
+  recorded on the scorecard, the HTML fingerprint, and the device key, so
+  `board` will not rank it against default-ctx runs. `fitr apply` then prints
+  the command to persist that setting; fitr never restarts the server.
 - `--load` (advise) loads an Ollama model and reads `/api/ps` so fit includes
   compute buffers. `--fit` runs `llama-fit-params` on a GGUF when that
   binary is on PATH. Both are dummy allocation; the weights+KV estimate is
@@ -123,6 +125,19 @@ SKIP, never a guess, when GPU memory was not measured, weights are unknown,
 or architecture metadata is missing. `--vram-gb N` supplies a budget; a GPU
 name is never turned into a VRAM number. There is no catalog of models to
 pick from - advise answers "does THIS fit", not "what exists".
+
+## Apply
+
+`fitr apply [model] [--ctx N]` prints the command to persist a measured
+context on whatever is serving. It never restarts or mutates the process.
+
+Ollama can take `num_ctx` per request (`fitr run --ctx` already does) or
+persist it in a derived tag via a Modelfile. llama-server allocates KV at
+launch, so the printout is a `--ctx-size` restart line. OpenAI-compat
+servers get the launch flags they actually use (`--max-model-len`,
+`--context-length`, or the LM Studio UI) rather than a guessed one-true
+flag. Pass `--backend` to see one recipe; with no runtime reachable, all
+three print.
 
 ## Device profiles
 
