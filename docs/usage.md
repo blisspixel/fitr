@@ -15,7 +15,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
 That puts one static binary on your PATH. No Go, no Python, no venv. Pin a
-release with `FITR_VERSION=v0.2.0`; relocate with `FITR_BIN`.
+release with `FITR_VERSION=v0.3.0`; relocate with `FITR_BIN`.
 
 From source (Go 1.25+):
 
@@ -35,28 +35,32 @@ need `cargo`, not a rewrite.
 | Command | Does |
 |---|---|
 | `fitr` | status: hardware, reachable runtimes, next command |
-| `fitr run <model> [--quick\|--full] [-k N] [--ctx N]` | measure a model on this device |
+| `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model; checks-only runs the generated battery for calibration |
 | `fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]` | does it fit here, and if not, which flag to try |
 | `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
+| `fitr view [model\|result.json]` | reopen the newest or selected saved result as a terminal data view |
 | `fitr board [--current]` | compare everything, grouped by device |
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips (accuracy can hide them) |
 | `fitr device` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
-| `fitr calibrate <a> <b>` | which check items discriminated two `--seedset` runs; does not rewrite the spec |
+| `fitr calibrate <a> <b> [--out PATH]` | paired item discrimination; optional privacy-safe evidence JSON |
+| `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate calibration evidence across devices and model pairs |
 
 | Level | Runs | ~Time |
 |---|---|---|
 | `--quick` | speed, memory, coding, plumbing, tools | ~4 min |
 | *(default)* | + 16 generated checks + refusal + tool withdrawal | ~11 min |
 | `--full` | + 40-turn unattended agentic task | ~18 min |
+| `--checks-only` | generated checks only; requires `--seedset`, defaults to 5 repeats | model-dependent |
 
 ## Flags worth knowing
 
-- `-k N` repeats the noisy tasks N times (default 3, 1 with `--quick`). A
-  single run is not a measurement: identical configs vary 10-20 pp.
+- `-k N` repeats the noisy tasks N times (default 3, 1 with `--quick`, 5 with
+  `--checks-only`). A single run is not a measurement: identical configs vary
+  10-20 pp.
 - `--adaptive` replaces the fixed check-repeat count with a sequential test:
   keep generating fresh instances until each gated need is decided against
   its gate, or report that the sample cannot separate it. See
@@ -64,6 +68,10 @@ need `cargo`, not a rewrite.
 - `--seedset NAME` pins the generated-instance set. Two runs sharing a
   seedset face identical instances, which upgrades `fitr compare` to a
   paired test. Fresh instances per run remain the default.
+- `--checks-only` is the efficient battery-calibration level. It requires a
+  seedset and uses five fixed repeats by default. It cannot be combined with
+  adaptive stopping because both sides of a pair must see every instance. See
+  [calibration.md](calibration.md).
 - `--backend auto|ollama|llama-server|openai` picks the serving runtime;
   see [backends.md](backends.md). Extra listen URLs: `$FITR_DISCOVER_URLS`.
 - `--ctx N` sets the request context (default 8192). This is how you *measure*
@@ -72,9 +80,9 @@ need `cargo`, not a rewrite.
   `board` will not rank it against default-ctx runs. `fitr apply` then prints
   the command to persist that setting; fitr never restarts the server.
 - `--load` (advise) loads an Ollama model and reads `/api/ps` so fit includes
-  compute buffers. `--fit` runs `llama-fit-params` on a GGUF when that
-  binary is on PATH. Both are dummy allocation; the weights+KV estimate is
-  the default and is labeled as such.
+  the live resident allocation and compute buffers. `--fit` runs
+  `llama-fit-params` on a GGUF when that binary is on PATH and uses its dummy
+  allocation. The weights+KV estimate is the default and is labeled as such.
 - `--pull` fetches a missing Ollama tag before measuring. Pasted Hugging
   Face GGUF URLs pull automatically (they *are* the request to fetch).
 - `--profile P` forces a device profile instead of auto-matching.
@@ -91,10 +99,16 @@ need `cargo`, not a rewrite.
 
 ```bash
 fitr run m --display json    # NDJSON on stdout, nothing else
+fitr view                    # newest saved result, with repeat-shape graphs on a rich terminal
+fitr view m --display json   # full saved result JSON
 fitr run m -q                # results only     -v  detail, no progress
 NO_COLOR=1 fitr board        # honored (empty string means unset)
 FITR_ASCII=1 fitr board      # force ASCII glyphs
 ```
+
+`--display auto` chooses `rich` on a capable terminal and `plain` when stdout
+is redirected. `rich` can be forced for a capture; `plain`, `json`, and `none`
+are stable automation surfaces. Unknown mode names are usage errors.
 
 Progress goes to **stderr**, results to **stdout**, so `fitr run m > out.txt`
 is clean. Errors are plain text on stderr even under `--display json`; the
@@ -163,3 +177,5 @@ Every threshold carries a `why`. **Copy `default.json`, tune it, set
 
 Results are stored as JSON under `~/.fitr/results` (override with
 `$FITR_RESULTS`); `fitr board` and `fitr compare` read them from there.
+See [Interface direction](interface.md) for the CLI-first full-screen TUI and
+native desktop plan.

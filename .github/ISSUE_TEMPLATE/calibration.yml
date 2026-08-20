@@ -1,0 +1,43 @@
+name: Calibration evidence
+description: Contribute a privacy-safe paired quant report from a real device
+title: "[calibration] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read the [calibration protocol](https://github.com/blisspixel/fitr/blob/main/docs/calibration.md) first.
+        Attach only a `fitr.calibration.pair.v1` file produced by `fitr calibrate --out`.
+        Do not attach the raw result JSON from `~/.fitr`.
+  - type: input
+    id: version
+    attributes:
+      label: fitr version
+      placeholder: 0.3.0
+    validations:
+      required: true
+  - type: input
+    id: pair
+    attributes:
+      label: Model pair
+      description: Higher-precision reference and lower-precision candidate
+      placeholder: model:q8_0 vs model:q4_K_M
+    validations:
+      required: true
+  - type: textarea
+    id: artifact
+    attributes:
+      label: Pair report
+      description: Drag the privacy-safe pair JSON into this field.
+    validations:
+      required: true
+  - type: checkboxes
+    id: controls
+    attributes:
+      label: Controls
+      options:
+        - label: Both runs used the same physical device, runtime configuration, context, seedset, and fixed repeat count.
+          required: true
+        - label: Both runs used at least 10 instances per task.
+          required: true
+        - label: I reviewed the artifact and did not attach raw prompts, model responses, hostnames, or local paths.
+          required: true

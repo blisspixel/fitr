@@ -89,11 +89,11 @@ def run(model: str, level: str = "default", profile_name=None, k: int = 3,
     }
 
     if prof.get("name") == "default":
-        disp.note("using the UNCALIBRATED default profile — verdicts are rough; "
+        disp.note("using the UNCALIBRATED default profile - verdicts are rough; "
                   "copy profiles/default.json and tune it for this box", "warn")
     if D.is_dense_and_big(res["model_meta"], prof):
         disp.note(f"dense {res['model_meta'].get('parameter_size')} model on a "
-                  f"bandwidth-bound device — expect very low tok/s", "warn")
+                  f"bandwidth-bound device - expect very low tok/s", "warn")
 
     workdir = tempfile.mkdtemp(prefix="evalkit_")
     t_all = time.perf_counter()

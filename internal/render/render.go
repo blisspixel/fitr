@@ -103,15 +103,29 @@ func Sanitize(s string) string { return ansiRe.ReplaceAllString(s, "") }
 
 func fit(s string, n int, ell string) string {
 	s = Sanitize(s)
-	if len(s) <= n {
+	if n <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	keep := max(n-len(ell), 1)
-	cut := s[:keep]
-	if i := strings.LastIndex(cut, " "); i > keep*3/5 {
-		cut = cut[:i]
+	ellRunes := []rune(ell)
+	if len(ellRunes) >= n {
+		return string(ellRunes[:n])
 	}
-	return strings.TrimRight(cut, " ,;") + ell
+	keep := max(n-len(ellRunes), 1)
+	cut := runes[:keep]
+	lastSpace := -1
+	for i, r := range cut {
+		if r == ' ' {
+			lastSpace = i
+		}
+	}
+	if lastSpace > keep*3/5 {
+		cut = cut[:lastSpace]
+	}
+	return strings.TrimRight(string(cut), " ,;") + ell
 }
 
 // ---------------------------------------------------------------- display
@@ -129,6 +143,8 @@ type Meta struct {
 	ParamSize, Quant, Family string
 	GPU, Driver, Device      string
 	Profile                  string
+	StartedAt, Level         string
+	WallSeconds              float64
 	NumCtx                   int
 	Repeats                  int
 	DecodeMean, DecodeSD     float64
@@ -136,11 +152,18 @@ type Meta struct {
 	DecodeN                  int
 	PrefillMean, PrefillSD   float64
 	PrefillN                 int
+	TTFTMean, TTFTSD         float64
+	TTFTN                    int
+	ResidentGB               float64
+	DecodeSeries             []float64
+	PrefillSeries            []float64
+	TTFTSeries               []float64
 	FirstRunSlow             bool
 	FirstRunRatio            float64
 	Trials                   int
 	MDEpp                    float64
 	SavedPath                string
+	Calibration              bool
 }
 
 func Resolve(mode string) string {
@@ -154,6 +177,15 @@ func Resolve(mode string) string {
 		return "plain"
 	}
 	return "rich"
+}
+
+func ValidMode(mode string) bool {
+	switch mode {
+	case "", "auto", "rich", "plain", "json", "none":
+		return true
+	default:
+		return false
+	}
 }
 
 func New(mode string) Display {
@@ -214,13 +246,30 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	rule := strings.Repeat("-", 78)
 	fmt.Fprintln(w, rule)
 	fmt.Fprintf(w, "model    %s\n", Sanitize(sc.Model))
-	fmt.Fprintf(w, "size     %s  %s  %s\n", m.ParamSize, m.Quant, m.Family)
+	fmt.Fprintf(w, "size     %s  %s  %s\n", Sanitize(m.ParamSize), Sanitize(m.Quant), Sanitize(m.Family))
 	if m.NumCtx > 0 {
 		fmt.Fprintf(w, "ctx      %d\n", m.NumCtx)
 	}
-	fmt.Fprintf(w, "use for  %s\n", d.pal.wrap(d.pal.Accent, Sanitize(sc.UseFor)))
+	if m.Level != "" {
+		run := Sanitize(m.Level)
+		if m.Repeats > 0 {
+			run += fmt.Sprintf("%sk=%d", d.g.Dot, m.Repeats)
+		}
+		if m.WallSeconds > 0 {
+			run += fmt.Sprintf("%s%.1fs", d.g.Dot, m.WallSeconds)
+		}
+		if m.StartedAt != "" {
+			run += d.g.Dot + Sanitize(m.StartedAt)
+		}
+		fmt.Fprintf(w, "run      %s\n", run)
+	}
+	useFor := sc.UseFor
+	if m.Calibration {
+		useFor = "calibration evidence only - not a standalone product verdict"
+	}
+	fmt.Fprintf(w, "use for  %s\n", d.pal.wrap(d.pal.Accent, Sanitize(useFor)))
 	fmt.Fprintf(w, "device   %s%sdriver %s%s%s%sprofile %s\n",
-		m.GPU, d.g.Dot, m.Driver, d.g.Dot, m.Device, d.g.Dot, m.Profile)
+		Sanitize(m.GPU), d.g.Dot, Sanitize(m.Driver), d.g.Dot, Sanitize(m.Device), d.g.Dot, Sanitize(m.Profile))
 	fmt.Fprintln(w, rule)
 	for _, k := range score.SortedNeeds(sc.Needs) {
 		v, ok := sc.Needs[k]
@@ -232,11 +281,38 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 			score.NeedLabel[k], Sanitize(v.Why))
 	}
 
-	if m.DecodeN > 0 {
-		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Muted, fmt.Sprintf(
-			"over %d repeats   decode %s   prefill %s", m.Repeats,
-			stat(m.DecodeMean, m.DecodeSD, m.DecodeN, m.DecodeMin, m.DecodeMax, d.g),
-			stat(m.PrefillMean, m.PrefillSD, m.PrefillN, 0, 0, d.g))))
+	if m.DecodeN > 0 || m.PrefillN > 0 || m.TTFTN > 0 || m.ResidentGB > 0 {
+		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "performance"))
+		if m.DecodeN > 0 {
+			fmt.Fprintf(w, "  %-8s %s tok/s", "decode", stat(m.DecodeMean, m.DecodeSD, m.DecodeN, m.DecodeMin, m.DecodeMax, d.g))
+			if len(m.DecodeSeries) > 0 {
+				fmt.Fprintf(w, "  %s", d.pal.wrap(d.pal.Accent, sparkline(m.DecodeSeries, 12, d.rich && unicodeOK())))
+			}
+			fmt.Fprintln(w)
+		}
+		if m.PrefillN > 0 {
+			fmt.Fprintf(w, "  %-8s %s tok/s", "prefill", stat(m.PrefillMean, m.PrefillSD, m.PrefillN, 0, 0, d.g))
+			if len(m.PrefillSeries) > 0 {
+				fmt.Fprintf(w, "  %s", d.pal.wrap(d.pal.Accent, sparkline(m.PrefillSeries, 12, d.rich && unicodeOK())))
+			}
+			fmt.Fprintln(w)
+		}
+		if m.TTFTN > 0 {
+			fmt.Fprintf(w, "  %-8s %s s", "TTFT", stat(m.TTFTMean, m.TTFTSD, m.TTFTN, 0, 0, d.g))
+			if len(m.TTFTSeries) > 0 {
+				fmt.Fprintf(w, "  %s", d.pal.wrap(d.pal.Accent, sparkline(m.TTFTSeries, 12, d.rich && unicodeOK())))
+			}
+			fmt.Fprintln(w)
+		}
+		if m.ResidentGB > 0 {
+			fmt.Fprintf(w, "  %-8s %.2f GB resident\n", "memory", m.ResidentGB)
+		}
+		if len(m.DecodeSeries) > 1 || len(m.PrefillSeries) > 1 || len(m.TTFTSeries) > 1 {
+			fmt.Fprintf(w, "  %s\n", d.pal.wrap(d.pal.Muted, "graphs show repeat shape, oldest to newest"))
+		}
+		if m.FirstRunSlow {
+			fmt.Fprintf(w, "  %s\n", d.pal.wrap(d.pal.Warn, fmt.Sprintf("! first decode repeat was %.1fx slower than the settled repeats", m.FirstRunRatio)))
+		}
 	}
 	// Say what this sample CANNOT resolve. An honest gap beats implied precision.
 	if m.MDEpp > 0 {
@@ -245,9 +321,12 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 				"not good from slightly better", m.Trials, d.g.Dash, m.MDEpp)))
 	}
 	if m.Repeats < 3 {
-		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Warn,
-			"! single-sample run - identical configs vary 10-20pp between runs; "+
-				"re-run with -k 3 before ranking against a close model"))
+		warning := "! single-sample run - identical configs vary 10-20pp between runs; " +
+			"re-run with -k 3 before ranking against a close model"
+		if m.Calibration {
+			warning = "! single calibration instance - use -k 5 for a workflow pass and -k 10 for decision evidence"
+		}
+		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Warn, warning))
 	}
 	fmt.Fprintln(w, rule)
 }
@@ -300,9 +379,13 @@ func (d *jsonDisplay) Result(sc score.Scorecard, m Meta) {
 	for k, v := range sc.Needs {
 		states[k] = string(v.State)
 	}
+	useFor := sc.UseFor
+	if m.Calibration {
+		useFor = "calibration evidence only - not a standalone product verdict"
+	}
 	d.emit(map[string]any{
 		"event": "result", "model": sc.Model, "profile": sc.Profile,
-		"use_for": sc.UseFor, "serves": sc.Serves, "needs": states,
+		"use_for": useFor, "serves": sc.Serves, "needs": states,
 		"passes": sc.Passes, "fails": sc.Fails, "unproven": sc.Unproven,
 		"repeats": m.Repeats, "num_ctx": m.NumCtx, "saved": m.SavedPath,
 	})

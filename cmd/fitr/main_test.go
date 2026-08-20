@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/blisspixel/fitr/internal/calibration"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/render"
@@ -240,6 +241,77 @@ func TestBoardDoesNotRankAcrossFingerprints(t *testing.T) {
 	}
 }
 
+func TestViewDefaultsToNewestSavedResult(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	older, newer := golden(t), golden(t)
+	older.Model, older.Scorecard.Model, older.StartedAt = "older", "older", "2026-01-01T00:00:00Z"
+	newer.Model, newer.Scorecard.Model, newer.StartedAt = "newer", "newer", "2026-01-02T00:00:00Z"
+	newer.Profile = "deleted-local-profile"
+	for _, result := range []*Result{older, newer} {
+		if _, err := save(result); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	old := os.Stdout
+	reader, writer, _ := os.Pipe()
+	os.Stdout = writer
+	code := cmdView(context.Background(), []string{"--display", "plain"})
+	writer.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(reader)
+	got := string(out)
+	if code != exitOK {
+		t.Fatalf("view exited %d:\n%s", code, got)
+	}
+	if !strings.Contains(got, "model    newer") || strings.Contains(got, "model    older") {
+		t.Fatalf("view did not select the newest result:\n%s", got)
+	}
+	for _, want := range []string{"performance", "decode", "prefill", "graphs show repeat shape"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("view missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestViewReadsResultPathAndCanEmitRawJSON(t *testing.T) {
+	dir := t.TempDir()
+	r := golden(t)
+	path := filepath.Join(dir, "result.json")
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := os.CreateTemp(dir, "view-output-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = output
+	code := cmdView(context.Background(), []string{path, "--display", "json"})
+	output.Close()
+	os.Stdout = old
+	out, err := os.ReadFile(output.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != exitOK {
+		t.Fatalf("view exited %d: %s", code, out)
+	}
+	var got Result
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("view JSON is invalid: %v\n%s", err, out)
+	}
+	if got.Model != r.Model || got.SchemaVersion != r.SchemaVersion {
+		t.Fatalf("view JSON changed the saved result: got %q schema %d", got.Model, got.SchemaVersion)
+	}
+}
+
 func TestCompareRefusesDifferentFingerprints(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FITR_RESULTS", dir)
@@ -320,6 +392,21 @@ func TestUsageMentionsAdvise(t *testing.T) {
 	if !strings.Contains(got, "--retonr") {
 		t.Fatalf("usage must mention the optional retonr export:\n%s", got)
 	}
+	if !strings.Contains(got, "--checks-only") || !strings.Contains(got, "calibrate merge") {
+		t.Fatalf("usage must include the calibration workflow:\n%s", got)
+	}
+}
+
+func TestChecksOnlyRequiresFixedPairing(t *testing.T) {
+	if code := cmdRun(context.Background(), []string{"m", "--checks-only"}); code != exitUsage {
+		t.Fatalf("code = %d, want usage without a seedset", code)
+	}
+	if code := cmdRun(context.Background(), []string{"m", "--checks-only", "--seedset", "s", "--adaptive"}); code != exitUsage {
+		t.Fatalf("code = %d, want usage for adaptive paired calibration", code)
+	}
+	if code := cmdRun(context.Background(), []string{"m", "--checks-only", "--seedset", "s", "--html"}); code != exitUsage {
+		t.Fatalf("code = %d, want usage for standalone calibration HTML", code)
+	}
 }
 
 func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
@@ -350,7 +437,8 @@ func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
 	old := os.Stdout
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
-	code := cmdCalibrate(context.Background(), []string{"m-q8", "m-q4"})
+	pairPath := filepath.Join(dir, "pair.json")
+	code := cmdCalibrate(context.Background(), []string{"m-q8", "m-q4", "--out", pairPath})
 	pw.Close()
 	os.Stdout = old
 	out, _ := io.ReadAll(pr)
@@ -363,6 +451,22 @@ func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
 	}
 	if strings.Contains(got, "rewrites spec") {
 		t.Fatal("must not claim to rewrite the spec")
+	}
+	report, err := calibration.ReadPair(pairPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Reference.Model != "m-q8" || report.Candidate.Model != "m-q4" {
+		t.Fatalf("wrong calibration direction: %+v", report)
+	}
+	raw, err := os.ReadFile(pairPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{hi.Device.Host, "CODE_WRITE_OK", ".fitr"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("pair report leaked %q: %s", forbidden, raw)
+		}
 	}
 }
 
@@ -378,6 +482,55 @@ func TestCalibrateRejectsUnpairedSeedsets(t *testing.T) {
 	}
 	if code := cmdCalibrate(context.Background(), []string{"aa", "bb"}); code != exitUsage {
 		t.Fatalf("code = %d, want usage when seedsets differ", code)
+	}
+}
+
+func TestCalibrateRejectsDifferentDeviceConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "aa", "bb"
+	a.SeedSet, b.SeedSet = "same", "same"
+	b.Device.GPUDriver = "different"
+	b.DeviceKey = b.Device.Key()
+	for _, r := range []*Result{a, b} {
+		raw, _ := json.Marshal(r)
+		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code := cmdCalibrate(context.Background(), []string{"aa", "bb"}); code != exitUsage {
+		t.Fatalf("code = %d, want usage when device configuration differs", code)
+	}
+}
+
+func TestCalibrateMergeWritesMultiDeviceSummary(t *testing.T) {
+	dir := t.TempDir()
+	paths := []string{filepath.Join(dir, "a.json"), filepath.Join(dir, "b.json")}
+	for i, path := range paths {
+		report := calibration.NewPair(version, 2, []string{"seed-a", "seed-b"}[i],
+			calibration.Device{ID: []string{"1111111111111111", "2222222222222222"}[i], GPU: "gpu"},
+			calibration.Run{Model: "m-q8", Quant: "Q8_0", Family: "fam", ParameterSize: "8B", ResultSchemaVersion: 4},
+			calibration.Run{Model: "m-q4", Quant: "Q4_K_M", Family: "fam", ParameterSize: "8B", ResultSchemaVersion: 4},
+			[]eval.ItemStat{{TaskID: "json", Family: "json", Need: "structured_output", Shared: 5, Flips: i, APass: 5, BPass: 5 - i}})
+		if err := calibration.WriteJSON(path, report); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(dir, "summary.json")
+	if code := cmdCalibrateMerge([]string{paths[0], paths[1], "--out", out}); code != exitOK {
+		t.Fatalf("code = %d", code)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary calibration.Summary
+	if err := json.Unmarshal(raw, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.Devices != 2 || summary.Reports != 2 || summary.Items[0].Flips != 1 {
+		t.Fatalf("bad merged summary: %+v", summary)
 	}
 }
 
@@ -407,8 +560,12 @@ func TestScreenshotsWriteDemoSVGs(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FITR_PROFILES", dir)
 	t.Setenv("FITR_RESULTS", t.TempDir())
+	t.Setenv("NO_COLOR", "1")
 	if code := cmdScreenshots(context.Background(), []string{dir}); code != exitOK {
 		t.Fatalf("screenshots exited %d", code)
+	}
+	if got := os.Getenv("NO_COLOR"); got != "1" {
+		t.Fatalf("screenshot generation did not restore NO_COLOR: %q", got)
 	}
 	for _, name := range []string{"advise.svg", "run.svg", "apply.svg", "board.svg"} {
 		b, err := os.ReadFile(filepath.Join(dir, name))
@@ -418,6 +575,9 @@ func TestScreenshotsWriteDemoSVGs(t *testing.T) {
 		got := string(b)
 		if !strings.Contains(got, "<svg") || !strings.Contains(got, "$ fitr") {
 			t.Fatalf("%s is not a terminal screenshot:\n%.200s", name, got)
+		}
+		if name == "board.svg" && !strings.Contains(got, "#d2a8ff") {
+			t.Fatalf("board screenshot lost its rich terminal color:\n%.400s", got)
 		}
 	}
 }

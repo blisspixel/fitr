@@ -79,7 +79,7 @@ def _unicode_ok(enc=None) -> bool:
     if not enc.startswith("utf"):
         return False
     try:
-        "·—±…".encode(enc)
+        "·-±…".encode(enc)
         return True
     except (UnicodeEncodeError, LookupError):
         return False
@@ -88,7 +88,7 @@ def _unicode_ok(enc=None) -> bool:
 _U = _unicode_ok()
 GLYPH = {
     "dot": " · " if _U else " | ",
-    "dash": "—" if _U else "-",
+    "dash": "-",
     "pm": "±" if _U else "+/-",
     "ell": "…" if _U else "...",
     "range": "–" if _U else "-",

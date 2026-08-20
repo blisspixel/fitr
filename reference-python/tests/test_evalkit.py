@@ -3,7 +3,7 @@
 Every test here exists because the corresponding bug actually happened during
 development, not because the function looked testable.
 
-No Ollama required — these are pure-logic tests.
+No Ollama required - these are pure-logic tests.
 """
 import json
 import os

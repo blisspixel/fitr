@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/blisspixel/fitr/internal/score"
 )
@@ -54,7 +55,7 @@ func TestAsciiOverrideAlwaysWins(t *testing.T) {
 		t.Fatal("FITR_ASCII must force ASCII even on a UTF locale")
 	}
 	g := glyphs{" | ", "-", "+/-", "..."}
-	if strings.ContainsAny(g.PM+g.Dot+g.Dash, "±·—") {
+	if strings.ContainsAny(g.PM+g.Dot+g.Dash, "\u00b1\u00b7\u2014") {
 		t.Fatal("ASCII glyph set must contain no multi-byte characters")
 	}
 }
@@ -105,6 +106,22 @@ func TestFitTruncatesOnWordBoundary(t *testing.T) {
 	}
 }
 
+func TestFitNeverSplitsUTF8(t *testing.T) {
+	got := fit("模型名称很长", 5, "…")
+	if !utf8.ValidString(got) {
+		t.Fatalf("fit produced invalid UTF-8: %q", got)
+	}
+	if utf8.RuneCountInString(got) > 5 {
+		t.Fatalf("fit overflowed rune budget: %q", got)
+	}
+	if got := fit("long", 1, "..."); got != "." {
+		t.Fatalf("one-cell fit = %q", got)
+	}
+	if got := fit("long", 0, "..."); got != "" {
+		t.Fatalf("zero-cell fit = %q", got)
+	}
+}
+
 func TestResolveModeFallsBackForNonTTY(t *testing.T) {
 	if got := Resolve("json"); got != "json" {
 		t.Fatalf("explicit mode must win, got %q", got)
@@ -112,6 +129,17 @@ func TestResolveModeFallsBackForNonTTY(t *testing.T) {
 	// Test binaries never have a TTY on stdout, so auto must resolve to plain.
 	if got := Resolve("auto"); got != "plain" {
 		t.Fatalf("auto on a non-TTY = %q, want plain", got)
+	}
+}
+
+func TestValidModeRejectsTypos(t *testing.T) {
+	for _, mode := range []string{"", "auto", "rich", "plain", "json", "none"} {
+		if !ValidMode(mode) {
+			t.Fatalf("valid mode %q was rejected", mode)
+		}
+	}
+	if ValidMode("colourful") {
+		t.Fatal("unknown display mode was accepted")
 	}
 }
 
@@ -157,6 +185,34 @@ func TestScorecardPrintsNumCtx(t *testing.T) {
 	got := buf.String()
 	if !strings.Contains(got, "ctx      4096") {
 		t.Fatalf("scorecard must print the request context:\n%s", got)
+	}
+}
+
+func TestScorecardSanitizesMetadata(t *testing.T) {
+	var buf strings.Builder
+	d := &textDisplay{out: &buf, err: &buf, pal: palette{}, g: glyphs{" | ", "-", "+/-", "..."}}
+	d.Result(score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}}, Meta{
+		ParamSize: "8B\x1b[2J", GPU: "gpu\x07", Driver: "driver\x1b[31m", Profile: "profile\x1b[H",
+	})
+	got := buf.String()
+	if strings.ContainsRune(got, '\x1b') || strings.ContainsRune(got, '\x07') {
+		t.Fatalf("scorecard leaked terminal control bytes: %q", got)
+	}
+}
+
+func TestCalibrationScorecardDoesNotPretendToBeAProductVerdict(t *testing.T) {
+	var buf strings.Builder
+	d := &textDisplay{out: &buf, err: &buf, pal: palette{}, g: glyphs{" | ", "-", "+/-", "..."}}
+	d.Result(score.Scorecard{Model: "m", UseFor: "no need passed yet"}, Meta{
+		GPU: "gpu", Driver: "driver", Device: "GPU", Profile: "default",
+		Repeats: 1, Calibration: true,
+	})
+	got := buf.String()
+	if !strings.Contains(got, "calibration evidence only") || !strings.Contains(got, "-k 10 for decision evidence") {
+		t.Fatalf("calibration framing missing:\n%s", got)
+	}
+	if strings.Contains(got, "before ranking") {
+		t.Fatalf("calibration output gave product-ranking advice:\n%s", got)
 	}
 }
 

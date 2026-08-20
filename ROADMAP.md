@@ -14,19 +14,52 @@ Most tools do exactly one of those steps. None connect them. Benchmarks tell you
 a number and leave; catalogs tell you a model exists and leave; nothing says
 *"run this, at this quant, with these settings, and here is the evidence."*
 
-`run` is the engine of that loop, not the product. The product is the loop.
-and the two commitments that make it worth trusting: measurements that are
+`run` is the engine of that loop, not the product. The product is the loop,
+backed by two commitments that make it worth trusting: measurements that are
 honest about their own resolution, and **a remedy attached to every negative
 verdict** (design rule 7).
 
 ---
 
-## Where it is now (0.2.0)
+## Next: calibrate before expanding
+
+The next milestone is a multi-device calibration campaign, not a model
+catalog. A live catalog can say what exists and what might fit. It cannot say
+which quant preserves structured output, instruction precision, and reasoning
+on this device without the evidence fitr is built to collect.
+
+The efficient, shareable machinery is now in place:
+
+- `fitr run --checks-only --seedset NAME -k N` runs only the generated battery
+  and requires fixed paired instances.
+- `fitr calibrate a b --out pair.json` rejects mixed devices, configs,
+  contexts, schemas, families, sizes, and incomplete pairs. The artifact omits
+  hostnames, prompts, raw model output, and local paths.
+- `fitr calibrate merge pair*.json --out summary.json` combines independent
+  evidence, deduplicates devices with a stable pseudonymous ID, and never
+  deletes a task.
+
+The battery changes only after at least two physical devices, two model
+families, and decision-grade pairs with at least 10 instances per task agree.
+The exact protocol and stop conditions are in
+[docs/calibration.md](docs/calibration.md).
+
+Why this comes first: the 1.0 promise is an actionable recommendation. An
+uncalibrated gate can turn a clean product loop into a confident wrong answer.
+Catalog breadth, automatic tune sweeps, and community profiles amplify that
+error; calibration reduces it.
+
+---
+
+## Where it is now (0.3.0)
 
 **Done and measured:**
 
 - Device fingerprint embedded in every result; `board` refuses to rank across
   fingerprints
+- CLI data views: `fitr view` reopens the newest or selected saved run;
+  scorecards and `board` show repeat-shape graphs, with color/Unicode fallbacks
+  and unchanged plain/JSON channels
 - Needs-based scoring - PASS / FAIL / SKIP / `n/a` / `BLKD` - instead of one number
 - Repeats with Wilson intervals, flakiness flags, `INDISTINGUISHABLE` verdicts,
   first-run-slow detection
@@ -116,7 +149,7 @@ verdict** (design rule 7).
 
 ---
 
-## 0.3 - Meet people where their models already are
+## Shipped: meet people where their models already are
 
 Promoted above everything else that remained, for two reasons found in the
 August 2026 research pass: it roughly **triples the addressable users**, and
@@ -153,7 +186,7 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
       from `/props` / the Ollama log `library=`; `board` refuses to rank
       across it.
 
-## 0.2.x - finish making the measurement trustworthy
+## Trust work
 
 - [x] **40-turn agentic floor** (was 20 - that measured early-abort behaviour)
       and **`reasoning_content` round-trip** in the loop; the Message struct
@@ -165,17 +198,19 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
       reports which check items flipped and which never did. It does **not**
       rewrite the spec: Aider kept 225 of 697 after many boxes; one pair is
       a lead, not a cull.
-- [ ] **Calibrate the check battery on hardware** - drop items that never
-      discriminate across known-good and known-degraded quants on more than
-      one box.
+- [x] **Efficient calibration evidence** - `run --checks-only` skips unrelated
+      phases; pair export omits raw output and hostnames; multi-report merge
+      rejects spec drift and reports device coverage without auto-culling.
+- [ ] **Calibrate the check battery and gates on hardware** - collect
+      decision-grade pairs across at least two physical devices and two model
+      families, then review items that never discriminate and thresholds that
+      do not match known usefulness.
 - [x] **Quant damage as correctness agreement** (machinery). `fitr compare` on
       a shared seedset reports item-level flips, including when the two rates
       match - accuracy hid the disagreements. Directional "quant damage"
       against the higher-precision run is claimed only when both results
       expose a comparable GGUF dtype of the same family. Which *items*
-      discriminate still needs a live calibration pass.
-- [ ] **Quant-flip calibration on hardware.** Drop check items that never
-      flip between known-good and known-degraded quants of the same model.
+      discriminate remains part of the hardware campaign above.
 - [x] **`fitr tune`, first honest cut.** Prints the request-level knobs
       (`num_ctx`, `num_batch`, `num_gpu`) and diffs two saved fingerprints
       (including a `num_ctx` split). It does **not** sweep: llama-bench owns
@@ -200,11 +235,13 @@ loop, closable on someone else's machine.
 | Bar | Status |
 |---|---|
 | One-command install (curl / irm) | **done** |
-| Honest measurement on Ollama, llama-server, OpenAI-compat | **done** (0.3) |
+| Honest measurement on Ollama, llama-server, OpenAI-compat | **done** |
 | Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals, quant flips) | **mostly done** - check-battery calibration still needs hardware; flip machinery is in `compare` |
-| `fitr advise` names a model + settings with a remedy | **done** for the NIM-shaped verdict; `--load`/`--fit` dummy-allocate; still no catalog |
+| `fitr advise <model>` returns a fit verdict + remedy | **done**; `--load` observes resident allocation and `--fit` dummy-allocates |
+| Recommend what to try without naming a model first | **blocked on calibration**; inventory-first comes before any internet catalog |
 | Persist a measured setting without silent mutation | **done** - `fitr apply` prints the command; never restarts the server |
 | A result can leave the terminal | **done** - `fitr export` / `fitr run --html`, opt-in, fingerprint in the page |
+| Saved evidence is easy to inspect in the terminal | **first slice done** - `fitr view` plus graph-based `board`; opt-in full-screen TUI follows calibrated recommendation |
 | Community device profiles beyond `lappy` | **scaffolded** - `fitr profiles new` writes an UNCALIBRATED local copy; no invented rtx-4090 numbers in the repo |
 
 We do **not** ship 1.0 with an uncalibrated `advise`, a public leaderboard,
@@ -213,7 +250,7 @@ advise: a one-line remedy (`try num_ctx=4096`) is advise; `fitr run --ctx 4096`
 measures it; `fitr apply` prints how to persist it (and never restarts the
 server). Sweeping knobs is tune.
 
-## 0.4 - `fitr advise`
+## Shipped: `fitr advise`
 
 The step that turns a chore into a product.
 
@@ -232,12 +269,18 @@ The step that turns a chore into a product.
       parameters, not total. A 30B MoE (~3B active) at 24.8 tok/s beat an 8B
       dense at 14.6 on the same box; naive total-parameter math recommends
       exactly the wrong thing. Pinned against Qwen3-30B-A3B architecture.
-- [ ] Honest open question, still deliberately open: a static binary cannot
-      know what models exist. Curated catalog that ages vs live index vs model
-      reasoning - pick deliberately; do not default. `advise` answers "does
-      THIS fit", not "what should I download".
+- [ ] **Inventory-first recommendation after calibration.** With no model
+      named, use the serving runtime's installed-model list plus saved fitr
+      measurements. Unmeasured models are candidates to measure, never
+      confidently ranked. This closes a useful loop with no stale catalog and
+      no network dependency.
+- [ ] **Live discovery only after evidence-backed local recommendation.** Use a
+      replaceable GGUF index adapter, not a curated list baked into the binary.
+      Every recommendation must name its fit source, measured gate evidence,
+      and remedy. Until then, `advise` answers "does THIS fit", not "what
+      should I download".
 
-## 0.5 - Share the map
+## Share the map
 
 - [x] **Local profile scaffold** - `fitr profiles new` copies default into
       `~/.fitr/profiles`, matched to this GPU, marked UNCALIBRATED. User
@@ -255,6 +298,26 @@ The step that turns a chore into a product.
       `fitr.retonr.evidence.v1` device-measurement JSON. A PATH hint appears
       only if `retonr` is already installed. Missing retonr is never an
       error. The file is not a qualification, activation, or license.
+
+## Interface path: CLI first, native later
+
+- [x] **Replayable terminal data view.** `fitr view [model|result.json]` opens
+      the newest or selected run through the scorecard renderer. `fitr board`
+      adds per-block throughput bars and repeat-shape graphs without a new
+      dependency. Plain output stays ASCII and pipe-safe; JSON stays complete.
+- [ ] **Opt-in full-screen TUI after calibration and inventory-first advise.**
+      Add live run, result, board, and history views only after a structured
+      event model exists. Normal commands never take over the terminal.
+- [ ] **Versioned presentation contract.** Extract a read-only snapshot and
+      event schema so every interface consumes the same scoring decisions.
+      Frontends never reimplement gates or comparisons.
+- [ ] **Truly native desktop clients only after the terminal information
+      architecture is proven.** SwiftUI/AppKit on macOS, WinUI 3 on Windows,
+      and GTK 4/libadwaita on Linux. Three thin native frontends share the Go
+      domain contracts. WebView wrappers are not the desktop plan.
+
+The detailed sequencing, accessibility rules, and framework decision gates are
+in [docs/interface.md](docs/interface.md).
 
 ## Later, if they earn it
 

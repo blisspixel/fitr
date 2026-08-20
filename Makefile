@@ -1,6 +1,5 @@
 BINARY := fitr
-VERSION := 0.2.0
-LDFLAGS := -s -w -X main.version=$(VERSION)
+LDFLAGS := -s -w
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 .PHONY: all build test vet fmt lint dist clean install spec-sync screenshots

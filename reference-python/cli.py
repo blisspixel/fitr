@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""evalkit — is this model any good ON THIS DEVICE?
+"""evalkit - is this model any good ON THIS DEVICE?
 
     evalkit run <model> [--quick|--full] [-k N]
     evalkit board [--current]
@@ -14,8 +14,8 @@ Design notes, all borrowed from tools that got it right:
     the progress bar (otherwise it interleaves with debug output).
   * Progress goes to STDERR, results to STDOUT, so `evalkit run ... > out.txt`
     is clean and pipeable (promptfoo).
-  * One `is_human_readable` predicate gates ALL chrome — headers, hints,
-    footers — so machine modes are never polluted (ruff).
+  * One `is_human_readable` predicate gates ALL chrome - headers, hints,
+    footers - so machine modes are never polluted (ruff).
   * Errors are error/note/hint, and go to stderr as PLAIN TEXT even in --json;
     nobody wraps errors in JSON. The exit code is the machine channel (rustc,
     gh, uv).
@@ -197,7 +197,7 @@ def cmd_device(a) -> int:
     print("  config")
     for k, v in (fp.get("config") or {}).items():
         print(f"    {k:<24} {v or '(unset)'}")
-    print(f"  profile            {prof.get('name')} — {prof.get('description','')}")
+    print(f"  profile            {prof.get('name')} - {prof.get('description','')}")
     print(f"  key                {D.fingerprint_key(fp)}")
     return EXIT_OK
 
@@ -291,7 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     def common(sp):
         sp.add_argument("--display", default="auto",
                         choices=["auto", "rich", "plain", "json", "none"],
-                        help="output mode (default: auto — rich on a TTY, plain otherwise)")
+                        help="output mode (default: auto - rich on a TTY, plain otherwise)")
         sp.add_argument("-q", "--quiet", action="count", default=0,
                         help="-q hides chrome, -qq silences everything")
         sp.add_argument("-v", "--verbose", action="count", default=0,

@@ -5,6 +5,37 @@ already solved, folklore, or genuinely open?
 
 **Answer: solved at the kernel layer, dead at the decision layer.**
 
+## August 20 decision: calibration before catalog breadth
+
+The available discovery surfaces do not close fitr's evidence gap:
+
+- Ollama's documented [`/api/tags`](https://docs.ollama.com/api/tags) endpoint
+  lists models already installed on one server. The public model library has a
+  search page, but the serving API does not document an internet-catalog search
+  endpoint.
+- The Hugging Face Hub has an open
+  [model API](https://huggingface.co/docs/hub/en/api) and a first-class
+  [GGUF filter and metadata viewer](https://huggingface.co/docs/hub/gguf).
+  That solves discovery and file metadata, not task quality for a quant on one
+  device.
+- llama.cpp's
+  [`llama-fit-params`](https://github.com/ggml-org/llama.cpp/blob/master/tools/fit-params/fit-params.cpp)
+  prints a context, GPU-layer, tensor-split, and buffer-placement configuration
+  that fits available memory. It does not establish structured-output,
+  instruction, reasoning, or agentic quality.
+
+So a live catalog would widen the set of uncalibrated answers before it made
+them more trustworthy. The order is:
+
+1. Calibrate generated checks and gates across real high/low quant pairs.
+2. Recommend among installed models and saved measurements without network
+   discovery.
+3. Add a live catalog only when every recommendation can cite a measured gate,
+   a fit source, and a remedy.
+
+This keeps discovery replaceable. Hugging Face, Ollama, or another index can be
+an adapter later; none becomes the source of truth for quality.
+
 ## The one thing worth stealing: NIM's three-tier output
 
 NVIDIA NIM does real hardware-aware selection. Per its

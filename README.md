@@ -1,5 +1,7 @@
 # fitr
 
+[![CI](https://github.com/blisspixel/fitr/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/fitr/actions/workflows/ci.yml)
+
 **Is this local model any good - on your machine?**
 
 Everyone has this problem. A model is all over your feed. You still do not
@@ -11,6 +13,7 @@ quant. The leaderboard was someone else's hardware.
 fitr advise some-new-model:tag          # does it fit, which flag if not
 fitr run some-new-model:tag --full --pull
 fitr apply some-new-model:tag           # print how to persist the measured ctx
+fitr view                               # reopen the newest result with graphs
 fitr board                              # compare everything you have measured
 ```
 
@@ -18,6 +21,11 @@ fitr board                              # compare everything you have measured
 <img src="docs/assets/run.svg" alt="fitr run scorecard (demo data)" width="820">
 <img src="docs/assets/apply.svg" alt="fitr apply (demo data)" width="820">
 <img src="docs/assets/board.svg" alt="fitr board (demo data)" width="820">
+
+The CLI is the primary product surface. Rich terminals get semantic color,
+throughput bars, and repeat-shape graphs; plain and JSON output remain clean
+automation interfaces. The [interface direction](docs/interface.md) takes this
+toward an opt-in full-screen TUI first, then truly native desktop clients.
 
 One run tells you, for this device and this config:
 
@@ -64,27 +72,29 @@ fitr                             # what this box is, what is already serving
 fitr advise qwen3:30b            # does it fit, and if not, which flag to try
 fitr run qwen3:30b --ctx 8192 --full
 fitr apply qwen3:30b             # print how to persist the measured ctx
+fitr view                        # data-rich view of the newest saved run
 fitr board
 ```
 
 From source (Go 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
-Pin a version with `FITR_VERSION=v0.2.0`, relocate with `FITR_BIN`.
+Pin a version with `FITR_VERSION=v0.3.0`, relocate with `FITR_BIN`.
 
 ## Commands
 
 | Command | Does |
 |---|---|
-| `fitr run <model> [--quick\|--full] [-k N] [--ctx N]` | measure a model on this device (~4 to ~18 min by level) |
+| `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model on this device; checks-only is for paired battery calibration |
 | `fitr advise <model>` | does it fit here, and if not, which flag to try (`--load` / `--fit` to measure) |
 | `fitr apply [model]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | request-level knobs; fingerprint diff of two saved runs (no silent sweep) |
 | `fitr export <model> [--out PATH]` | write a self-contained HTML scorecard (opt-in; contains the fingerprint) |
+| `fitr view [model\|result.json]` | reopen the newest or selected saved result with repeat-shape graphs |
 | `fitr board [--current]` | compare everything, grouped by device |
 | `fitr doctor <model>` | can this box be measured fairly at all? (~1 min) |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips on shared instances |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr device` / `fitr profiles [new]` | fingerprint and gates; `new` scaffolds an UNCALIBRATED local profile |
-| `fitr calibrate <a> <b>` | which check items discriminated two paired runs (does not rewrite the spec) |
+| `fitr calibrate <a> <b> [--out PATH]` | which check items discriminated two paired runs; export privacy-safe evidence |
 
 ## Three ideas carry everything
 
@@ -107,9 +117,11 @@ Pin a version with `FITR_VERSION=v0.2.0`, relocate with `FITR_BIN`.
 | [Design](docs/design.md) | the four commitments, the needs, how to read a result, known limits |
 | [Statistics](docs/statistics.md) | every method, the rejected alternative, and the references |
 | [Task battery](docs/tasks.md) | generated checks with computed answers; your own tasks without forking |
+| [Calibration](docs/calibration.md) | paired quant protocol, safe evidence, and multi-device aggregation |
 | [Doctor](docs/doctor.md) | determinism, served context, placement, config red flags |
 | [Backends](docs/backends.md) | Ollama, llama-server, OpenAI-compatible - and what each can measure honestly |
 | [Usage](docs/usage.md) | flags, output modes, exit codes, device profiles |
+| [Interface direction](docs/interface.md) | CLI-first data UX, opt-in TUI, and truly native desktop path |
 | [Roadmap](ROADMAP.md) | what is next and why |
 | [retonr](docs/retonr.md) | optional sister project; fitr works without it |
 

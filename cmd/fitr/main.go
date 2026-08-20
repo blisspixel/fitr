@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -24,6 +25,8 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/buildinfo"
+	"github.com/blisspixel/fitr/internal/calibration"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/llamaserver"
@@ -37,7 +40,7 @@ import (
 	"github.com/blisspixel/fitr/internal/stats"
 )
 
-const version = "0.2.0"
+var version = buildinfo.Version()
 
 // Exit codes: small, documented, domain-specific. Not sysexits -- nobody uses it.
 const (
@@ -62,24 +65,26 @@ func usage() {
 	fmt.Fprint(os.Stderr, `fitr `+version+` - is this local model any good ON THIS DEVICE?
 
 usage:
-  fitr run <model> [--quick|--full] [-k N] [--ctx N] [--profile P] [--display MODE] [--html]
+  fitr run <model> [--quick|--full|--checks-only] [-k N] [--ctx N] [--profile P] [--display MODE] [--html]
   fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]
   fitr apply [model] [--ctx N]
   fitr tune [model-a model-b]
   fitr export <model> [--out PATH] [--retonr]
+  fitr view [model|result.json] [--display MODE]
   fitr board [--current]
   fitr diag <model>
   fitr doctor <model> [-n N]
   fitr device
   fitr profiles [new [name]]
-  fitr calibrate <model-a> <model-b>
+  fitr calibrate <model-a> <model-b> [--out PATH]
+  fitr calibrate merge <pair.json>... [--out PATH]
   fitr compare <model-a> <model-b>
 
 flags:
-  --display  auto|plain|json|none   output mode (default auto)
+  --display  auto|rich|plain|json|none   output mode (default auto)
   --backend  auto|ollama|llama-server|openai   serving runtime (default auto-detect)
   --pull     fetch a missing model first (Ollama; HF links pull automatically)
-  -k         repeats per noisy task (default 3, 1 with --quick)
+  -k         repeats per noisy task (default 3; 1 quick; 5 checks-only)
              A single run is not a measurement: identical configs vary 10-20pp.
   -q         quiet (repeat for silent)      -v  verbose
 
@@ -99,8 +104,11 @@ examples:
   fitr tune
   fitr tune qwen3:30b qwen3:30b-q8
   fitr export qwen3:30b --out scorecard.html
+  fitr view qwen3:30b
   fitr profiles new
-  fitr calibrate qwen3:30b-q8 qwen3:30b-q4
+  fitr run qwen3:8b-q8_0 --checks-only --seedset qwen3-8b -k 5
+  fitr run qwen3:8b-q4_K_M --checks-only --seedset qwen3-8b -k 5
+  fitr calibrate qwen3:8b-q8_0 qwen3:8b-q4_K_M --out pair.json
 `)
 }
 
@@ -126,6 +134,8 @@ func run() int {
 		return cmdTune(ctx, os.Args[2:])
 	case "export":
 		return cmdExport(ctx, os.Args[2:])
+	case "view":
+		return cmdView(ctx, os.Args[2:])
 	case "board":
 		return cmdBoard(ctx, os.Args[2:])
 	case "diag":
@@ -495,11 +505,15 @@ func cmdAdvise(ctx context.Context, args []string) int {
 	vram := fs.Float64("vram-gb", -1, "available GPU memory in GB (skip detection)")
 	ctxSize := fs.Int("ctx", 0, "requested context length (default: model's max)")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
-	mode := fs.String("display", "auto", "auto|plain|json|none")
+	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	pullFlag := fs.Bool("pull", false, "pull the model first if it is not installed")
 	loadFlag := fs.Bool("load", false, "load the model on Ollama and read resident size (dummy allocation)")
 	fitFlag := fs.Bool("fit", false, "run llama-fit-params on a GGUF if it is on PATH")
 	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if !render.ValidMode(*mode) {
+		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
 		return exitUsage
 	}
 	if fs.NArg() < 1 {
@@ -691,8 +705,12 @@ func cmdApply(ctx context.Context, args []string) int {
 	fs.SetOutput(os.Stderr)
 	ctxSize := fs.Int("ctx", 0, "context to persist (default: latest result, else 4096 as the worked example)")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
-	mode := fs.String("display", "auto", "auto|plain|json|none")
+	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if !render.ValidMode(*mode) {
+		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
 		return exitUsage
 	}
 	model := ""
@@ -829,9 +847,10 @@ func cmdRun(ctx context.Context, args []string) int {
 	fs.SetOutput(os.Stderr)
 	quick := fs.Bool("quick", false, "speed+memory+coding+tools")
 	full := fs.Bool("full", false, "adds the 40-turn agentic task")
+	checksOnly := fs.Bool("checks-only", false, "generated checks only for paired hardware calibration")
 	k := fs.Int("k", 0, "repeats per noisy task")
 	profileName := fs.String("profile", "", "device profile (default: auto-match)")
-	mode := fs.String("display", "auto", "auto|plain|json|none")
+	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	seedset := fs.String("seedset", "", "pin the generated-instance seed set; two runs sharing "+
 		"a seedset face IDENTICAL task instances, enabling a paired comparison")
@@ -846,8 +865,34 @@ func cmdRun(ctx context.Context, args []string) int {
 	if err := fs.Parse(permute(args)); err != nil {
 		return exitUsage
 	}
+	if !render.ValidMode(*mode) {
+		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
+		return exitUsage
+	}
 	if fs.NArg() < 1 {
 		errPrint("missing model", "", "fitr run <model> --full")
+		return exitUsage
+	}
+	levels := 0
+	for _, selected := range []bool{*quick, *full, *checksOnly} {
+		if selected {
+			levels++
+		}
+	}
+	if levels > 1 {
+		errPrint("choose one run level", "--quick, --full, and --checks-only are mutually exclusive", "")
+		return exitUsage
+	}
+	if *checksOnly && *seedset == "" {
+		errPrint("--checks-only requires --seedset", "calibration pairs must face identical generated instances", "")
+		return exitUsage
+	}
+	if *checksOnly && *adaptive {
+		errPrint("--checks-only cannot use --adaptive", "paired calibration needs both models to run every instance", "use a fixed -k value")
+		return exitUsage
+	}
+	if *checksOnly && *htmlFlag {
+		errPrint("--checks-only cannot write a scorecard HTML", "calibration is paired evidence, not a standalone product verdict", "use `fitr calibrate a b --out pair.json` after both runs")
 		return exitUsage
 	}
 	model := normalizeModelRef(fs.Arg(0))
@@ -857,13 +902,21 @@ func cmdRun(ctx context.Context, args []string) int {
 		level = "quick"
 	} else if *full {
 		level = "full"
+	} else if *checksOnly {
+		level = "checks"
 	}
 	reps := *k
 	if reps == 0 {
 		reps = 3
 		if level == "quick" {
 			reps = 1
+		} else if level == "checks" {
+			reps = 5
 		}
+	}
+	if reps < 1 {
+		errPrint("invalid repeat count", "-k must be at least 1", "")
+		return exitUsage
 	}
 	if *quiet > 1 {
 		*mode = "none"
@@ -882,8 +935,11 @@ func cmdRun(ctx context.Context, args []string) int {
 	// already a set of independent trials pooled per need. Repeats multiply
 	// wall-clock across ~16 tasks, so they follow -k only when asked.
 	checksReps := 1
-	if *k > 0 {
+	if *k > 0 || level == "checks" {
 		checksReps = *k
+		if *k == 0 {
+			checksReps = reps
+		}
 	}
 
 	res, err := execute(ctx, c, model, runOpts{
@@ -917,22 +973,30 @@ func cmdRun(ctx context.Context, args []string) int {
 	}
 	if *quiet == 0 && render.Resolve(*mode) != "json" {
 		fmt.Fprintf(os.Stderr, "\n  saved  %s\n", path)
-		if htmlFile != "" {
-			fmt.Fprintf(os.Stderr, "  html   %s\n", htmlFile)
+		if level == "checks" {
+			fmt.Fprintf(os.Stderr, "  next   run the paired model with --checks-only --seedset %s -k %d\n", *seedset, checksReps)
+			fmt.Fprintf(os.Stderr, "         fitr calibrate <reference> <candidate> --out pair.json\n")
+		} else {
+			if htmlFile != "" {
+				fmt.Fprintf(os.Stderr, "  html   %s\n", htmlFile)
+			}
+			fmt.Fprintf(os.Stderr, "  next   fitr board\n")
+			if !*htmlFlag {
+				fmt.Fprintf(os.Stderr, "         fitr export %s   for a shareable HTML scorecard\n", model)
+			}
+			if req := eval.ResolvedCtx(*ctxSize); req != eval.NumCtx {
+				fmt.Fprintf(os.Stderr, "         fitr apply %s   to persist num_ctx=%d on the server\n", model, req)
+			}
+			if h := retonr.Hint(model); h != "" {
+				fmt.Fprintf(os.Stderr, "         %s\n", h)
+			}
+			if reps < 3 {
+				fmt.Fprintf(os.Stderr, "         fitr run %s -k 3   for a rankable result\n", model)
+			}
 		}
-		fmt.Fprintf(os.Stderr, "  next   fitr board\n")
-		if !*htmlFlag {
-			fmt.Fprintf(os.Stderr, "         fitr export %s   for a shareable HTML scorecard\n", model)
-		}
-		if req := eval.ResolvedCtx(*ctxSize); req != eval.NumCtx {
-			fmt.Fprintf(os.Stderr, "         fitr apply %s   to persist num_ctx=%d on the server\n", model, req)
-		}
-		if h := retonr.Hint(model); h != "" {
-			fmt.Fprintf(os.Stderr, "         %s\n", h)
-		}
-		if reps < 3 {
-			fmt.Fprintf(os.Stderr, "         fitr run %s -k 3   for a rankable result\n", model)
-		}
+	}
+	if level == "checks" {
+		return exitOK
 	}
 	if res.Scorecard.Fails > 0 {
 		return exitGates
@@ -1014,15 +1078,17 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	// User tasks extend the battery without a fork. A malformed one is a hard
 	// error with the filename in it - silently dropping your own task would
 	// defeat the point of having one.
-	userChecks, err := eval.LoadUserChecks(eval.UserTasksDir())
-	if err != nil {
-		return nil, err
-	}
-	if len(userChecks) > 0 {
-		if spec.Checks, err = eval.MergeChecks(spec.Checks, userChecks); err != nil {
+	if level != "checks" {
+		userChecks, err := eval.LoadUserChecks(eval.UserTasksDir())
+		if err != nil {
 			return nil, err
 		}
-		disp.Note(fmt.Sprintf("%d user task(s) loaded from %s", len(userChecks), eval.UserTasksDir()), "")
+		if len(userChecks) > 0 {
+			if spec.Checks, err = eval.MergeChecks(spec.Checks, userChecks); err != nil {
+				return nil, err
+			}
+			disp.Note(fmt.Sprintf("%d user task(s) loaded from %s", len(userChecks), eval.UserTasksDir()), "")
+		}
 	}
 	fp := device.Detect(ctx, c)
 	prof, err := device.SelectProfile(profileName, fp)
@@ -1077,6 +1143,12 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		disp.Done(name, time.Since(t).Seconds())
 		return nil
 	}
+	standardStep := func(name, detail string, fn func() error) error {
+		if level == "checks" {
+			return nil
+		}
+		return step(name, detail, fn)
+	}
 
 	// One model resident at a time is non-negotiable between phases. A model
 	// that will not unload is recorded and warned about -- data marked suspect
@@ -1096,7 +1168,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	}
 
 	stopAll()
-	if err := step("speed", fmt.Sprintf("x%d", reps), func() error {
+	if err := standardStep("speed", fmt.Sprintf("x%d", reps), func() error {
 		for i := range reps {
 			// The nonce MUST vary: identical long prompts hit the prefix cache
 			// and prefill becomes fiction.
@@ -1134,9 +1206,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	}); err != nil {
 		return nil, err
 	}
-	res.Device.InferenceDevice = device.InferenceDeviceFor(ctx, c, model)
-
-	if err := step("memory", "resident @32K", func() error {
+	if err := standardStep("memory", "resident @32K", func() error {
 		m, err := eval.RunMemory(ctx, c, model, 32768)
 		res.Memory = m
 		return err
@@ -1144,7 +1214,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		return nil, err
 	}
 
-	if err := step("coding", fmt.Sprintf("x%d", reps), func() error {
+	if err := standardStep("coding", fmt.Sprintf("x%d", reps), func() error {
 		for i := range reps {
 			w, err := eval.RunExec(ctx, c, model, spec.CodeWrite, filepath.Join(work, fmt.Sprintf("cw%d", i)))
 			if err != nil {
@@ -1220,7 +1290,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 
 	// Plumbing BEFORE capability: a tools failure is uninterpretable until you
 	// know the template and parser work.
-	if err := step("plumbing", "tool round-trip", func() error {
+	if err := standardStep("plumbing", "tool round-trip", func() error {
 		p, err := eval.RunPlumbing(ctx, c, model, spec.Plumbing)
 		if err == nil {
 			res.Plumbing = &p
@@ -1230,7 +1300,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		return nil, err
 	}
 
-	if err := step("tools", fmt.Sprintf("x%d", reps), func() error {
+	if err := standardStep("tools", fmt.Sprintf("x%d", reps), func() error {
 		for i := range reps {
 			t, err := eval.RunToolLoop(ctx, c, model, spec.Tools, filepath.Join(work, fmt.Sprintf("tl%d", i)))
 			if err != nil {
@@ -1243,7 +1313,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		return nil, err
 	}
 
-	if level != "quick" {
+	if level != "quick" && level != "checks" {
 		if err := step("withdrawal", "a tool vanishes mid-loop", func() error {
 			w, err := eval.RunToolLoop(ctx, c, model, spec.Withdrawal, filepath.Join(work, "wd"))
 			if err != nil {
@@ -1256,7 +1326,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		}
 	}
 
-	if level != "quick" {
+	if level != "quick" && level != "checks" {
 		if err := step("refusal", "3 prompts", func() error {
 			r, n, err := eval.RunRefusal(ctx, c, model, spec.Refusal)
 			res.Refusal, res.Refused = r, n
@@ -1280,6 +1350,8 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		}
 	}
 
+	res.Device.InferenceDevice = device.InferenceDeviceFor(ctx, c, model)
+
 	// Degeneracy over the longest text this model produced.
 	longest := ""
 	for _, r := range append(append([]eval.ExecResult{}, res.CodeWrite...), res.CodeFix...) {
@@ -1300,32 +1372,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	stopAll()
 
 	res.Scorecard = score.Score(measure(res), prof)
-	res.Meta = render.Meta{
-		ParamSize: info.Details.ParameterSize, Quant: info.Details.QuantizationLevel,
-		Family: info.Details.Family, GPU: fp.GPU, Driver: fp.GPUDriver,
-		Device: res.Device.InferenceDevice, Profile: prof.Name,
-		NumCtx: reqCtx, Repeats: reps,
-		DecodeMean: res.DecodeSum.Mean, DecodeSD: res.DecodeSum.SD,
-		DecodeMin: res.DecodeSum.Min, DecodeMax: res.DecodeSum.Max,
-		DecodeN:     res.DecodeSum.N,
-		PrefillMean: res.PrefillSum.Mean, PrefillSD: res.PrefillSum.SD,
-		PrefillN: res.PrefillSum.N,
-	}
-	var decodes []float64
-	for _, s := range res.Speed {
-		decodes = append(decodes, s.DecodeTPS)
-	}
-	res.Meta.FirstRunSlow, res.Meta.FirstRunRatio = stats.FirstRunSlow(decodes)
-
-	// State what this sample size CANNOT resolve, out loud, on every run.
-	trials := len(res.CodeWrite) + len(res.CodeFix) + len(res.Tools) + len(res.Checks)
-	if res.Agentic != nil {
-		trials++
-	}
-	if trials > 0 {
-		res.Meta.Trials = trials
-		res.Meta.MDEpp = 100 * stats.MinDetectableEffect(trials, 1)
-	}
+	res.Meta = resultMeta(res, prof.Name)
 	return res, nil
 }
 
@@ -1611,28 +1658,7 @@ func artifactFrom(r *Result) (render.Artifact, error) {
 		return render.Artifact{}, err
 	}
 	sc := score.Score(measure(r), prof)
-	trials := len(r.CodeWrite) + len(r.CodeFix) + len(r.Tools) + len(r.Checks)
-	if r.Agentic != nil {
-		trials++
-	}
-	meta := render.Meta{
-		ParamSize: r.ModelMeta.Details.ParameterSize,
-		Quant:     r.ModelMeta.Details.QuantizationLevel,
-		Family:    r.ModelMeta.Details.Family,
-		GPU:       r.Device.GPU, Driver: r.Device.GPUDriver,
-		Device: r.Device.InferenceDevice, Profile: prof.Name,
-		NumCtx:     resultNumCtx(r),
-		Repeats:    r.Repeats,
-		DecodeMean: r.DecodeSum.Mean, DecodeSD: r.DecodeSum.SD,
-		DecodeMin: r.DecodeSum.Min, DecodeMax: r.DecodeSum.Max,
-		DecodeN:     r.DecodeSum.N,
-		PrefillMean: r.PrefillSum.Mean, PrefillSD: r.PrefillSum.SD,
-		PrefillN: r.PrefillSum.N,
-	}
-	if trials > 0 {
-		meta.Trials = trials
-		meta.MDEpp = 100 * stats.MinDetectableEffect(trials, 1)
-	}
+	meta := resultMeta(r, prof.Name)
 	return render.Artifact{
 		FitrVersion:   version,
 		SchemaVersion: r.SchemaVersion,
@@ -1648,6 +1674,43 @@ func artifactFrom(r *Result) (render.Artifact, error) {
 		Meta:          meta,
 		Contamination: r.Contamination,
 	}, nil
+}
+
+func resultMeta(r *Result, profile string) render.Meta {
+	meta := render.Meta{
+		ParamSize: r.ModelMeta.Details.ParameterSize,
+		Quant:     r.ModelMeta.Details.QuantizationLevel,
+		Family:    r.ModelMeta.Details.Family,
+		GPU:       r.Device.GPU, Driver: r.Device.GPUDriver,
+		Device: r.Device.InferenceDevice, Profile: profile,
+		StartedAt: r.StartedAt, Level: r.Level, WallSeconds: r.WallSeconds,
+		NumCtx:     resultNumCtx(r),
+		Repeats:    r.Repeats,
+		DecodeMean: r.DecodeSum.Mean, DecodeSD: r.DecodeSum.SD,
+		DecodeMin: r.DecodeSum.Min, DecodeMax: r.DecodeSum.Max,
+		DecodeN:     r.DecodeSum.N,
+		PrefillMean: r.PrefillSum.Mean, PrefillSD: r.PrefillSum.SD,
+		PrefillN: r.PrefillSum.N,
+		TTFTMean: r.TTFTSum.Mean, TTFTSD: r.TTFTSum.SD, TTFTN: r.TTFTSum.N,
+		ResidentGB:  r.Memory.ResidentGB,
+		Calibration: r.Level == "checks",
+	}
+	for _, sample := range r.Speed {
+		meta.DecodeSeries = append(meta.DecodeSeries, sample.DecodeTPS)
+		meta.PrefillSeries = append(meta.PrefillSeries, sample.PrefillTPS)
+		meta.TTFTSeries = append(meta.TTFTSeries, sample.TTFT)
+	}
+	meta.FirstRunSlow, meta.FirstRunRatio = stats.FirstRunSlow(meta.DecodeSeries)
+	// State what this sample size CANNOT resolve, out loud, on every run.
+	trials := len(r.CodeWrite) + len(r.CodeFix) + len(r.Tools) + len(r.Checks)
+	if r.Agentic != nil {
+		trials++
+	}
+	if trials > 0 {
+		meta.Trials = trials
+		meta.MDEpp = 100 * stats.MinDetectableEffect(trials, 1)
+	}
+	return meta
 }
 
 // writeHTMLArtifact is a no-op unless the caller asked. dest "auto" writes
@@ -1681,13 +1744,106 @@ func writeHTMLArtifact(r *Result, dest, jsonPath string) (string, error) {
 	return dest, nil
 }
 
+// ---------------------------------------------------------------- view
+// cmdView replays a saved measurement through the same terminal renderer used
+// at run completion. With no model it selects the newest result, making the
+// command a quick dashboard rather than a file-hunting exercise.
+func cmdView(_ context.Context, args []string) int {
+	fs := flag.NewFlagSet("view", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if !render.ValidMode(*mode) {
+		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
+		return exitUsage
+	}
+	if fs.NArg() > 1 {
+		errPrint("too many arguments", "view accepts one model or result path", "fitr view [model|result.json]")
+		return exitUsage
+	}
+
+	var selected *Result
+	if fs.NArg() == 1 {
+		candidate := fs.Arg(0)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			b, err := os.ReadFile(candidate)
+			if err != nil {
+				errPrint("could not read result: "+err.Error(), "", "")
+				return exitError
+			}
+			var r Result
+			if err := json.Unmarshal(b, &r); err != nil || r.Model == "" {
+				errPrint("not a fitr result", "expected a saved run JSON with a model", candidate)
+				return exitError
+			}
+			selected = &r
+		} else {
+			results, err := loadResults()
+			if err != nil || len(results) == 0 {
+				errPrint("no results yet", "", "fitr run "+normalizeModelRef(candidate)+" --full")
+				return exitError
+			}
+			selected = latestNamed(results, normalizeModelRef(candidate))
+			if selected == nil {
+				errPrint(fmt.Sprintf("no stored result for %q", candidate), "", "fitr board")
+				return exitError
+			}
+		}
+	} else {
+		results, err := loadResults()
+		if err != nil || len(results) == 0 {
+			errPrint("no results yet", "", "run one first: fitr run <model> --full")
+			return exitError
+		}
+		for _, result := range results {
+			if selected == nil || result.StartedAt > selected.StartedAt {
+				selected = result
+			}
+		}
+	}
+
+	switch render.Resolve(*mode) {
+	case "none":
+		return exitOK
+	case "json":
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(selected); err != nil {
+			errPrint("could not render result: "+err.Error(), "", "")
+			return exitError
+		}
+		return exitOK
+	}
+	scorecard := selected.Scorecard
+	meta := resultMeta(selected, selected.Profile)
+	if scorecard.Model == "" {
+		artifact, err := artifactFrom(selected)
+		if err != nil {
+			errPrint("could not render result: "+err.Error(), "", "")
+			return exitError
+		}
+		scorecard = artifact.Scorecard
+		meta = artifact.Meta
+	}
+	display := render.New(*mode)
+	defer display.Close()
+	display.Result(scorecard, meta)
+	return exitOK
+}
+
 // ---------------------------------------------------------------- board
 func cmdBoard(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("board", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	current := fs.Bool("current", false, "only this machine's current config")
-	mode := fs.String("display", "auto", "auto|plain|json|none")
+	current := fs.Bool("current", false, "only this machine, including its measured context variants")
+	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if !render.ValidMode(*mode) {
+		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
 		return exitUsage
 	}
 	results, err := loadResults()
@@ -1711,13 +1867,8 @@ func cmdBoard(ctx context.Context, args []string) int {
 	}
 	sort.Strings(order)
 
-	if render.Resolve(*mode) == "json" {
-		b, _ := json.Marshal(map[string]any{"groups": groups, "current": cur})
-		fmt.Println(string(b))
-		return exitOK
-	}
-
-	shown := 0
+	board := render.Board{}
+	visible := map[string][]*Result{}
 	for _, key := range order {
 		rows := groups[key]
 		hw := eval.HardwareKey(key)
@@ -1734,34 +1885,46 @@ func cmdBoard(ctx context.Context, args []string) int {
 				note = "this machine, current config"
 			}
 		}
-		fmt.Printf("\n%s | driver %s | KV %s | ctx %d\n", g.Device.GPU, g.Device.GPUDriver,
-			g.Device.Config["OLLAMA_KV_CACHE_TYPE"], nctx)
-		fmt.Printf("  %s\n", note)
-		shown++
 		sort.Slice(rows, func(i, j int) bool {
 			return rows[i].DecodeSum.Mean > rows[j].DecodeSum.Mean
 		})
-		fmt.Printf("  %-28s %7s %8s %7s %8s %7s %3s  %s\n",
-			"model", "params", "tok/s", "sd", "prefill", "GB@32K", "k", "serves")
+		visible[key] = rows
+		group := render.BoardGroup{
+			GPU: g.Device.GPU, Driver: g.Device.GPUDriver,
+			KV: g.Device.Config["OLLAMA_KV_CACHE_TYPE"], NumCtx: nctx, Note: note,
+		}
 		for _, r := range rows {
-			sd := ""
-			if r.DecodeSum.Valid() {
-				sd = fmt.Sprintf("%.2f", r.DecodeSum.SD)
-			}
 			var codes []string
 			for _, s := range r.Scorecard.Serves {
-				codes = append(codes, score.NeedCode[s])
+				if code := score.NeedCode[s]; code != "" {
+					codes = append(codes, code)
+				}
 			}
-			fmt.Printf("  %-28s %7s %8.2f %7s %8.1f %7.2f %3d  %s\n",
-				trunc(r.Model, 28), r.ModelMeta.Details.ParameterSize,
-				r.DecodeSum.Mean, sd, r.PrefillSum.Mean, r.Memory.ResidentGB,
-				r.Repeats, strings.Join(codes, ", "))
+			var decodes []float64
+			for _, sample := range r.Speed {
+				decodes = append(decodes, sample.DecodeTPS)
+			}
+			group.Rows = append(group.Rows, render.BoardRow{
+				Model: r.Model, ParamSize: r.ModelMeta.Details.ParameterSize,
+				Quant:      r.ModelMeta.Details.QuantizationLevel,
+				DecodeMean: r.DecodeSum.Mean, DecodeSD: r.DecodeSum.SD,
+				PrefillMean: r.PrefillSum.Mean, ResidentGB: r.Memory.ResidentGB,
+				DecodeSeries: decodes, Repeats: r.Repeats, Serves: codes,
+			})
 		}
+		board.Results += len(rows)
+		board.Groups = append(board.Groups, group)
 	}
-	fmt.Println("\n  k = repeats. k<3 is a smoke test, not a rankable result.")
-	if shown > 1 && !*current {
-		fmt.Println("  blocks differ in hardware/config (including request context) - re-measure rather than ranking across them")
+	if len(board.Groups) == 0 {
+		errPrint("no results for this machine", "", "run fitr run <model> --full")
+		return exitError
 	}
+	if render.Resolve(*mode) == "json" {
+		b, _ := json.Marshal(map[string]any{"groups": visible, "current": cur})
+		fmt.Println(string(b))
+		return exitOK
+	}
+	render.WriteBoard(os.Stdout, board, *mode)
 	return exitOK
 }
 
@@ -1776,13 +1939,6 @@ func resultNumCtx(r *Result) int {
 		return n
 	}
 	return eval.NumCtx
-}
-
-func trunc(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-3] + "..."
 }
 
 // ---------------------------------------------------------------- diag
@@ -2046,9 +2202,18 @@ func cmdProfilesNew(ctx context.Context, name string) int {
 // does not rewrite the spec: dropping an item is a human decision after
 // more than one box has spoken.
 func cmdCalibrate(ctx context.Context, args []string) int {
-	if len(args) < 2 {
+	if len(args) > 0 && args[0] == "merge" {
+		return cmdCalibrateMerge(args[1:])
+	}
+	fs := flag.NewFlagSet("calibrate", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	out := fs.String("out", "", "write a privacy-safe calibration pair as JSON")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() != 2 {
 		errPrint("need two saved results", "",
-			"fitr run a --seedset night && fitr run b --seedset night && fitr calibrate a b")
+			"fitr run a --checks-only --seedset night && fitr run b --checks-only --seedset night && fitr calibrate a b")
 		return exitUsage
 	}
 	results, err := loadResults()
@@ -2056,8 +2221,8 @@ func cmdCalibrate(ctx context.Context, args []string) int {
 		errPrint("no saved results", "", "fitr run both models with the same --seedset first")
 		return exitError
 	}
-	a := latestNamed(results, args[0])
-	b := latestNamed(results, args[1])
+	a := latestNamed(results, fs.Arg(0))
+	b := latestNamed(results, fs.Arg(1))
 	if a == nil || b == nil {
 		errPrint("need two saved results", "", "fitr board lists what is on disk")
 		return exitUsage
@@ -2070,8 +2235,13 @@ func cmdCalibrate(ctx context.Context, args []string) int {
 	}
 	stats := eval.ItemStats(a.Checks, b.Checks)
 	if len(stats) == 0 {
-		errPrint("no shared check instances", "", "both runs need the default (or --full) level, same seedset")
+		errPrint("no shared check instances", "", "both runs need --checks-only (or the default/full level), the same seedset, and the same -k")
 		return exitError
+	}
+	report, err := calibrationPair(a, b, stats)
+	if err != nil {
+		errPrint("invalid calibration pair", err.Error(), "pair the same model family and size on one unchanged device/config")
+		return exitUsage
 	}
 	qa, qb := a.ModelMeta.Details.QuantizationLevel, b.ModelMeta.Details.QuantizationLevel
 	fmt.Printf("  calibrate  %s (%s)  vs  %s (%s)\n", a.Model, qa, b.Model, qb)
@@ -2096,13 +2266,131 @@ func cmdCalibrate(ctx context.Context, args []string) int {
 		}
 	}
 	if len(drop) > 0 {
-		fmt.Println("\n  never flipped (candidates to drop AFTER more hardware, not dropped here):")
+		fmt.Println("\n  never flipped (not evidence to drop until more devices and model pairs agree):")
 		for _, s := range drop {
 			fmt.Printf("    %-22s  %d/%d agree    %s\n", s.TaskID, s.Shared, s.Shared, s.Need)
 		}
 	}
-	fmt.Println("\n  this command does not rewrite spec/tasks. Aider kept 225 of 697")
-	fmt.Println("  by repeating this on many boxes; one pair is a lead, not a cull.")
+	if *out != "" {
+		if err := calibration.WriteJSON(*out, report); err != nil {
+			errPrint("could not write calibration report", err.Error(), "")
+			return exitError
+		}
+		fmt.Printf("\n  wrote      %s (no hostname, prompts, raw output, or result paths)\n", *out)
+	}
+	fmt.Println("\n  this command does not rewrite spec/tasks. One pair is a lead, not a cull.")
+	return exitOK
+}
+
+func calibrationPair(a, b *Result, stats []eval.ItemStat) (calibration.PairReport, error) {
+	if a.DeviceKey == "" || b.DeviceKey == "" || a.DeviceKey != b.DeviceKey {
+		return calibration.PairReport{}, errors.New("results were measured on different hardware or runtime configurations")
+	}
+	if diffs := a.Device.Diff(b.Device); len(diffs) > 0 {
+		names := make([]string, 0, len(diffs))
+		for _, diff := range diffs {
+			names = append(names, diff[0])
+		}
+		return calibration.PairReport{}, fmt.Errorf("resolved device configuration differs: %s", strings.Join(names, ", "))
+	}
+	if a.NumCtx != b.NumCtx {
+		return calibration.PairReport{}, fmt.Errorf("request context differs: %d vs %d", a.NumCtx, b.NumCtx)
+	}
+	paired := eval.PairFlips(a.Checks, b.Checks)
+	if len(a.Checks) != len(b.Checks) || paired.Shared != len(a.Checks) {
+		return calibration.PairReport{}, fmt.Errorf("check instances are incomplete: %d left, %d right, %d paired",
+			len(a.Checks), len(b.Checks), paired.Shared)
+	}
+	fa, fb := strings.TrimSpace(a.ModelMeta.Details.Family), strings.TrimSpace(b.ModelMeta.Details.Family)
+	if fa == "" || fb == "" || !strings.EqualFold(fa, fb) {
+		return calibration.PairReport{}, fmt.Errorf("model family differs or is unknown: %q vs %q", fa, fb)
+	}
+	pa, pb := strings.TrimSpace(a.ModelMeta.Details.ParameterSize), strings.TrimSpace(b.ModelMeta.Details.ParameterSize)
+	if pa == "" || pb == "" || !strings.EqualFold(pa, pb) {
+		return calibration.PairReport{}, fmt.Errorf("parameter size differs or is unknown: %q vs %q", pa, pb)
+	}
+	spec, err := eval.LoadSpec()
+	if err != nil {
+		return calibration.PairReport{}, err
+	}
+	if a.SchemaVersion != b.SchemaVersion || a.SchemaVersion != spec.Version.ResultSchemaVersion {
+		return calibration.PairReport{}, fmt.Errorf("result schema differs from this battery: %d, %d, current %d",
+			a.SchemaVersion, b.SchemaVersion, spec.Version.ResultSchemaVersion)
+	}
+	fp := a.Device
+	dev := calibration.Device{
+		ID: calibration.PseudonymousDeviceID(a.DeviceKey),
+		OS: fp.OS, CPU: fp.CPU, RAMGB: fp.RAMGb, GPU: fp.GPU,
+		GPUDriver: fp.GPUDriver, GPUDriverDate: fp.GPUDriverDate,
+		GPUBackend: fp.GPUBackend, Runtime: fp.Runtime,
+		InferenceDevice: fp.InferenceDevice, Config: fp.Config,
+	}
+	toRun := func(r *Result) calibration.Run {
+		return calibration.Run{
+			Model: r.Model, Quant: r.ModelMeta.Details.QuantizationLevel,
+			Family: r.ModelMeta.Details.Family, ParameterSize: r.ModelMeta.Details.ParameterSize,
+			StartedAt: r.StartedAt, NumCtx: r.NumCtx, ResultSchemaVersion: r.SchemaVersion,
+		}
+	}
+	return calibration.NewPair(version, spec.Version.SpecVersion, a.SeedSet, dev, toRun(a), toRun(b), stats), nil
+}
+
+func cmdCalibrateMerge(args []string) int {
+	fs := flag.NewFlagSet("calibrate merge", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	out := fs.String("out", "", "write the aggregate calibration summary as JSON")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() < 1 {
+		errPrint("need calibration pair reports", "", "fitr calibrate merge pair-a.json pair-b.json --out summary.json")
+		return exitUsage
+	}
+	reports := make([]calibration.PairReport, 0, fs.NArg())
+	for _, path := range fs.Args() {
+		r, err := calibration.ReadPair(path)
+		if err != nil {
+			errPrint("could not read calibration report", err.Error(), "")
+			return exitError
+		}
+		reports = append(reports, r)
+	}
+	summary, err := calibration.Aggregate(reports)
+	if err != nil {
+		errPrint("could not aggregate calibration reports", err.Error(), "")
+		return exitError
+	}
+	fmt.Printf("  calibration evidence  %d report(s), %d device(s), %d model pair(s), spec v%d\n",
+		summary.Reports, summary.Devices, summary.ModelPairs, summary.SpecVersion)
+	var observed, unseen []calibration.SummaryItem
+	for _, item := range summary.Items {
+		if item.Status == "observed" {
+			observed = append(observed, item)
+		} else {
+			unseen = append(unseen, item)
+		}
+	}
+	if len(observed) > 0 {
+		fmt.Println("\n  discrimination observed:")
+		for _, item := range observed {
+			fmt.Printf("    %-22s  %d flip(s)/%d shared  on %d/%d device(s)\n",
+				item.TaskID, item.Flips, item.Shared, item.DiscriminatedDevices, item.Devices)
+		}
+	}
+	if len(unseen) > 0 {
+		fmt.Println("\n  discrimination not yet observed:")
+		for _, item := range unseen {
+			fmt.Printf("    %-22s  0/%d shared  across %d device(s)\n", item.TaskID, item.Shared, item.Devices)
+		}
+	}
+	if *out != "" {
+		if err := calibration.WriteJSON(*out, summary); err != nil {
+			errPrint("could not write calibration summary", err.Error(), "")
+			return exitError
+		}
+		fmt.Printf("\n  wrote  %s\n", *out)
+	}
+	fmt.Println("\n  evidence only: aggregation never deletes or rewrites a task.")
 	return exitOK
 }
 

@@ -122,9 +122,10 @@ prints "not recommended."
   work", not the full alignment surface.
 - **One model at a time.** Concurrent models contaminate timings enough to
   invalidate a run; every phase clears residents first.
-- **`advise` estimates, it does not dummy-allocate.** The number is weights
-  plus KV from GGUF metadata. Compute buffers are excluded and said so.
-  Unmeasured VRAM or architecture is SKIP, not a name-to-GB guess.
+- **`advise` estimates by default.** The default is weights plus KV from GGUF
+  metadata, with excluded compute buffers disclosed. `--load` observes an
+  Ollama resident allocation and `--fit` uses `llama-fit-params` dummy
+  allocation. Unmeasured VRAM or architecture is SKIP, not a name-to-GB guess.
 - **Sharing is opt-in.** `fitr export` / `--html` write a self-contained
   page that includes the fingerprint. JSON under `~/.fitr` stays local.
 

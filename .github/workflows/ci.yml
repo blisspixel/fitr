@@ -13,12 +13,24 @@ jobs:
         with: { go-version: '1.25' }
       # No Ollama needed: every test here is pure logic. The tests that would
       # need a model are the ones you run locally against your own hardware.
+      - run: gofmt -w .
+      - run: git diff --exit-code
       - run: go vet ./...
       - run: go test ./... -count=1
       - run: go build ./...
       - name: installer syntax
         if: runner.os == 'Linux'
         run: sh -n install.sh
+      - name: installer syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path install.ps1), [ref]$tokens, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) { throw ($errors | Out-String) }
 
   dist:
     runs-on: ubuntu-latest

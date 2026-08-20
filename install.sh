@@ -149,6 +149,6 @@ case ":$PATH:" in
     ;;
 esac
 echo
-echo "  next:  fitr device        # confirm it sees your hardware"
-echo "         fitr run <model> --full"
-echo "         fitr run https://huggingface.co/<org>/<gguf-repo>"
+echo "  next:  fitr                        # hardware and reachable runtime"
+echo "         fitr advise <model>         # does this quant fit"
+echo "         fitr run <model> --full     # measure it on this machine"

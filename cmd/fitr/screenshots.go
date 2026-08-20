@@ -31,11 +31,17 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		errPrint(err.Error(), "", "")
 		return exitError
 	}
-	// Colour and unicode on regardless of TTY: the capture pipe is not one.
+	// Colour and unicode on regardless of TTY or the caller's environment: the
+	// capture pipe is not a terminal, and checked-in screenshots must reproduce.
+	oldNoColor, hadNoColor := os.LookupEnv("NO_COLOR")
+	oldForceColor, hadForceColor := os.LookupEnv("FORCE_COLOR")
+	oldUnicode, hadUnicode := os.LookupEnv("FITR_UNICODE")
+	os.Setenv("NO_COLOR", "")
 	os.Setenv("FORCE_COLOR", "1")
 	os.Setenv("FITR_UNICODE", "1")
-	defer os.Unsetenv("FORCE_COLOR")
-	defer os.Unsetenv("FITR_UNICODE")
+	defer restoreEnv("NO_COLOR", oldNoColor, hadNoColor)
+	defer restoreEnv("FORCE_COLOR", oldForceColor, hadForceColor)
+	defer restoreEnv("FITR_UNICODE", oldUnicode, hadUnicode)
 
 	shots := []struct {
 		name string
@@ -58,6 +64,14 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		fmt.Fprintf(os.Stderr, "wrote %s\n", path)
 	}
 	return exitOK
+}
+
+func restoreEnv(key, value string, existed bool) {
+	if existed {
+		os.Setenv(key, value)
+		return
+	}
+	os.Unsetenv(key)
 }
 
 func captureStdout(ctx context.Context, fn func(context.Context) (string, error)) (string, error) {
@@ -121,11 +135,19 @@ func shotRun(ctx context.Context) (string, error) {
 		ParamSize: res.ModelMeta.Details.ParameterSize, Quant: res.ModelMeta.Details.QuantizationLevel,
 		Family: res.ModelMeta.Details.Family, GPU: res.Device.GPU, Driver: res.Device.GPUDriver,
 		Device: res.Device.InferenceDevice, Profile: res.Profile,
+		StartedAt: res.StartedAt, Level: res.Level, WallSeconds: res.WallSeconds,
 		NumCtx: resultNumCtx(&res), Repeats: res.Repeats,
 		DecodeMean: res.DecodeSum.Mean, DecodeSD: res.DecodeSum.SD,
 		DecodeMin: res.DecodeSum.Min, DecodeMax: res.DecodeSum.Max, DecodeN: res.DecodeSum.N,
 		PrefillMean: res.PrefillSum.Mean, PrefillSD: res.PrefillSum.SD, PrefillN: res.PrefillSum.N,
-		Trials: trials, MDEpp: 100 * stats.MinDetectableEffect(trials, 1),
+		TTFTMean: res.TTFTSum.Mean, TTFTSD: res.TTFTSum.SD, TTFTN: res.TTFTSum.N,
+		ResidentGB: res.Memory.ResidentGB,
+		Trials:     trials, MDEpp: 100 * stats.MinDetectableEffect(trials, 1),
+	}
+	for _, sample := range res.Speed {
+		meta.DecodeSeries = append(meta.DecodeSeries, sample.DecodeTPS)
+		meta.PrefillSeries = append(meta.PrefillSeries, sample.PrefillTPS)
+		meta.TTFTSeries = append(meta.TTFTSeries, sample.TTFT)
 	}
 	pre := "$ fitr run qwen3-coder:30b --full --pull\n\n"
 	disp := render.New("rich")
@@ -198,10 +220,12 @@ func shotBoard(ctx context.Context) (string, error) {
 	cur := device.Detect(ctx, probeBackend(ctx))
 	a := mockResult("qwen3:30b-q4", 23.16, 0.44, 226.64, 3.10, 6, 6, 14, 16)
 	a.ModelMeta.Details.ParameterSize = "30.5B"
+	a.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
 	a.Memory.ResidentGB = 20.34
 	a.Scorecard.Serves = []string{"fast_and_decent", "coding", "structured_output"}
 	b := mockResult("llama3.1:8b", 14.61, 0.52, 148.20, 4.70, 4, 6, 5, 16)
 	b.ModelMeta.Details.ParameterSize = "8.0B"
+	b.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
 	b.Memory.ResidentGB = 5.10
 	b.Scorecard.Serves = []string{"fast_and_decent", "low_footprint"}
 	// Same key as Detect so the board labels this block "this machine"
@@ -214,7 +238,7 @@ func shotBoard(ctx context.Context) (string, error) {
 		}
 	}
 	fmt.Println("$ fitr board")
-	if code := cmdBoard(ctx, nil); code != exitOK {
+	if code := cmdBoard(ctx, []string{"--display", "rich"}); code != exitOK {
 		return "", fmt.Errorf("cmdBoard exited %d", code)
 	}
 	return "", nil
@@ -248,6 +272,11 @@ func mockResult(model string, dec, decSD, pre, preSD float64, codePass, codeN, c
 	}
 	r.DecodeSum = stats.Summary{Mean: dec, SD: decSD, N: 3, Min: dec - decSD, Max: dec + decSD}
 	r.PrefillSum = stats.Summary{Mean: pre, SD: preSD, N: 3, Min: pre - preSD, Max: pre + preSD}
+	r.Speed = []eval.SpeedResult{
+		{DecodeTPS: dec - decSD, PrefillTPS: pre - preSD},
+		{DecodeTPS: dec, PrefillTPS: pre},
+		{DecodeTPS: dec + decSD, PrefillTPS: pre + preSD},
+	}
 	for i := 0; i < codeN; i++ {
 		res := eval.ExecResult{Pass: i < codePass}
 		if i%2 == 0 {
