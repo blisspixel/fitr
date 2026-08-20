@@ -62,7 +62,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `fitr `+version+` - is this local model any good ON THIS DEVICE?
 
 usage:
-  fitr run <model> [--quick|--full] [-k N] [--profile P] [--display MODE] [--html]
+  fitr run <model> [--quick|--full] [-k N] [--ctx N] [--profile P] [--display MODE] [--html]
   fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]
   fitr tune [model-a model-b]
   fitr export <model> [--out PATH] [--retonr]
@@ -105,8 +105,9 @@ func main() { os.Exit(run()) }
 
 func run() int {
 	if len(os.Args) < 2 {
-		usage()
-		return exitUsage
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		return cmdStatus(ctx)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -663,7 +664,11 @@ func cmdAdvise(ctx context.Context, args []string) int {
 	default:
 		advise.Write(os.Stdout, rep)
 		if rep.Tier == advise.Compatible || rep.Tier == advise.LowMemory {
-			fmt.Fprintf(os.Stderr, "\n  next   fitr run %s --full\n", in.Model)
+			next := fmt.Sprintf("fitr run %s --full", in.Model)
+			if rep.FlagValue > 0 {
+				next = fmt.Sprintf("fitr run %s --ctx %d --full", in.Model, rep.FlagValue)
+			}
+			fmt.Fprintf(os.Stderr, "\n  next   %s\n", next)
 		}
 	}
 	return rep.ExitCode()
@@ -764,6 +769,7 @@ func cmdRun(ctx context.Context, args []string) int {
 	pullFlag := fs.Bool("pull", false, "pull the model first if it is not installed "+
 		"(Ollama; supports hf.co/... and pasted Hugging Face URLs)")
 	htmlFlag := fs.Bool("html", false, "write a self-contained HTML artifact next to the JSON")
+	ctxSize := fs.Int("ctx", 0, "request context (default 8192). Apply an advise num_ctx remedy here.")
 	quiet := fs.Int("q", 0, "quiet level")
 	verbose := fs.Bool("v", false, "verbose")
 	if err := fs.Parse(permute(args)); err != nil {
@@ -812,6 +818,7 @@ func cmdRun(ctx context.Context, args []string) int {
 	res, err := execute(ctx, c, model, runOpts{
 		level: level, profile: *profileName, seedSet: *seedset,
 		reps: reps, checksReps: checksReps, adaptive: *adaptive,
+		numCtx: *ctxSize,
 	}, disp)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -871,6 +878,7 @@ type Result struct {
 	// `fitr compare` from an unpaired comparison to a paired one.
 	SeedSet     string             `json:"seedset,omitempty"`
 	Repeats     int                `json:"repeats"`
+	NumCtx      int                `json:"num_ctx,omitempty"`
 	WallSeconds float64            `json:"wall_s"`
 	Device      device.Fingerprint `json:"device"`
 	DeviceKey   string             `json:"device_key"`
@@ -907,6 +915,7 @@ type runOpts struct {
 	level, profile, seedSet string
 	reps, checksReps        int
 	adaptive                bool
+	numCtx                  int
 }
 
 func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
@@ -948,12 +957,18 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	}
 	info, _ := c.Show(ctx, model)
 
+	reqCtx := eval.ResolvedCtx(opts.numCtx)
+	ctx = eval.WithNumCtx(ctx, reqCtx)
 	res := &Result{
 		SchemaVersion: spec.Version.ResultSchemaVersion,
 		Model:         model,
 		StartedAt:     time.Now().Format(time.RFC3339),
-		Level:         level, Repeats: reps,
+		Level:         level, Repeats: reps, NumCtx: reqCtx,
 		Device: fp, DeviceKey: fp.Key(), Profile: prof.Name, ModelMeta: info,
+	}
+	if reqCtx != eval.NumCtx {
+		res.DeviceKey = res.DeviceKey + fmt.Sprintf("|ctx=%d", reqCtx)
+		disp.Note(fmt.Sprintf("num_ctx=%d (advise remedy applied; default is %d)", reqCtx, eval.NumCtx), "")
 	}
 	// Fresh instances every run by default; a pinned seedset trades that
 	// contamination resistance for pairing power, and says so.
@@ -1676,6 +1691,7 @@ func cmdDiag(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("diag", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
+	ctxSize := fs.Int("ctx", 0, "request context (default 8192)")
 	if err := fs.Parse(permute(args)); err != nil {
 		return exitUsage
 	}
@@ -1694,6 +1710,7 @@ func cmdDiag(ctx context.Context, args []string) int {
 		return exitError
 	}
 	fmt.Printf("tool plumbing: %s\n", model)
+	ctx = eval.WithNumCtx(ctx, *ctxSize)
 	r, err := eval.RunPlumbing(ctx, c, model, spec.Plumbing)
 	if err != nil {
 		errPrint(err.Error(), "", "")
@@ -1723,6 +1740,7 @@ func cmdDoctor(ctx context.Context, args []string) int {
 	fs.SetOutput(os.Stderr)
 	n := fs.Int("n", 5, "identical generations per determinism probe")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
+	ctxSize := fs.Int("ctx", 0, "request context (default 8192)")
 	if err := fs.Parse(permute(args)); err != nil {
 		return exitUsage
 	}
@@ -1749,6 +1767,7 @@ func cmdDoctor(ctx context.Context, args []string) int {
 
 	fp := device.Detect(ctx, c)
 	fmt.Printf("doctor: %s on %s (%s)\n", model, fp.GPU, fp.Runtime)
+	ctx = eval.WithNumCtx(ctx, *ctxSize)
 	r, err := eval.RunDoctor(ctx, c, model, *n, eval.DoctorOpts{
 		Config: fp.Config,
 		Placement: func(ctx context.Context) string {
@@ -1788,6 +1807,46 @@ func printDoctor(w io.Writer, r eval.DoctorResult, color bool) {
 	fmt.Fprintf(w, "  => %s\n", r.Verdict)
 }
 
+// cmdStatus is what a bare `fitr` prints after install: what this box is,
+// what is already serving, and the next command. Not a usage error.
+func cmdStatus(ctx context.Context) int {
+	found := llm.Discover(ctx)
+	var b llm.Backend
+	if len(found) > 0 {
+		b = backendAt(found[0].Kind, found[0].URL)
+	}
+	fp := device.Detect(ctx, b)
+	fmt.Printf("  fitr %s\n", version)
+	fmt.Printf("  gpu       %s", fp.GPU)
+	if fp.GPUBackend != "" {
+		fmt.Printf("  (%s)", fp.GPUBackend)
+	}
+	fmt.Println()
+	if fp.VRAMGb > 0 {
+		fmt.Printf("  memory    %s\n", device.FormatVRAM(fp.VRAMGb, fp.VRAMSource))
+	}
+	if len(found) == 0 {
+		fmt.Println("  runtime   none reachable")
+		fmt.Println("  next      start Ollama, llama-server, or an OpenAI-compatible server")
+		fmt.Println("            then: fitr advise <model>   and   fitr run <model> --full")
+		return exitError
+	}
+	for i, f := range found {
+		label := "runtime"
+		if i > 0 {
+			label = "also"
+		}
+		fmt.Printf("  %-9s %s  %s\n", label, f.Kind, f.URL)
+	}
+	fmt.Println("  next      fitr advise <model>          # does this quant fit")
+	fmt.Println("            fitr doctor <model>          # can this box be measured fairly")
+	fmt.Println("            fitr run <model> --full      # then compare with fitr board")
+	if h := retonr.Hint("<model>"); h != "" {
+		fmt.Printf("            %s\n", h)
+	}
+	return exitOK
+}
+
 // ---------------------------------------------------------------- device
 func cmdDevice(ctx context.Context, args []string) int {
 	fp := device.Detect(ctx, probeBackend(ctx))
@@ -1804,8 +1863,9 @@ func cmdDevice(ctx context.Context, args []string) int {
 	fmt.Printf("  ram_gb             %.1f\n", fp.RAMGb)
 	fmt.Printf("  vram_gb            %s\n", device.FormatVRAM(fp.VRAMGb, fp.VRAMSource))
 	fmt.Printf("  gpu                %s\n", fp.GPU)
+	fmt.Printf("  gpu_backend        %s\n", emptyDash(fp.GPUBackend))
 	fmt.Printf("  gpu_driver         %s  (%s)\n", fp.GPUDriver, fp.GPUDriverDate)
-	fmt.Printf("  ollama             %s\n", fp.Runtime)
+	fmt.Printf("  runtime            %s\n", fp.Runtime)
 	fmt.Printf("  inference_device   %s\n", fp.InferenceDevice)
 	fmt.Println("  config")
 	keys := make([]string, 0, len(fp.Config))

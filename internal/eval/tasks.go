@@ -17,8 +17,6 @@ import (
 	"github.com/blisspixel/fitr/internal/ollama"
 )
 
-const NumCtx = 8192
-
 // ---------------------------------------------------------------- speed
 type SpeedResult struct {
 	DecodeTPS float64 `json:"decode_tps"`
@@ -73,7 +71,7 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 	// with residents cleared, so on the first repeat it does), its wall-clock
 	// first token IS the honest cold-start figure - record it instead of
 	// discarding it.
-	warm := ollama.Deterministic(8, NumCtx)
+	warm := ollama.Deterministic(8, numCtx(ctx))
 	_, m0, err := c.Generate(ctx, model, "Say OK.", warm)
 	if err != nil {
 		return out, err
@@ -81,7 +79,7 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 	if m0.LoadSeconds > 0.1 {
 		out.ColdTTFT = m0.TTFTSeconds
 	}
-	samp := ollama.Deterministic(s.Speed.Decode.NumPredict, NumCtx)
+	samp := ollama.Deterministic(s.Speed.Decode.NumPredict, numCtx(ctx))
 	tag := ""
 	if nonce != "" {
 		tag = "  <!-- run " + nonce + " -->"
@@ -114,7 +112,7 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 		}
 	}
 
-	samp2 := ollama.Deterministic(s.Speed.Prefill.NumPredict, NumCtx)
+	samp2 := ollama.Deterministic(s.Speed.Prefill.NumPredict, numCtx(ctx))
 	_, m2, err := c.Generate(ctx, model, buildLongPrompt(nonce), samp2)
 	if err != nil {
 		return out, err
@@ -245,7 +243,7 @@ func RunExec(ctx context.Context, c llm.Backend, model string, spec ExecSpec, di
 	if err != nil {
 		return r, err
 	}
-	samp := ollama.Deterministic(spec.NumPredict, NumCtx)
+	samp := ollama.Deterministic(spec.NumPredict, numCtx(ctx))
 	text, _, err := c.Generate(ctx, model, prompt, samp)
 	if err != nil {
 		return r, err
@@ -370,7 +368,7 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 	sigCount := map[string]int{}
 	msgs := []ollama.Message{{Role: "user", Content: spec.Prompt}}
 	lastPrompt := 0
-	samp := ollama.Deterministic(spec.NumPredict, NumCtx)
+	samp := ollama.Deterministic(spec.NumPredict, numCtx(ctx))
 	deadline := time.Now().Add(time.Duration(spec.Budget) * time.Second)
 	var seq strings.Builder
 

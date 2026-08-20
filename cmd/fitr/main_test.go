@@ -275,6 +275,23 @@ func TestMDEIsSaidOutLoud(t *testing.T) {
 	}
 }
 
+func TestBareFitrIsStatusNotUsage(t *testing.T) {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	code := cmdStatus(context.Background())
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	got := string(out)
+	if !strings.Contains(got, "fitr "+version) || !strings.Contains(got, "next") {
+		t.Fatalf("bare fitr must be a status page:\n%s", got)
+	}
+	if code == exitUsage {
+		t.Fatal("bare fitr is not a usage error")
+	}
+}
+
 func TestUsageMentionsAdvise(t *testing.T) {
 	old := os.Stderr
 	r, w, _ := os.Pipe()

@@ -58,9 +58,10 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 Then:
 
 ```bash
-fitr device                      # confirm it sees your hardware
+fitr                             # what this box is, what is already serving
 fitr advise qwen3:30b            # does it fit, and if not, which flag to try
-fitr run qwen3-coder:30b --full  # or paste a Hugging Face GGUF URL
+fitr run qwen3:30b --ctx 8192 --full
+fitr board
 ```
 
 From source (Go 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.

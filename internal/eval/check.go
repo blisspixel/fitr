@@ -107,7 +107,7 @@ type CheckOutcome struct {
 func RunCheck(ctx context.Context, c llm.Backend, model string, cs CheckSpec, seed uint64) (CheckOutcome, error) {
 	out := CheckOutcome{TaskID: cs.ID, Family: cs.Family, Need: cs.Need, Origin: cs.Origin, Seed: seed}
 	inst := Generate(cs, seed)
-	samp := ollama.Deterministic(cs.NumPredict, NumCtx)
+	samp := ollama.Deterministic(cs.NumPredict, numCtx(ctx))
 	text, m, err := c.Generate(ctx, model, inst.Prompt, samp)
 	if err != nil {
 		return out, err

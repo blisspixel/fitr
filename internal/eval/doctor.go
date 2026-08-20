@@ -71,7 +71,7 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 
 	// 1. A real generated token, not an HTTP 200. Cold on purpose: load time
 	// is part of what this box is.
-	text, m, err := c.Generate(ctx, model, "Say OK.", ollama.Deterministic(8, NumCtx))
+	text, m, err := c.Generate(ctx, model, "Say OK.", ollama.Deterministic(8, numCtx(ctx)))
 	if err != nil {
 		add("real_token", "FAIL", "generation failed: "+err.Error())
 		r.Verdict = "the server is reachable but did not generate - nothing else is measurable"
@@ -103,7 +103,7 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 
 	// 3. Served context. A server can silently evaluate less prompt than you
 	// sent; prompt_eval_count is the receipt. Nonce defeats the prefix cache.
-	_, mp, err := c.Generate(ctx, model, buildLongPrompt("doctor-ctx-probe"), ollama.Deterministic(16, NumCtx))
+	_, mp, err := c.Generate(ctx, model, buildLongPrompt("doctor-ctx-probe"), ollama.Deterministic(16, numCtx(ctx)))
 	// Cached prompt tokens count as served: on backends that report the split,
 	// prompt_n alone under-reads a partially cached prompt.
 	served := mp.PromptTokens + mp.CachedTokens
@@ -120,7 +120,7 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	// 4. Determinism, plain text. Identical request, N times, byte-compared.
 	texts := make([]string, 0, runs)
 	for i := 0; i < runs; i++ {
-		t, _, err := c.Generate(ctx, model, doctorTextPrompt, ollama.Deterministic(64, NumCtx))
+		t, _, err := c.Generate(ctx, model, doctorTextPrompt, ollama.Deterministic(64, numCtx(ctx)))
 		if err != nil {
 			return r, err
 		}
@@ -133,7 +133,7 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	// DIFFERENT code path and is known to break seed reproducibility on some
 	// stacks while plain text reproduces.
 	jsons := make([]string, 0, runs)
-	samp := ollama.Deterministic(128, NumCtx)
+	samp := ollama.Deterministic(128, numCtx(ctx))
 	samp.Format = "json"
 	jsonOK := true
 	for i := 0; i < runs; i++ {

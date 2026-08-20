@@ -14,7 +14,7 @@ Most tools do exactly one of those steps. None connect them. Benchmarks tell you
 a number and leave; catalogs tell you a model exists and leave; nothing says
 *"run this, at this quant, with these settings, and here is the evidence."*
 
-`run` is the engine of that loop, not the product. The product is the loop -
+`run` is the engine of that loop, not the product. The product is the loop.
 and the two commitments that make it worth trusting: measurements that are
 honest about their own resolution, and **a remedy attached to every negative
 verdict** (design rule 7).
@@ -199,8 +199,8 @@ loop, closable on someone else's machine.
 
 We do **not** ship 1.0 with an uncalibrated `advise`, a public leaderboard,
 or LLM-as-judge. Battery calibration still needs hardware. `tune` can trail
-advise: a one-line remedy ("try num_ctx=4096") is advise; sweeping knobs is
-tune.
+advise: a one-line remedy (`try num_ctx=4096`) is advise; `fitr run --ctx 4096`
+applies it. Sweeping knobs is tune.
 
 ## 0.4 - `fitr advise`
 

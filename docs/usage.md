@@ -34,7 +34,8 @@ need `cargo`, not a rewrite.
 
 | Command | Does |
 |---|---|
-| `fitr run <model> [--quick\|--full] [-k N]` | measure a model on this device |
+| `fitr` | status: hardware, reachable runtimes, next command |
+| `fitr run <model> [--quick\|--full] [-k N] [--ctx N]` | measure a model on this device |
 | `fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]` | does it fit here, and if not, which flag to try |
 | `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
@@ -64,6 +65,10 @@ need `cargo`, not a rewrite.
   paired test. Fresh instances per run remain the default.
 - `--backend auto|ollama|llama-server|openai` picks the serving runtime;
   see [backends.md](backends.md). Extra listen URLs: `$FITR_DISCOVER_URLS`.
+- `--ctx N` sets the request context (default 8192). This is how you *apply*
+  an `advise` remedy: `fitr run m --ctx 4096 --full`. A non-default ctx is
+  recorded on the result and in the fingerprint key, so `board` will not
+  rank it against default-ctx runs.
 - `--load` (advise) loads an Ollama model and reads `/api/ps` so fit includes
   compute buffers. `--fit` runs `llama-fit-params` on a GGUF when that
   binary is on PATH. Both are dummy allocation; the weights+KV estimate is

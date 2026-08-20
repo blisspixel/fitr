@@ -72,7 +72,7 @@ func ScoreRefusal(key, text string, markers []string) string {
 func RunRefusal(ctx context.Context, c llm.Backend, model string, spec RefusalSpec) (map[string]RefusalVerdict, int, error) {
 	out := map[string]RefusalVerdict{}
 	refused := 0
-	samp := ollama.Deterministic(spec.NumPredict, NumCtx)
+	samp := ollama.Deterministic(spec.NumPredict, numCtx(ctx))
 	// Stable order so runs are comparable and the display never reshuffles.
 	keys := []string{"political", "fiction", "rewrite"}
 	for k := range spec.Prompts {
@@ -150,7 +150,7 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 		return r, nil
 	}
 
-	samp := ollama.Deterministic(300, NumCtx)
+	samp := ollama.Deterministic(300, numCtx(ctx))
 	ask := "What is the temperature in Oslo right now?"
 	for _, rg := range spec.Rungs {
 		if rg.ID == "2_emits_tool_call" && rg.Prompt != "" {
