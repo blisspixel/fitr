@@ -32,12 +32,11 @@ task family. Every verdict must remain traceable to complete, correctly
 attributed observations. An unavailable fact stays unavailable instead of
 quietly becoming a score.
 
-Family-stratified aggregation is the first C slice because default pooled
-Wilsons treat distinct check families as iid trials. Isolation does not fix
-that, and coding is already SKIP. Same-base lineage is the second slice
-because unsigned calibration pairs cannot become decision-grade without it.
-The isolated worker follows: executable coding stays SKIP until confinement
-is the same test on all six targets.
+Family-stratified aggregation and the same-base lineage receipt are on
+`main`. Isolation is next for verified coding PASS/FAIL: executable coding
+stays SKIP until confinement is the same test on all six targets. Hardware
+calibration can collect exploratory pairs now; decision-grade still needs
+trusted signers, two devices, and two families.
 
 ### Release A: evidence integrity
 
@@ -88,8 +87,10 @@ environment.
 ### Release C: benchmark quality
 
 - [x] Family-stratified statistical aggregation.
-- [ ] Calibrated profile provenance and community calibration tooling,
-      starting with a same-base lineage receipt.
+- [x] Same-base lineage receipt (`fitr.lineage.same-base.v1`) from a
+      publisher conversion manifest or matching GGUF base-digest metadata.
+      A pair signature still cannot manufacture lineage.
+- [ ] Calibrated profile provenance and community calibration tooling.
 - [ ] Cross-platform isolated worker.
 - [ ] Real vision tasks.
 - [ ] Privacy-safe share artifacts.
@@ -312,19 +313,19 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
       and local-model identifiers; multi-report merge rejects spec drift and
       normalizes legacy artifacts. Unsigned imports remain exploratory and
       cannot create verified readiness or automatic review candidates.
-- [ ] **Calibrate the check battery and gates on hardware** - first define and
-      verify a sealed same-base revision lineage receipt, then collect reviewed,
-      authenticated pairs across at least two physical devices and two model
-      families. Only then review items that never discriminate and thresholds
-      that do not match known usefulness.
+- [ ] **Calibrate the check battery and gates on hardware** - the same-base
+      lineage receipt exists; collect reviewed, authenticated pairs that carry
+      it across at least two physical devices and two model families. Only then
+      review items that never discriminate and thresholds that do not match
+      known usefulness.
 - [x] **Quant comparison as item-level agreement** (machinery). `fitr compare` on
       a shared seedset reports item-level flips, including when the two rates
       match - accuracy hid the disagreements. Matching family, parameter size,
       and ranked dtype does not prove same-base revision lineage, so directional
-      quant attribution remains INCONCLUSIVE. A future sealed lineage receipt
-      must bind both artifacts to one exact base revision before any pair can
-      support a decision-grade quant claim. Which *items* discriminate remains
-      part of the hardware campaign above.
+      quant attribution on `compare` remains INCONCLUSIVE. `fitr calibrate
+      --lineage` can attach a sealed receipt that binds both runtime-bound
+      artifact digests to one base revision; campaign readiness still needs
+      trust plus the hardware coverage above.
 - [x] **`fitr tune`, first honest cut.** Prints the request-level knobs
       (`num_ctx`, `num_batch`, `num_gpu`) and diffs two saved fingerprints
       (including a `num_ctx` split). It does **not** sweep: llama-bench owns

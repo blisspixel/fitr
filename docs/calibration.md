@@ -59,9 +59,43 @@ mode because it can make the two models see different instances.
 - model family or parameter size
 
 It orders known GGUF dtypes for display, reports every item-level flip, and
-does not rewrite the task specification. The order is not a causal claim. The
-current schema cannot verify or reject the operator's same-base hypothesis, so
-every pair is exploratory and no pair can be decision-grade yet.
+does not rewrite the task specification. The order is not a causal claim.
+
+Same-base lineage is a separate, independently checkable receipt. Matching
+family, parameter size, and dtype rank is still only a preflight. A pair
+becomes lineage-verified only when both runs have runtime-bound artifact
+digests and a derivation binds those exact digests to one base revision:
+
+```bash
+fitr calibrate \
+  huihui_ai/dolphin3-abliterated:8b-llama3.1-q8_0 \
+  huihui_ai/dolphin3-abliterated:8b-llama3.1-q4_K_M \
+  --lineage dolphin3-8b-conversion.json \
+  --out dolphin3-8b-pair.json
+```
+
+The conversion manifest is `fitr.lineage.conversion.v1`. It names one
+`base_revision` SHA-256 and every derived artifact digest:
+
+```json
+{
+  "schema": "fitr.lineage.conversion.v1",
+  "base_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "artifacts": [
+    {"digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "role": "base", "quant": "F16"},
+    {"digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "role": "derived", "quant": "Q8_0"},
+    {"digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "role": "derived", "quant": "Q4_K_M"}
+  ]
+}
+```
+
+Operator belief, Hugging Face names, and GGUF `base_model` URLs are not lineage. If both
+Ollama blobs are local GGUFs whose metadata already stores the same
+`general.base_model.0.sha256` (or `general.source.sha256`) and those files
+hash to the runtime-bound digests, `fitr calibrate` attaches
+`gguf_base_digest` lineage without `--lineage`. A pair signature still cannot
+manufacture a missing receipt. Unsigned lineage-verified pairs remain
+exploratory for campaign readiness.
 
 ## Combine independent evidence
 
@@ -87,14 +121,14 @@ item flip. The identifier contains no hostname but can link reports from the
 same device. Aggregation never labels an item safe to remove.
 
 `fitr calibrate` reports whether a local pair meets the controlled sampling and
-health criteria. The privacy-safe exported JSON is unsigned, however, so its
-device and model-family assertions are unverified. `fitr calibrate merge`
-accepts these files as exploratory leads but never counts them toward verified
-campaign readiness or emits automatic review candidates. Even a trusted report
-signature seals only the claims present in the report. The current pair schema
-has no same-base revision lineage receipt, so it cannot create decision-grade
-quant evidence. Lineage receipts and an external trust process are Release C
-work. Until then, every cross-device or community aggregation is exploratory.
+health criteria. The privacy-safe exported JSON is unsigned, so its device and
+model-family assertions are unverified until an external trust policy names
+the signer. `fitr calibrate merge` accepts unsigned files as exploratory leads
+and never counts them toward verified campaign readiness. A trusted signature
+seals the claims present in the report, including a lineage receipt when one
+was attached. Decision-grade still requires that receipt, the k=10 floor, a
+healthy higher-precision reference, contrast on the candidate, two devices,
+and two model families. A signature without lineage stays exploratory.
 
 To contribute an exploratory pair, open the repository's **Calibration
 evidence** issue form and attach only the exported pair JSON. The form requires
@@ -105,8 +139,10 @@ for written review, not authenticated evidence.
 
 A task becomes a removal candidate only after all of the following are true:
 
-1. Every pair has a sealed lineage receipt binding both artifact digests to one
-   exact base-model revision, verified under an external trust policy.
+1. Every pair has a `fitr.lineage.same-base.v1` receipt binding both
+   runtime-bound artifact digests to one exact base-model revision, verified
+   under an external trust policy. Publisher conversion manifests and matching
+   GGUF base-digest metadata are the accepted derivations.
 2. At least two physical devices and two model families have supplied reviewed,
    authenticated pairs.
 3. Each qualifying pair used at least 10 instances per task.

@@ -147,6 +147,59 @@ func TestReadPairNormalizesLegacySensitiveIdentifiers(t *testing.T) {
 	}
 }
 
+func withLineage(t *testing.T, r PairReport) PairReport {
+	t.Helper()
+	ref, cand, base := testDigest(0x61), testDigest(0x62), testDigest(0x60)
+	r.Reference.ArtifactDigest = ref
+	r.Candidate.ArtifactDigest = cand
+	receipt, err := LineageFromConversion(conversionFor(base, ref, cand), ref, cand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AttachLineage(receipt); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestAssessPairDecisionGradeRequiresLineageAndTrust(t *testing.T) {
+	good := withLineage(t, decisionPair("1111111111111111", "s1", "fam-a"))
+	key := signTestPair(t, &good)
+	if AssessPair(good).DecisionGrade || !AssessPair(good).SameBaseLineageVerified {
+		t.Fatalf("unsigned lineage pair became decision-grade: %+v", AssessPair(good))
+	}
+	a := AssessPairWithTrust(good, NewTrustPolicy(key))
+	if !a.DecisionGrade || !a.SameBaseLineageVerified || !a.TrustedEvidence ||
+		!a.HigherPrecisionReference || !a.CandidateDamaged || !a.ReferenceHealthy {
+		t.Fatalf("trusted lineage pair was not decision-grade: %+v", a)
+	}
+}
+
+func TestAggregateDecisionGradeReadinessNeedsLineage(t *testing.T) {
+	a := withLineage(t, decisionPair("1111111111111111", "s1", "fam-a"))
+	b := withLineage(t, decisionPair("2222222222222222", "s2", "fam-b"))
+	keyA := signTestPair(t, &a)
+	keyB := signTestPair(t, &b)
+	s, err := AggregateWithTrust([]PairReport{a, b}, NewTrustPolicy(keyA, keyB))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Readiness.ReadyForReview || s.Readiness.DecisionGradeReports != 2 ||
+		s.Readiness.Devices != 2 || s.Readiness.ModelFamilies != 2 {
+		t.Fatalf("verified lineage did not create readiness: %+v", s.Readiness)
+	}
+	items := map[string]SummaryItem{}
+	for _, item := range s.Items {
+		items[item.TaskID] = item
+	}
+	if got := items["stable"]; !got.ReviewCandidate || got.DecisionGradeStatus != "review_candidate" || got.DecisionGradeFlips != 0 {
+		t.Fatalf("never-flipped item = %+v", got)
+	}
+	if got := items["contrast"]; got.ReviewCandidate || got.DecisionGradeStatus != "observed" || got.DecisionGradeFlips != 2 {
+		t.Fatalf("discriminating item = %+v", got)
+	}
+}
+
 func TestAssessPairDecisionGradeControls(t *testing.T) {
 	good := decisionPair("1111111111111111", "s1", "fam-a")
 	key := signTestPair(t, &good)

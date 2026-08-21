@@ -153,6 +153,9 @@ func TestBackendProtocolMatchesLlamaServerNativeReceipt(t *testing.T) {
 	if issue := identity.RankingIssue(); issue != "" {
 		t.Fatalf("runtime-bound llama-server identity was unrankable: %s", issue)
 	}
+	if identity.RuntimeBoundDigest() != testArtifactDigest {
+		t.Fatalf("runtime-bound digest = %q", identity.RuntimeBoundDigest())
+	}
 }
 
 func TestObservedLocalIdentityCannotRank(t *testing.T) {

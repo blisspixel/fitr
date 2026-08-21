@@ -11,6 +11,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -85,7 +87,7 @@ usage:
   fitr doctor <model> [-n N]
   fitr device
   fitr profiles [new [name]]
-  fitr calibrate <model-a> <model-b> [--out PATH]
+  fitr calibrate <model-a> <model-b> [--out PATH] [--lineage PATH]
   fitr calibrate merge <pair.json>... [--out PATH]
   fitr compare <model-a> <model-b>
 
@@ -123,7 +125,7 @@ examples:
   fitr profiles new
   fitr run qwen3:8b-q8_0 --checks-only --seedset qwen3-8b -k 5
   fitr run qwen3:8b-q4_K_M --checks-only --seedset qwen3-8b -k 5
-  fitr calibrate qwen3:8b-q8_0 qwen3:8b-q4_K_M --out pair.json
+  fitr calibrate qwen3:8b-q8_0 qwen3:8b-q4_K_M --out pair.json --lineage conversion.json
 `)
 }
 
@@ -209,7 +211,7 @@ func permute(args []string) []string {
 func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
-	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out":
+	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage":
 		return true
 	}
 	return false
@@ -2875,6 +2877,7 @@ func cmdCalibrate(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("calibrate", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	out := fs.String("out", "", "write a privacy-safe calibration pair as JSON")
+	lineagePath := fs.String("lineage", "", "publisher conversion manifest binding both artifacts to one base revision")
 	if err := fs.Parse(permute(args)); err != nil {
 		return exitUsage
 	}
@@ -2910,11 +2913,21 @@ func cmdCalibrate(ctx context.Context, args []string) int {
 		errPrint("invalid calibration pair", err.Error(), "pair the same model family and size on one unchanged device/config")
 		return exitUsage
 	}
+	if err := attachCalibrateLineage(&report, *lineagePath); err != nil {
+		errPrint("could not verify same-base lineage", err.Error(),
+			"pass a fitr.lineage.conversion.v1 manifest with --lineage, or keep the pair exploratory")
+		return exitError
+	}
 	qa, qb := a.ModelMeta.Details.QuantizationLevel, b.ModelMeta.Details.QuantizationLevel
 	fmt.Printf("  calibrate  %s (%s)  vs  %s (%s)\n", terminalText(a.Model), terminalText(qa), terminalText(b.Model), terminalText(qb))
 	fmt.Printf("  seedset    %s\n", terminalText(a.SeedSet))
 	assessment := calibration.AssessPair(report)
-	fmt.Printf("  evidence   exploratory only: %s\n", terminalText(strings.Join(assessment.Reasons, "; ")))
+	if assessment.SameBaseLineageVerified {
+		fmt.Printf("  lineage    verified (%s)\n", terminalText(report.Lineage.Method))
+		fmt.Printf("  evidence   unsigned: %s\n", terminalText(strings.Join(assessment.Reasons, "; ")))
+	} else {
+		fmt.Printf("  evidence   exploratory only: %s\n", terminalText(strings.Join(assessment.Reasons, "; ")))
+	}
 	var kept, drop []eval.ItemStat
 	for _, s := range stats {
 		if s.Discriminated() {
@@ -2927,6 +2940,8 @@ func cmdCalibrate(ctx context.Context, args []string) int {
 		len(stats), len(kept), len(drop))
 	if ra, rb := eval.QuantRank(qa), eval.QuantRank(qb); ra == 0 || rb == 0 || ra == rb {
 		fmt.Println("  note       dtypes are not a ranked pair; this is discrimination, not directional quant damage")
+	} else if assessment.SameBaseLineageVerified {
+		fmt.Println("  note       same-base lineage is verified; unsigned pairs still cannot create campaign readiness")
 	} else {
 		fmt.Println("  note       same-base revision lineage is unverified; flips are discrimination only, not directional quant damage")
 	}
@@ -3018,13 +3033,125 @@ func calibrationPair(a, b *Result, stats []eval.ItemStat) (calibration.PairRepor
 		InferenceDevice: fp.InferenceDevice, Config: fp.Config,
 	}
 	toRun := func(r *Result) calibration.Run {
+		digest := ""
+		if r.Manifest != nil {
+			digest = r.Manifest.Model.RuntimeBoundDigest()
+		}
 		return calibration.Run{
 			Model: r.Model, Quant: r.ModelMeta.Details.QuantizationLevel,
 			Family: r.ModelMeta.Details.Family, ParameterSize: r.ModelMeta.Details.ParameterSize,
 			StartedAt: r.StartedAt, NumCtx: r.NumCtx, ResultSchemaVersion: r.SchemaVersion,
+			ArtifactDigest: digest,
 		}
 	}
 	return calibration.NewPair(version, spec.Version.SpecVersion, a.SeedSet, dev, toRun(a), toRun(b), stats), nil
+}
+
+func attachCalibrateLineage(report *calibration.PairReport, lineagePath string) error {
+	if report == nil {
+		return errors.New("calibration pair is missing")
+	}
+	if strings.TrimSpace(lineagePath) != "" {
+		manifest, err := calibration.ReadConversionManifest(lineagePath)
+		if err != nil {
+			return err
+		}
+		receipt, err := calibration.LineageFromConversion(manifest, report.Reference.ArtifactDigest, report.Candidate.ArtifactDigest)
+		if err != nil {
+			return err
+		}
+		return report.AttachLineage(receipt)
+	}
+	receipt, err := autoGGUFLineage(*report)
+	if err != nil || receipt.Schema == "" {
+		return err
+	}
+	return report.AttachLineage(receipt)
+}
+
+func autoGGUFLineage(report calibration.PairReport) (calibration.LineageReceipt, error) {
+	refKVs, err := hashedRuntimeGGUF(report.Reference.ArtifactDigest)
+	if err != nil {
+		return calibration.LineageReceipt{}, err
+	}
+	candKVs, err := hashedRuntimeGGUF(report.Candidate.ArtifactDigest)
+	if err != nil {
+		return calibration.LineageReceipt{}, err
+	}
+	if refKVs == nil || candKVs == nil {
+		return calibration.LineageReceipt{}, nil
+	}
+	receipt, err := calibration.LineageFromGGUF(refKVs, candKVs, report.Reference.ArtifactDigest, report.Candidate.ArtifactDigest)
+	if err != nil {
+		if errors.Is(err, calibration.ErrGGUFNoBaseDigest) || errors.Is(err, calibration.ErrGGUFNamedWithoutDigest) {
+			return calibration.LineageReceipt{}, nil
+		}
+		return calibration.LineageReceipt{}, err
+	}
+	return receipt, nil
+}
+
+func hashedRuntimeGGUF(wantDigest string) (map[string]any, error) {
+	if strings.TrimSpace(wantDigest) == "" {
+		return nil, nil
+	}
+	path := ollamaBlobPath(wantDigest)
+	if path == "" {
+		return nil, nil
+	}
+	got, err := fileSHA256(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if got != wantDigest {
+		return nil, fmt.Errorf("blob %s does not match runtime digest %s", path, wantDigest)
+	}
+	kvs, _, err := advise.OpenGGUF(path)
+	if err != nil {
+		return nil, nil
+	}
+	return kvs, nil
+}
+
+func ollamaBlobPath(digest string) string {
+	digest = strings.ToLower(strings.TrimSpace(digest))
+	if !strings.HasPrefix(digest, "sha256:") || len(digest) != 71 {
+		return ""
+	}
+	name := "sha256-" + strings.TrimPrefix(digest, "sha256:")
+	roots := []string{}
+	if env := strings.TrimSpace(os.Getenv("OLLAMA_MODELS")); env != "" {
+		roots = append(roots, env)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		roots = append(roots, filepath.Join(home, ".ollama", "models"))
+	}
+	if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+		roots = append(roots, filepath.Join(local, "Ollama", "models"))
+	}
+	for _, root := range roots {
+		path := filepath.Join(root, "blobs", name)
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+			return path
+		}
+	}
+	return ""
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func cmdCalibrateMerge(args []string) int {
@@ -3342,8 +3469,9 @@ func pairedCompare(a, b *Result) {
 
 // quantDamageLine explains why a tempting directional claim is inconclusive.
 // Family names and parameter sizes do not prove that two quantized artifacts
-// descend from the same base revision. FitR has no sealed lineage receipt yet,
-// so it reports paired flips separately and never attributes them to quantization.
+// descend from the same base revision. Lineage receipts live on calibration
+// pairs, not compare results, so compare still reports paired flips and never
+// attributes them to quantization.
 func quantDamageLine(a, b *Result, flips eval.FlipReport) (string, bool) {
 	qa, qb := a.ModelMeta.Details.QuantizationLevel, b.ModelMeta.Details.QuantizationLevel
 	ra, rb := eval.QuantRank(qa), eval.QuantRank(qb)

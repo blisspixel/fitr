@@ -613,6 +613,79 @@ func TestCalibrationPairRejectsContaminatedAndUnreconciledEvidence(t *testing.T)
 	}
 }
 
+func TestCalibrateAttachesVerifiedLineageFromConversionManifest(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "m-q8", "m-q4"
+	a.SeedSet, b.SeedSet = "shared", "shared"
+	a.ModelMeta.Details.QuantizationLevel = "Q8_0"
+	b.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
+	sealCurrentResult(t, a, b)
+	saveCurrentResults(t, a, b)
+	base := "sha256:" + strings.Repeat("aa", 32)
+	manifest := calibration.ConversionManifest{
+		Schema: calibration.ConversionSchema, BaseRevision: base,
+		Artifacts: []calibration.ConversionArtifact{
+			{Digest: base, Role: "base", Quant: "F16"},
+			{Digest: a.Manifest.Model.Value, Role: "derived", Quant: "Q8_0"},
+			{Digest: b.Manifest.Model.Value, Role: "derived", Quant: "Q4_K_M"},
+		},
+	}
+	manPath := filepath.Join(dir, "conversion.json")
+	if err := calibration.WriteJSON(manPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "pair.json")
+	printed, code := captureTopStdout(t, func() int {
+		return cmdCalibrate(context.Background(), []string{"m-q8", "m-q4", "--out", out, "--lineage", manPath})
+	})
+	if code != exitOK {
+		t.Fatalf("code = %d\n%s", code, printed)
+	}
+	if !strings.Contains(printed, "lineage    verified") || strings.Contains(printed, "READY FOR ITEM REVIEW") {
+		t.Fatalf("verified unsigned lineage print:\n%s", printed)
+	}
+	got, err := calibration.ReadPair(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Lineage == nil || got.Lineage.Validate() != nil || !calibration.AssessPair(got).SameBaseLineageVerified {
+		t.Fatalf("exported pair lineage = %+v", got.Lineage)
+	}
+	if calibration.AssessPair(got).DecisionGrade {
+		t.Fatal("unsigned lineage pair became decision-grade")
+	}
+}
+
+func TestCalibrateLineageRejectsManifestThatOmitsAnArtifact(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "m-q8", "m-q4"
+	a.SeedSet, b.SeedSet = "shared", "shared"
+	a.ModelMeta.Details.QuantizationLevel = "Q8_0"
+	b.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
+	sealCurrentResult(t, a, b)
+	saveCurrentResults(t, a, b)
+	base := "sha256:" + strings.Repeat("bb", 32)
+	manifest := calibration.ConversionManifest{
+		Schema: calibration.ConversionSchema, BaseRevision: base,
+		Artifacts: []calibration.ConversionArtifact{
+			{Digest: base, Role: "base"},
+			{Digest: a.Manifest.Model.Value, Role: "derived"},
+			{Digest: "sha256:" + strings.Repeat("cc", 32), Role: "derived"},
+		},
+	}
+	manPath := filepath.Join(dir, "conversion.json")
+	if err := calibration.WriteJSON(manPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if code := cmdCalibrate(context.Background(), []string{"m-q8", "m-q4", "--lineage", manPath}); code != exitError {
+		t.Fatalf("code = %d, want error when the manifest omits a pair artifact", code)
+	}
+}
+
 func TestCalibrateMergeWritesMultiDeviceSummary(t *testing.T) {
 	dir := t.TempDir()
 	paths := []string{filepath.Join(dir, "a.json"), filepath.Join(dir, "b.json")}

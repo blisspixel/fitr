@@ -67,7 +67,7 @@ enter a PASS or FAIL denominator.
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips (accuracy can hide them) |
 | `fitr device` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
-| `fitr calibrate <a> <b> [--out PATH]` | paired item discrimination and privacy-safe exploratory JSON |
+| `fitr calibrate <a> <b> [--out PATH] [--lineage PATH]` | paired item discrimination; optional same-base lineage receipt |
 | `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads without claiming verified campaign readiness |
 
 | Level | Runs | ~Time |
@@ -93,6 +93,10 @@ enter a PASS or FAIL denominator.
   seedset and uses five fixed repeats by default. It cannot be combined with
   adaptive stopping because both sides of a pair must see every instance. See
   [calibration.md](calibration.md).
+- `--lineage PATH` (`fitr calibrate`) attaches a `fitr.lineage.same-base.v1`
+  receipt from a `fitr.lineage.conversion.v1` manifest that names both
+  runtime-bound artifact digests and one base revision. Family names are not
+  lineage. Unsigned pairs with a valid receipt are still not decision-grade.
 - `--backend auto|ollama|llama-server|openai` picks the serving runtime;
   see [backends.md](backends.md). Extra listen URLs: `$FITR_DISCOVER_URLS`.
 - `--ctx N` sets the request context (default 8192). This is how you *measure*

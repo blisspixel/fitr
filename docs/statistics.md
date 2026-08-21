@@ -127,8 +127,9 @@ other passed and pass three the other failed, and both score 6/8.
 rates match ("accuracy hid N item-level flips"). FitR does not attribute those
 flips to quantization: matching family, parameter size, and a ranked GGUF dtype
 do not prove both artifacts descend from the same exact base revision. Until a
-sealed same-base lineage receipt is available, directional quant attribution is
-INCONCLUSIVE. IQ and unknown schemes also SKIP dtype ordering.
+sealed same-base lineage receipt binds both runtime-bound artifact digests,
+directional quant attribution is INCONCLUSIVE. `fitr calibrate --lineage`
+attaches that receipt; `fitr compare` still does not. IQ and unknown schemes also SKIP dtype ordering.
 
 ## 5. Ratios of means: Fieller's theorem
 

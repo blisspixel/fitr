@@ -383,6 +383,16 @@ func (i ModelIdentity) RankingIssue() string {
 	return ""
 }
 
+// RuntimeBoundDigest is the content digest the serving runtime bound to this
+// measurement. Observed-only local file hashes are not returned: they do not
+// prove which bytes the process loaded.
+func (i ModelIdentity) RuntimeBoundDigest() string {
+	if i.Kind != IdentityRuntimeDigest || i.RankingIssue() != "" {
+		return ""
+	}
+	return i.Value
+}
+
 // RunManifest is the sealed, run-defining state captured before evaluation.
 // It intentionally excludes measurements and verdicts. ManifestSHA256 detects
 // any later mutation of the identity or configuration.

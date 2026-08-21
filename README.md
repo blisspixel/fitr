@@ -123,8 +123,8 @@ Pin a version with `FITR_VERSION=v0.4.0`, relocate with `FITR_BIN`.
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips on shared instances |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr device` / `fitr profiles [new]` | fingerprint and gates; `new` scaffolds an UNCALIBRATED local profile |
-| `fitr calibrate <a> <b> [--out PATH]` | paired discrimination and privacy-safe exploratory evidence |
-| `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads without presenting them as verified campaign readiness |
+| `fitr calibrate <a> <b> [--out PATH] [--lineage PATH]` | paired discrimination; optional same-base lineage receipt |
+| `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads; decision-grade still needs lineage, trust, and coverage |
 
 ## Three ideas carry everything
 

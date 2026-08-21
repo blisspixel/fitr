@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: fitr version
-      placeholder: 0.4.0
+      placeholder: 0.5.0
     validations:
       required: true
   - type: input
@@ -40,6 +40,8 @@ body:
         - label: Both runs used at least 10 instances per task.
           required: true
         - label: I understand this unsigned pair is an exploratory lead for written review, not authenticated campaign evidence.
+          required: true
+        - label: If the pair JSON has no fitr.lineage.same-base.v1 receipt, I am not claiming same-base revision lineage or directional quant damage.
           required: true
         - label: I reviewed the artifact and did not attach raw prompts, model responses, hostnames, or local paths.
           required: true

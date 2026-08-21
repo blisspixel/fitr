@@ -30,6 +30,11 @@ const (
 	DecisionGradeMinInstances     = 10
 	DecisionGradeMinDevices       = 2
 	DecisionGradeMinModelFamilies = 2
+
+	LineageSchema     = "fitr.lineage.same-base.v1"
+	ConversionSchema  = "fitr.lineage.conversion.v1"
+	LineageConversion = "publisher_conversion_manifest"
+	LineageGGUFDigest = "gguf_base_digest"
 )
 
 // Device contains the measurement-relevant hardware fields but deliberately
@@ -83,6 +88,10 @@ type Run struct {
 	StartedAt           string `json:"started_at"`
 	NumCtx              int    `json:"num_ctx"`
 	ResultSchemaVersion int    `json:"result_schema_version"`
+	// ArtifactDigest is the runtime-bound SHA-256 of the served artifact.
+	// Observed-only local file hashes are omitted: they do not prove which
+	// bytes the process loaded and cannot support lineage.
+	ArtifactDigest string `json:"artifact_digest,omitempty"`
 }
 
 // Item is the paired pass/fail agreement for one generated task family.
@@ -109,13 +118,14 @@ type PairReport struct {
 	Reference Run `json:"reference"`
 	Candidate Run `json:"candidate"`
 
-	Shared        int           `json:"shared"`
-	Flips         int           `json:"flips"`
-	Discriminated int           `json:"items_discriminated"`
-	NeverObserved int           `json:"items_never_observed"`
-	Direction     string        `json:"direction"`
-	Items         []Item        `json:"items"`
-	Trust         *TrustReceipt `json:"trust,omitempty"`
+	Shared        int             `json:"shared"`
+	Flips         int             `json:"flips"`
+	Discriminated int             `json:"items_discriminated"`
+	NeverObserved int             `json:"items_never_observed"`
+	Direction     string          `json:"direction"`
+	Items         []Item          `json:"items"`
+	Lineage       *LineageReceipt `json:"lineage,omitempty"`
+	Trust         *TrustReceipt   `json:"trust,omitempty"`
 }
 
 // TrustReceipt proves that the report has not changed since its issuer signed
@@ -196,12 +206,12 @@ func AssessPairWithTrust(r PairReport, trust TrustPolicy) PairAssessment {
 	if !a.TrustedEvidence {
 		a.Reasons = append(a.Reasons, "report has no verifiable trust receipt")
 	}
-	// The current pair schema records family, parameter size, and dtype, but it
-	// does not carry an authoritative derivation receipt that binds both
-	// artifacts to one exact base-model revision. A trusted report signature
-	// seals the claim it contains; it cannot manufacture missing lineage
-	// evidence. Until a verifiable lineage receipt exists, all pairs remain
-	// exploratory and cannot create calibration readiness.
+	// A trusted report signature seals the claims present in the report. It
+	// cannot manufacture missing lineage evidence. Same-base verification
+	// requires a structurally valid lineage receipt that independently binds
+	// both runtime-bound artifact digests to one base revision.
+	a.SameBaseLineageVerified = r.Lineage != nil &&
+		r.Lineage.Bind(r.Reference.ArtifactDigest, r.Candidate.ArtifactDigest) == nil
 	if !a.SameBaseLineageVerified {
 		a.Reasons = append(a.Reasons, "same-base model revision lineage is not verified")
 	}
@@ -483,6 +493,14 @@ func normalizePair(r PairReport) PairReport {
 		run.Family = shareableText(run.Family)
 		run.ParameterSize = shareableText(run.ParameterSize)
 		run.StartedAt = shareableText(run.StartedAt)
+		if digest, err := normalizeDigest(run.ArtifactDigest); err == nil {
+			run.ArtifactDigest = digest
+		} else if strings.TrimSpace(run.ArtifactDigest) == "" {
+			run.ArtifactDigest = ""
+		}
+	}
+	if r.Lineage != nil {
+		_ = r.Lineage.normalize()
 	}
 	r.Device.ID = strings.ToLower(shareableText(r.Device.ID))
 	r.Device.OS = shareableText(r.Device.OS)
@@ -555,6 +573,22 @@ func validatePair(r PairReport) error {
 	if r.Shared != shared || r.Flips != flips || r.Discriminated != discriminated ||
 		r.NeverObserved != len(r.Items)-discriminated {
 		return errors.New("pair totals do not match item outcomes")
+	}
+	for _, run := range []Run{r.Reference, r.Candidate} {
+		if strings.TrimSpace(run.ArtifactDigest) == "" {
+			continue
+		}
+		if _, err := normalizeDigest(run.ArtifactDigest); err != nil {
+			return fmt.Errorf("run artifact digest: %w", err)
+		}
+	}
+	if r.Lineage != nil {
+		if strings.TrimSpace(r.Reference.ArtifactDigest) == "" || strings.TrimSpace(r.Candidate.ArtifactDigest) == "" {
+			return errors.New("lineage receipt requires runtime-bound artifact digests on both runs")
+		}
+		if err := r.Lineage.Bind(r.Reference.ArtifactDigest, r.Candidate.ArtifactDigest); err != nil {
+			return err
+		}
 	}
 	return nil
 }
