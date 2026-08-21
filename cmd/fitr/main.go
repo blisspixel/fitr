@@ -1093,7 +1093,7 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 		return exitUsage
 	}
 	if fs.NArg() < 1 {
-		reportError("missing model", "", "fitr run <model> --full")
+		reportError("missing model", "", "fitr run <model>")
 		return exitUsage
 	}
 	levels := 0
@@ -2394,7 +2394,7 @@ func cmdView(_ context.Context, args []string) int {
 	} else {
 		results, err := loadResults()
 		if err != nil || len(results) == 0 {
-			errPrint("no results yet", "", "run one first: fitr run <model> --full")
+			errPrint("no results yet", "", "run one first: fitr run <model>")
 			return exitError
 		}
 		for _, result := range results {
@@ -2445,7 +2445,7 @@ func cmdBoard(ctx context.Context, args []string) int {
 	}
 	results, err := loadResults()
 	if err != nil || len(results) == 0 {
-		errPrint("no results yet", "", "run one first: fitr run <model> --full")
+		errPrint("no results yet", "", "run one first: fitr run <model>")
 		return exitError
 	}
 	curDevice := device.Detect(ctx, probeBackend(ctx))
@@ -2579,7 +2579,7 @@ func cmdBoard(ctx context.Context, args []string) int {
 			errPrint("no conclusive results for this machine", detail,
 				"re-run with the current fitr version after unloading all models")
 		} else {
-			errPrint("no results for this machine", "", "run fitr run <model> --full")
+			errPrint("no results for this machine", "", "run fitr run <model>")
 		}
 		return exitError
 	}
@@ -2741,6 +2741,7 @@ func cmdStatus(ctx context.Context) int {
 	}
 	fp := device.Detect(ctx, b)
 	fmt.Printf("  fitr %s\n", terminalText(version))
+	fmt.Printf("  cpu       %s\n", terminalText(device.FormatCPU(fp.CPU)))
 	fmt.Printf("  gpu       %s", terminalText(fp.GPU))
 	if fp.GPUBackend != "" {
 		fmt.Printf("  (%s)", terminalText(fp.GPUBackend))
@@ -2752,8 +2753,8 @@ func cmdStatus(ctx context.Context) int {
 	if len(found) == 0 {
 		fmt.Println("  runtime   none reachable")
 		fmt.Println("  next      start Ollama, llama-server, or an OpenAI-compatible server")
-		fmt.Println("            then: fitr advise <model>   and   fitr run <model> --full")
-		return exitError
+		fmt.Println("            then: fitr advise <model>   and   fitr run <model>")
+		return exitOK
 	}
 	for i, f := range found {
 		label := "runtime"
@@ -2764,7 +2765,7 @@ func cmdStatus(ctx context.Context) int {
 	}
 	fmt.Println("  next      fitr advise <model>          # does this quant fit")
 	fmt.Println("            fitr doctor <model>          # can this box be measured fairly")
-	fmt.Println("            fitr run <model> --full      # then compare with fitr board")
+	fmt.Println("            fitr run <model>             # then compare with fitr board")
 	fmt.Println("            fitr apply <model>           # print how to persist a measured ctx")
 	if h := retonr.Hint("<model>"); h != "" {
 		fmt.Printf("            %s\n", terminalText(h))
@@ -2784,7 +2785,7 @@ func cmdDevice(ctx context.Context, args []string) int {
 	}
 	fmt.Printf("  host               %s\n", terminalText(fp.Host))
 	fmt.Printf("  os                 %s\n", terminalText(fp.OS))
-	fmt.Printf("  cpu                %s\n", terminalText(fp.CPU))
+	fmt.Printf("  cpu                %s\n", terminalText(device.FormatCPU(fp.CPU)))
 	fmt.Printf("  ram_gb             %.1f\n", fp.RAMGb)
 	fmt.Printf("  vram_gb            %s\n", terminalText(device.FormatVRAM(fp.VRAMGb, fp.VRAMSource)))
 	fmt.Printf("  gpu                %s\n", terminalText(fp.GPU))
@@ -3241,7 +3242,7 @@ func cmdCompare(ctx context.Context, args []string) int {
 	}
 	results, err := loadResults()
 	if err != nil {
-		errPrint("no results", "", "fitr run <model> --full")
+		errPrint("no results", "", "fitr run <model>")
 		return exitError
 	}
 	byName := map[string]*Result{}

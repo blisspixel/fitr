@@ -143,7 +143,7 @@ func cmdTopView(ctx context.Context, args []string) int {
 		return exitError
 	}
 	if len(data.History) == 0 {
-		errPrint("no results yet", "", "run one first: fitr top run <model> --full")
+		errPrint("no results yet", "", "run one first: fitr top run <model>")
 		return exitError
 	}
 	selectedID := ""

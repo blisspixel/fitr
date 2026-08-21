@@ -169,6 +169,19 @@ terminal.
 | 3 | ran fine, a need FAILED (`advise`: low memory or incompatible) |
 | 130 | interrupted |
 
+## Cores
+
+fitr already schedules on every logical CPU Go can see. Runtime discovery
+probes ports at once; hardware probes overlap; split GGUF shards are sized
+in parallel. `fitr` and `fitr device` print that CPU count as display-only.
+It is not part of the fingerprint key.
+
+A scored `fitr run` is still one request at a time. Concurrent prompts on
+the same server contaminate timings and divide the context (doctor warns
+on `OLLAMA_NUM_PARALLEL>1`). Faster runs come from `--quick`, fewer
+repeats, or a smaller model - not from parallel inference. The serving
+runtime owns how many threads actually decode.
+
 ## Advise
 
 `fitr advise <model>` sizes a model against this box and prints a three-tier

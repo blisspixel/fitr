@@ -144,7 +144,9 @@ a score.
 
 - [ ] Calibrated profile provenance and community calibration tooling
 - [ ] Cross-platform isolated worker (executable coding stays SKIP until
-      confinement is the same test on all six targets)
+      confinement is the same test on all six targets). Spare cores then
+      execute generated programs while the GPU is busy on the next prompt;
+      they still do not share the inference queue.
 - [ ] Real vision tasks
 - [ ] Privacy-safe share artifacts beyond the current opt-in HTML
 - [ ] Signed releases, SBOMs, and attestations
@@ -164,6 +166,7 @@ the source.
 | Community SKU profiles (`rtx-4090`, `m3-max`, `strix-halo`) | Would be invented GB. `fitr profiles new` already writes an UNCALIBRATED local copy. Collect measured gates on real boxes. |
 | Battery calibration that rewrites `spec/` | Protocol is done. Changing items still needs lineage-verified pairs on two devices and two families. Collect in the background; do not hold the loop for a cull. |
 | `fitr tune` sweeps | Needs server restart orchestration fitr does not have. llama-bench owns throughput-only. A flash-attention quality regression is why throughput-only is not enough. |
+| Parallel scored inference | Would make tok/s a shared-GPU number. Doctor already warns on `OLLAMA_NUM_PARALLEL>1`. The process lock exists because concurrent evals produced plausible-and-wrong timings. |
 | Live discovery / `internal/scout` | Catalog recency is not quality. Inventory before internet. |
 | Exec-kind user tasks | Arbitrary code from JSON. Wait for the isolated worker. |
 | Long-context / needle tests; decode at 3+ depths | Explicit later list; does not close advise → run → apply. |
@@ -215,6 +218,34 @@ server). Sweeping knobs is tune.
 | `advise` default is still weights+KV for conventional attention | `--load` / `--fit` measure compute buffers. Hybrid recurrent models stay SKIP without that receipt, and incomplete split GGUFs are rejected. No model catalog. |
 | Bare `fitr` is status, not inventory | Hardware, reachable runtimes, and a generic next command. It does not yet list installed tags joined to evidence. That is 0.6.0. |
 | `--full` is a long loop, not a coding grade | The 40-turn agentic task still SKIPs executable evidence until isolation. First measurement should be the default battery, not `--full`. |
+| Scored inference is single-flight | Using 16 cores to fire 16 prompts would make tok/s a shared-GPU number. The process lock and doctor's `OLLAMA_NUM_PARALLEL` warning exist because concurrent evals produced plausible-and-wrong timings. |
+
+---
+
+## Cores, GPUs, and honesty
+
+Machines have 6–16+ logical CPUs. fitr uses them where that does not lie,
+and refuses them where it would.
+
+**Already concurrent:** runtime discovery (every well-known port at once),
+the TUI and lock refresher in the background, hardware fingerprint probes
+(GPU/CPU/RAM/VRAM overlap; on Windows those are separate PowerShell
+launches), split-GGUF shard `stat`. Go itself schedules on every logical
+CPU (`GOMAXPROCS`). `fitr` / `fitr device` print that count as display-only.
+It is not in the fingerprint key.
+
+**Deliberately single-flight:** the measurement. One model, one request at
+a time. Concurrent models contaminate timings. Parallel slots divide the
+context. The wall clock of `fitr run` is the model, not the harness.
+
+**Where cores earn a later checkbox:**
+
+- [x] Discover probes concurrently; fingerprint probes and split-GGUF stats overlap
+- [ ] Isolated worker overlaps generated-code execution with the next prompt (Trust C)
+- [ ] Inventory of many local GGUFs parses headers in parallel (with 0.6.0 listing, not a disk crawl)
+
+Non-goal: `FITR_PARALLEL=N` for scored inference. Faster runs come from
+`--quick`, fewer repeats, or a smaller model.
 
 ---
 

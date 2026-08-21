@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/blisspixel/fitr/internal/llm"
 )
@@ -240,7 +241,19 @@ var configKeys = []string{
 
 func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	host, _ := os.Hostname()
-	gpu, drv, date := gpuInfo()
+	// GPU/CPU/RAM/VRAM probes are independent process or sysfs reads.
+	// On Windows each is a PowerShell round-trip; paying them in series
+	// wastes cores and hundreds of milliseconds before the first line prints.
+	var gpu, drv, date, cpu string
+	var ram, vram float64
+	var vsrc string
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() { defer wg.Done(); gpu, drv, date = gpuInfo() }()
+	go func() { defer wg.Done(); cpu = cpuName() }()
+	go func() { defer wg.Done(); ram = ramGB() }()
+	go func() { defer wg.Done(); vram, vsrc = vramInfo() }()
+
 	cfg := map[string]string{}
 	version := ""
 	isOllama := b != nil && b.Name() == "ollama"
@@ -259,13 +272,28 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	if a, ok := b.(interface{ Accel(context.Context) string }); ok {
 		accel = NormalizeAccel(a.Accel(ctx))
 	}
-	vram, vsrc := vramInfo()
+	placement := inferenceDevice(ctx, b, "")
+	wg.Wait()
 	return Fingerprint{
-		Host: host, OS: runtime.GOOS, CPU: cpuName(), RAMGb: ramGB(),
+		Host: host, OS: runtime.GOOS, CPU: cpu, RAMGb: ram,
 		GPU: gpu, GPUDriver: drv, GPUDriverDate: date,
-		Runtime: version, InferenceDevice: inferenceDevice(ctx, b, ""),
+		Runtime: version, InferenceDevice: placement,
 		GPUBackend: accel, VRAMGb: vram, VRAMSource: vsrc, Config: cfg,
 	}
+}
+
+// FormatCPU is display-only. Logical CPU count is not part of Fingerprint.Key:
+// adding it would void comparable history without changing what a measurement
+// means. The serving runtime, not fitr, owns inference threads.
+func FormatCPU(name string) string {
+	if name == "" {
+		name = "unknown"
+	}
+	n := runtime.NumCPU()
+	if n < 1 {
+		return name
+	}
+	return fmt.Sprintf("%s  (%d logical)", name, n)
 }
 
 // FormatVRAM renders a memory budget. Unmeasured is said out loud; 0.0 is

@@ -135,7 +135,9 @@ prints "not recommended."
 - **The refusal battery is 3 prompts.** It detects "will refuse ordinary
   work", not the full alignment surface.
 - **One model at a time.** Concurrent models contaminate timings enough to
-  invalidate a run; every phase clears residents first.
+  invalidate a run; every phase clears residents first. Cores are used for
+  discovery, fingerprinting, and shard stats, not for parallel scored
+  inference. See [Cores, GPUs, and honesty](#cores-gpus-and-honesty).
 - **`advise` estimates by default.** The default is weights plus KV from GGUF
   metadata, with excluded compute buffers disclosed. `--load` observes an
   Ollama resident allocation and `--fit` uses `llama-fit-params` dummy
@@ -162,6 +164,31 @@ Not performance - a run is ~99.9% blocked waiting on the model, so the
 harness language is irrelevant to runtime. It is **distribution**: one static
 binary, no interpreter or package manager on the user's machine, ~10 ms
 startup, and trivial cross-compilation for every platform the runtimes serve.
+
+Go still uses every logical CPU it can schedule (`GOMAXPROCS`). Runtime
+discovery probes ports concurrently. Hardware fingerprint probes overlap
+(on Windows each is a PowerShell round-trip). Split GGUF shard stats overlap.
+None of that is the wall clock of `fitr run`.
+
+## Cores, GPUs, and honesty
+
+A 16-core machine does not make a scored run 16 times faster, and it should
+not. The process lock exists because of a real incident: two evals talking
+to the same server produced plausible-and-wrong timings. Doctor already
+treats `OLLAMA_NUM_PARALLEL>1` as a red flag - parallel slots divide the
+context window and add batching variance. Firing N prompts at once would
+make tok/s a shared-GPU number, which is the lie this tool exists to refuse.
+
+The serving runtime owns inference threads. llama.cpp and Ollama already
+use CPU cores for prompt processing and for any layer that is not on the
+GPU. fitr does not second-guess that, and it does not put logical CPU count
+in the fingerprint key: adding it would void comparable history without
+changing what a measurement means.
+
+Where cores will earn their keep later: an isolated worker can execute
+generated code on spare cores while the GPU is busy on the next prompt.
+Inventory of many local GGUFs can parse headers in parallel. Neither of
+those is scored inference.
 
 The eval definition lives in `spec/` as language-neutral JSON, so the spec is
 the contract and the harness is just glue. The classic tasks were extracted

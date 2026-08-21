@@ -432,8 +432,17 @@ func TestBareFitrIsStatusNotUsage(t *testing.T) {
 	if !strings.Contains(got, "fitr "+version) || !strings.Contains(got, "next") {
 		t.Fatalf("bare fitr must be a status page:\n%s", got)
 	}
+	if !strings.Contains(got, "cpu") || !strings.Contains(got, "logical") {
+		t.Fatalf("bare fitr must show logical CPUs as display-only:\n%s", got)
+	}
+	if strings.Contains(got, "run <model> --full") {
+		t.Fatalf("first-run next must be the default battery, not --full:\n%s", got)
+	}
 	if code == exitUsage {
 		t.Fatal("bare fitr is not a usage error")
+	}
+	if code != exitOK {
+		t.Fatalf("bare fitr with no runtime is status, not an error; got exit %d", code)
 	}
 }
 

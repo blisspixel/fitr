@@ -2,7 +2,9 @@ package device
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -16,6 +18,17 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+func TestFormatCPUIsDisplayOnly(t *testing.T) {
+	got := FormatCPU("Example CPU")
+	want := fmt.Sprintf("(%d logical)", runtime.NumCPU())
+	if !strings.Contains(got, "Example CPU") || !strings.Contains(got, want) {
+		t.Fatalf("FormatCPU = %q, want name and %s", got, want)
+	}
+	if FormatCPU("") == "" {
+		t.Fatal("empty name must still render")
+	}
 }
 
 func TestProfilesEmbedAndParse(t *testing.T) {

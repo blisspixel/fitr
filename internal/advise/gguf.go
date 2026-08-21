@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync"
 )
 
 const ggufMagic = "GGUF"
@@ -76,20 +77,44 @@ func completeGGUFSize(path string, selected os.FileInfo) (int64, error) {
 	if shardErr != nil || totalErr != nil || total < 1 || shard < 1 || shard > total {
 		return 0, fmt.Errorf("invalid split GGUF filename %q", filepath.Base(path))
 	}
-	var size int64
+	type shardStat struct {
+		size int64
+		err  error
+	}
+	results := make([]shardStat, total)
+	dir := filepath.Dir(path)
+	var wg sync.WaitGroup
 	for index := 1; index <= total; index++ {
-		name := fmt.Sprintf("%s-%05d-of-%05d%s", match[1], index, total, match[4])
-		info, err := os.Stat(filepath.Join(filepath.Dir(path), name))
-		if err != nil {
-			return 0, fmt.Errorf("incomplete split GGUF, shard %d of %d: %w", index, total, err)
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("%s-%05d-of-%05d%s", match[1], index, total, match[4])
+			info, err := os.Stat(filepath.Join(dir, name))
+			if err != nil {
+				results[index-1].err = fmt.Errorf("incomplete split GGUF, shard %d of %d: %w", index, total, err)
+				return
+			}
+			if !info.Mode().IsRegular() {
+				results[index-1].err = fmt.Errorf("split GGUF shard %d of %d is not a regular file", index, total)
+				return
+			}
+			if info.Size() < 0 {
+				results[index-1].err = fmt.Errorf("split GGUF size overflows int64")
+				return
+			}
+			results[index-1].size = info.Size()
+		}(index)
+	}
+	wg.Wait()
+	var size int64
+	for _, result := range results {
+		if result.err != nil {
+			return 0, result.err
 		}
-		if !info.Mode().IsRegular() {
-			return 0, fmt.Errorf("split GGUF shard %d of %d is not a regular file", index, total)
-		}
-		if info.Size() < 0 || size > math.MaxInt64-info.Size() {
+		if size > math.MaxInt64-result.size {
 			return 0, fmt.Errorf("split GGUF size overflows int64")
 		}
-		size += info.Size()
+		size += result.size
 	}
 	return size, nil
 }
