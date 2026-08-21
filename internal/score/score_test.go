@@ -167,6 +167,44 @@ func TestPooledNeedsScoreAgainstRateGates(t *testing.T) {
 	}
 }
 
+func TestReasoningObservedWhenCodingSkipped(t *testing.T) {
+	m := good()
+	m.CodeKnown = false
+	m.Reasoning = Pool{Passes: 4, N: 5}
+	sc := Score(m, lappy(t))
+	verdict := sc.Needs["coding"]
+	if verdict.State != Skip {
+		t.Fatalf("coding = %s, want SKIP", verdict.State)
+	}
+	if !strings.Contains(verdict.Why, "reasoning checks 4/5") || !strings.Contains(verdict.Why, "not a coding verdict") {
+		t.Fatalf("coding skip hid observed reasoning: %q", verdict.Why)
+	}
+	if slices.Contains(sc.Serves, "coding") {
+		t.Fatalf("unrun coding became a served need: %+v", sc)
+	}
+}
+
+func TestClusteredPoolCannotHideADeadFamily(t *testing.T) {
+	m := good()
+	m.Structured = Pool{Passes: 60, N: 70}
+	for i, name := range []string{"json_object", "json_schema", "json_extract", "csv_strict", "tool_args", "json_object_nested"} {
+		m.Structured.Families = append(m.Structured.Families, FamilyPool{Family: name, Passes: 10, N: 10})
+		_ = i
+	}
+	m.Structured.Families = append(m.Structured.Families, FamilyPool{Family: "json_extract_noise", Passes: 0, N: 10})
+	sc := Score(m, lappy(t))
+	verdict := sc.Needs["structured_output"]
+	if verdict.State == Pass {
+		t.Fatalf("structured_output = PASS with a 0/10 family: %s", verdict.Why)
+	}
+	if !strings.Contains(verdict.Why, "json_extract_noise 0/10") {
+		t.Fatalf("dead family was not named: %q", verdict.Why)
+	}
+	if slices.Contains(sc.Serves, "structured_output") {
+		t.Fatalf("dead-family pool became a product claim: %+v", sc)
+	}
+}
+
 func TestPooledGateInsideWilsonIntervalIsInconclusive(t *testing.T) {
 	m := good()
 	// The point estimate clears 0.75, but 7 trials cannot establish that the

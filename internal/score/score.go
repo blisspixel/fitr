@@ -223,12 +223,63 @@ func InformationDensity(text string) Density {
 }
 
 // ---------------------------------------------------------------- inputs
+// FamilyPool is one generated-check family's trials inside a need.
+type FamilyPool struct {
+	Family string `json:"family"`
+	Passes int    `json:"passes"`
+	N      int    `json:"n"`
+}
+
 // Pool is a set of pooled binary trials feeding one need.
 type Pool struct {
-	Passes, N int
+	Passes   int          `json:"passes"`
+	N        int          `json:"n"`
+	Families []FamilyPool `json:"families,omitempty"`
 }
 
 func (p Pool) rate() float64 { return float64(p.Passes) / float64(p.N) }
+
+func (p *Pool) Add(family string, pass bool) {
+	if p == nil {
+		return
+	}
+	p.N++
+	if pass {
+		p.Passes++
+	}
+	family = strings.TrimSpace(family)
+	if family == "" {
+		family = "unspecified"
+	}
+	for i := range p.Families {
+		if p.Families[i].Family == family {
+			p.Families[i].N++
+			if pass {
+				p.Families[i].Passes++
+			}
+			return
+		}
+	}
+	fp := FamilyPool{Family: family, N: 1}
+	if pass {
+		fp.Passes = 1
+	}
+	p.Families = append(p.Families, fp)
+}
+
+func (p Pool) clusters() []stats.Cluster {
+	if len(p.Families) == 0 {
+		if p.N == 0 {
+			return nil
+		}
+		return []stats.Cluster{{Passes: p.Passes, N: p.N}}
+	}
+	out := make([]stats.Cluster, 0, len(p.Families))
+	for _, f := range p.Families {
+		out = append(out, stats.Cluster{Passes: f.Passes, N: f.N})
+	}
+	return out
+}
 
 // Measured is everything the scorer needs, decoupled from how it was gathered.
 type Measured struct {
@@ -261,9 +312,9 @@ type Measured struct {
 	CodeKnown                  bool
 	CodeFlaky                  bool
 
-	// Pools of binary check-task trials, one per need they feed. Each trial is
-	// an independent generated instance, so pooling into one Wilson interval
-	// per need is legitimate.
+	// Pools of binary check-task trials, one per need they feed. Repeats of
+	// one family are independent generated instances; families are clusters.
+	// Need-level intervals use Rao-Scott Wilson, not iid Wilson on the pool.
 	Structured Pool
 	Precision  Pool
 	Reasoning  Pool
@@ -347,7 +398,13 @@ func Score(m Measured, p device.Profile) Scorecard {
 	// checks pool into the same interval (each instance is an independent
 	// trial) so the number rests on more than six observations.
 	if !m.CodeKnown {
-		n["coding"] = Verdict{Skip, "not measured"}
+		why := "not measured"
+		if m.Reasoning.N > 0 {
+			wi := stats.Wilson(m.Reasoning.Passes, m.Reasoning.N)
+			why = fmt.Sprintf("executable coding not measured; reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
+				m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi)
+		}
+		n["coding"] = Verdict{Skip, why}
 	} else {
 		ok := m.CodeWritePass && m.CodeFixPass
 		why := fmt.Sprintf("write=%v, fix=%v", m.CodeWritePass, m.CodeFixPass)
@@ -581,10 +638,10 @@ func ExcludeContamination(sc Scorecard, models []string) Scorecard {
 }
 
 // poolVerdict scores a pooled binary need against a pass_rate_min gate.
-// Unmeasured skips; a missing gate skips; the why always carries the Wilson
-// interval so a thin sample cannot masquerade as a confident verdict - and
-// when the gate itself sits inside the interval, the verdict says so: the
-// point estimate picked a side, the sample did not.
+// Unmeasured skips; a missing gate skips; the why always carries the interval
+// so a thin sample cannot masquerade as a confident verdict. Distinct check
+// families are clustered: iid Wilson overstates n and can hide a dead family.
+// When the gate sits inside the interval, the verdict says so.
 func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
 	if pool.N == 0 {
 		return Verdict{Skip, "not measured"}
@@ -593,15 +650,48 @@ func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
 	if !ok {
 		return Verdict{Skip, "no " + gate + " gate in profile"}
 	}
-	wi := stats.Wilson(pool.Passes, pool.N)
+	wi := stats.ClusteredWilson(pool.clusters())
 	why := fmt.Sprintf("%d/%d %s [%.2f-%.2f] (need >=%.2f)",
 		pool.Passes, pool.N, verb, wi.Lo, wi.Hi, minRate)
+	if fam := familyBreakdown(pool.Families); fam != "" {
+		why += "; " + fam
+	}
 	verdictState := state(pool.rate() >= minRate)
 	if gateInsideInterval(wi.Lo, wi.Hi, minRate) {
 		verdictState = Inconclusive
 		why += " - INCONCLUSIVE: gate inside the 95% interval"
 	}
+	if dead := establishedFamilyBelowGate(pool.Families, minRate); dead != "" && verdictState == Pass {
+		verdictState = Inconclusive
+		why += " - INCONCLUSIVE: family " + dead + " is established below the gate"
+	}
 	return Verdict{verdictState, why}
+}
+
+func familyBreakdown(families []FamilyPool) string {
+	if len(families) == 0 {
+		return ""
+	}
+	names := append([]FamilyPool(nil), families...)
+	sort.Slice(names, func(i, j int) bool { return names[i].Family < names[j].Family })
+	parts := make([]string, 0, len(names))
+	for _, f := range names {
+		parts = append(parts, fmt.Sprintf("%s %d/%d", f.Family, f.Passes, f.N))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func establishedFamilyBelowGate(families []FamilyPool, gate float64) string {
+	for _, f := range families {
+		if f.N < 3 {
+			continue
+		}
+		wi := stats.Wilson(f.Passes, f.N)
+		if wi.Hi < gate {
+			return f.Family
+		}
+	}
+	return ""
 }
 
 func gateInsideInterval(lo, hi, gate float64) bool {

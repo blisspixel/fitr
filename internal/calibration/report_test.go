@@ -3,6 +3,7 @@ package calibration
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -80,6 +81,33 @@ func TestNewPairPseudonymizesLocalModelPaths(t *testing.T) {
 	}
 	if strings.Contains(string(b), "private") || strings.Contains(string(b), "Users") || strings.Contains(string(b), "home") {
 		t.Fatalf("local model path leaked: %s", b)
+	}
+}
+
+func TestReadPairRejectsUnknownFieldsAndTrailingJSON(t *testing.T) {
+	r := pair("1111111111111111", "seed", 1)
+	path := filepath.Join(t.TempDir(), "pair.json")
+	if err := WriteJSON(path, r); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := strings.Replace(string(b), "{", `{"unexpected":true,`, 1)
+	unknownPath := filepath.Join(t.TempDir(), "unknown.json")
+	if err := os.WriteFile(unknownPath, []byte(unknown), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadPair(unknownPath); err == nil || !strings.Contains(err.Error(), "unexpected") {
+		t.Fatalf("unknown field = %v", err)
+	}
+	trailingPath := filepath.Join(t.TempDir(), "trailing.json")
+	if err := os.WriteFile(trailingPath, append(b, []byte("\n{}\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadPair(trailingPath); err == nil || !strings.Contains(strings.ToLower(err.Error()), "after") {
+		t.Fatalf("trailing JSON = %v", err)
 	}
 }
 

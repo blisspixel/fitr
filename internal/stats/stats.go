@@ -52,12 +52,106 @@ func wilsonRaw(passes, n int) (lo, hi float64) {
 	if n <= 0 {
 		return 0, 1
 	}
-	p := float64(passes) / float64(n)
-	fn := float64(n)
-	denom := 1 + Z95*Z95/fn
-	centre := (p + Z95*Z95/(2*fn)) / denom
-	margin := (Z95 / denom) * math.Sqrt(p*(1-p)/fn+Z95*Z95/(4*fn*fn))
+	return wilsonRate(float64(passes)/float64(n), float64(n))
+}
+
+func wilsonRate(p, n float64) (lo, hi float64) {
+	if n <= 0 {
+		return 0, 1
+	}
+	if p < 0 {
+		p = 0
+	}
+	if p > 1 {
+		p = 1
+	}
+	denom := 1 + Z95*Z95/n
+	centre := (p + Z95*Z95/(2*n)) / denom
+	margin := (Z95 / denom) * math.Sqrt(p*(1-p)/n+Z95*Z95/(4*n*n))
 	return math.Max(0, centre-margin), math.Min(1, centre+margin)
+}
+
+// Cluster is one family of binary trials. Repeats of the same generated
+// family are not independent Bernoulli draws of the need.
+type Cluster struct {
+	Passes, N int
+}
+
+// ClusteredWilson is a Rao-Scott adjusted Wilson interval. Distinct check
+// families are clusters; pooling them as iid overstates n and can mint a
+// PASS that hides a dead family.
+//
+//	deff  = 1 + (m̄ - 1)ρ̂
+//	n_eff = n / deff
+//
+// ρ̂ is the ANOVA intra-cluster correlation, floored at 0. When every
+// cluster has size 1, or there is only one cluster, the result equals
+// Wilson. The interval is never narrower than ordinary Wilson.
+func ClusteredWilson(clusters []Cluster) Interval {
+	var passes, n, groups int
+	equalSingletons := true
+	for _, c := range clusters {
+		if c.N <= 0 {
+			continue
+		}
+		groups++
+		passes += c.Passes
+		n += c.N
+		if c.N != 1 {
+			equalSingletons = false
+		}
+	}
+	if n <= 0 {
+		return Wilson(0, 0)
+	}
+	p := float64(passes) / float64(n)
+	iid := Wilson(passes, n)
+	if groups <= 1 || equalSingletons {
+		return iid
+	}
+
+	meanSize := float64(n) / float64(groups)
+	between, within := 0.0, 0.0
+	for _, c := range clusters {
+		if c.N <= 0 {
+			continue
+		}
+		pi := float64(c.Passes) / float64(c.N)
+		d := pi - p
+		between += float64(c.N) * d * d
+		within += float64(c.N) * pi * (1 - pi)
+	}
+	msb := between / float64(groups-1)
+	msw := 0.0
+	if n > groups {
+		msw = within / float64(n-groups)
+	}
+	rho := 1.0
+	if msb+(meanSize-1)*msw > 0 {
+		rho = (msb - msw) / (msb + (meanSize-1)*msw)
+	}
+	if rho < 0 {
+		rho = 0
+	}
+	deff := 1 + (meanSize-1)*rho
+	if deff < 1 {
+		deff = 1
+	}
+	nEff := float64(n) / deff
+	if nEff > float64(n) {
+		nEff = float64(n)
+	}
+	if nEff < float64(groups) {
+		nEff = float64(groups)
+	}
+	lo, hi := wilsonRate(p, nEff)
+	if lo > iid.Lo {
+		lo = iid.Lo
+	}
+	if hi < iid.Hi {
+		hi = iid.Hi
+	}
+	return Interval{Point: round(p, 4), Lo: round(lo, 4), Hi: round(hi, 4), N: n}
 }
 
 // NewcombeDiff is the hybrid score ("square-and-add") 95% interval for the

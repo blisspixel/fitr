@@ -32,6 +32,10 @@ const (
 	IdentityLocalFile       = "local_file_sha256"
 	IdentityBindingRuntime  = "runtime_bound"
 	IdentityBindingObserved = "observed_only"
+
+	BackendProtocolOllama            = "fitr.backend.ollama.v1"
+	BackendProtocolLlamaServerNative = "fitr.backend.llama-server-native.v1"
+	BackendProtocolOpenAICompatible  = "fitr.backend.openai-compatible.v1"
 )
 
 var (
@@ -610,16 +614,38 @@ func (p RunProvenance) CompatibilityError(other RunProvenance) error {
 	return nil
 }
 
-func protocolMatchesBackend(protocol, backend string) bool {
-	protocol = strings.ToLower(strings.TrimSpace(protocol))
-	backend = strings.ToLower(strings.TrimSpace(backend))
-	switch backend {
-	case "llamaserver":
-		backend = "llama-server"
-	case "openai":
-		backend = "openai-compatible"
+// BackendProtocol is the versioned wire-protocol receipt for a serving
+// backend. llama-server's native completion protocol is tagged
+// llama-server-native; a substring match on "llama-server" would reject it.
+func BackendProtocol(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "ollama":
+		return BackendProtocolOllama
+	case "llama-server", "llamaserver":
+		return BackendProtocolLlamaServerNative
+	case "openai", "openai-compatible":
+		return BackendProtocolOpenAICompatible
+	default:
+		name = strings.ToLower(strings.TrimSpace(name))
+		name = strings.Map(func(r rune) rune {
+			if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
+				return r
+			}
+			return '-'
+		}, name)
+		name = strings.Trim(name, "._-")
+		if name == "" {
+			name = "unknown"
+		}
+		return "fitr.backend." + name + ".v1"
 	}
-	return backend != "" && strings.Contains(protocol, ".backend."+backend+".")
+}
+
+func protocolMatchesBackend(protocol, backend string) bool {
+	if strings.TrimSpace(protocol) == "" || strings.TrimSpace(backend) == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(protocol), BackendProtocol(backend))
 }
 
 func (m RunManifest) digest() (string, error) {

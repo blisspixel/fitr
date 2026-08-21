@@ -21,14 +21,23 @@ verdict** (design rule 7).
 
 ---
 
-## Trust sequence: A and B complete, C next
+## Trust sequence: A and B on main as 0.5.0, C next
 
-Releases A and B establish the evidence and reproducibility contracts. Release
-C is now the next milestone. It turns those local guarantees into an
-independently reproducible benchmark protocol before fitr adds a model catalog
-or another task family. Every verdict must remain traceable to complete,
-correctly attributed observations. An unavailable fact stays unavailable
-instead of quietly becoming a score.
+v0.4.0 is the tagged TUI/history release. The A/B evidence contract lives on
+`main` as unreleased 0.5.0: typed outcomes, sealed manifests, fingerprint v2,
+runtime identity pins, and ranking surfaces that exclude contaminated
+evidence. Release C turns those local guarantees into an independently
+reproducible benchmark protocol before fitr adds a model catalog or another
+task family. Every verdict must remain traceable to complete, correctly
+attributed observations. An unavailable fact stays unavailable instead of
+quietly becoming a score.
+
+Family-stratified aggregation is the first C slice because default pooled
+Wilsons treat distinct check families as iid trials. Isolation does not fix
+that, and coding is already SKIP. Same-base lineage is the second slice
+because unsigned calibration pairs cannot become decision-grade without it.
+The isolated worker follows: executable coding stays SKIP until confinement
+is the same test on all six targets.
 
 ### Release A: evidence integrity
 
@@ -47,8 +56,10 @@ instead of quietly becoming a score.
       and execution policy.
 - [x] Add INCONCLUSIVE and exclude contaminated evidence from score, board,
       history comparison, and CLI comparison claims.
-- [x] Complete the fault-injection matrix proving that no infrastructure
-      failure can create or alter a model PASS or FAIL.
+- [x] Fail-closed infrastructure handling: typed failures abort or record
+      INCONCLUSIVE/ERROR; plumbing, process-receipt, identity, transport,
+      and execute-level injection tests prove those paths cannot mint a
+      model PASS or FAIL.
 
 Exit criterion: no injected infrastructure failure can create or alter a model
 PASS or FAIL.
@@ -76,9 +87,10 @@ environment.
 
 ### Release C: benchmark quality
 
+- [x] Family-stratified statistical aggregation.
+- [ ] Calibrated profile provenance and community calibration tooling,
+      starting with a same-base lineage receipt.
 - [ ] Cross-platform isolated worker.
-- [ ] Family-stratified statistical aggregation.
-- [ ] Calibrated profile provenance and community calibration tooling.
 - [ ] Real vision tasks.
 - [ ] Privacy-safe share artifacts.
 - [ ] Signed releases, SBOMs, and attestations.

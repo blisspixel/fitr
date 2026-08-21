@@ -47,6 +47,36 @@ fitr can tell broken from working, not good from slightly better, and the
 scorecard says that sentence on every run. Tools that omit this number are
 not more precise; they are less honest about the same sample.
 
+## 2b. Need-level pooling is clustered by family
+
+The generated checks are 16 families, not 16 iid draws of one skill.
+`json_object` and `csv_strict` both feed `structured_output`, but a model
+that emits valid objects and broken CSV is not a 15/16 Bernoulli process.
+Pooling them as iid Wilson overstates n and can mint a PASS that hides a
+dead family: 60/70 with one family at 0/10 looks like `[0.76, 0.93]`
+against a 0.75 gate.
+
+Need-level intervals therefore use a Rao-Scott adjusted Wilson. Each
+family is a cluster. Intra-cluster correlation ρ̂ comes from the ANOVA
+estimator; the design effect is `1 + (m̄ - 1)ρ̂`; the Wilson interval is
+computed at `n_eff = n / deff`. When every family has one trial, or there
+is only one family, this equals ordinary Wilson. The clustered interval is
+never narrower than iid Wilson. Per-family counts stay on the why line so
+the interval is not the only disclosure.
+
+A family whose own Wilson interval lies entirely below the gate cannot
+let the need PASS. Reasoning checks observed while executable coding is
+SKIP are printed on the coding line as observations, not as a coding
+verdict.
+
+Rejected alternative: raising default `-k` until iid Wilson looks wide
+enough. That spends wall time to paper over a dependence structure the
+interval should have named.
+
+Reference: Rao, J. N. K. and Scott, A. J. (1981), "The Analysis of
+Categorical Data from Complex Sample Surveys: Chi-Squared Tests for
+Goodness of Fit and Independence in Two-Way Tables," *JASA* 76(374).
+
 ## 3. Comparing two models, unpaired: the Newcombe difference interval
 
 The intuitive rule - "the two intervals overlap, so no claim" - is not a 5%

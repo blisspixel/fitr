@@ -1367,7 +1367,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	provenance, err := record.NewRunProvenance(effectiveHashes.TaskSetSHA256,
 		effectiveHashes.SpecSHA256, prof, record.CurrentScoringPolicy(), record.SoftwareReceipt{
 			FitrVersion: version, SoftwareBuildSHA256: softwareBuild,
-			BackendProtocol: backendProtocolVersion(c.Name()),
+			BackendProtocol: record.BackendProtocol(c.Name()),
 		})
 	if err != nil {
 		return nil, fmt.Errorf("build run provenance: %w", err)
@@ -1924,30 +1924,6 @@ func hasAdaptiveGates(spec *eval.Spec, profile device.Profile, level string) boo
 	return false
 }
 
-func backendProtocolVersion(name string) string {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "ollama":
-		return "fitr.backend.ollama.v1"
-	case "llama-server", "llamaserver":
-		return "fitr.backend.llama-server-native.v1"
-	case "openai":
-		return "fitr.backend.openai-compatible.v1"
-	default:
-		name = strings.ToLower(strings.TrimSpace(name))
-		name = strings.Map(func(r rune) rune {
-			if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
-				return r
-			}
-			return '-'
-		}, name)
-		name = strings.Trim(name, "._-")
-		if name == "" {
-			name = "unknown"
-		}
-		return "fitr.backend." + name + ".v1"
-	}
-}
-
 func allDecided(sprts map[string]*stats.SPRT) bool {
 	if len(sprts) == 0 {
 		return true
@@ -2052,10 +2028,7 @@ func measure(r *Result) score.Measured {
 		default:
 			pool = &m.User
 		}
-		pool.N++
-		if pass {
-			pool.Passes++
-		}
+		pool.Add(ck.Family, pass)
 	}
 	if r.Refusal != nil {
 		expected := r.TaskPlan.RefusalTrials

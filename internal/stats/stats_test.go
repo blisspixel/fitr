@@ -26,6 +26,41 @@ func TestWilsonKnownValue(t *testing.T) {
 	}
 }
 
+func TestClusteredWilsonMatchesWilsonForSingletonsAndOneFamily(t *testing.T) {
+	singletons := []Cluster{{1, 1}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, {1, 1}}
+	got := ClusteredWilson(singletons)
+	want := Wilson(7, 7)
+	if got != want {
+		t.Fatalf("7 singleton families = %+v, want Wilson %+v", got, want)
+	}
+	one := ClusteredWilson([]Cluster{{Passes: 18, N: 20}})
+	if one != Wilson(18, 20) {
+		t.Fatalf("one family = %+v, want Wilson %+v", one, Wilson(18, 20))
+	}
+}
+
+func TestClusteredWilsonWidensWhenOneFamilyIsDead(t *testing.T) {
+	// 10/10 in six families and 0/10 in one: pooled 60/70 looks like a PASS
+	// under iid Wilson. Perfect clustering (ρ̂=1) must shrink n_eff toward
+	// the family count so the need cannot hide the dead family.
+	clusters := make([]Cluster, 7)
+	for i := range clusters {
+		clusters[i] = Cluster{Passes: 10, N: 10}
+	}
+	clusters[0] = Cluster{Passes: 0, N: 10}
+	got := ClusteredWilson(clusters)
+	iid := Wilson(60, 70)
+	if got.Lo >= iid.Lo {
+		t.Fatalf("clustered lo = %v, want wider than iid Wilson %v", got.Lo, iid.Lo)
+	}
+	if got.Point != iid.Point {
+		t.Fatalf("point = %v, want pooled rate %v", got.Point, iid.Point)
+	}
+	if got.Lo >= 0.75 || got.Hi < 0.75 {
+		t.Fatalf("clustered interval [%v, %v] hid 0.75, iid was [%v, %v]", got.Lo, got.Hi, iid.Lo, iid.Hi)
+	}
+}
+
 func TestWilsonEdges(t *testing.T) {
 	if lo := Wilson(0, 5).Lo; lo != 0 {
 		t.Fatalf("lo = %v, want 0", lo)

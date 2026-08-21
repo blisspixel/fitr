@@ -109,6 +109,103 @@ func TestModelIdentityStrengthIsExplicitAndPrivate(t *testing.T) {
 	}
 }
 
+func TestBackendProtocolMatchesLlamaServerNativeReceipt(t *testing.T) {
+	cases := []struct {
+		backend, want string
+	}{
+		{"ollama", BackendProtocolOllama},
+		{"llama-server", BackendProtocolLlamaServerNative},
+		{"llamaserver", BackendProtocolLlamaServerNative},
+		{"openai", BackendProtocolOpenAICompatible},
+		{"openai-compatible", BackendProtocolOpenAICompatible},
+	}
+	for _, tc := range cases {
+		got := BackendProtocol(tc.backend)
+		if got != tc.want {
+			t.Fatalf("BackendProtocol(%q) = %q, want %q", tc.backend, got, tc.want)
+		}
+		if !protocolMatchesBackend(got, tc.backend) {
+			t.Fatalf("protocol %q was rejected for backend %q", got, tc.backend)
+		}
+	}
+	if protocolMatchesBackend(BackendProtocolOllama, "llama-server") {
+		t.Fatal("ollama protocol matched llama-server")
+	}
+	if protocolMatchesBackend("fitr.backend.llama-server.v1", "llama-server") {
+		t.Fatal("truncated llama-server protocol was accepted")
+	}
+
+	r := manifestRecord("model", "2026-08-21T12:00:00Z")
+	addTestFingerprintV2(t, r)
+	identity, err := NewModelIdentity("model", "model", "llama-server", "llama-server b1",
+		testArtifactDigest, "", 1234)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provenance := testRunProvenance(t)
+	provenance.BackendProtocol = BackendProtocol("llama-server")
+	if err := r.AttachManifest(identity, provenance); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ValidateManifest(); err != nil {
+		t.Fatalf("llama-server native protocol failed to seal: %v", err)
+	}
+	if issue := identity.RankingIssue(); issue != "" {
+		t.Fatalf("runtime-bound llama-server identity was unrankable: %s", issue)
+	}
+}
+
+func TestObservedLocalIdentityCannotRank(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "private-model.gguf")
+	if err := os.WriteFile(path, []byte("model bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := NewModelIdentity("model", "model", "llama-server",
+		"llama-server b1", "", path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.RankingIssue() == "" {
+		t.Fatal("observed-only local file identity was rankable")
+	}
+
+	profile := device.Profile{Name: "default", Description: "test", Gates: map[string]device.Gate{}}
+	r := manifestRecord("model", "2026-08-21T12:00:00Z")
+	r.SchemaVersion = EvidenceSchemaVersion
+	r.TaskPlan = TaskPlan{CodeTrials: 1, CheckTrialsLimit: 1}
+	r.CodeWrite = []eval.ExecResult{{Outcome: eval.OutcomeInconclusive}}
+	r.Checks = []eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}}
+	r.Rep = score.RepetitionMetrics("")
+	r.Density = score.InformationDensity("")
+	r.Scorecard = score.Scorecard{Model: r.Model, Profile: r.Profile, Needs: map[string]score.Verdict{}}
+	r.EvidenceCounts = map[string]eval.OutcomeCounts{
+		"coding": eval.CountOutcomes(1, eval.OutcomeInconclusive),
+		"checks": eval.CountOutcomes(1, eval.OutcomePass),
+		"tools":  eval.CountOutcomes(0), "refusal": eval.CountOutcomes(0),
+		"plumbing": eval.CountOutcomes(0), "withdrawal": eval.CountOutcomes(0),
+		"agentic": eval.CountOutcomes(0),
+	}
+	addTestFingerprintV2(t, r)
+	provenance, err := NewRunProvenance(testRunProvenance(t).TaskSetSHA256, testRunProvenance(t).SpecSHA256,
+		profile, CurrentScoringPolicy(), SoftwareReceipt{
+			FitrVersion: "0.5.0", SoftwareBuildSHA256: testArtifactDigest,
+			BackendProtocol: BackendProtocol("llama-server"),
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AttachManifest(identity, provenance); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CompleteEvidence(profile); err != nil {
+		t.Fatal(err)
+	}
+	if issue := r.EvidenceIntegrityIssue(); !strings.Contains(issue, "not bound to the serving runtime") {
+		t.Fatalf("observed-only identity ranking issue = %q", issue)
+	}
+}
+
 func TestModelIdentityRejectsRuntimePathThatIsNotLocal(t *testing.T) {
 	_, err := NewModelIdentity(
 		"requested.gguf",
