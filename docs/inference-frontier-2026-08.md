@@ -16,7 +16,7 @@ Ranked by how badly each invalidates results, not by effort to fix.
 | 1 | tok/s is a property of the model | It is a property of **speculative-decoding config**. llama.cpp has 10 backends behind `--spec-type`. Muse Glimmer + DFlash: **74.9 -> 233.4 tok/s (3.1x)**, identical output. A decode number without spec-type and acceptance rate is meaningless. |
 | 2 | One TTFT number | Warm-prefix vs cold TTFT differ by **70-200x** (41 s -> 0.2 s, Strix Halo, 16k prompt). Every runtime now has a RAM-backed prefix cache **on by default**. Blending them is the single biggest measurement error available. |
 | 3 | "Thinking" is a boolean | Graded `reasoning_effort` everywhere, with **mutually incompatible vocabularies** (`low/medium/xhigh` Qwen, `low/high/max` DeepSeek and Kimi, `no_think/low/high` Hunyuan, `enabled/adaptive/disabled` MiniMax). Kimi K3 **cannot** disable thinking. |
-| 4 | Reasoning content is cosmetic | Kimi K3 and Poolside Laguna **require** `reasoning_content` round-tripped across turns or they degrade. llama.cpp has `--reasoning-preserve` and a `supports_preserve_reasoning` capability flag. **Our 20-turn loop drops it.** |
+| 4 | Reasoning content is cosmetic | Kimi K3 and Poolside Laguna **require** `reasoning_content` round-tripped across turns or they degrade. llama.cpp has `--reasoning-preserve` and a `supports_preserve_reasoning` capability flag. FitR now preserves it across turns. |
 | 5 | Ollama is the local runtime | llama-server is a strict superset: `/v1/responses`, Anthropic `/v1/messages`, router mode, built-in tools, an MCP stdio client, Prometheus spec-decode counters, per-slot state. |
 | 6 | 20 turns is an agentic loop | little-coder caps Terminal-Bench at **40**; GDPval-AA v2 allows **250**. 20 turns measures early-abort behaviour. |
 | 7 | Quant = Q4_K_M vs Q8_0 | GGUF now has **NVFP4 (40), MXFP4 (39), Q1_0 (41), Q2_0 (42)**. PrismML Bonsai-27B runs on an iPhone at **1.125 bpw retaining 90%** of baseline. |
@@ -33,8 +33,8 @@ Ranked by how badly each invalidates results, not by effort to fix.
 | Ollama context default is VRAM-tiered (under 24 GiB -> **4k**), so an unset `num_ctx` silently truncates | **Safe** - `num_ctx` is pinned explicitly on every call |
 | Ollama v0.32.10 changed default `repeat_penalty` **1.1 -> 1.0** | **Was exposed.** Now pinned at 1.0. See below |
 | Results can silently merge across runtime versions | **Safe** - Ollama version is part of `Fingerprint.Key()` |
-| `reasoning_content` must be round-tripped in multi-turn | **Exposed** - our agentic loop drops it |
-| 20 turns is short | **Exposed** - our `--full` runs exactly 20 |
+| `reasoning_content` must be round-tripped in multi-turn | **Fixed** - the agentic transcript preserves and replays it |
+| 20 turns is short | **Fixed** - `--full` now uses a 40-turn floor |
 
 ### Why `repeat_penalty` is now pinned to 1.0
 
@@ -82,7 +82,7 @@ reproducible tool calls.
 | prefill tok/s | + measured-vs-roofline efficiency. **Prefill is compute-bound; decode is bandwidth-bound** |
 | resident memory at 32K | + peak RSS across the run; note SWA/hybrid models break linear KV scaling |
 | coding tasks | + **tokens-to-correct-answer** |
-| 20-turn agentic | **40 turns minimum**; compaction watchdog at 80% of window; A/B on preserved reasoning; tool selection under **10-25 tools** (MCP-Atlas shape) |
+| 40-turn agentic | + A/B on preserved reasoning and tool selection under **10-25 tools** (MCP-Atlas shape); the 80% compaction watchdog is already implemented |
 | degeneracy | + **overthinking-error rate** (correct answer reached in an intermediate step, then lost) and truncation rate |
 | refusal | + **prompt-injection resistance** (`strongreject` ships in Harbor) |
 | - | **new:** schema adherence - free-form vs `json_schema` vs `structural_tag`, reporting valid rate, semantic accuracy, tok/s, and **grammar compile time separately** |
@@ -109,7 +109,7 @@ long-prompt work.
 Also: decode degrades **23-28% from empty to 76k context**. A single
 empty-context number overstates real use by roughly a quarter.
 
-## Backends: add llama-server next, not vLLM
+## Why llama-server was the next backend, not vLLM
 
 Same audience as Ollama, strictly larger API surface, and it uniquely provides
 what Ollama cannot:

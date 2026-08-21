@@ -13,7 +13,6 @@ package device
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -88,12 +87,13 @@ func LoadEmbeddedProfiles() ([]Profile, error) {
 		}
 		b, err := profilesFS.ReadFile(path.Join("profiles", e.Name()))
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("profile %s: %w", e.Name(), err)
 		}
-		var p Profile
-		if json.Unmarshal(b, &p) == nil {
-			out = append(out, p)
+		p, err := decodeProfile("embedded/"+e.Name(), b)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, p)
 	}
 	return out, nil
 }

@@ -7,6 +7,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,8 +17,10 @@ import (
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
+	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/score"
 	"github.com/blisspixel/fitr/internal/stats"
@@ -62,7 +66,7 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 			errPrint(err.Error(), "", "")
 			return exitError
 		}
-		fmt.Fprintf(os.Stderr, "wrote %s\n", path)
+		fmt.Fprintf(os.Stderr, "wrote %s\n", terminalText(path))
 	}
 	return exitOK
 }
@@ -82,6 +86,12 @@ func shotTop(context.Context) (string, error) {
 	b.DeviceKey = a.DeviceKey
 	a.Device.GPU, b.Device.GPU = "Demo GPU 24 GB", "Demo GPU 24 GB"
 	a.Device.Runtime, b.Device.Runtime = "llama-server b7000", "llama-server b7000"
+	if err := prepareMockEvidence(a); err != nil {
+		return "", err
+	}
+	if err := prepareMockEvidence(b); err != nil {
+		return "", err
+	}
 	snapshot := buildTopSnapshot([]*Result{a, b})
 	state := top.NewState(snapshot)
 	state.View, state.Width, state.Height = top.ViewBoard, 110, 18
@@ -286,6 +296,12 @@ func shotBoard(ctx context.Context) (string, error) {
 	// instead of "different hardware" (the rows are demo; the grouping is real).
 	a.Device, a.DeviceKey = cur, cur.Key()
 	b.Device, b.DeviceKey = cur, cur.Key()
+	if err := prepareMockEvidence(a); err != nil {
+		return "", err
+	}
+	if err := prepareMockEvidence(b); err != nil {
+		return "", err
+	}
 	for _, r := range []*Result{a, b} {
 		if _, err := save(r); err != nil {
 			return "", err
@@ -344,12 +360,213 @@ func mockResult(model string, dec, decSD, pre, preSD float64, codePass, codeN, c
 		"instruction_precision", "instruction_precision", "instruction_precision", "reasoning",
 		"reasoning", "reasoning", "reasoning", "reasoning"}
 	for i := 0; i < checksN; i++ {
+		pass := i >= checksN-checksPass
 		r.Checks = append(r.Checks, eval.CheckOutcome{
 			TaskID: fmt.Sprintf("task%02d", i), Need: needs[i%len(needs)], Origin: "builtin",
-			Seed: uint64(1000 + i), Pass: i >= checksN-checksPass,
+			Seed: uint64(1000 + i), Pass: pass, Outcome: mockBinaryOutcome(pass),
 		})
 	}
+	if err := prepareMockEvidence(r); err != nil {
+		panic(err)
+	}
 	return r
+}
+
+// prepareMockEvidence gives demo and test records the same sealed denominator
+// contract as a real current result. Executable observations remain explicitly
+// inconclusive because the mock never ran an isolated verifier.
+func prepareMockEvidence(r *Result) error {
+	if r == nil {
+		return fmt.Errorf("nil mock result")
+	}
+	if r.Profile == "" {
+		r.Profile = "default"
+	}
+	if r.DeviceKey == "" {
+		r.DeviceKey = "mock-device|mock-runtime|ctx=8192"
+	}
+	if r.Device.Host == "" {
+		r.Device.Host = "mock-host"
+	}
+	if r.Device.OS == "" {
+		r.Device.OS = "mock-os"
+	}
+	if r.Device.CPU == "" {
+		r.Device.CPU = "mock-cpu"
+	}
+	if r.Device.GPU == "" {
+		r.Device.GPU = "mock-gpu"
+	}
+	if r.Device.Runtime == "" {
+		r.Device.Runtime = "mock-runtime-v1"
+	}
+	if r.Device.InferenceDevice == "" {
+		r.Device.InferenceDevice = "mock placement"
+	}
+	if r.Device.Config == nil {
+		r.Device.Config = map[string]string{}
+	}
+	if r.SeedSet == "" {
+		r.SeedSet = "mock-seedset-v1"
+	}
+	r.SchemaVersion = 5
+	r.ExecutionPolicy = record.ExecutionDisabled
+	r.TaskPlan = record.TaskPlan{
+		SpeedSamples:     len(r.Speed),
+		Memory:           true,
+		CodeTrials:       len(r.CodeWrite) + len(r.CodeFix),
+		CheckTrialsLimit: len(r.Checks),
+		Plumbing:         r.Plumbing != nil,
+		ToolTrials:       len(r.Tools),
+		Withdrawal:       r.Withdrawal != nil,
+		RefusalTrials:    len(r.Refusal),
+		AgenticTrials:    boolInt(r.Agentic != nil),
+	}
+
+	coding := make([]eval.Outcome, 0, r.TaskPlan.CodeTrials)
+	for i := range r.CodeWrite {
+		r.CodeWrite[i].Outcome = eval.OutcomeInconclusive
+		coding = append(coding, eval.OutcomeInconclusive)
+	}
+	for i := range r.CodeFix {
+		r.CodeFix[i].Outcome = eval.OutcomeInconclusive
+		coding = append(coding, eval.OutcomeInconclusive)
+	}
+	checks := make([]eval.Outcome, 0, len(r.Checks))
+	for i := range r.Checks {
+		if r.Checks[i].Outcome == "" {
+			r.Checks[i].Outcome = mockBinaryOutcome(r.Checks[i].Pass)
+		}
+		checks = append(checks, r.Checks[i].Outcome)
+	}
+	tools := make([]eval.Outcome, len(r.Tools))
+	for i := range r.Tools {
+		r.Tools[i].Outcome = eval.OutcomeInconclusive
+		tools[i] = eval.OutcomeInconclusive
+	}
+	refusal := make([]eval.Outcome, 0, len(r.Refusal))
+	for key, verdict := range r.Refusal {
+		if verdict.Outcome == "" {
+			verdict.Outcome = mockBinaryOutcome(verdict.Verdict == "answered")
+			r.Refusal[key] = verdict
+		}
+		refusal = append(refusal, verdict.Outcome)
+	}
+	plumbing := []eval.Outcome{}
+	if r.Plumbing != nil {
+		if r.Plumbing.Outcome == "" {
+			r.Plumbing.Outcome = mockBinaryOutcome(r.Plumbing.Healthy)
+		}
+		plumbing = append(plumbing, r.Plumbing.Outcome)
+	}
+	withdrawal := []eval.Outcome{}
+	if r.Withdrawal != nil {
+		if r.Withdrawal.Outcome == "" {
+			r.Withdrawal.Outcome = mockBinaryOutcome(r.Withdrawal.Pass)
+		}
+		withdrawal = append(withdrawal, r.Withdrawal.Outcome)
+	}
+	agentic := []eval.Outcome{}
+	if r.Agentic != nil {
+		r.Agentic.Outcome = eval.OutcomeInconclusive
+		agentic = append(agentic, eval.OutcomeInconclusive)
+	}
+	r.EvidenceCounts = map[string]eval.OutcomeCounts{
+		"coding":     eval.CountOutcomes(r.TaskPlan.CodeTrials, coding...),
+		"checks":     eval.CountOutcomes(r.TaskPlan.CheckTrialsLimit, checks...),
+		"tools":      eval.CountOutcomes(r.TaskPlan.ToolTrials, tools...),
+		"refusal":    eval.CountOutcomes(r.TaskPlan.RefusalTrials, refusal...),
+		"plumbing":   eval.CountOutcomes(boolInt(r.TaskPlan.Plumbing), plumbing...),
+		"withdrawal": eval.CountOutcomes(boolInt(r.TaskPlan.Withdrawal), withdrawal...),
+		"agentic":    eval.CountOutcomes(r.TaskPlan.AgenticTrials, agentic...),
+	}
+	decode, ttft, prefill := make([]float64, 0, len(r.Speed)), make([]float64, 0, len(r.Speed)), make([]float64, 0, len(r.Speed))
+	for _, sample := range r.Speed {
+		decode = append(decode, sample.DecodeTPS)
+		ttft = append(ttft, sample.TTFT)
+		prefill = append(prefill, sample.PrefillTPS)
+	}
+	r.DecodeSum, r.TTFTSum, r.PrefillSum = stats.MeanSD(decode), stats.MeanSD(ttft), stats.MeanSD(prefill)
+	longest := ""
+	for _, result := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
+		if len(result.Raw) > len(longest) {
+			longest = result.Raw
+		}
+	}
+	r.Refused = 0
+	for _, verdict := range r.Refusal {
+		if len(verdict.Text) > len(longest) {
+			longest = verdict.Text
+		}
+		if verdict.Outcome == eval.OutcomeFail {
+			r.Refused++
+		}
+	}
+	r.Rep, r.Density = score.RepetitionMetrics(longest), score.InformationDensity(longest)
+	effective := r.ContextSize()
+	fingerprintV2, err := device.NewFingerprintV2(r.Device, device.ContextVerification{
+		RequestedTokens: effective, EffectiveTokens: &effective,
+		EffectiveSource: device.ContextSourceRuntimeReport,
+	})
+	if err != nil {
+		return err
+	}
+	r.DeviceV2 = &fingerprintV2
+	r.DeviceKey, err = fingerprintV2.ComparabilityKey()
+	if err != nil {
+		return err
+	}
+
+	sum := sha256.Sum256([]byte("fitr mock artifact\x00" + r.Model))
+	identity, err := record.NewModelIdentity(r.Model, r.Model, "mock", "mock-runtime-v1",
+		"sha256:"+hex.EncodeToString(sum[:]), "", 0)
+	if err != nil {
+		return err
+	}
+	spec, err := eval.LoadSpec()
+	if err != nil {
+		return err
+	}
+	hashes, err := eval.EffectiveHashes(spec)
+	if err != nil {
+		return err
+	}
+	softwareBuild, err := buildinfo.BinarySHA256()
+	if err != nil {
+		return err
+	}
+	profile, err := device.SelectProfile(r.Profile, r.Device)
+	if err != nil {
+		return err
+	}
+	provenance, err := record.NewRunProvenance(hashes.TaskSetSHA256, hashes.SpecSHA256,
+		profile, record.CurrentScoringPolicy(),
+		record.SoftwareReceipt{FitrVersion: buildinfo.Version(), SoftwareBuildSHA256: softwareBuild,
+			BackendProtocol: "fitr.backend.mock.v1"})
+	if err != nil {
+		return err
+	}
+	r.Manifest = nil
+	r.Completion = nil
+	if err := r.AttachManifest(identity, provenance); err != nil {
+		return err
+	}
+	r.Scorecard = score.Score(measure(r), profile)
+	return r.CompleteEvidence(profile)
+}
+
+func mockBinaryOutcome(pass bool) eval.Outcome {
+	if pass {
+		return eval.OutcomePass
+	}
+	return eval.OutcomeFail
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------- ansi->svg

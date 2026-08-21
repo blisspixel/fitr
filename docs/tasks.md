@@ -1,9 +1,30 @@
 # The task battery
 
-Two kinds of task make up a run: classic tasks with bespoke runners (executed
-coding fixtures, a real tool loop, a tool-withdrawal loop, a 40-turn
-unattended agentic session, a refusal battery, speed and memory probes) and
-**generated checks** - the scalable half of the battery.
+Two kinds of task make up a run: classic tasks with bespoke harness logic and
+**generated checks**, the scalable half of the battery. Speed, memory, refusal,
+plumbing, generated checks, and tool withdrawal do not execute generated code.
+Coding fixtures and executable tool or agent loops are disabled by default.
+
+## Executable task safety
+
+The current cross-platform executor is not a sandbox. An explicit
+`--allow-unsafe-exec` run preflights the interpreter and requires a successful
+exit plus an exact final verifier receipt, but generated Python still has the
+current user's normal filesystem, environment, credential, and network access.
+For that reason:
+
+1. Default runs record executable tasks as SKIP before a model call or work
+   directory is created.
+2. Unsafe opt-in observations are recorded as INCONCLUSIVE even when their
+   assertions appear to pass or fail.
+3. INCONCLUSIVE and executor errors never enter a scoring or comparison
+   numerator or denominator.
+4. User task files remain declarative. Executable kinds, executable fields,
+   unknown fields, and trailing JSON are hard errors.
+
+Verified executable PASS and FAIL evidence requires the isolated worker in the
+benchmark-quality release. Until then, no generated model code is allowed to
+make a ranking claim.
 
 ## Generated checks: no answer strings, anywhere
 

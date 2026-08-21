@@ -3,6 +3,7 @@ package score
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -152,8 +153,8 @@ func TestMissingGateSkipsRatherThanCrashes(t *testing.T) {
 
 func TestPooledNeedsScoreAgainstRateGates(t *testing.T) {
 	m := good()
-	m.Structured = Pool{Passes: 7, N: 7}
-	m.Precision = Pool{Passes: 2, N: 4} // 0.5 < 0.7 gate
+	m.Structured = Pool{Passes: 20, N: 20}
+	m.Precision = Pool{Passes: 0, N: 20}
 	sc := Score(m, lappy(t))
 	if sc.Needs["structured_output"].State != Pass {
 		t.Fatalf("structured_output = %v, want PASS", sc.Needs["structured_output"].State)
@@ -162,7 +163,25 @@ func TestPooledNeedsScoreAgainstRateGates(t *testing.T) {
 		t.Fatalf("pooled verdict must carry its Wilson interval, got %q", sc.Needs["structured_output"].Why)
 	}
 	if sc.Needs["instruction_precision"].State != Fail {
-		t.Fatalf("instruction_precision = %v, want FAIL at 2/4 against 0.7", sc.Needs["instruction_precision"].State)
+		t.Fatalf("instruction_precision = %v, want FAIL at 0/20 against 0.7", sc.Needs["instruction_precision"].State)
+	}
+}
+
+func TestPooledGateInsideWilsonIntervalIsInconclusive(t *testing.T) {
+	m := good()
+	// The point estimate clears 0.75, but 7 trials cannot establish that the
+	// underlying rate does. The interval, not the point estimate, decides.
+	m.Structured = Pool{Passes: 7, N: 7}
+	sc := Score(m, lappy(t))
+	verdict := sc.Needs["structured_output"]
+	if verdict.State != Inconclusive {
+		t.Fatalf("structured_output = %s, want INCONCLUSIVE: %s", verdict.State, verdict.Why)
+	}
+	if !strings.Contains(verdict.Why, "gate inside the 95% interval") {
+		t.Fatalf("inconclusive verdict does not explain the uncertainty: %q", verdict.Why)
+	}
+	if slices.Contains(sc.Serves, "structured_output") || sc.Fails != 0 {
+		t.Fatalf("inconclusive pool became a product claim: %+v", sc)
 	}
 }
 
@@ -193,6 +212,21 @@ func TestUserTasksDefaultToAllMustPass(t *testing.T) {
 	// user_tasks lives outside NeedOrder; the counters must still see it.
 	if sc.Fails == 0 {
 		t.Fatal("a failing user_tasks need must count as a failure")
+	}
+}
+
+func TestConfiguredUserTaskRateUsesWilsonInconclusive(t *testing.T) {
+	m := Measured{Model: "test", User: Pool{Passes: 7, N: 7}}
+	profile := device.Profile{Name: "test", Gates: map[string]device.Gate{
+		"user_tasks": {"pass_rate_min": 0.75},
+	}}
+	sc := Score(m, profile)
+	if verdict := sc.Needs["user_tasks"]; verdict.State != Inconclusive ||
+		!strings.Contains(verdict.Why, "gate inside the 95% interval") {
+		t.Fatalf("user_tasks = %+v, want explicit Wilson INCONCLUSIVE", verdict)
+	}
+	if !strings.Contains(sc.UseFor, "unmeasured/blocked") {
+		t.Fatalf("use_for did not count INCONCLUSIVE as unproven: %q", sc.UseFor)
 	}
 }
 
@@ -321,5 +355,47 @@ func TestClientDerivedTimingsAreLabeledNotSkipped(t *testing.T) {
 	}
 	if sc.Needs["fast_and_decent"].State != Pass {
 		t.Fatal("labeling is not a SKIP; decode and TTFT were still measured")
+	}
+}
+
+func TestContaminationExcludesMeasuredScoreClaims(t *testing.T) {
+	m := good()
+	m.Capabilities = append(m.Capabilities, "vision")
+	m.Structured = Pool{Passes: 0, N: 7}
+	m.Rep.Words, m.Rep.GzipRatio = 200, 9
+	m.Contamination = []string{"other:7b", "other:7b"}
+
+	sc := Score(m, lappy(t))
+	for _, need := range []string{"fast_and_decent", "coding", "structured_output", "vision", "output_health"} {
+		verdict := sc.Needs[need]
+		if verdict.State != Inconclusive {
+			t.Fatalf("%s = %s, want INCONCLUSIVE: %s", need, verdict.State, verdict.Why)
+		}
+		if !strings.Contains(verdict.Why, "other:7b") || !strings.Contains(verdict.Why, "excluded") {
+			t.Fatalf("%s must disclose the exclusion and resident model: %q", need, verdict.Why)
+		}
+	}
+	if sc.Needs["uncensored"].State != Skip {
+		t.Fatalf("an unmeasured need remains SKIP, got %s", sc.Needs["uncensored"].State)
+	}
+	if sc.Passes != 0 || sc.Fails != 0 || len(sc.Serves) != 0 {
+		t.Fatalf("contaminated scorecard still claims outcomes: %+v", sc)
+	}
+	if sc.Unproven != len(sc.Needs) || !strings.Contains(sc.UseFor, "INCONCLUSIVE") {
+		t.Fatalf("contaminated scorecard summary is not explicit: %+v", sc)
+	}
+}
+
+func TestExcludeContaminationDoesNotMutateStoredScorecard(t *testing.T) {
+	original := Scorecard{
+		Needs:  map[string]Verdict{"coding": {State: Pass, Why: "passed"}},
+		Serves: []string{"coding"}, Passes: 1, UseFor: "coding",
+	}
+	excluded := ExcludeContamination(original, []string{"resident"})
+	if original.Needs["coding"].State != Pass || len(original.Serves) != 1 {
+		t.Fatalf("legacy scorecard was mutated: %+v", original)
+	}
+	if excluded.Needs["coding"].State != Inconclusive || len(excluded.Serves) != 0 {
+		t.Fatalf("excluded scorecard retained a claim: %+v", excluded)
 	}
 }

@@ -7,10 +7,12 @@
 package eval
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -27,6 +29,33 @@ import (
 var checkNeeds = map[string]bool{
 	"structured_output": true, "instruction_precision": true,
 	"reasoning": true, "user_tasks": true,
+}
+
+var executableUserTaskKinds = map[string]bool{
+	"execute":   true,
+	"exec":      true,
+	"shell":     true,
+	"tool":      true,
+	"tools":     true,
+	"tool_loop": true,
+	"agentic":   true,
+}
+
+// These are top-level fields from executable task specifications. Params are
+// deliberately not scanned recursively: generated check families own that
+// data, and a check may legitimately grade JSON containing names such as
+// "command" or "files". No params value is ever interpreted as an executor.
+var executableUserTaskFields = []string{
+	"runner",
+	"command",
+	"shell",
+	"entry",
+	"files",
+	"editable_files",
+	"extract",
+	"pass_if_stdout_contains",
+	"tools",
+	"verify",
 }
 
 type CheckSpec struct {
@@ -92,14 +121,15 @@ func Generate(cs CheckSpec, seed uint64) Instance {
 }
 
 type CheckOutcome struct {
-	TaskID    string `json:"task"`
-	Family    string `json:"family"`
-	Need      string `json:"need"`
-	Origin    string `json:"origin"`
-	Seed      uint64 `json:"seed"`
-	Pass      bool   `json:"pass"`
-	Detail    string `json:"detail"`
-	Truncated bool   `json:"truncated,omitempty"`
+	TaskID    string  `json:"task"`
+	Family    string  `json:"family"`
+	Need      string  `json:"need"`
+	Origin    string  `json:"origin"`
+	Seed      uint64  `json:"seed"`
+	Pass      bool    `json:"pass"`
+	Outcome   Outcome `json:"outcome,omitempty"`
+	Detail    string  `json:"detail"`
+	Truncated bool    `json:"truncated,omitempty"`
 }
 
 // RunCheck generates the instance, prompts the model once, and grades the
@@ -110,9 +140,11 @@ func RunCheck(ctx context.Context, c llm.Backend, model string, cs CheckSpec, se
 	samp := ollama.Deterministic(cs.NumPredict, numCtx(ctx))
 	text, m, err := c.Generate(ctx, model, inst.Prompt, samp)
 	if err != nil {
-		return out, err
+		out.Outcome = OutcomeError
+		return out, failure(FailureTransport, cs.ID+".generate", err)
 	}
 	out.Pass, out.Detail = inst.Grade(text)
+	out.Outcome = outcomeFor(out.Pass)
 	out.Truncated = m.Truncated
 	if m.Truncated && !out.Pass {
 		out.Detail += " (output hit the token cap)"
@@ -138,7 +170,7 @@ func loadChecks() ([]CheckSpec, error) {
 			return nil, fmt.Errorf("check %s: %w", e.Name(), err)
 		}
 		var cs CheckSpec
-		if err := json.Unmarshal(b, &cs); err != nil {
+		if err := decodeBuiltinJSON(b, &cs); err != nil {
 			return nil, fmt.Errorf("check %s: %w", e.Name(), err)
 		}
 		cs.Origin = "builtin"
@@ -165,6 +197,49 @@ func UserTasksDir() string {
 		return ""
 	}
 	return filepath.Join(home, ".fitr", "tasks")
+}
+
+func decodeUserCheck(b []byte, into *CheckSpec) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return failure(FailureInvalidSpec, "load_user_task", err)
+	}
+	if raw == nil {
+		return failure(FailureInvalidSpec, "load_user_task",
+			fmt.Errorf("task must be a JSON object"))
+	}
+
+	if encodedKind, ok := raw["kind"]; ok {
+		var kind string
+		if err := json.Unmarshal(encodedKind, &kind); err != nil {
+			return failure(FailureInvalidSpec, "load_user_task",
+				fmt.Errorf("kind: %w", err))
+		}
+		if executableUserTaskKinds[strings.ToLower(strings.TrimSpace(kind))] {
+			return failure(FailureUnsafeTask, "load_user_task",
+				fmt.Errorf("executable task kind %q is disabled for user tasks", kind))
+		}
+	}
+	for _, field := range executableUserTaskFields {
+		if _, ok := raw[field]; ok {
+			return failure(FailureUnsafeTask, "load_user_task",
+				fmt.Errorf("executable field %q is disabled for user tasks", field))
+		}
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		return failure(FailureInvalidSpec, "load_user_task", err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("content after the JSON object")
+		}
+		return failure(FailureInvalidSpec, "load_user_task", err)
+	}
+	return nil
 }
 
 // LoadUserChecks reads *.json from dir. A missing directory means no user
@@ -196,7 +271,7 @@ func LoadUserChecks(dir string) ([]CheckSpec, error) {
 			return nil, fmt.Errorf("user task %s: %w", p, err)
 		}
 		var cs CheckSpec
-		if err := json.Unmarshal(b, &cs); err != nil {
+		if err := decodeUserCheck(b, &cs); err != nil {
 			return nil, fmt.Errorf("user task %s: %w", p, err)
 		}
 		if cs.Need == "" {
@@ -204,7 +279,8 @@ func LoadUserChecks(dir string) ([]CheckSpec, error) {
 		}
 		cs.Origin = "user"
 		if err := ValidateCheck(cs); err != nil {
-			return nil, fmt.Errorf("user task %s: %w", p, err)
+			return nil, fmt.Errorf("user task %s: %w", p,
+				failure(FailureInvalidSpec, "load_user_task", err))
 		}
 		out = append(out, cs)
 	}

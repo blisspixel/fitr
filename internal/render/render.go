@@ -19,6 +19,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/blisspixel/fitr/internal/score"
 )
@@ -101,8 +103,100 @@ var ansiRe = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]|[\x00-\x0
 
 func Sanitize(s string) string { return ansiRe.ReplaceAllString(s, "") }
 
+var c1EscapeReplacer = strings.NewReplacer(
+	"\u0090", "\x1bP",
+	"\u0098", "\x1bX",
+	"\u009b", "\x1b[",
+	"\u009c", "\x1b\\",
+	"\u009d", "\x1b]",
+	"\u009e", "\x1b^",
+	"\u009f", "\x1b_",
+)
+
+// SingleLine turns untrusted text into one terminal-safe presentation line.
+// It consumes terminal control sequences, removes control and format runes,
+// and collapses layout whitespace while preserving ordinary Unicode text.
+func SingleLine(s string) string {
+	s = c1EscapeReplacer.Replace(s)
+	s = strings.ToValidUTF8(s, "\uFFFD")
+
+	var out strings.Builder
+	space := false
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b {
+			i = consumeEscape(s, i)
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+		if unicode.IsSpace(r) {
+			if out.Len() > 0 {
+				space = true
+			}
+			continue
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		if space {
+			out.WriteByte(' ')
+			space = false
+		}
+		out.WriteRune(r)
+	}
+	return strings.TrimSpace(out.String())
+}
+
+func consumeEscape(s string, start int) int {
+	i := start + 1
+	if i >= len(s) {
+		return i
+	}
+	switch s[i] {
+	case '[':
+		return consumeCSI(s, i+1)
+	case ']':
+		return consumeStringControl(s, i+1, true)
+	case 'P', 'X', '^', '_':
+		return consumeStringControl(s, i+1, false)
+	case '\\':
+		return i + 1
+	}
+	for i < len(s) && s[i] >= 0x20 && s[i] <= 0x2f {
+		i++
+	}
+	if i < len(s) {
+		i++
+	}
+	return i
+}
+
+func consumeCSI(s string, i int) int {
+	for i < len(s) {
+		b := s[i]
+		i++
+		if b >= 0x40 && b <= 0x7e {
+			break
+		}
+	}
+	return i
+}
+
+func consumeStringControl(s string, i int, bellTerminates bool) int {
+	for i < len(s) {
+		if bellTerminates && s[i] == '\a' {
+			return i + 1
+		}
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
+			return i + 2
+		}
+		i++
+	}
+	return i
+}
+
 func fit(s string, n int, ell string) string {
-	s = Sanitize(s)
+	s = SingleLine(s)
 	if n <= 0 {
 		return ""
 	}
@@ -146,6 +240,8 @@ type Meta struct {
 	StartedAt, Level         string
 	WallSeconds              float64
 	NumCtx                   int
+	EffectiveCtx             int
+	ContextState             string
 	Repeats                  int
 	DecodeMean, DecodeSD     float64
 	DecodeMin, DecodeMax     float64
@@ -212,7 +308,7 @@ type textDisplay struct {
 }
 
 func (d *textDisplay) Phase(name, detail string) {
-	fmt.Fprintf(d.err, "  %-12s %s\n", d.pal.wrap(d.pal.Accent, name), d.pal.wrap(d.pal.Muted, detail))
+	fmt.Fprintf(d.err, "  %-12s %s\n", d.pal.wrap(d.pal.Accent, SingleLine(name)), d.pal.wrap(d.pal.Muted, SingleLine(detail)))
 }
 
 func (d *textDisplay) Note(msg, level string) {
@@ -220,12 +316,12 @@ func (d *textDisplay) Note(msg, level string) {
 	if level == "warn" {
 		style = d.pal.Warn
 	}
-	fmt.Fprintf(d.err, "  %s\n", d.pal.wrap(style, "! "+Sanitize(msg)))
+	fmt.Fprintf(d.err, "  %s\n", d.pal.wrap(style, "! "+SingleLine(msg)))
 }
 
 func (d *textDisplay) Done(name string, seconds float64) {
 	fmt.Fprintf(d.err, "  %-12s %s\n", "", d.pal.wrap(d.pal.Muted,
-		fmt.Sprintf("%s done in %.1fs", name, seconds)))
+		fmt.Sprintf("%s done in %.1fs", SingleLine(name), seconds)))
 }
 
 func (d *textDisplay) stateStyle(s score.State) string {
@@ -236,6 +332,8 @@ func (d *textDisplay) stateStyle(s score.State) string {
 		return d.pal.Fail
 	case score.Blocked:
 		return d.pal.Blocked
+	case score.Inconclusive:
+		return d.pal.Warn
 	default:
 		return d.pal.Skip
 	}
@@ -245,13 +343,22 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	w := d.out
 	rule := strings.Repeat("-", 78)
 	fmt.Fprintln(w, rule)
-	fmt.Fprintf(w, "model    %s\n", Sanitize(sc.Model))
-	fmt.Fprintf(w, "size     %s  %s  %s\n", Sanitize(m.ParamSize), Sanitize(m.Quant), Sanitize(m.Family))
+	fmt.Fprintf(w, "model    %s\n", SingleLine(sc.Model))
+	fmt.Fprintf(w, "size     %s  %s  %s\n", SingleLine(m.ParamSize), SingleLine(m.Quant), SingleLine(m.Family))
 	if m.NumCtx > 0 {
-		fmt.Fprintf(w, "ctx      %d\n", m.NumCtx)
+		switch {
+		case m.EffectiveCtx > 0 && m.EffectiveCtx != m.NumCtx:
+			fmt.Fprintf(w, "ctx      %d requested -> %d effective (%s)\n", m.NumCtx, m.EffectiveCtx, SingleLine(m.ContextState))
+		case m.EffectiveCtx > 0:
+			fmt.Fprintf(w, "ctx      %d effective (%s)\n", m.EffectiveCtx, SingleLine(m.ContextState))
+		case m.ContextState != "":
+			fmt.Fprintf(w, "ctx      %d requested; effective %s\n", m.NumCtx, SingleLine(m.ContextState))
+		default:
+			fmt.Fprintf(w, "ctx      %d\n", m.NumCtx)
+		}
 	}
 	if m.Level != "" {
-		run := Sanitize(m.Level)
+		run := SingleLine(m.Level)
 		if m.Repeats > 0 {
 			run += fmt.Sprintf("%sk=%d", d.g.Dot, m.Repeats)
 		}
@@ -259,7 +366,7 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 			run += fmt.Sprintf("%s%.1fs", d.g.Dot, m.WallSeconds)
 		}
 		if m.StartedAt != "" {
-			run += d.g.Dot + Sanitize(m.StartedAt)
+			run += d.g.Dot + SingleLine(m.StartedAt)
 		}
 		fmt.Fprintf(w, "run      %s\n", run)
 	}
@@ -267,9 +374,9 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	if m.Calibration {
 		useFor = "calibration evidence only - not a standalone product verdict"
 	}
-	fmt.Fprintf(w, "use for  %s\n", d.pal.wrap(d.pal.Accent, Sanitize(useFor)))
+	fmt.Fprintf(w, "use for  %s\n", d.pal.wrap(d.pal.Accent, SingleLine(useFor)))
 	fmt.Fprintf(w, "device   %s%sdriver %s%s%s%sprofile %s\n",
-		Sanitize(m.GPU), d.g.Dot, Sanitize(m.Driver), d.g.Dot, Sanitize(m.Device), d.g.Dot, Sanitize(m.Profile))
+		SingleLine(m.GPU), d.g.Dot, SingleLine(m.Driver), d.g.Dot, SingleLine(m.Device), d.g.Dot, SingleLine(m.Profile))
 	fmt.Fprintln(w, rule)
 	for _, k := range score.SortedNeeds(sc.Needs) {
 		v, ok := sc.Needs[k]
@@ -278,7 +385,7 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 		}
 		fmt.Fprintf(w, "[%s] %-34s %s\n",
 			d.pal.wrap(d.stateStyle(v.State), fmt.Sprintf("%-4s", v.State)),
-			score.NeedLabel[k], Sanitize(v.Why))
+			SingleLine(score.NeedLabel[k]), SingleLine(v.Why))
 	}
 
 	if m.DecodeN > 0 || m.PrefillN > 0 || m.TTFTN > 0 || m.ResidentGB > 0 {
@@ -369,7 +476,7 @@ func (d *jsonDisplay) Phase(name, detail string) {
 // Notes go to STDERR as plain text even in JSON mode; nobody wraps diagnostics
 // in JSON, and stdout must stay a clean record stream.
 func (d *jsonDisplay) Note(msg, level string) {
-	fmt.Fprintln(os.Stderr, Sanitize(msg))
+	fmt.Fprintln(os.Stderr, SingleLine(msg))
 }
 func (d *jsonDisplay) Done(name string, seconds float64) {
 	d.emit(map[string]any{"event": "phase_done", "name": name, "seconds": seconds})
@@ -383,12 +490,19 @@ func (d *jsonDisplay) Result(sc score.Scorecard, m Meta) {
 	if m.Calibration {
 		useFor = "calibration evidence only - not a standalone product verdict"
 	}
-	d.emit(map[string]any{
+	payload := map[string]any{
 		"event": "result", "model": sc.Model, "profile": sc.Profile,
 		"use_for": useFor, "serves": sc.Serves, "needs": states,
 		"passes": sc.Passes, "fails": sc.Fails, "unproven": sc.Unproven,
 		"repeats": m.Repeats, "num_ctx": m.NumCtx, "saved": m.SavedPath,
-	})
+	}
+	if m.ContextState != "" {
+		payload["context_state"] = m.ContextState
+	}
+	if m.EffectiveCtx > 0 {
+		payload["effective_ctx"] = m.EffectiveCtx
+	}
+	d.emit(payload)
 }
 func (d *jsonDisplay) Emit(v any) { d.emit(v) }
 func (d *jsonDisplay) Close()     {}

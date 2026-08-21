@@ -510,7 +510,7 @@ func verdictRole(state string) Role {
 		return RolePass
 	case "FAIL":
 		return RoleFail
-	case "BLKD", "WARN":
+	case "BLKD", "WARN", "INCONCLUSIVE":
 		return RoleWarning
 	default:
 		return RoleMuted

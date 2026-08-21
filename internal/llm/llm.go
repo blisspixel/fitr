@@ -45,3 +45,19 @@ type Backend interface {
 }
 
 var _ Backend = (*ollama.Client)(nil)
+
+// EffectiveContextObserver is an optional runtime receipt for the context
+// allocated to a currently loaded, resolved model. observed=false means the
+// runtime did not expose the value and tokens must be zero. Absence is not an
+// error and callers must not substitute the requested context.
+type EffectiveContextObserver interface {
+	EffectiveContext(ctx context.Context, model string) (tokens int, observed bool, err error)
+}
+
+var _ EffectiveContextObserver = (*ollama.Client)(nil)
+
+// ModelDigestVerifier promotes an untrusted runtime digest only after an
+// independent operator-controlled identity check.
+type ModelDigestVerifier interface {
+	VerifyModelDigest(model, reported string) (string, error)
+}

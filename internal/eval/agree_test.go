@@ -33,16 +33,16 @@ func TestEqualAccuracyCanHideFlips(t *testing.T) {
 		t.Fatalf("flips %+v, want 2 each way", r)
 	}
 	if !r.HidesDisagreement() {
-		t.Fatal("identical rates with four flips is the damage signal accuracy hides")
+		t.Fatal("identical rates with four flips is the disagreement accuracy hides")
 	}
 }
 
-func TestDirectionalQuantDamageIsHiOnly(t *testing.T) {
+func TestPairFlipsPreservesDirectionWithoutClaimingCause(t *testing.T) {
 	hi := []CheckOutcome{ck("a", 1, true), ck("b", 2, true), ck("c", 3, true), ck("d", 4, true)}
 	lo := []CheckOutcome{ck("a", 1, true), ck("b", 2, false), ck("c", 3, false), ck("d", 4, true)}
 	r := PairFlips(hi, lo)
 	if r.AOnly != 2 || r.BOnly != 0 {
-		t.Fatalf("damage is items the higher quant passed and the lower failed: %+v", r)
+		t.Fatalf("directional flip counts were not preserved: %+v", r)
 	}
 	if r.HidesDisagreement() {
 		t.Fatal("4/4 vs 2/4 is a rate change as well as flips; HidesDisagreement is the equal-rate case")

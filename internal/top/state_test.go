@@ -286,6 +286,16 @@ func TestHistoryBaselineComparisonAndExactMismatch(t *testing.T) {
 	}
 }
 
+func TestHistoryComparisonRejectsInconclusiveRun(t *testing.T) {
+	comparison := compareRuns(
+		Run{ID: "a", Model: "a", DeviceID: "device", Verdicts: []Verdict{{State: "PASS"}}},
+		Run{ID: "b", Model: "b", DeviceID: "device", Verdicts: []Verdict{{State: "INCONCLUSIVE"}}},
+	)
+	if comparison.Compatible || !strings.Contains(comparison.Reason, "INCONCLUSIVE") {
+		t.Fatalf("comparison = %+v", comparison)
+	}
+}
+
 func TestFilterEscapeRestoresPreviousValue(t *testing.T) {
 	state := NewState(testSnapshot())
 	state.View = ViewHistory

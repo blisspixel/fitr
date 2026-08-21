@@ -52,7 +52,8 @@ type Evidence struct {
 	Result   string `json:"result_path,omitempty"`
 }
 
-// NeedObs is one fitr need as an observation. State is PASS/FAIL/SKIP/n/a/BLKD.
+// NeedObs is one fitr need as an observation. State is
+// PASS/FAIL/SKIP/n/a/BLKD/INCONCLUSIVE.
 type NeedObs struct {
 	State string `json:"state"`
 	Why   string `json:"why,omitempty"`

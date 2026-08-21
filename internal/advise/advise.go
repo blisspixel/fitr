@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/blisspixel/fitr/internal/render"
 )
 
 const GiB = 1024 * 1024 * 1024
@@ -49,6 +51,7 @@ type Input struct {
 	// not substituted for it.
 	ResidentB   int64
 	ResidentSrc string
+	ResidentCtx int // nonzero only when fitr loaded the model at this exact context
 	// FitB is llama-fit-params dummy allocation at Ctx. Zero means the
 	// binary was not run. A projection from the allocator beats weights+KV
 	// and loses to a live resident.
@@ -74,6 +77,12 @@ type Arch struct {
 	FFN        int // expert FFN if MoE, else dense FFN
 	Vocab      int
 	Params     int64
+	// Hybrid recurrent models need runtime state beyond a conventional KV
+	// cache. Their metadata is preserved, but weights-plus-KV arithmetic is
+	// not allowed to stand in for a measured allocation.
+	Hybrid                bool
+	FullAttentionInterval int
+	RecurrentLayers       int
 }
 
 // KVReady is whether the KV cache can be sized without guessing head dim
@@ -305,7 +314,24 @@ func Evaluate(in Input) Report {
 			}
 			return r
 		}
+		if in.Arch.Hybrid && in.ResidentCtx == in.Ctx {
+			r.Tier = Compatible
+			r.NeedGB = r.ObservedGB
+			r.Why = fmt.Sprintf("resident %s GB of %s GB available at the requested %d context (measured)",
+				trim1(r.ObservedGB), trim1(r.HaveGB), in.Ctx)
+			r.Source = in.ResidentSrc
+			r.Gaps = append(r.Gaps, "hybrid recurrent state is included in the measured allocation")
+			return r
+		}
 		r.Gaps = append(r.Gaps, "current resident "+trim1(r.ObservedGB)+" GB (measured)")
+	}
+
+	if in.Arch.Hybrid && in.FitB == 0 {
+		r.Tier = Skip
+		r.Why = "hybrid recurrent architecture cannot be safely projected from weights plus a conventional KV cache"
+		r.Hint = "use --load at the requested context with Ollama, or --fit with llama-fit-params"
+		r.Gaps = append(r.Gaps, "recurrent state and runtime buffers were not measured")
+		return r
 	}
 
 	if in.FitB > 0 {
@@ -324,6 +350,11 @@ func Evaluate(in Input) Report {
 		if in.WeightsB <= 0 || !in.Arch.KVReady() {
 			r.Tier = Incompatible
 			r.Remedy = "try a smaller quant, or a shorter context"
+			return r
+		}
+		if in.Arch.Hybrid {
+			r.Tier = Incompatible
+			r.Remedy = "try a smaller quant or rerun --fit at a shorter context; hybrid recurrent state prevents a safe algebraic context remedy"
 			return r
 		}
 		// Allocator said this ctx does not fit; KV math still names a shorter window.
@@ -454,10 +485,10 @@ func trim1(v float64) string {
 func Write(w io.Writer, r Report) {
 	var bits []string
 	if r.Model != "" {
-		bits = append(bits, r.Model)
+		bits = append(bits, render.SingleLine(r.Model))
 	}
 	if r.Quant != "" {
-		bits = append(bits, r.Quant)
+		bits = append(bits, render.SingleLine(r.Quant))
 	}
 	if p := formatParams(r); p != "" {
 		bits = append(bits, p)
@@ -465,21 +496,21 @@ func Write(w io.Writer, r Report) {
 	if len(bits) > 0 {
 		fmt.Fprintf(w, "  %s\n\n", strings.Join(bits, "  "))
 	}
-	fmt.Fprintf(w, "  [%-12s]  %s\n", r.Label(), r.Why)
+	fmt.Fprintf(w, "  [%-12s]  %s\n", render.SingleLine(r.Label()), render.SingleLine(r.Why))
 	if r.Remedy != "" {
-		fmt.Fprintf(w, "  try            %s\n", r.Remedy)
+		fmt.Fprintf(w, "  try            %s\n", render.SingleLine(r.Remedy))
 	}
 	if r.Hint != "" {
-		fmt.Fprintf(w, "  hint           %s\n", r.Hint)
+		fmt.Fprintf(w, "  hint           %s\n", render.SingleLine(r.Hint))
 	}
 	for _, g := range r.Gaps {
-		fmt.Fprintf(w, "  note           %s\n", g)
+		fmt.Fprintf(w, "  note           %s\n", render.SingleLine(g))
 	}
 	if r.Source != "" {
-		fmt.Fprintf(w, "  source         %s\n", r.Source)
+		fmt.Fprintf(w, "  source         %s\n", render.SingleLine(r.Source))
 	}
 	if r.HaveSource != "" && r.Tier != Skip {
-		fmt.Fprintf(w, "  memory         %s GB (%s)\n", trim1(r.HaveGB), r.HaveSource)
+		fmt.Fprintf(w, "  memory         %s GB (%s)\n", trim1(r.HaveGB), render.SingleLine(r.HaveSource))
 	}
 }
 
@@ -573,22 +604,22 @@ func applyOpenAI(ctxN int) []string {
 // WriteApply prints the human form. Never claims fitr ran the commands.
 func WriteApply(w io.Writer, p ApplyPlan) {
 	fmt.Fprintln(w, "  apply prints how to persist a measured context.")
-	fmt.Fprintln(w, "  "+p.Note+".")
+	fmt.Fprintln(w, "  "+render.SingleLine(p.Note)+".")
 	fmt.Fprintln(w)
 	if p.Model != "" {
-		fmt.Fprintf(w, "  model          %s\n", p.Model)
+		fmt.Fprintf(w, "  model          %s\n", render.SingleLine(p.Model))
 	}
 	fmt.Fprintf(w, "  ctx            %d\n", p.Ctx)
 	if p.Backend != "" {
-		fmt.Fprintf(w, "  runtime        %s\n", p.Backend)
+		fmt.Fprintf(w, "  runtime        %s\n", render.SingleLine(p.Backend))
 	}
 	fmt.Fprintln(w)
 	for _, s := range p.Steps {
 		if strings.HasSuffix(s, ":") && !strings.Contains(s, " ") {
-			fmt.Fprintf(w, "  %s\n", s)
+			fmt.Fprintf(w, "  %s\n", render.SingleLine(s))
 			continue
 		}
-		fmt.Fprintf(w, "    %s\n", s)
+		fmt.Fprintf(w, "    %s\n", render.SingleLine(s))
 	}
 }
 
@@ -622,6 +653,10 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	a.Experts = asInt(first(kvs, p+"expert_count"))
 	a.ExpertUsed = asInt(first(kvs, p+"expert_used_count"))
 	a.FFN = asInt(first(kvs, p+"expert_feed_forward_length", p+"feed_forward_length"))
+	a.FullAttentionInterval = asInt(first(kvs, p+"full_attention_interval"))
+	a.RecurrentLayers = asInt(first(kvs, p+"attention.recurrent_layer_count", "attention.recurrent_layer_count"))
+	a.Hybrid = a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 ||
+		strings.EqualFold(arch, "qwen35") || strings.EqualFold(arch, "qwen3.5")
 	return a
 }
 

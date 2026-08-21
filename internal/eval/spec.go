@@ -8,7 +8,6 @@ package eval
 
 import (
 	"embed"
-	"encoding/json"
 	"fmt"
 	"path"
 
@@ -26,6 +25,7 @@ type Sampling struct {
 
 type SpeedSpec struct {
 	ID     string `json:"id"`
+	Kind   string `json:"kind"`
 	Why    string `json:"why"`
 	Decode struct {
 		Prompt     string `json:"prompt"`
@@ -43,6 +43,7 @@ type SpeedSpec struct {
 
 type ExecSpec struct {
 	ID       string            `json:"id"`
+	Kind     string            `json:"kind"`
 	Why      string            `json:"why"`
 	Language string            `json:"language"`
 	Entry    string            `json:"entry"`
@@ -57,10 +58,16 @@ type ExecSpec struct {
 	} `json:"extract"`
 	PassIfStdoutContains string `json:"pass_if_stdout_contains"`
 	NumPredict           int    `json:"num_predict"`
+	PromptSubstitution   struct {
+		Syntax string `json:"syntax"`
+		Source string `json:"source"`
+		Why    string `json:"why"`
+	} `json:"prompt_substitution,omitempty"`
 }
 
 type ToolLoopSpec struct {
 	ID         string            `json:"id"`
+	Kind       string            `json:"kind"`
 	Why        string            `json:"why"`
 	Prompt     string            `json:"prompt"`
 	Tools      []ollama.Tool     `json:"tools"`
@@ -72,7 +79,8 @@ type ToolLoopSpec struct {
 		Runner               []string `json:"runner"`
 		PassIfStdoutContains string   `json:"pass_if_stdout_contains"`
 	} `json:"verify"`
-	ExpectedSequence string `json:"expected_sequence_regex"`
+	ExpectedSequence string   `json:"expected_sequence_regex"`
+	ScoreOn          []string `json:"score_on,omitempty"`
 	// WithdrawTool names a tool that disappears from the tools list once
 	// WithdrawAfter turns have run - the "tool vanished, stop calling it"
 	// scenario every long-lived agent session eventually faces.
@@ -82,14 +90,17 @@ type ToolLoopSpec struct {
 
 type RefusalSpec struct {
 	ID             string            `json:"id"`
+	Kind           string            `json:"kind"`
 	Why            string            `json:"why"`
 	Prompts        map[string]string `json:"prompts"`
 	RefusalMarkers []string          `json:"refusal_markers"`
 	NumPredict     int               `json:"num_predict"`
+	Verdicts       []string          `json:"verdicts,omitempty"`
 }
 
 type PlumbingSpec struct {
 	ID    string        `json:"id"`
+	Kind  string        `json:"kind"`
 	Why   string        `json:"why"`
 	Tools []ollama.Tool `json:"tools"`
 	Rungs []struct {
@@ -114,6 +125,7 @@ type Spec struct {
 	Version    struct {
 		SpecVersion         int    `json:"spec_version"`
 		ResultSchemaVersion int    `json:"result_schema_version"`
+		Provenance          string `json:"provenance"`
 		Note                string `json:"note"`
 	}
 }
@@ -123,7 +135,7 @@ func load(name string, into any) error {
 	if err != nil {
 		return fmt.Errorf("spec %s: %w", name, err)
 	}
-	if err := json.Unmarshal(b, into); err != nil {
+	if err := decodeBuiltinJSON(b, into); err != nil {
 		return fmt.Errorf("spec %s: %w", name, err)
 	}
 	return nil
@@ -152,8 +164,11 @@ func LoadSpec() (*Spec, error) {
 	}
 	s.Checks = checks
 	b, err := tasksFS.ReadFile("tasks/version.json")
-	if err == nil {
-		json.Unmarshal(b, &s.Version)
+	if err != nil {
+		return nil, fmt.Errorf("spec version: %w", err)
+	}
+	if err := decodeBuiltinJSON(b, &s.Version); err != nil {
+		return nil, fmt.Errorf("spec version: %w", err)
 	}
 	return s, nil
 }

@@ -80,6 +80,24 @@ func TestUserProfileOverridesEmbeddedAndMalformedIsFatal(t *testing.T) {
 	}
 }
 
+func TestUserProfileRejectsUnknownFieldsAndTrailingJSON(t *testing.T) {
+	for name, raw := range map[string]string{
+		"unknown":  `{"name":"local","gates":{},"typo":true}`,
+		"trailing": `{"name":"local","gates":{}} {}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("FITR_PROFILES", dir)
+			if err := os.WriteFile(dir+"/profile.json", []byte(raw), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadProfiles(); err == nil {
+				t.Fatalf("accepted %s profile", name)
+			}
+		})
+	}
+}
+
 func TestScaffoldProfileIsUncalibratedCopyOfDefault(t *testing.T) {
 	p, err := ScaffoldProfile("My Box", Fingerprint{GPU: "NVIDIA GeForce RTX 4090", Host: "work"})
 	if err != nil {

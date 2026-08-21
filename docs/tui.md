@@ -159,6 +159,10 @@ The canonical `~/.fitr/results/<model>.json` file remains for compatibility.
 Each completed run is also written atomically to private append-only history.
 Legacy result files continue to load. Malformed history entries do not hide
 valid evidence; the monitor reports their count without exposing local paths.
+Board is built only from reconciled canonical current records. History entries
+and explicit external files can be opened for inspection, but cannot enter a
+ranking unless they exactly match the canonical current record and its private
+history twin.
 
 History contains the same raw prompts, responses, hostname, and device details
 as the canonical result and has no automatic retention limit. It remains local
@@ -166,6 +170,13 @@ and is never uploaded. `fitr top history path` prints its location;
 `fitr top history clear --yes` removes archived copies while preserving the
 canonical latest result for each model. Ordinary commands read only canonical
 results, so deleting one does not silently resurrect it from History.
+
+The completion receipt binds the sealed manifest and measured outcome. This
+detects post-completion edits and, together with current/history
+reconciliation, rejects ordinary crafted imports from ranking surfaces. It is
+not external attestation against an actor who can replace the executable and
+rewrite the entire local store. Signed artifacts and externally anchored
+provenance remain Release C work.
 
 Run selection uses stable opaque IDs rather than row positions, so refreshes
 do not move the user's selection to a different result.

@@ -14,8 +14,9 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
-That puts one static binary on your PATH. No Go, no Python, no venv. Pin a
-release with `FITR_VERSION=v0.4.0`; relocate with `FITR_BIN`.
+That puts one static binary on your PATH. The default evidence path needs no Go,
+Python, or venv. Pin a release with `FITR_VERSION=v0.4.0`; relocate with
+`FITR_BIN`.
 
 From source (Go 1.25+):
 
@@ -24,11 +25,26 @@ git clone https://github.com/blisspixel/fitr && cd fitr
 make install
 ```
 
-A run needs a serving runtime (Ollama, llama-server, or any OpenAI-compatible
-server) and `python3` on PATH **only** to execute the Python coding fixtures.
-The harness language and the task language are deliberately separate: a task
-declares the interpreter it needs in its spec, so adding Rust tasks would
-need `cargo`, not a rewrite.
+A rankable run needs a serving runtime and verified artifact identity. Ollama
+exposes a runtime content digest. A readable GGUF reported by an already-running
+llama-server can be hashed for inspection, but that post-load file hash does not
+prove which bytes the process loaded, so the result remains unrankable without
+a runtime binding receipt. For a generic OpenAI-compatible endpoint, set
+`FITR_OPENAI_MODEL_SHA256` to an independently obtained expected digest; the
+endpoint must assert the same digest. A mutable model label or an endpoint
+assertion by itself is not artifact evidence.
+
+Authenticated OpenAI-compatible endpoints use `FITR_OPENAI_API_KEY`.
+`OPENAI_API_KEY` is considered only for the official HTTPS OpenAI host. Tokens
+are intentionally not accepted as command-line flags, where shell history and
+process listings could expose them. Auto-discovery never attaches credentials.
+
+Generated-code execution is disabled by default. `--allow-unsafe-exec` opts
+into unisolated built-in Python diagnostics and therefore requires `python` on
+PATH. Generated code in that mode has the current user's ordinary filesystem,
+environment, credential, and network access. Run it only on a disposable,
+credential-free machine. Its observations are always INCONCLUSIVE and never
+enter a PASS or FAIL denominator.
 
 ## Commands
 
@@ -51,14 +67,14 @@ need `cargo`, not a rewrite.
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips (accuracy can hide them) |
 | `fitr device` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
-| `fitr calibrate <a> <b> [--out PATH]` | paired item discrimination; optional privacy-safe evidence JSON |
-| `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate calibration evidence across devices and model pairs |
+| `fitr calibrate <a> <b> [--out PATH]` | paired item discrimination and privacy-safe exploratory JSON |
+| `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads without claiming verified campaign readiness |
 
 | Level | Runs | ~Time |
 |---|---|---|
-| `--quick` | speed, memory, coding, plumbing, tools | ~4 min |
-| *(default)* | + 16 generated checks + refusal + tool withdrawal | ~11 min |
-| `--full` | + 40-turn unattended agentic task | ~18 min |
+| `--quick` | speed, memory, plumbing; executable tasks recorded as SKIP | model-dependent |
+| *(default)* | + 16 generated checks, refusal, safe tool withdrawal | model-dependent |
+| `--full` | + long-horizon agent task, SKIP while execution is disabled | model-dependent |
 | `--checks-only` | generated checks only; requires `--seedset`, defaults to 5 repeats | model-dependent |
 
 ## Flags worth knowing
@@ -81,15 +97,23 @@ need `cargo`, not a rewrite.
   see [backends.md](backends.md). Extra listen URLs: `$FITR_DISCOVER_URLS`.
 - `--ctx N` sets the request context (default 8192). This is how you *measure*
   an `advise` remedy: `fitr run m --ctx 4096 --full`. A non-default ctx is
-  recorded on the scorecard, the HTML fingerprint, and the device key, so
-  `board` will not rank it against default-ctx runs. `fitr apply` then prints
-  the command to persist that setting; fitr never restarts the server.
+  recorded beside the runtime-reported effective context. `board` and
+  `compare` require that effective receipt and will not rank a request the
+  runtime did not verify. `fitr apply` then prints the command to persist that
+  setting; fitr never restarts the server.
 - `--load` (advise) loads an Ollama model and reads `/api/ps` so fit includes
   the live resident allocation and compute buffers. `--fit` runs
   `llama-fit-params` on a GGUF when that binary is on PATH and uses its dummy
-  allocation. The weights+KV estimate is the default and is labeled as such.
+  allocation. The weights+KV estimate is the default for conventional
+  attention and is labeled as such. Hybrid recurrent architectures stay SKIP
+  until `--load` or `--fit` measures their extra state. Split GGUF weights are
+  summed only after every declared shard is present.
 - `--pull` fetches a missing Ollama tag before measuring. Pasted Hugging
   Face GGUF URLs pull automatically (they *are* the request to fetch).
+- `--allow-unsafe-exec` runs unisolated built-in Python diagnostics after an
+  interpreter preflight. The process must exit successfully and finish with
+  one exact verifier receipt. These defenses do not create a sandbox, so the
+  observation remains INCONCLUSIVE and is excluded from rankings.
 - `--profile P` forces a device profile instead of auto-matching.
 - `--vram-gb N` (advise) supplies the memory budget when fitr cannot read
   one. Unmeasured VRAM is a SKIP, never a guess from the GPU's name.
@@ -149,6 +173,12 @@ running process that exceeds the VRAM *reading* is SKIP, not Incompatible -
 the budget is the suspect number. MoE decode class uses *active* parameters,
 not total.
 
+Hybrid recurrent architectures are not conventional KV-only models. fitr does
+not project their memory from an incomplete formula: use `--load` at the
+requested context or `--fit`. For split GGUFs, every declared shard must be
+present and the weight total is the sum of the complete set; a shard header is
+never mistaken for the whole model.
+
 SKIP, never a guess, when GPU memory was not measured, weights are unknown,
 or architecture metadata is missing. `--vram-gb N` supplies a budget; a GPU
 name is never turned into a VRAM number. There is no catalog of models to
@@ -190,12 +220,20 @@ Every threshold carries a `why`. **Copy `default.json`, tune it, set
 `match`.** Do not reuse another machine's numbers.
 
 Results are stored as JSON under `~/.fitr/results` (override with
-`$FITR_RESULTS`). The canonical `<model>.json` files remain the source for
-ordinary `view`, `board`, `compare`, `calibrate`, and `export` commands.
+`$FITR_RESULTS`). Canonical files use a readable model prefix plus a short
+SHA-256 suffix so two model names that sanitize alike cannot overwrite each
+other. Pre-v0.4 `<model>.json` files remain readable and migrate naturally on
+the next save. Canonical latest results remain the source for ordinary `view`,
+`board`, `compare`, `calibrate`, and `export` commands.
 Completed runs are also copied atomically into a private `.history` directory
 for `fitr top History`. These archives contain the same raw prompts, responses,
 hostname, and device details as the canonical result, can grow without a fixed
-retention limit, and are never uploaded.
+retention limit, and are never uploaded. A canonical result is eligible for a
+ranking or comparison claim only when it exactly matches its private history
+twin. History entries and explicit external result paths remain available for
+inspection, but are display-only unless they reconcile with the canonical
+current record. Local completion receipts bind the sealed run manifest and
+measured outcome; they do not replace external attestation.
 
 Use `fitr top history path` to locate the archive and
 `fitr top history clear --yes` to delete archived copies while keeping the

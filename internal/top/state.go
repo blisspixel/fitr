@@ -460,6 +460,11 @@ func compareRuns(baseline, selected Run) Comparison {
 		MemoryA: baseline.MemoryGB, MemoryB: selected.MemoryGB,
 		Compatible: baseline.DeviceID != "" && baseline.DeviceID == selected.DeviceID,
 	}
+	if runInconclusive(baseline) || runInconclusive(selected) {
+		comparison.Compatible = false
+		comparison.Reason = "INCONCLUSIVE: evidence integrity does not support a direct comparison"
+		return comparison
+	}
 	if comparison.Compatible {
 		comparison.Reason = "same hardware, runtime, request context, and config"
 		return comparison
@@ -471,6 +476,15 @@ func compareRuns(baseline, selected Run) Comparison {
 		comparison.Reason = "hardware, runtime, or server config differs; a direct comparison would be misleading"
 	}
 	return comparison
+}
+
+func runInconclusive(run Run) bool {
+	for _, verdict := range run.Verdicts {
+		if strings.EqualFold(strings.TrimSpace(verdict.State), "INCONCLUSIVE") {
+			return true
+		}
+	}
+	return false
 }
 
 func orderedIDs(s State, view View) []string {

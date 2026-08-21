@@ -31,14 +31,17 @@ import (
 
 // State is a verdict. SKIP means "not measured" and must NEVER read as failure;
 // NA means the model never claimed the capability, which is not a deficiency.
+// INCONCLUSIVE means a measurement exists but an integrity problem excludes it
+// from PASS and FAIL claims.
 type State string
 
 const (
-	Pass    State = "PASS"
-	Fail    State = "FAIL"
-	Skip    State = "SKIP"
-	NA      State = "n/a"
-	Blocked State = "BLKD"
+	Pass         State = "PASS"
+	Fail         State = "FAIL"
+	Skip         State = "SKIP"
+	NA           State = "n/a"
+	Blocked      State = "BLKD"
+	Inconclusive State = "INCONCLUSIVE"
 )
 
 type Verdict struct {
@@ -231,6 +234,10 @@ func (p Pool) rate() float64 { return float64(p.Passes) / float64(p.N) }
 type Measured struct {
 	Model        string
 	Capabilities []string
+	// Contamination names models that remained resident when the runtime was
+	// asked to unload them. A non-empty list invalidates score claims from this
+	// run even when the raw measurements look plausible.
+	Contamination []string
 
 	DecodeTPS  float64
 	TTFT       float64 // loaded, prompt uncached - what the gate judges
@@ -372,8 +379,14 @@ func Score(m Measured, p device.Profile) Scorecard {
 	if m.User.N > 0 {
 		wi := stats.Wilson(m.User.Passes, m.User.N)
 		if minRate, ok := p.Float("user_tasks", "pass_rate_min"); ok {
-			n["user_tasks"] = Verdict{state(m.User.rate() >= minRate), fmt.Sprintf(
-				"%d/%d passed [%.2f-%.2f] (need >=%.2f)", m.User.Passes, m.User.N, wi.Lo, wi.Hi, minRate)}
+			why := fmt.Sprintf("%d/%d passed [%.2f-%.2f] (need >=%.2f)",
+				m.User.Passes, m.User.N, wi.Lo, wi.Hi, minRate)
+			verdictState := state(m.User.rate() >= minRate)
+			if gateInsideInterval(wi.Lo, wi.Hi, minRate) {
+				verdictState = Inconclusive
+				why += " - INCONCLUSIVE: gate inside the 95% interval"
+			}
+			n["user_tasks"] = Verdict{verdictState, why}
 		} else {
 			n["user_tasks"] = Verdict{state(m.User.Passes == m.User.N), fmt.Sprintf(
 				"%d/%d passed [%.2f-%.2f] (default: all must pass; set a user_tasks gate to loosen)",
@@ -434,10 +447,11 @@ func Score(m Measured, p device.Profile) Scorecard {
 	// irrelevant question) and restraint under CHANGE (a tool vanishes
 	// mid-loop; one grace call to discover that, then stop).
 	switch {
+	case m.PlumbingRan && !m.PlumbingHealthy:
+		n["tool_restraint"] = Verdict{Blocked,
+			"tool plumbing did not establish a usable protocol; restraint was not judged"}
 	case !m.IrrelevanceRan && !m.WithdrawRan:
 		n["tool_restraint"] = Verdict{Skip, "plumbing diagnostic not run"}
-	case m.PlumbingRan && !m.PlumbingHealthy:
-		n["tool_restraint"] = Verdict{NA, "model does not emit usable tool calls"}
 	default:
 		ok := true
 		var bits []string
@@ -506,6 +520,63 @@ func Score(m Measured, p device.Profile) Scorecard {
 		}
 	}
 	sc.UseFor = useFor(m, n, sc.Serves)
+	return ExcludeContamination(sc, m.Contamination)
+}
+
+// ExcludeEvidence converts every measured PASS or FAIL into an explicit
+// INCONCLUSIVE observation without mutating the stored scorecard. Readers use
+// it whenever the evidence contract does not support ranking claims.
+func ExcludeEvidence(sc Scorecard, reason string) Scorecard {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "evidence contract is unavailable"
+	}
+	detail := reason + "; measured outcome excluded from PASS/FAIL claims"
+
+	needs := make(map[string]Verdict, len(sc.Needs))
+	for need, verdict := range sc.Needs {
+		if verdict.State == Pass || verdict.State == Fail {
+			verdict.State = Inconclusive
+			if verdict.Why == "" {
+				verdict.Why = detail
+			} else {
+				verdict.Why += "; " + detail
+			}
+		}
+		needs[need] = verdict
+	}
+	sc.Needs = needs
+	sc.Serves = nil
+	sc.Passes = 0
+	sc.Fails = 0
+	sc.Unproven = len(needs)
+	sc.UseFor = "INCONCLUSIVE - " + reason
+	return sc
+}
+
+// ExcludeContamination excludes observations made while another model was
+// resident. Contaminated results remain visible as history, but not claims.
+func ExcludeContamination(sc Scorecard, models []string) Scorecard {
+	if len(models) == 0 {
+		return sc
+	}
+	unique := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		if model = strings.TrimSpace(model); model != "" {
+			unique[model] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(unique))
+	for model := range unique {
+		names = append(names, model)
+	}
+	sort.Strings(names)
+	reason := "resident model contamination detected"
+	if len(names) > 0 {
+		reason += ": " + strings.Join(names, ", ")
+	}
+	sc = ExcludeEvidence(sc, reason)
+	sc.UseFor = "INCONCLUSIVE - resident model contamination; unload all models and re-run"
 	return sc
 }
 
@@ -525,10 +596,16 @@ func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
 	wi := stats.Wilson(pool.Passes, pool.N)
 	why := fmt.Sprintf("%d/%d %s [%.2f-%.2f] (need >=%.2f)",
 		pool.Passes, pool.N, verb, wi.Lo, wi.Hi, minRate)
-	if wi.Lo < minRate && minRate < wi.Hi {
-		why += " - borderline: gate inside the CI"
+	verdictState := state(pool.rate() >= minRate)
+	if gateInsideInterval(wi.Lo, wi.Hi, minRate) {
+		verdictState = Inconclusive
+		why += " - INCONCLUSIVE: gate inside the 95% interval"
 	}
-	return Verdict{state(pool.rate() >= minRate), why}
+	return Verdict{verdictState, why}
+}
+
+func gateInsideInterval(lo, hi, gate float64) bool {
+	return lo <= gate && gate <= hi
 }
 
 func outputHealth(m Measured, p device.Profile) Verdict {
@@ -607,8 +684,8 @@ func useFor(m Measured, n map[string]Verdict, serves []string) string {
 	}
 	if len(bits) == 0 {
 		unproven := 0
-		for _, k := range NeedOrder {
-			if s := n[k].State; s == Skip || s == NA || s == Blocked {
+		for _, verdict := range n {
+			if s := verdict.State; s == Skip || s == NA || s == Blocked || s == Inconclusive {
 				unproven++
 			}
 		}

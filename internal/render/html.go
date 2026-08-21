@@ -196,7 +196,17 @@ func htmlDataFrom(a Artifact) htmlData {
 		RepeatsWarn:   a.Meta.Repeats > 0 && a.Meta.Repeats < 3,
 	}
 	if a.Meta.NumCtx > 0 {
-		d.NumCtx = fmt.Sprintf("%d", a.Meta.NumCtx)
+		switch {
+		case a.Meta.EffectiveCtx > 0 && a.Meta.EffectiveCtx != a.Meta.NumCtx:
+			d.NumCtx = fmt.Sprintf("%d requested, %d effective (%s)", a.Meta.NumCtx,
+				a.Meta.EffectiveCtx, a.Meta.ContextState)
+		case a.Meta.EffectiveCtx > 0:
+			d.NumCtx = fmt.Sprintf("%d effective (%s)", a.Meta.EffectiveCtx, a.Meta.ContextState)
+		case a.Meta.ContextState != "":
+			d.NumCtx = fmt.Sprintf("%d requested, effective %s", a.Meta.NumCtx, a.Meta.ContextState)
+		default:
+			d.NumCtx = fmt.Sprintf("%d", a.Meta.NumCtx)
+		}
 	}
 	if a.Device.RAMGb > 0 {
 		d.RAM = fmt.Sprintf("%.1f GB", a.Device.RAMGb)

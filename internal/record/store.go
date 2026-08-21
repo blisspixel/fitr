@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -70,9 +71,17 @@ func NewStore(dir string) Store {
 	return Store{Dir: dir}
 }
 
-// CanonicalPath returns the backwards-compatible latest-result path for a
-// model. Existing commands and user scripts can continue to use this file.
+// CanonicalPath returns the collision-safe latest-result path for a model.
+// A readable prefix remains for humans while the digest distinguishes model
+// names that sanitize to the same filesystem spelling.
 func (s Store) CanonicalPath(model string) string {
+	return filepath.Join(s.dir(), canonicalName(model))
+}
+
+// LegacyCanonicalPath identifies the pre-v0.4 filename. Loaders continue to
+// read it, but new writes never target it because distinct model names could
+// collide after sanitization.
+func (s Store) LegacyCanonicalPath(model string) string {
 	return filepath.Join(s.dir(), safeName(model)+".json")
 }
 
@@ -131,6 +140,12 @@ func (s Store) Save(r *Record) (SavedPaths, error) {
 	runID := r.EnsureRunID()
 	if runID == "" {
 		return SavedPaths{}, errors.New("could not derive a run ID")
+	}
+	if err := r.ValidateManifest(); err != nil {
+		return SavedPaths{}, fmt.Errorf("invalid run manifest: %w", err)
+	}
+	if err := r.ValidateEvidenceContract(); err != nil {
+		return SavedPaths{}, fmt.Errorf("invalid evidence contract: %w", err)
 	}
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
@@ -195,6 +210,11 @@ func (s Store) Read(path string) (*Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	if sameDirectory(filepath.Dir(path), s.dir()) {
+		s.reconcileWithHistory(r)
+	} else if r.SchemaVersion >= EvidenceSchemaVersion {
+		r.storageIntegrityIssue = "external or archived result is display-only without an exact canonical current twin"
+	}
 	return r, nil
 }
 
@@ -215,7 +235,11 @@ func (s Store) LoadAll() (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	files = append(files, history...)
-	return loadCandidateFiles(files, warnings), nil
+	loaded := loadCandidateFiles(files, warnings)
+	for _, record := range loaded.Records {
+		s.reconcileWithCurrent(record)
+	}
+	return loaded, nil
 }
 
 // LoadCurrent reads only the backwards-compatible canonical result files.
@@ -229,7 +253,96 @@ func (s Store) LoadCurrent() (LoadResult, error) {
 		}
 		return LoadResult{}, err
 	}
-	return loadCandidateFiles(files, nil), nil
+	loaded := loadCandidateFiles(files, nil)
+	for _, record := range loaded.Records {
+		s.reconcileWithHistory(record)
+	}
+	seen := map[string]bool{}
+	latest := make([]*Record, 0, len(loaded.Records))
+	for _, record := range loaded.Records {
+		if seen[record.Model] {
+			continue
+		}
+		seen[record.Model] = true
+		latest = append(latest, record)
+	}
+	loaded.Records = latest
+	return loaded, nil
+}
+
+func sameDirectory(a, b string) bool {
+	a, errA := filepath.Abs(filepath.Clean(a))
+	b, errB := filepath.Abs(filepath.Clean(b))
+	return errA == nil && errB == nil && a == b
+}
+
+// reconcileWithHistory keeps a valid but altered canonical file visible while
+// excluding it from ranking. Only an exact immutable history twin restores the
+// evidence chain established by Save.
+func (s Store) reconcileWithHistory(r *Record) {
+	if r == nil || r.SchemaVersion < EvidenceSchemaVersion {
+		return
+	}
+	files, err := listJSON(s.HistoryDir(), true)
+	if err != nil {
+		r.storageIntegrityIssue = "canonical result has no matching immutable history entry"
+		return
+	}
+	wantID, wantContent := r.EnsureRunID(), recordContentHash(r)
+	foundID := false
+	for _, file := range files {
+		b, readErr := os.ReadFile(file.path)
+		if readErr != nil {
+			continue
+		}
+		history, decodeErr := decodeRecord(b)
+		if decodeErr != nil || history.EnsureRunID() != wantID {
+			continue
+		}
+		foundID = true
+		if recordContentHash(history) == wantContent {
+			r.storageIntegrityIssue = ""
+			return
+		}
+	}
+	if foundID {
+		r.storageIntegrityIssue = "canonical result differs from its immutable history entry"
+	} else {
+		r.storageIntegrityIssue = "canonical result has no matching immutable history entry"
+	}
+}
+
+// reconcileWithCurrent makes full-history records presentation-only unless an
+// exact canonical current twin proves they came through Store.Save. Older
+// archives remain inspectable, but cannot enter a ranking surface. Without a
+// separate local trust root, a JSON file copied into .history is an import.
+func (s Store) reconcileWithCurrent(r *Record) {
+	if r == nil || r.SchemaVersion < EvidenceSchemaVersion {
+		return
+	}
+	files, err := listJSON(s.dir(), false)
+	if err != nil {
+		r.storageIntegrityIssue = "external or archived result is display-only without an exact canonical current twin"
+		return
+	}
+	wantID, wantContent := r.EnsureRunID(), recordContentHash(r)
+	for _, file := range files {
+		b, readErr := os.ReadFile(file.path)
+		if readErr != nil {
+			continue
+		}
+		current, decodeErr := decodeRecord(b)
+		if decodeErr != nil || current.EnsureRunID() != wantID {
+			continue
+		}
+		if recordContentHash(current) == wantContent {
+			r.storageIntegrityIssue = ""
+			return
+		}
+		r.storageIntegrityIssue = "archived result differs from its canonical current twin"
+		return
+	}
+	r.storageIntegrityIssue = "external or archived result is display-only without an exact canonical current twin"
 }
 
 func loadCandidateFiles(files []candidateFile, warnings []FileWarning) LoadResult {
@@ -307,11 +420,26 @@ func listJSON(dir string, history bool) ([]candidateFile, error) {
 
 func decodeRecord(b []byte) (*Record, error) {
 	var r Record
-	if err := json.Unmarshal(b, &r); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&r); err != nil {
+		return nil, fmt.Errorf("invalid result JSON: %w", err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("invalid result JSON: content after the result")
+		}
 		return nil, fmt.Errorf("invalid result JSON: %w", err)
 	}
 	if strings.TrimSpace(r.Model) == "" {
 		return nil, errors.New("not a fitr result: missing model")
+	}
+	if err := r.ValidateManifest(); err != nil {
+		return nil, fmt.Errorf("invalid run manifest: %w", err)
+	}
+	if err := r.ValidateEvidenceContract(); err != nil {
+		return nil, fmt.Errorf("invalid evidence contract: %w", err)
 	}
 	return &r, nil
 }
@@ -447,4 +575,22 @@ func safeName(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func canonicalName(model string) string {
+	return ArtifactStem(model) + ".json"
+}
+
+// ArtifactStem returns a readable, collision-resistant filename stem for an
+// untrusted logical name. It contains only portable ASCII filename characters.
+func ArtifactStem(name string) string {
+	prefix := strings.Trim(safeName(name), " ._-")
+	if prefix == "" {
+		prefix = "model"
+	}
+	if len(prefix) > 80 {
+		prefix = prefix[:80]
+	}
+	sum := sha256.Sum256([]byte(name))
+	return prefix + "--" + hex.EncodeToString(sum[:16])
 }

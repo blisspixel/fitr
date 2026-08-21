@@ -21,33 +21,119 @@ verdict** (design rule 7).
 
 ---
 
-## Next: calibrate before expanding
+## Trust sequence: A and B complete, C next
 
-The next milestone is a multi-device calibration campaign, not a model
-catalog. A live catalog can say what exists and what might fit. It cannot say
-which quant preserves structured output, instruction precision, and reasoning
-on this device without the evidence fitr is built to collect.
+Releases A and B establish the evidence and reproducibility contracts. Release
+C is now the next milestone. It turns those local guarantees into an
+independently reproducible benchmark protocol before fitr adds a model catalog
+or another task family. Every verdict must remain traceable to complete,
+correctly attributed observations. An unavailable fact stays unavailable
+instead of quietly becoming a score.
 
-The efficient, shareable machinery is now in place:
+### Release A: evidence integrity
 
-- `fitr run --checks-only --seedset NAME -k N` runs only the generated battery
-  and requires fixed paired instances.
-- `fitr calibrate a b --out pair.json` rejects mixed devices, configs,
-  contexts, schemas, families, sizes, and incomplete pairs. The artifact omits
-  hostnames, prompts, raw model output, and local paths.
-- `fitr calibrate merge pair*.json --out summary.json` combines independent
-  evidence, deduplicates devices with a stable pseudonymous ID, and never
-  deletes a task.
+- [x] Disable tasks that execute generated code by default and preflight every
+      executable before any model output is requested.
+- [x] Require successful process exit and an exact verifier receipt. Explicit
+      unisolated diagnostics remain INCONCLUSIVE and unrankable.
+- [x] Add typed task outcomes and typed infrastructure failures.
+- [x] Propagate refusal, plumbing, transport, fixture, and tool-loop failures.
+- [x] Resolve the runtime model strictly. Require a runtime artifact digest or
+      an independently pinned remote digest; keep post-load local file hashes
+      visible but unrankable without a runtime binding receipt.
+- [x] Return a nonzero exit when result persistence fails.
+- [x] Seal an immutable run manifest before measurement, including artifact,
+      backend/runtime, device/config, task level, seed set, context, repeats,
+      and execution policy.
+- [x] Add INCONCLUSIVE and exclude contaminated evidence from score, board,
+      history comparison, and CLI comparison claims.
+- [x] Complete the fault-injection matrix proving that no infrastructure
+      failure can create or alter a model PASS or FAIL.
 
-The battery changes only after at least two physical devices, two model
-families, and decision-grade pairs with at least 10 instances per task agree.
-The exact protocol and stop conditions are in
-[docs/calibration.md](docs/calibration.md).
+Exit criterion: no injected infrastructure failure can create or alter a model
+PASS or FAIL.
 
-Why this comes first: the 1.0 promise is an actionable recommendation. An
-uncalibrated gate can turn a clean product loop into a confident wrong answer.
-Catalog breadth, automatic tune sweeps, and community profiles amplify that
-error; calibration reduces it.
+### Release B: reproducibility
+
+- [x] Fingerprint v2 and effective-context verification.
+- [x] Task, profile, scoring-policy, specification, and exact executable
+      hashes, plus a versioned backend-protocol receipt.
+- [x] Strict built-in, profile, result, and calibration schemas with
+      unknown-field and trailing-value rejection.
+- [x] Persist adaptive decisions, tool-loop clean-stop evidence, and loop
+      scoring.
+- [x] OpenAI protocol conformance, bounded responses, exact-origin credential
+      binding, and independent artifact pinning.
+- [x] Result migrations and collision-free filenames.
+- [x] Fake-backend integration coverage, fuzzing, and vulnerability scanning.
+- [x] Bind completed measurements to the sealed manifest, reconcile canonical
+      results with private history, and keep external or archived imports
+      display-only on ranking surfaces.
+
+Exit criterion: a stored result contains enough information to reproduce the
+task battery, scoring policy, backend protocol, model identity, and execution
+environment.
+
+### Release C: benchmark quality
+
+- [ ] Cross-platform isolated worker.
+- [ ] Family-stratified statistical aggregation.
+- [ ] Calibrated profile provenance and community calibration tooling.
+- [ ] Real vision tasks.
+- [ ] Privacy-safe share artifacts.
+- [ ] Signed releases, SBOMs, and attestations.
+- [ ] Externally anchored share provenance and a trust-root workflow for
+      decision-grade community evidence.
+- [ ] Published repeatability and test-retest studies.
+- [ ] Formal backend-conformance corpus.
+
+Exit criterion: an independent user can reproduce the protocol and distinguish
+unsupported, inconclusive, contaminated, and measured outcomes without reading
+the source.
+
+Model discovery, context guidance, recurring reevaluation, and native desktop
+clients remain valuable. They follow the evidence contract so candidate
+metadata can never be mistaken for measured quality.
+
+### After the trust gates: close the everyday-user loop
+
+The target user is someone who would rather buy a capable machine every few
+years than keep several cloud subscriptions, while still preserving enough
+detail for expert audit. The product question is workflow-first: which of this
+person's real jobs does this exact artifact, quant, context, runtime, and device
+cover, with what evidence?
+
+The next product sequence is:
+
+1. **Installed inventory first.** With no model argument, show what is already
+   available locally, what has current fitr evidence, what is stale, and the
+   cheapest next measurement that would resolve a decision. Unmeasured means
+   candidate, never recommended.
+2. **Context made visible.** Present weights, KV or recurrent state, runtime
+   buffers, and safety headroom as separate measured or estimated components.
+   Show how memory, prefill, decode, and usable task depth change at several
+   context points. Hybrid attention and incomplete split GGUFs stay SKIP until
+   their architecture and complete shard set are verified.
+3. **Replaceable live discovery.** Query a free public model index through an
+   adapter, cache source timestamps and immutable artifact metadata locally,
+   and rank only by fit eligibility plus the user's stated workflows. Catalog
+   recency is not quality evidence. A candidate becomes a recommendation only
+   after a local run clears the relevant gates.
+4. **Research receipts.** For each candidate, show why it entered the set,
+   source freshness, license, architecture, quant and shard completeness,
+   expected fit range, runtime support, missing evidence, and the exact command
+   that would test it. No opaque "best model" answer.
+5. **Opt-in recurring reevaluation.** Print and install an OS-native scheduled
+   command only after explicit confirmation. The default is a dry-run plan.
+   A cycle refreshes metadata, detects new candidates or stale evidence, spends
+   no cloud inference money, and asks before downloads or evaluations. Budgets
+   cover network bytes, disk, wall time, thermals, and any external cost.
+
+The terminal views for this loop are an Inventory table, a Context fit graph,
+a Candidate evidence pane, and a Change log. Every row carries one of four
+plain states: measured, unproven, incompatible, or stale. Color and graphs add
+density but never carry the state alone. Native clients later consume the same
+versioned snapshots and decisions.
 
 ---
 
@@ -55,8 +141,9 @@ error; calibration reduces it.
 
 **Done and measured:**
 
-- Device fingerprint embedded in every result; `board` refuses to rank across
-  fingerprints
+- Device fingerprint v2 embedded in every current result; requested and
+  effective context stay separate, and `board` refuses unverified or
+  cross-fingerprint ranking
 - CLI data views: `fitr view` reopens the newest or selected saved run;
   scorecards and `board` show repeat-shape graphs, with color/Unicode fallbacks
   and unchanged plain/JSON channels
@@ -67,10 +154,10 @@ error; calibration reduces it.
 - **Versioned presentation contracts** for privacy-safe snapshots and typed
   live events. The reducer and canvas are independent of tcell so later native
   clients can consume decisions without reimplementing scoring.
-- **Append-only local run history** alongside the canonical latest result,
-  with atomic writes, legacy loading, explicit retention disclosure, and a
-  clear command that preserves canonical results
-- Needs-based scoring - PASS / FAIL / SKIP / `n/a` / `BLKD` - instead of one number
+- **Append-only local run history** alongside a collision-safe canonical
+  latest result, with atomic writes, legacy migration, explicit retention
+  disclosure, and a clear command that preserves canonical results
+- Needs-based scoring - PASS / FAIL / INCONCLUSIVE / SKIP / `n/a` / `BLKD` - instead of one number
 - Repeats with Wilson intervals, flakiness flags, `INDISTINGUISHABLE` verdicts,
   first-run-slow detection
 - Five-signal degeneracy detection
@@ -106,8 +193,8 @@ error; calibration reduces it.
   fewer-than-six-flips impossibility stated instead of a doomed p-value),
   Wald SPRT adaptive repeats (`--adaptive`), exact zero-event bounds behind
   doctor's determinism claims, MAD outlier annotation on timing repeats, CV
-  in every spread line, and borderline-gate annotations when a gate sits
-  inside the pool's interval. Every formula pinned to published reference
+  in every spread line, and INCONCLUSIVE when a gate sits inside the pool's
+  interval. Every formula pinned to published reference
   values in tests.
 - Spec drift protection: `spec/` at the repo root is canonical, the embedded
   copies are compared byte-for-byte in tests, `make spec-sync` repairs
@@ -155,7 +242,7 @@ error; calibration reduces it.
 | ~23 binary trials per default run | MDE ~ 29pp. Better than the ~33pp of six tasks, still separates *broken* from *working*, not *good* from *slightly better*. `-k 3` on checks triples the sample. |
 | OpenAI-backend timings are client-derived | usage gives counts, not server timings; decode/prefill rates there are wall-clock estimates |
 | 2 device profiles | `lappy` and an uncalibrated `default` |
-| `advise` default is still weights+KV | `--load` / `--fit` measure; without them, Compatible can still OOM on compute buffers. No model catalog. |
+| `advise` default is still weights+KV for conventional attention | `--load` / `--fit` measure compute buffers. Hybrid recurrent models stay SKIP without that receipt, and incomplete split GGUFs are rejected. No model catalog. |
 
 ---
 
@@ -209,18 +296,23 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
       rewrite the spec: Aider kept 225 of 697 after many boxes; one pair is
       a lead, not a cull.
 - [x] **Efficient calibration evidence** - `run --checks-only` skips unrelated
-      phases; pair export omits raw output and hostnames; multi-report merge
-      rejects spec drift and reports device coverage without auto-culling.
-- [ ] **Calibrate the check battery and gates on hardware** - collect
-      decision-grade pairs across at least two physical devices and two model
-      families, then review items that never discriminate and thresholds that
-      do not match known usefulness.
-- [x] **Quant damage as correctness agreement** (machinery). `fitr compare` on
+      phases; pair export omits raw output and pseudonymizes device, seedset,
+      and local-model identifiers; multi-report merge rejects spec drift and
+      normalizes legacy artifacts. Unsigned imports remain exploratory and
+      cannot create verified readiness or automatic review candidates.
+- [ ] **Calibrate the check battery and gates on hardware** - first define and
+      verify a sealed same-base revision lineage receipt, then collect reviewed,
+      authenticated pairs across at least two physical devices and two model
+      families. Only then review items that never discriminate and thresholds
+      that do not match known usefulness.
+- [x] **Quant comparison as item-level agreement** (machinery). `fitr compare` on
       a shared seedset reports item-level flips, including when the two rates
-      match - accuracy hid the disagreements. Directional "quant damage"
-      against the higher-precision run is claimed only when both results
-      expose a comparable GGUF dtype of the same family. Which *items*
-      discriminate remains part of the hardware campaign above.
+      match - accuracy hid the disagreements. Matching family, parameter size,
+      and ranked dtype does not prove same-base revision lineage, so directional
+      quant attribution remains INCONCLUSIVE. A future sealed lineage receipt
+      must bind both artifacts to one exact base revision before any pair can
+      support a decision-grade quant claim. Which *items* discriminate remains
+      part of the hardware campaign above.
 - [x] **`fitr tune`, first honest cut.** Prints the request-level knobs
       (`num_ctx`, `num_batch`, `num_gpu`) and diffs two saved fingerprints
       (including a `num_ctx` split). It does **not** sweep: llama-bench owns
@@ -245,7 +337,7 @@ loop, closable on someone else's machine.
 | Bar | Status |
 |---|---|
 | One-command install (curl / irm) | **done** |
-| Honest measurement on Ollama, llama-server, OpenAI-compat | **done** |
+| Honest measurement on Ollama, llama-server, OpenAI-compat | **done with fail-closed identity gates** - generic OpenAI runs require an operator SHA-256 pin matching the endpoint assertion; post-load llama-server path hashes remain unrankable without a runtime binding receipt |
 | Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals, quant flips) | **mostly done** - check-battery calibration still needs hardware; flip machinery is in `compare` |
 | `fitr advise <model>` returns a fit verdict + remedy | **done**; `--load` observes resident allocation and `--fit` dummy-allocates |
 | Recommend what to try without naming a model first | **blocked on calibration**; inventory-first comes before any internet catalog |
@@ -346,9 +438,11 @@ in [docs/interface.md](docs/interface.md).
 
 - **A public leaderboard.** The whole thesis is that cross-device numbers are
   not comparable. Publishing a ranking would contradict the tool.
-- **LLM-as-judge for correctness.** Coding is scored by *executing assertions*;
-  checks are graded by computed ground truth. Judges get added only where
-  nothing mechanical can reach, and only with the bias mitigations known to work.
+- **LLM-as-judge for correctness.** Checks are graded by computed ground truth.
+  Built-in executable diagnostics can observe assertions only under an explicit
+  unsafe opt-in, remain INCONCLUSIVE, and cannot become scored coding evidence
+  until the isolated worker exists. Judges get added only where nothing
+  mechanical can reach, and only with known bias mitigations.
 - **Replacing lm-evaluation-harness / Inspect AI.** Those answer "how good is
   this model." `fitr` answers "how good is it *here*." Different question.
 - **Chasing benchmark scores.** If a task stops discriminating, it gets replaced

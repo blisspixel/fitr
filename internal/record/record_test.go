@@ -76,7 +76,8 @@ func TestSavePreservesCanonicalAndAppendsPrivateHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.CanonicalPath != filepath.Join(dir, "org_model_Q4_K_M.json") {
+	if saved.CanonicalPath != store.CanonicalPath(r.Model) ||
+		filepath.Base(saved.CanonicalPath) == "org_model_Q4_K_M.json" {
 		t.Fatalf("canonical path = %q", saved.CanonicalPath)
 	}
 	if saved.RunID == "" || r.RunID != saved.RunID {
@@ -221,6 +222,104 @@ func TestLoadLegacyCurrentAndHistoryDeduplicatesStably(t *testing.T) {
 	}
 	if first.Records[0].RunID == "" || first.Records[0].RunID != second.Records[0].RunID {
 		t.Fatalf("legacy ID is not stable: %q and %q", first.Records[0].RunID, second.Records[0].RunID)
+	}
+}
+
+func TestReadRejectsUnknownFieldsAndTrailingJSON(t *testing.T) {
+	store := NewStore(t.TempDir())
+	for name, raw := range map[string]string{
+		"unknown.json":  `{"schema_version":4,"model":"m","unexpected":true}`,
+		"trailing.json": `{"schema_version":4,"model":"m"} {"model":"second"}`,
+	} {
+		path := filepath.Join(store.Dir, name)
+		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Read(path); err == nil {
+			t.Fatalf("accepted %s", name)
+		}
+	}
+}
+
+func FuzzDecodeRecord(f *testing.F) {
+	f.Add([]byte(`{"schema_version":4,"model":"legacy"}`))
+	f.Add([]byte(`{"schema_version":5,"model":"current","unexpected":true}`))
+	f.Add([]byte(`{"model":"a"} {"model":"b"}`))
+	f.Add([]byte{0xff, 0x00, '{', '}'})
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		record, err := decodeRecord(raw)
+		if err != nil {
+			return
+		}
+		if record == nil || strings.TrimSpace(record.Model) == "" {
+			t.Fatal("decoder accepted an empty result")
+		}
+		if err := record.ValidateManifest(); err != nil {
+			t.Fatalf("decoder returned an invalid manifest: %v", err)
+		}
+		if err := record.ValidateEvidenceContract(); err != nil {
+			t.Fatalf("decoder returned an invalid evidence contract: %v", err)
+		}
+	})
+}
+
+func TestCanonicalNamesDoNotCollideAndLegacyCurrentStillLoads(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	a := testRecord("org/model", "2026-08-20T12:00:00Z")
+	b := testRecord("org:model", "2026-08-20T13:00:00Z")
+	if store.LegacyCanonicalPath(a.Model) != store.LegacyCanonicalPath(b.Model) {
+		t.Fatal("test models no longer exercise the legacy collision")
+	}
+	if store.CanonicalPath(a.Model) == store.CanonicalPath(b.Model) {
+		t.Fatal("collision-safe canonical paths collided")
+	}
+	for _, record := range []*Record{a, b} {
+		if _, err := store.Save(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loaded, err := store.LoadCurrent()
+	if err != nil || len(loaded.Records) != 2 {
+		t.Fatalf("current collision-safe records=%d err=%v", len(loaded.Records), err)
+	}
+
+	legacy := testRecord("legacy", "2026-08-19T12:00:00Z")
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.LegacyCanonicalPath(legacy.Model), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = store.LoadCurrent()
+	if err != nil || len(loaded.Records) != 3 {
+		t.Fatalf("legacy migration records=%d err=%v", len(loaded.Records), err)
+	}
+}
+
+func TestLoadCurrentMigratesLegacyFilenameWithoutDuplicatingModel(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	legacy := testRecord("org/model", "2026-08-19T12:00:00Z")
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.LegacyCanonicalPath(legacy.Model), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	current := testRecord(legacy.Model, "2026-08-20T12:00:00Z")
+	if _, err := store.Save(current); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.LoadCurrent()
+	if err != nil || len(loaded.Records) != 1 || loaded.Records[0].StartedAt != current.StartedAt {
+		t.Fatalf("migrated current=%+v err=%v", loaded, err)
+	}
+	history, err := store.LoadAll()
+	if err != nil || len(history.Records) != 2 {
+		t.Fatalf("migration history records=%d err=%v", len(history.Records), err)
 	}
 }
 

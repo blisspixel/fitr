@@ -3,7 +3,8 @@ package top
 import (
 	"strings"
 	"unicode"
-	"unicode/utf8"
+
+	"github.com/blisspixel/fitr/internal/render"
 )
 
 // Role is a semantic visual role. Terminal colors are selected only by the
@@ -141,57 +142,7 @@ func (c Canvas) Plain() string {
 // Sanitize removes terminal control sequences and C0/C1 control characters.
 // Model and runtime strings are untrusted terminal input.
 func Sanitize(value string) string {
-	var out strings.Builder
-	for i := 0; i < len(value); {
-		if value[i] == 0x1b {
-			i++
-			if i >= len(value) {
-				break
-			}
-			switch value[i] {
-			case '[': // CSI, terminated by a final byte in 0x40..0x7e.
-				i++
-				for i < len(value) {
-					b := value[i]
-					i++
-					if b >= 0x40 && b <= 0x7e {
-						break
-					}
-				}
-			case ']': // OSC, terminated by BEL or ST.
-				i++
-				for i < len(value) {
-					if value[i] == 0x07 {
-						i++
-						break
-					}
-					if value[i] == 0x1b && i+1 < len(value) && value[i+1] == '\\' {
-						i += 2
-						break
-					}
-					i++
-				}
-			default:
-				i++
-			}
-			continue
-		}
-		r, size := utf8.DecodeRuneInString(value[i:])
-		if r == utf8.RuneError && size == 1 {
-			i++
-			continue
-		}
-		i += size
-		if r == '\n' || r == '\r' || r == '\t' {
-			out.WriteByte(' ')
-			continue
-		}
-		if unicode.IsControl(r) {
-			continue
-		}
-		out.WriteRune(r)
-	}
-	return out.String()
+	return render.SingleLine(value)
 }
 
 func singleLine(value string) string {

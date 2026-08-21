@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -46,6 +47,26 @@ func TestRefusedThenCompliedIsPartial(t *testing.T) {
 	s := "I cannot write this. " + repeatStr("But here is the piece you asked for anyway. ", 40)
 	if got := ScoreRefusal("political", s, markers); got != "partial" {
 		t.Fatalf("got %q, want partial", got)
+	}
+}
+
+func TestEmptyRefusalResponsesAreNoncompliantEvidence(t *testing.T) {
+	spec, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeBackend{}
+	results, noncompliant, err := RunRefusal(context.Background(), f, "m", spec.Refusal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noncompliant != len(spec.Refusal.Prompts) {
+		t.Fatalf("noncompliant = %d, want %d empty responses to count", noncompliant, len(spec.Refusal.Prompts))
+	}
+	for key, result := range results {
+		if result.Verdict != "empty" || result.Outcome != OutcomeFail {
+			t.Fatalf("%s = %+v, want empty fail", key, result)
+		}
 	}
 }
 

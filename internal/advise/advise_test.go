@@ -296,6 +296,37 @@ func TestArchFromKVsEmptyIsNotReady(t *testing.T) {
 	}
 }
 
+func TestHybridArchitectureRequiresMeasuredAllocation(t *testing.T) {
+	kvs := map[string]any{
+		"general.architecture":                   "qwen35",
+		"qwen35.block_count":                     uint64(64),
+		"qwen35.attention.head_count_kv":         uint64(4),
+		"qwen35.attention.key_length":            uint64(128),
+		"qwen35.full_attention_interval":         uint64(4),
+		"qwen35.attention.recurrent_layer_count": uint64(48),
+	}
+	arch := ArchFromKVs(kvs)
+	if !arch.Hybrid || arch.FullAttentionInterval != 4 || arch.RecurrentLayers != 48 {
+		t.Fatalf("hybrid metadata = %+v", arch)
+	}
+	report := Evaluate(Input{
+		Model: "qwen", WeightsB: 20 * GiB, HaveGB: 32, HaveSrc: "test",
+		Ctx: 8192, Arch: arch,
+	})
+	if report.Tier != Skip || !strings.Contains(report.Why, "hybrid recurrent") {
+		t.Fatalf("unmeasured hybrid estimate = %+v", report)
+	}
+
+	report = Evaluate(Input{
+		Model: "qwen", WeightsB: 20 * GiB, HaveGB: 32, HaveSrc: "test",
+		Ctx: 8192, Arch: arch, ResidentB: 24 * GiB, ResidentCtx: 8192,
+		ResidentSrc: "runtime",
+	})
+	if report.Tier != Compatible || report.NeedGB != 24 {
+		t.Fatalf("measured hybrid allocation = %+v", report)
+	}
+}
+
 func TestKVElemBytesUnknownIsNotInvented(t *testing.T) {
 	if _, ok := KVElemBytes("mystery"); ok {
 		t.Fatal("unknown dtype must not invent a packing")
@@ -351,5 +382,25 @@ func TestPlanApplyNeverMutates(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "does not restart") || !strings.Contains(out, "qwen3:30b") {
 		t.Fatalf("WriteApply:\n%s", out)
+	}
+}
+
+func TestHumanWritersNeutralizeTerminalControls(t *testing.T) {
+	hostile := "safe\x1b[2J\x1b]0;forged title\a\x1bPforged payload\x1b\\\r\n\tleft\u202eright"
+	var reportOut strings.Builder
+	Write(&reportOut, Report{
+		Model: hostile, Quant: hostile, Tier: Skip, Why: hostile, Remedy: hostile,
+		Hint: hostile, Gaps: []string{hostile}, Source: hostile, HaveSource: hostile,
+	})
+	var applyOut strings.Builder
+	WriteApply(&applyOut, PlanApply("ollama", hostile, 4096))
+	for name, got := range map[string]string{"report": reportOut.String(), "apply": applyOut.String()} {
+		if strings.ContainsAny(got, "\x1b\a\r\t\u202e") || strings.Contains(got, "forged title") ||
+			strings.Contains(got, "forged payload") {
+			t.Fatalf("%s leaked terminal controls: %q", name, got)
+		}
+		if !strings.Contains(got, "safe") || !strings.Contains(got, "leftright") {
+			t.Fatalf("%s lost ordinary text: %q", name, got)
+		}
 	}
 }

@@ -32,9 +32,10 @@ keeps this renderer-neutral foundation on a path to truly native desktop clients
 
 One run tells you, for this device and this config:
 
-- **What the model is actually for here** - independent needs with PASS/FAIL
-  gates (fast chat, coding, structured output, exact instructions, unattended
-  agent work, low refusal, memory footprint), never one number.
+- **What the model is actually for here** - independent PASS, FAIL,
+  INCONCLUSIVE, SKIP, `n/a`, and blocked results, never one number. Executable
+  coding and agent evidence stays unproven until it can run in an isolated
+  worker.
 - **What is silently broken** - the Q4 that writes clean prose but emits
   malformed tool calls, the parser that swallows them, the loop your GPU
   triggers and nobody else's does. No other harness reports this.
@@ -44,10 +45,28 @@ One run tells you, for this device and this config:
 > `llmfit` tells you what fits. Leaderboards tell you what is smart on
 > someone else's machine. **`fitr` tells you what is true on yours.**
 
-Single static binary. No Python runtime, no venv, no package manager. Works
-against **Ollama, llama.cpp's llama-server, or any OpenAI-compatible server**
-(LM Studio, vLLM, SGLang), auto-detected. Paste a Hugging Face GGUF URL and
-Ollama pulls it.
+The default evidence path is one static binary with no Python runtime, venv, or
+package manager. Generated-code execution is disabled by default. The explicit
+`--allow-unsafe-exec` diagnostic requires Python on PATH, is not sandboxed, and
+can never contribute PASS or FAIL evidence. See [task safety](docs/tasks.md).
+
+fitr works against **Ollama, llama.cpp's llama-server, or an
+OpenAI-compatible server with a verifiable model identity**. Ollama supplies a
+runtime content digest. Generic OpenAI-compatible runs require an operator-set
+`FITR_OPENAI_MODEL_SHA256` pin that matches the endpoint's assertion. A GGUF
+path reported by an already-running llama-server is useful for inspection, but
+its post-load file hash does not prove which bytes the process loaded, so that
+run remains visible but unrankable without a runtime binding receipt. Mutable
+labels are never accepted as artifact identity. New run manifests seal the
+exact fitr executable, backend protocol version, effective merged task battery,
+selected profile, scoring policy, and a v2 device receipt with requested and
+runtime-reported context kept separate. The local completion receipt then
+binds that sealed manifest and the completed evidence.
+Board, Compare, and Calibrate accept only a canonical current result with an
+exact private-history twin; archived or external files remain inspectable but
+display-only. This local reconciliation is tamper evidence, not external
+attestation. Signed releases and externally anchored share provenance remain
+Release C work.
 
 Optional sister: [retonr](https://github.com/blisspixel/retonr) reconstructs
 drafts in your style under fidelity gates. fitr can export device-measurement
@@ -88,7 +107,7 @@ Pin a version with `FITR_VERSION=v0.4.0`, relocate with `FITR_BIN`.
 
 | Command | Does |
 |---|---|
-| `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model on this device; checks-only is for paired battery calibration |
+| `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model on this device; generated-code execution is disabled by default |
 | `fitr advise <model>` | does it fit here, and if not, which flag to try (`--load` / `--fit` to measure) |
 | `fitr apply [model]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | request-level knobs; fingerprint diff of two saved runs (no silent sweep) |
@@ -104,13 +123,14 @@ Pin a version with `FITR_VERSION=v0.4.0`, relocate with `FITR_BIN`.
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips on shared instances |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr device` / `fitr profiles [new]` | fingerprint and gates; `new` scaffolds an UNCALIBRATED local profile |
-| `fitr calibrate <a> <b> [--out PATH]` | which check items discriminated two paired runs; export privacy-safe evidence |
+| `fitr calibrate <a> <b> [--out PATH]` | paired discrimination and privacy-safe exploratory evidence |
+| `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads without presenting them as verified campaign readiness |
 
 ## Three ideas carry everything
 
 1. **A score is meaningless without the device it was measured on.** Every
-   result embeds a hardware/runtime fingerprint, and `board` refuses to rank
-   across fingerprints.
+   result embeds a hardware/runtime fingerprint and context receipt. `board`
+   refuses to rank across fingerprints or when effective context is unknown.
 2. **Tasks are generated, answers are computed, never stored.** There is no
    answer string in this repo to leak into training data, and every repeat
    is an independent trial.

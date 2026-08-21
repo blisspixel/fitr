@@ -18,6 +18,8 @@ type Board struct {
 type BoardGroup struct {
 	GPU, Driver, KV, Note string
 	NumCtx                int
+	EffectiveCtx          int
+	ContextState          string
 	Rows                  []BoardRow
 }
 
@@ -59,14 +61,20 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 		if kv == "" {
 			kv = "default"
 		}
-		header := fmt.Sprintf("%s%sdriver %s%sKV %s%sctx %d",
-			Sanitize(group.GPU), g.Dot, Sanitize(group.Driver), g.Dot, Sanitize(kv), g.Dot, group.NumCtx)
+		ctx := fmt.Sprintf("ctx %d", group.NumCtx)
+		if group.EffectiveCtx > 0 && group.EffectiveCtx != group.NumCtx {
+			ctx = fmt.Sprintf("ctx %d -> %d effective", group.NumCtx, group.EffectiveCtx)
+		} else if group.EffectiveCtx > 0 {
+			ctx = fmt.Sprintf("ctx %d verified", group.EffectiveCtx)
+		}
+		header := fmt.Sprintf("%s%sdriver %s%sKV %s%s%s",
+			SingleLine(group.GPU), g.Dot, SingleLine(group.Driver), g.Dot, SingleLine(kv), g.Dot, SingleLine(ctx))
 		fmt.Fprintln(w, p.wrap(p.Head, header))
 		noteStyle := p.Muted
 		if strings.Contains(group.Note, "not comparable") {
 			noteStyle = p.Warn
 		}
-		fmt.Fprintf(w, "  %s\n", p.wrap(noteStyle, Sanitize(group.Note)))
+		fmt.Fprintf(w, "  %s\n", p.wrap(noteStyle, SingleLine(group.Note)))
 
 		maxDecode := 0.0
 		for _, row := range group.Rows {

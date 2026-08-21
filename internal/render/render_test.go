@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/blisspixel/fitr/internal/score"
@@ -70,6 +71,45 @@ func TestSanitizeStripsTerminalEscapes(t *testing.T) {
 	}
 	if !strings.Contains(got, "hello") || !strings.Contains(got, "spoofed") {
 		t.Fatalf("sanitiser destroyed legitimate text: %q", got)
+	}
+}
+
+func TestSingleLineNeutralizesTerminalAndLayoutControls(t *testing.T) {
+	nasty := "café 模型\tready\r\n" +
+		"\x1b[2Jvisible\x1b[31mred\x1b[0m " +
+		"\x1b]0;forged title\a" +
+		"\x1bPforged payload\x1b\\" +
+		"\u009b32mgreen\u009b0m " +
+		"\u009d0;forged c1 title\u009c" +
+		"left\u202eright\u2066isolate\u2069\u0000\u0085end"
+	got := SingleLine(nasty)
+	if got != "café 模型 ready visiblered green leftrightisolate end" {
+		t.Fatalf("single-line encoding = %q", got)
+	}
+	for _, r := range got {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			t.Fatalf("terminal or format control survived: %U in %q", r, got)
+		}
+	}
+}
+
+func TestSingleLinePreservesOrdinaryUnicode(t *testing.T) {
+	want := "cafe\u0301 | 模型 | Ελληνικά | العربية"
+	if got := SingleLine(want); got != want {
+		t.Fatalf("ordinary Unicode changed: got %q, want %q", got, want)
+	}
+}
+
+func TestSingleLineConsumesUnterminatedStringControl(t *testing.T) {
+	if got := SingleLine("safe \x1b]0;forged remainder"); got != "safe" {
+		t.Fatalf("unterminated OSC payload survived: %q", got)
+	}
+}
+
+func TestSanitizeKeepsExistingMultilineBehavior(t *testing.T) {
+	want := "first\n\tsecond\rthird"
+	if got := Sanitize(want); got != want {
+		t.Fatalf("multiline sanitization changed: got %q, want %q", got, want)
 	}
 }
 
@@ -188,14 +228,27 @@ func TestScorecardPrintsNumCtx(t *testing.T) {
 	}
 }
 
+func TestScorecardSeparatesRequestedAndEffectiveContext(t *testing.T) {
+	var buf strings.Builder
+	d := &textDisplay{out: &buf, err: &buf, pal: palette{}, g: glyphs{" | ", "-", "+/-", "..."}}
+	d.Result(score.Scorecard{Model: "m", UseFor: "unproven"}, Meta{
+		NumCtx: 8192, EffectiveCtx: 4096, ContextState: "adjusted",
+	})
+	if got := buf.String(); !strings.Contains(got, "8192 requested -> 4096 effective (adjusted)") {
+		t.Fatalf("effective context is hidden:\n%s", got)
+	}
+}
+
 func TestScorecardSanitizesMetadata(t *testing.T) {
 	var buf strings.Builder
 	d := &textDisplay{out: &buf, err: &buf, pal: palette{}, g: glyphs{" | ", "-", "+/-", "..."}}
 	d.Result(score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}}, Meta{
-		ParamSize: "8B\x1b[2J", GPU: "gpu\x07", Driver: "driver\x1b[31m", Profile: "profile\x1b[H",
+		ParamSize: "8B\x1b[2J\u202e", GPU: "gpu\x07\r\nspoof", Driver: "driver\x1b[31m",
+		Profile: "profile\x1b]0;forged title\a\x1bPforged payload\x1b\\",
 	})
 	got := buf.String()
-	if strings.ContainsRune(got, '\x1b') || strings.ContainsRune(got, '\x07') {
+	if strings.ContainsAny(got, "\x1b\x07\r\u202e") || strings.Contains(got, "forged title") ||
+		strings.Contains(got, "forged payload") {
 		t.Fatalf("scorecard leaked terminal control bytes: %q", got)
 	}
 }
@@ -223,5 +276,19 @@ func TestJSONResultIncludesNumCtx(t *testing.T) {
 	got := buf.String()
 	if !strings.Contains(got, `"num_ctx":4096`) {
 		t.Fatalf("json result missing num_ctx:\n%s", got)
+	}
+}
+
+func TestJSONResultIncludesContextReceiptWhenAvailable(t *testing.T) {
+	var buf strings.Builder
+	d := &jsonDisplay{out: &buf}
+	d.Result(score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}}, Meta{
+		NumCtx: 8192, EffectiveCtx: 4096, ContextState: "adjusted",
+	})
+	got := buf.String()
+	for _, want := range []string{`"num_ctx":8192`, `"effective_ctx":4096`, `"context_state":"adjusted"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("json result missing %s:\n%s", want, got)
+		}
 	}
 }

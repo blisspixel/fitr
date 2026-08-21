@@ -313,3 +313,117 @@ func TestTagsListsTheSingleServedModel(t *testing.T) {
 		t.Fatalf("capabilities = %v", tags[0].Capabilities)
 	}
 }
+
+func TestEffectiveContextReadsPropsReceipt(t *testing.T) {
+	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/props" {
+			t.Errorf("path = %s, want /props", r.URL.Path)
+		}
+		w.Write([]byte(`{"model_path":"/m/served.gguf","default_generation_settings":{"n_ctx":16384}}`))
+	})
+	defer done()
+
+	got, observed, err := c.EffectiveContext(context.Background(), "served.gguf")
+	if err != nil || !observed || got != 16384 {
+		t.Fatalf("EffectiveContext = %d, %v, %v", got, observed, err)
+	}
+	running, err := c.PS(context.Background())
+	if err != nil || len(running) != 1 || running[0].ContextLength != 16384 {
+		t.Fatalf("PS context receipt = %+v, %v", running, err)
+	}
+}
+
+func TestEffectiveContextPreservesMissingAndRejectsInvalidProps(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{"missing", `{"model_path":"/m/served.gguf","default_generation_settings":{}}`, ""},
+		{"negative", `{"model_path":"/m/served.gguf","default_generation_settings":{"n_ctx":-1}}`, "negative"},
+		{"malformed", `{`, "unexpected EOF"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(tc.body))
+			})
+			defer done()
+			got, observed, err := c.EffectiveContext(context.Background(), "served.gguf")
+			if tc.wantErr == "" {
+				if err != nil || observed || got != 0 {
+					t.Fatalf("missing observation = %d, %v, %v", got, observed, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) || observed || got != 0 {
+				t.Fatalf("invalid observation = %d, %v, %v", got, observed, err)
+			}
+		})
+	}
+}
+
+func TestGenerateRejectsMalformedAndIncompleteNativeFrames(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		body      string
+		wantText  string
+		wantError string
+	}{
+		{
+			name: "legitimate plain NDJSON",
+			body: `{"content":"ok","stop":false}` + "\n" +
+				`{"stop":true,"stop_type":"eos","timings":{"predicted_n":1,"predicted_ms":1}}` + "\n",
+			wantText: "ok",
+		},
+		{name: "malformed SSE data", body: "data: {\n", wantError: "completion frame"},
+		{name: "invalid prefix", body: "event: completion\n", wantError: "invalid frame prefix"},
+		{name: "trailing JSON", body: `data: {"stop":true} {}` + "\n", wantError: "content after JSON frame"},
+		{name: "early EOF", body: `data: {"content":"partial","stop":false}` + "\n", wantText: "partial", wantError: "before a terminal receipt"},
+		{name: "done before receipt", body: "data: [DONE]\n", wantError: "before a terminal receipt"},
+		{name: "data after receipt", body: `data: {"stop":true}` + "\n" + `data: {"content":"spoof"}` + "\n", wantError: "after the terminal frame"},
+		{name: "negative receipt", body: `data: {"stop":true,"tokens_cached":-1}` + "\n", wantError: "negative metric"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(tc.body))
+			})
+			defer done()
+			text, _, err := c.Generate(context.Background(), "m", "p", ollama.Deterministic(8, 8192))
+			if text != tc.wantText {
+				t.Fatalf("text = %q, want %q", text, tc.wantText)
+			}
+			if tc.wantError == "" && err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
+				t.Fatalf("error = %v, want %q", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestSuccessfulJSONResponsesAreBoundedAndSingular(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		body      string
+		wantError string
+	}{
+		{"legitimate", `{"model_path":"m.gguf"}`, ""},
+		{"trailing JSON", `{"model_path":"m.gguf"} {}`, "content after JSON frame"},
+		{"oversized", `{"model_path":"m.gguf"}` + strings.Repeat(" ", maxNativeBody), "exceeds"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(tc.body))
+			})
+			defer done()
+			_, err := c.Tags(context.Background())
+			if tc.wantError == "" && err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
+				t.Fatalf("error = %v, want %q", err, tc.wantError)
+			}
+		})
+	}
+}

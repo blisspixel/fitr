@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -31,12 +32,22 @@ import (
 
 const DefaultURL = "http://127.0.0.1:8080"
 
+const (
+	maxNativeBody      = 16 << 20
+	maxNativeError     = 64 << 10
+	maxNativeLine      = 1 << 20
+	maxNativeStream    = 64 << 20
+	maxNativeFrames    = 1_000_000
+	maxGeneratedOutput = 8 << 20
+)
+
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client
 }
 
 var _ llm.Backend = (*Client)(nil)
+var _ llm.EffectiveContextObserver = (*Client)(nil)
 
 func New() *Client {
 	base := os.Getenv("LLAMA_SERVER_URL")
@@ -123,7 +134,10 @@ func (c *Client) props(ctx context.Context) (props, error) {
 		return p, err
 	}
 	defer resp.Body.Close()
-	return p, json.NewDecoder(resp.Body).Decode(&p)
+	if resp.StatusCode != http.StatusOK {
+		return p, httpError("llama-server", resp)
+	}
+	return p, decodeBoundedJSON(resp.Body, &p)
 }
 
 // Version reports the llama.cpp build, prefixed with the runtime name so a
@@ -194,7 +208,24 @@ func (c *Client) PS(ctx context.Context) ([]ollama.RunningModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []ollama.RunningModel{{Name: modelName(p)}}, nil
+	return []ollama.RunningModel{{Name: modelName(p), ContextLength: p.DefaultSettings.NCtx}}, nil
+}
+
+// EffectiveContext reads the per-slot n_ctx resolved by llama-server. Builds
+// that omit the field leave it unavailable. The server is single-model, so
+// the value applies to the one model loaded at process start.
+func (c *Client) EffectiveContext(ctx context.Context, _ string) (int, bool, error) {
+	p, err := c.props(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	if p.DefaultSettings.NCtx == 0 {
+		return 0, false, nil
+	}
+	if p.DefaultSettings.NCtx < 0 {
+		return 0, false, fmt.Errorf("llama-server reported a negative effective context")
+	}
+	return p.DefaultSettings.NCtx, true, nil
 }
 
 // StopAll is a no-op: a llama-server process serves one model for its whole
@@ -247,29 +278,59 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 	var sb strings.Builder
 	var ttft float64
 	var final completionResp
+	var totalBytes, frames int
+	terminal := false
 	sc := bufio.NewScanner(resp.Body)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxNativeLine)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
-		// SSE frames are "data: {json}"; be tolerant of plain NDJSON too.
-		line = bytes.TrimPrefix(line, []byte("data: "))
-		if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
+		if len(line) == 0 || bytes.HasPrefix(line, []byte(":")) {
 			continue
 		}
+		totalBytes += len(line) + 1
+		frames++
+		if totalBytes > maxNativeStream || frames > maxNativeFrames {
+			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream exceeds protocol limits")
+		}
+		if terminal {
+			if bytes.Equal(bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:"))), []byte("[DONE]")) {
+				continue
+			}
+			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream contains data after the terminal frame")
+		}
+		if bytes.HasPrefix(line, []byte("data:")) {
+			line = bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		} else if !bytes.HasPrefix(line, []byte("{")) {
+			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream contains an invalid frame prefix")
+		}
+		if bytes.Equal(line, []byte("[DONE]")) {
+			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream ended before a terminal receipt")
+		}
 		var g completionResp
-		if err := json.Unmarshal(line, &g); err != nil {
-			continue
+		if err := decodeJSONFrame(line, &g); err != nil {
+			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion frame: %w", err)
+		}
+		if g.TokensCached < 0 || g.Timings.PromptN < 0 || g.Timings.PromptMS < 0 ||
+			g.Timings.PredictedN < 0 || g.Timings.PredictedMS < 0 {
+			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion frame contains a negative metric")
 		}
 		if g.Content != "" && ttft == 0 {
 			ttft = time.Since(start).Seconds()
 		}
+		if len(g.Content) > maxGeneratedOutput-sb.Len() {
+			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server generated output exceeds %d bytes", maxGeneratedOutput)
+		}
 		sb.WriteString(g.Content)
 		if g.Stop {
 			final = g
+			terminal = true
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return sb.String(), ollama.Metrics{}, err
+		return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream: %w", err)
+	}
+	if !terminal {
+		return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream ended before a terminal receipt")
 	}
 
 	m := ollama.Metrics{
@@ -315,7 +376,7 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 			CompletionTokens int `json:"completion_tokens"`
 		} `json:"usage"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	if err := decodeBoundedJSON(resp.Body, &r); err != nil {
 		return ollama.Message{}, ollama.Metrics{}, err
 	}
 	if len(r.Choices) == 0 {
@@ -346,9 +407,45 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 }
 
 func httpError(who string, resp *http.Response) error {
-	buf := new(bytes.Buffer)
-	buf.ReadFrom(resp.Body)
-	return fmt.Errorf("%s %d: %s", who, resp.StatusCode, strings.TrimSpace(buf.String()))
+	b, err := readBounded(resp.Body, maxNativeError)
+	if err != nil {
+		return fmt.Errorf("%s %d: %w", who, resp.StatusCode, err)
+	}
+	return fmt.Errorf("%s %d: %s", who, resp.StatusCode, strings.TrimSpace(string(b)))
+}
+
+func readBounded(r io.Reader, limit int64) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, fmt.Errorf("response exceeds %d bytes", limit)
+	}
+	return b, nil
+}
+
+func decodeBoundedJSON(r io.Reader, into any) error {
+	b, err := readBounded(r, maxNativeBody)
+	if err != nil {
+		return err
+	}
+	return decodeJSONFrame(b, into)
+}
+
+func decodeJSONFrame(frame []byte, into any) error {
+	dec := json.NewDecoder(bytes.NewReader(frame))
+	if err := dec.Decode(into); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("content after JSON frame")
+		}
+		return err
+	}
+	return nil
 }
 
 func round(v float64, places int) float64 {

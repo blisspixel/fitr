@@ -31,8 +31,8 @@ func (v View) String() string {
 }
 
 // Verdict is one user-facing need result. State is expected to be PASS, FAIL,
-// SKIP, n/a, or BLKD, but remains a string so presentation is not coupled to
-// the scoring package.
+// SKIP, n/a, BLKD, or INCONCLUSIVE, but remains a string so presentation is
+// not coupled to the scoring package.
 type Verdict struct {
 	Need  string `json:"need"`
 	Label string `json:"label"`

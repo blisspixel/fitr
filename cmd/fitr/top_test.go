@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -91,6 +92,7 @@ func TestTopSnapshotIsVersionedAndPrivacySafe(t *testing.T) {
 	r.Device.Host = "secret-hostname"
 	r.DeviceKey = "secret-hostname|gpu|driver|runtime"
 	r.CodeWrite = []eval.ExecResult{{Raw: "private model response", Pass: true}}
+	sealCurrentResult(t, r)
 	if _, err := save(r); err != nil {
 		t.Fatal(err)
 	}
@@ -196,6 +198,27 @@ func TestTopDisplayReportsUnsaveableCompletion(t *testing.T) {
 	}
 }
 
+func TestTopDisplayPublishesGeneratedTaskProgress(t *testing.T) {
+	sink, err := session.NewSink(session.Options{RunID: "progress_run_1234"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Start(session.RunInfo{Model: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	display := &topDisplay{
+		ctx: context.Background(), sink: sink, events: make(chan top.Event, 4),
+		sequence: &atomic.Uint64{}, saved: true,
+	}
+	display.Phase("checks", "160 generated tasks")
+	display.LiveProgress(37, 160, "37 of 160 generated tasks")
+	live := liveFromSession(sink.Snapshot())
+	if live.Phase != "checks" || live.CompletedSteps != 37 || live.TotalSteps != 160 ||
+		live.Detail != "37 of 160 generated tasks" {
+		t.Fatalf("live progress = %+v", live)
+	}
+}
+
 func TestTopDisplayRedactsLocalPathsFromLiveMessages(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FITR_RESULTS", dir)
@@ -257,11 +280,109 @@ func TestTopSnapshotKeepsUnknownDevicesUnrankedAndShowsConfig(t *testing.T) {
 	b.Device.Config["OLLAMA_KV_CACHE_TYPE"] = "q8_0"
 	b.Device.Config["OLLAMA_FLASH_ATTENTION"] = "1"
 	snapshot := buildTopSnapshot([]*Result{a, b})
-	if len(snapshot.Board) != 2 || snapshot.Board[0].Comparable || snapshot.Board[1].Comparable {
-		t.Fatalf("unknown board = %+v", snapshot.Board)
+	if len(snapshot.Board) != 0 {
+		t.Fatalf("unknown unverified results entered the board: %+v", snapshot.Board)
 	}
 	if !strings.Contains(snapshot.History[1].Config, "kv_cache_type=q8_0") || !strings.Contains(snapshot.History[1].Config, "flash_attention=1") {
 		t.Fatalf("config = %q", snapshot.History[1].Config)
+	}
+}
+
+func TestTopSnapshotKeepsContaminatedRunInHistoryButOutOfBoard(t *testing.T) {
+	clean := mockResult("clean", 10, .1, 100, 1, 1, 1, 1, 1)
+	contaminated := mockResult("contaminated", 100, .1, 100, 1, 1, 1, 1, 1)
+	contaminated.Contamination = []string{"leftover:7b"}
+
+	snapshot := buildTopSnapshot([]*Result{contaminated, clean})
+	if len(snapshot.History) != 2 {
+		t.Fatalf("history dropped the integrity record: %+v", snapshot.History)
+	}
+	if len(snapshot.Board) != 1 || len(snapshot.Board[0].Runs) != 1 || snapshot.Board[0].Runs[0].Model != "clean" {
+		t.Fatalf("board retained a contaminated ranking row: %+v", snapshot.Board)
+	}
+	var found bool
+	for _, verdict := range snapshot.History[0].Verdicts {
+		if verdict.State == string(score.Inconclusive) {
+			found = true
+			break
+		}
+	}
+	if !found || !strings.Contains(snapshot.History[0].UseFor, "INCONCLUSIVE") {
+		t.Fatalf("history did not expose explicit inconclusive state: %+v", snapshot.History[0])
+	}
+}
+
+func TestTopBoardUsesOnlyReconciledCurrentRecords(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	trusted := mockResult("trusted", 10, .1, 100, 1, 1, 1, 1, 1)
+	if _, err := save(trusted); err != nil {
+		t.Fatal(err)
+	}
+
+	forged := mockResult("forged", 999, .01, 999, 1, 1, 1, 1, 1)
+	raw, err := json.Marshal(forged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(record.NewStore(dir).HistoryDir(), "forged.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, _, err := loadTopSnapshot(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOnlyTopBoardModel(t, snapshot, "trusted")
+	var forgedHistory *top.Run
+	for i := range snapshot.History {
+		if snapshot.History[i].Model == "forged" {
+			forgedHistory = &snapshot.History[i]
+		}
+	}
+	if forgedHistory == nil || !strings.Contains(forgedHistory.UseFor, "INCONCLUSIVE") {
+		t.Fatalf("injected history was not disclosed as display-only: %+v", snapshot.History)
+	}
+}
+
+func TestTopExternalCandidateCannotEnterBoard(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	trusted := mockResult("trusted", 10, .1, 100, 1, 1, 1, 1, 1)
+	if _, err := save(trusted); err != nil {
+		t.Fatal(err)
+	}
+	external := mockResult("external", 999, .01, 999, 1, 1, 1, 1, 1)
+	raw, err := json.Marshal(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "external.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, _, err := loadTopSnapshot(&path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOnlyTopBoardModel(t, snapshot, "trusted")
+	if len(snapshot.History) < 2 || snapshot.History[0].Model != "external" ||
+		!strings.Contains(snapshot.History[0].UseFor, "INCONCLUSIVE") {
+		t.Fatalf("external candidate was not display-only: %+v", snapshot.History)
+	}
+}
+
+func assertOnlyTopBoardModel(t *testing.T, snapshot top.Snapshot, model string) {
+	t.Helper()
+	var models []string
+	for _, group := range snapshot.Board {
+		for _, run := range group.Runs {
+			models = append(models, run.Model)
+		}
+	}
+	if len(models) != 1 || models[0] != model {
+		t.Fatalf("board models = %v, want only %q", models, model)
 	}
 }
 

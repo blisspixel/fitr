@@ -10,7 +10,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -22,6 +24,15 @@ import (
 )
 
 const DefaultURL = "http://127.0.0.1:11434"
+
+const (
+	maxNativeBody      = 16 << 20
+	maxNativeError     = 64 << 10
+	maxNativeLine      = 1 << 20
+	maxNativeStream    = 64 << 20
+	maxNativeFrames    = 1_000_000
+	maxGeneratedOutput = 8 << 20
+)
 
 type Client struct {
 	BaseURL string
@@ -127,6 +138,56 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 	return c.HTTP.Do(req)
 }
 
+func readBounded(r io.Reader, limit int64) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, fmt.Errorf("response exceeds %d bytes", limit)
+	}
+	return b, nil
+}
+
+func decodeBoundedJSON(r io.Reader, into any) error {
+	b, err := readBounded(r, maxNativeBody)
+	if err != nil {
+		return err
+	}
+	return decodeJSONFrame(b, into)
+}
+
+func decodeJSONFrame(frame []byte, into any) error {
+	dec := json.NewDecoder(bytes.NewReader(frame))
+	if err := dec.Decode(into); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("content after JSON frame")
+		}
+		return err
+	}
+	return nil
+}
+
+func nativeHTTPError(resp *http.Response) error {
+	b, err := readBounded(resp.Body, maxNativeError)
+	if err != nil {
+		return fmt.Errorf("ollama %d: %w", resp.StatusCode, err)
+	}
+	return fmt.Errorf("ollama %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+}
+
+func validateGenFrame(g genResp) error {
+	if g.EvalCount < 0 || g.EvalDuration < 0 || g.PromptEvalCount < 0 ||
+		g.PromptEvalDuration < 0 || g.LoadDuration < 0 {
+		return fmt.Errorf("ollama generate frame contains a negative metric")
+	}
+	return nil
+}
+
 // Generate streams /api/generate and returns the text plus timing.
 //
 // TTFT is measured as wall-clock from request start to the first non-empty
@@ -153,36 +214,53 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(resp.Body)
-		return "", Metrics{}, fmt.Errorf("ollama %d: %s", resp.StatusCode,
-			strings.TrimSpace(buf.String()))
+		return "", Metrics{}, nativeHTTPError(resp)
 	}
 
 	var sb strings.Builder
 	var ttft float64
 	var final genResp
+	var totalBytes, frames int
+	terminal := false
 	sc := bufio.NewScanner(resp.Body)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxNativeLine)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
 		}
+		totalBytes += len(line) + 1
+		frames++
+		if totalBytes > maxNativeStream || frames > maxNativeFrames {
+			return sb.String(), Metrics{}, fmt.Errorf("ollama generate stream exceeds protocol limits")
+		}
+		if terminal {
+			return sb.String(), Metrics{}, fmt.Errorf("ollama generate stream contains data after the terminal frame")
+		}
 		var g genResp
-		if err := json.Unmarshal(line, &g); err != nil {
-			continue
+		if err := decodeJSONFrame(line, &g); err != nil {
+			return sb.String(), Metrics{}, fmt.Errorf("ollama generate frame: %w", err)
+		}
+		if err := validateGenFrame(g); err != nil {
+			return sb.String(), Metrics{}, err
 		}
 		if g.Response != "" && ttft == 0 {
 			ttft = time.Since(start).Seconds()
 		}
+		if len(g.Response) > maxGeneratedOutput-sb.Len() {
+			return sb.String(), Metrics{}, fmt.Errorf("ollama generated output exceeds %d bytes", maxGeneratedOutput)
+		}
 		sb.WriteString(g.Response)
 		if g.Done {
 			final = g
+			terminal = true
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return sb.String(), Metrics{}, err
+		return sb.String(), Metrics{}, fmt.Errorf("ollama generate stream: %w", err)
+	}
+	if !terminal {
+		return sb.String(), Metrics{}, fmt.Errorf("ollama generate stream ended before a terminal frame")
 	}
 
 	m := Metrics{
@@ -274,14 +352,17 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools [
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(resp.Body)
-		return Message{}, Metrics{}, fmt.Errorf("ollama %d: %s", resp.StatusCode,
-			strings.TrimSpace(buf.String()))
+		return Message{}, Metrics{}, nativeHTTPError(resp)
 	}
 	var r chatResp
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	if err := decodeBoundedJSON(resp.Body, &r); err != nil {
 		return Message{}, Metrics{}, err
+	}
+	if !r.Done {
+		return Message{}, Metrics{}, fmt.Errorf("ollama chat response is missing the terminal receipt")
+	}
+	if r.EvalCount < 0 || r.EvalDuration < 0 || r.PromptEvalCount < 0 || r.PromptEvalDuration < 0 {
+		return Message{}, Metrics{}, fmt.Errorf("ollama chat response contains a negative metric")
 	}
 	m := Metrics{
 		WallSeconds:  round(time.Since(start).Seconds(), 2),
@@ -301,9 +382,13 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools [
 
 // ---------------------------------------------------------------- inspection
 type ModelInfo struct {
-	Name         string   `json:"name"`
-	Size         int64    `json:"size"`
-	Capabilities []string `json:"capabilities"`
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	Digest string `json:"digest,omitempty"`
+	// ReportedDigest is an untrusted server assertion that requires an
+	// independent backend-specific verifier before it can become Digest.
+	ReportedDigest string   `json:"reported_digest,omitempty"`
+	Capabilities   []string `json:"capabilities"`
 	// Path is a local GGUF path when the runtime exposes one (llama-server
 	// /props model_path). Empty on Ollama tags.
 	Path string `json:"path,omitempty"`
@@ -325,10 +410,16 @@ func (c *Client) Tags(ctx context.Context) ([]ModelInfo, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, nativeHTTPError(resp)
+	}
 	var r struct {
 		Models []ModelInfo `json:"models"`
 	}
-	return r.Models, json.NewDecoder(resp.Body).Decode(&r)
+	if err := decodeBoundedJSON(resp.Body, &r); err != nil {
+		return nil, err
+	}
+	return r.Models, nil
 }
 
 // Show returns capabilities for one model. `capabilities` is authoritative for
@@ -340,17 +431,21 @@ func (c *Client) Show(ctx context.Context, model string) (ModelInfo, error) {
 		return ModelInfo{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ModelInfo{}, nativeHTTPError(resp)
+	}
 	var mi ModelInfo
-	err = json.NewDecoder(resp.Body).Decode(&mi)
+	err = decodeBoundedJSON(resp.Body, &mi)
 	mi.Name = model
 	return mi, err
 }
 
 type RunningModel struct {
-	Name      string `json:"name"`
-	Size      int64  `json:"size"`
-	SizeVRAM  int64  `json:"size_vram"`
-	ExpiresAt string `json:"expires_at"`
+	Name          string `json:"name"`
+	Size          int64  `json:"size"`
+	SizeVRAM      int64  `json:"size_vram"`
+	ContextLength int    `json:"context_length,omitempty"`
+	ExpiresAt     string `json:"expires_at"`
 }
 
 func (c *Client) PS(ctx context.Context) ([]RunningModel, error) {
@@ -360,10 +455,47 @@ func (c *Client) PS(ctx context.Context) ([]RunningModel, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, nativeHTTPError(resp)
+	}
 	var r struct {
 		Models []RunningModel `json:"models"`
 	}
-	return r.Models, json.NewDecoder(resp.Body).Decode(&r)
+	if err := decodeBoundedJSON(resp.Body, &r); err != nil {
+		return nil, err
+	}
+	return r.Models, nil
+}
+
+// EffectiveContext reads the context allocation reported for the exact model
+// currently loaded by Ollama. Older servers omit context_length; that is an
+// unavailable observation, not zero context and not the requested value.
+func (c *Client) EffectiveContext(ctx context.Context, model string) (int, bool, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return 0, false, errors.New("effective context requires a resolved model name")
+	}
+	running, err := c.Resident(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	var match *RunningModel
+	for i := range running {
+		if running[i].Name != model {
+			continue
+		}
+		if match != nil {
+			return 0, false, fmt.Errorf("effective context is ambiguous for model %q", model)
+		}
+		match = &running[i]
+	}
+	if match == nil || match.ContextLength == 0 {
+		return 0, false, nil
+	}
+	if match.ContextLength < 0 {
+		return 0, false, fmt.Errorf("Ollama reported a negative context length for model %q", model)
+	}
+	return match.ContextLength, true, nil
 }
 
 // Resident reports models that are actually still loaded.
@@ -461,24 +593,42 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(resp.Body)
-		return fmt.Errorf("ollama %d: %s", resp.StatusCode, strings.TrimSpace(buf.String()))
+		return nativeHTTPError(resp)
 	}
 	sc := bufio.NewScanner(resp.Body)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxNativeLine)
+	var totalBytes, frames int
+	terminal := false
 	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		totalBytes += len(line) + 1
+		frames++
+		if totalBytes > maxNativeStream || frames > maxNativeFrames {
+			return fmt.Errorf("ollama pull stream exceeds protocol limits")
+		}
+		if terminal {
+			return fmt.Errorf("ollama pull stream contains data after the terminal frame")
+		}
 		var p struct {
 			Status    string `json:"status"`
 			Error     string `json:"error"`
 			Total     int64  `json:"total"`
 			Completed int64  `json:"completed"`
 		}
-		if json.Unmarshal(bytes.TrimSpace(sc.Bytes()), &p) != nil {
-			continue
+		if err := decodeJSONFrame(line, &p); err != nil {
+			return fmt.Errorf("ollama pull frame: %w", err)
 		}
 		if p.Error != "" {
 			return fmt.Errorf("pull: %s", p.Error)
+		}
+		if p.Total < 0 || p.Completed < 0 || (p.Total > 0 && p.Completed > p.Total) {
+			return fmt.Errorf("ollama pull frame contains invalid progress")
+		}
+		if p.Status == "success" {
+			terminal = true
 		}
 		if progress != nil && p.Status != "" {
 			pct := -1
@@ -488,7 +638,13 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 			progress(p.Status, pct)
 		}
 	}
-	return sc.Err()
+	if err := sc.Err(); err != nil {
+		return fmt.Errorf("ollama pull stream: %w", err)
+	}
+	if !terminal {
+		return fmt.Errorf("ollama pull stream ended before a success receipt")
+	}
+	return nil
 }
 
 // Version asks the server, falling back to the CLI. The server's answer wins:
@@ -503,7 +659,7 @@ func (c *Client) Version(ctx context.Context) string {
 		var v struct {
 			Version string `json:"version"`
 		}
-		if json.NewDecoder(resp.Body).Decode(&v) == nil && v.Version != "" {
+		if resp.StatusCode == http.StatusOK && decodeBoundedJSON(resp.Body, &v) == nil && v.Version != "" {
 			return v.Version
 		}
 	}

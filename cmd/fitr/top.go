@@ -54,7 +54,7 @@ func cmdTopHistory(ctx context.Context, args []string) int {
 			errPrint("history path takes no arguments", "", "fitr top history path")
 			return exitUsage
 		}
-		fmt.Println(record.NewStore(resultsDir()).HistoryDir())
+		fmt.Println(terminalText(record.NewStore(resultsDir()).HistoryDir()))
 		return exitOK
 	case "clear":
 		fs := flag.NewFlagSet("top history clear", flag.ContinueOnError)
@@ -350,6 +350,7 @@ func previewTopRun(args []string) (topRunPreview, error) {
 	adaptive := fs.Bool("adaptive", false, "")
 	_ = fs.Bool("pull", false, "")
 	html := fs.Bool("html", false, "")
+	unsafeExec := fs.Bool("allow-unsafe-exec", false, "")
 	numCtx := fs.Int("ctx", 0, "")
 	_ = fs.Int("q", 0, "")
 	_ = fs.Bool("v", false, "")
@@ -376,6 +377,9 @@ func previewTopRun(args []string) (topRunPreview, error) {
 	}
 	if *checks && *html {
 		return topRunPreview{}, errors.New("--checks-only cannot use --html")
+	}
+	if *checks && *unsafeExec {
+		return topRunPreview{}, errors.New("--checks-only cannot use --allow-unsafe-exec")
 	}
 	level := "default"
 	if *quick {
@@ -630,16 +634,20 @@ func liveFromSession(snapshot session.Snapshot) top.Live {
 
 func loadTopSnapshot(candidate *string) (top.Snapshot, []record.FileWarning, error) {
 	store := record.NewStore(resultsDir())
-	loaded, err := store.LoadAll()
+	history, err := store.LoadAll()
 	if err != nil {
 		return top.Snapshot{}, nil, err
 	}
-	records := loaded.Records
+	current, err := store.LoadCurrent()
+	if err != nil {
+		return top.Snapshot{}, history.Warnings, err
+	}
+	records := history.Records
 	if candidate != nil {
 		if info, statErr := os.Stat(*candidate); statErr == nil && !info.IsDir() {
 			selected, readErr := store.Read(*candidate)
 			if readErr != nil {
-				return top.Snapshot{}, loaded.Warnings, readErr
+				return top.Snapshot{}, history.Warnings, readErr
 			}
 			id := selected.EnsureRunID()
 			found := false
@@ -654,24 +662,37 @@ func loadTopSnapshot(candidate *string) (top.Snapshot, []record.FileWarning, err
 			}
 		}
 	}
-	return buildTopSnapshot(records), loaded.Warnings, nil
+	return buildTopSnapshotWithBoard(records, current.Records), history.Warnings, nil
 }
 
 func buildTopSnapshot(records []*Result) top.Snapshot {
+	return buildTopSnapshotWithBoard(records, records)
+}
+
+func buildTopSnapshotWithBoard(historyRecords, boardRecords []*Result) top.Snapshot {
 	now := time.Now().UTC()
 	snapshot := top.Snapshot{UpdatedAt: now}
+	for _, result := range historyRecords {
+		if result != nil {
+			snapshot.History = append(snapshot.History, presentTopRun(result))
+		}
+	}
 	groups := make(map[string][]top.Run)
 	groupRecords := make(map[string]*Result)
 	seenBoard := make(map[string]bool)
-	for _, result := range records {
+	for _, result := range boardRecords {
 		if result == nil {
 			continue
 		}
 		run := presentTopRun(result)
-		snapshot.History = append(snapshot.History, run)
-		groupKey := result.DeviceKey
-		if groupKey == "" {
-			groupKey = "unknown:" + run.ID
+		// The board is a ranking surface, so only reconciled canonical current
+		// records can enter it. History and explicit paths remain display-only.
+		if len(result.Contamination) > 0 || result.EvidenceIntegrityIssue() != "" {
+			continue
+		}
+		groupKey, err := result.ComparableDeviceKey()
+		if err != nil {
+			continue
 		}
 		boardKey := groupKey + "\x00" + result.Model
 		if seenBoard[boardKey] {
@@ -703,10 +724,7 @@ func buildTopSnapshot(records []*Result) top.Snapshot {
 			title = strings.TrimSpace(title + " | " + representative.Device.Runtime)
 		}
 		note := "same hardware, runtime, and config; rows are comparable"
-		comparable := representative.DeviceKey != ""
-		if !comparable {
-			note = "missing device fingerprint; this run is not rankable"
-		}
+		comparable := true
 		if len(runs) < 2 {
 			if comparable {
 				note = "one saved model for this hardware, runtime, and config"
@@ -722,10 +740,15 @@ func buildTopSnapshot(records []*Result) top.Snapshot {
 func presentTopRun(result *Result) top.Run {
 	started, _ := time.Parse(time.RFC3339Nano, result.StartedAt)
 	scorecard := result.Scorecard
-	if scorecard.Model == "" {
-		if artifact, err := artifactFrom(result); err == nil {
-			scorecard = artifact.Scorecard
-		}
+	if artifact, err := artifactFrom(result); err == nil {
+		scorecard = artifact.Scorecard
+	} else {
+		scorecard = score.ExcludeEvidence(scorecard,
+			"the scoring profile is unavailable, so the stored verdict cannot be reproduced")
+	}
+	scorecard = score.ExcludeContamination(scorecard, result.Contamination)
+	if issue := result.EvidenceIntegrityIssue(); issue != "" {
+		scorecard = score.ExcludeEvidence(scorecard, issue)
 	}
 	verdicts := make([]top.Verdict, 0, len(scorecard.Needs))
 	for _, need := range score.SortedNeeds(scorecard.Needs) {
@@ -742,9 +765,15 @@ func presentTopRun(result *Result) top.Run {
 			serves = append(serves, code)
 		}
 	}
-	warnings := make([]string, 0, len(result.Contamination)+1)
+	warnings := make([]string, 0, len(result.Contamination)+2)
 	for _, contaminated := range result.Contamination {
-		warnings = append(warnings, "resident model: "+presentationModelLabel(contaminated))
+		warnings = append(warnings, "INCONCLUSIVE, resident model: "+presentationModelLabel(contaminated))
+	}
+	if issue := result.EvidenceIntegrityIssue(); issue != "" {
+		warnings = append(warnings, "INCONCLUSIVE, "+issue)
+	}
+	if _, err := result.ComparableDeviceKey(); err != nil {
+		warnings = append(warnings, "INCONCLUSIVE, "+err.Error()+"; excluded from board and comparison")
 	}
 	if result.Profile == "default" {
 		warnings = append(warnings, "uncalibrated default profile")
@@ -767,7 +796,14 @@ func presentTopRun(result *Result) top.Run {
 	for _, sample := range result.Speed {
 		decodeSeries = append(decodeSeries, sample.DecodeTPS)
 	}
-	config := fmt.Sprintf("num_ctx=%d", result.ContextSize())
+	config := fmt.Sprintf("ctx requested=%d", result.ContextSize())
+	if result.DeviceV2 != nil {
+		if result.DeviceV2.Context.EffectiveTokens != nil {
+			config += fmt.Sprintf(" effective=%d", *result.DeviceV2.Context.EffectiveTokens)
+		} else {
+			config += " effective=unverified"
+		}
+	}
 	if backend := result.Device.GPUBackend; backend != "" {
 		config += " | " + backend
 	}
@@ -785,9 +821,9 @@ func presentTopRun(result *Result) top.Run {
 		nextCommand = "fitr apply " + modelLabel
 	}
 	deviceID, hardwareID := "", ""
-	if result.DeviceKey != "" {
-		deviceID = privacyID(result.DeviceKey)
-		hardwareID = privacyID(eval.HardwareKey(result.DeviceKey))
+	if comparableKey, err := result.ComparableDeviceKey(); err == nil {
+		deviceID = privacyID(comparableKey)
+		hardwareID = privacyID(eval.HardwareKey(result.Device.Key()))
 	}
 	return top.Run{
 		ID: result.StableRunID(), Model: modelLabel,

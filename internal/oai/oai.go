@@ -21,6 +21,7 @@ import (
 type Message struct {
 	Role             string     `json:"role"`
 	Content          string     `json:"content"`
+	Refusal          string     `json:"refusal,omitempty"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
 	Name             string     `json:"name,omitempty"`
 	ToolCallID       string     `json:"tool_call_id,omitempty"`
@@ -45,9 +46,6 @@ func FromMessages(msgs []ollama.Message) []Message {
 			ReasoningContent: m.Thinking,
 			ToolCallID:       m.ToolCallID,
 		}
-		if m.Role == "tool" {
-			om.Name = m.ToolName
-		}
 		for _, tc := range m.ToolCalls {
 			otc := ToolCall{ID: tc.ID, Type: "function"}
 			otc.Function.Name = tc.Function.Name
@@ -68,7 +66,11 @@ func FromMessages(msgs []ollama.Message) []Message {
 
 // ToMessage converts an OpenAI response message back to the harness shape.
 func ToMessage(got Message) ollama.Message {
-	out := ollama.Message{Role: got.Role, Content: got.Content, Thinking: got.ReasoningContent}
+	content := got.Content
+	if got.Refusal != "" {
+		content += got.Refusal
+	}
+	out := ollama.Message{Role: got.Role, Content: content, Thinking: got.ReasoningContent}
 	for _, otc := range got.ToolCalls {
 		var tc ollama.ToolCall
 		tc.ID = otc.ID
@@ -90,10 +92,19 @@ func ToMessage(got Message) ollama.Message {
 // ecosystem (llama-server, vLLM, LM Studio, SGLang) - and they are the knobs
 // that pin reproducibility, so they are sent.
 func ChatPayload(model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) map[string]any {
+	payload := StrictChatPayload(model, msgs, tools, s)
+	payload["top_k"] = s.TopK
+	payload["repeat_penalty"] = s.RepeatPenalty
+	return payload
+}
+
+// StrictChatPayload contains only fields defined by the OpenAI chat
+// completions protocol. The generic compatible backend uses this shape so a
+// conforming server does not have to tolerate llama.cpp sampler extensions.
+func StrictChatPayload(model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) map[string]any {
 	payload := map[string]any{
 		"model": model, "messages": FromMessages(msgs), "stream": false,
-		"temperature": s.Temperature, "top_k": s.TopK, "seed": s.Seed,
-		"repeat_penalty": s.RepeatPenalty, "max_tokens": s.NumPredict,
+		"temperature": s.Temperature, "seed": s.Seed, "max_tokens": s.NumPredict,
 	}
 	if len(tools) > 0 {
 		payload["tools"] = tools

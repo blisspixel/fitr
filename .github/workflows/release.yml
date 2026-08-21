@@ -10,8 +10,10 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: "1.25" }
       - name: verify tag and source version
         shell: bash
@@ -24,6 +26,12 @@ jobs:
       - run: go vet ./...
       - run: go test ./... -count=1
       - run: go test -race ./... -count=1
+      - name: reachable Go vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      - name: terminal renderer fuzz smoke
+        run: go test ./internal/top -run='^$' -fuzz=FuzzRenderBounds -fuzztime=10s
+      - name: result decoder fuzz smoke
+        run: go test ./internal/record -run='^$' -fuzz=FuzzDecodeRecord -fuzztime=10s
       - run: make dist
       - name: binary size gate
         shell: bash

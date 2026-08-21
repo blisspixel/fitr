@@ -7,6 +7,8 @@ package eval
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"testing"
 
 	"github.com/blisspixel/fitr/internal/llm"
@@ -19,11 +21,19 @@ type fakeTurn struct {
 }
 
 type fakeBackend struct {
-	turns     []fakeTurn
-	i         int
-	gens      []ollama.Metrics
-	gi        int
-	toolsSeen []int // len(tools) per Chat call
+	turns         []fakeTurn
+	i             int
+	gens          []ollama.Metrics
+	gi            int
+	toolsSeen     []int // len(tools) per Chat call
+	generateCalls int
+	chatCalls     int
+	generateErr   error
+	generateErrAt map[int]error
+	chatErrAt     map[int]error
+	showErr       error
+	chatHook      func(int)
+	messagesSeen  [][]ollama.Message
 }
 
 var _ llm.Backend = (*fakeBackend)(nil)
@@ -36,10 +46,20 @@ func (f *fakeBackend) StopAll(ctx context.Context) ([]string, error)         { r
 func (f *fakeBackend) Tags(ctx context.Context) ([]ollama.ModelInfo, error)  { return nil, nil }
 func (f *fakeBackend) PS(ctx context.Context) ([]ollama.RunningModel, error) { return nil, nil }
 func (f *fakeBackend) Show(ctx context.Context, model string) (ollama.ModelInfo, error) {
+	if f.showErr != nil {
+		return ollama.ModelInfo{}, f.showErr
+	}
 	return ollama.ModelInfo{Name: model, Capabilities: []string{"completion", "tools"}}, nil
 }
 
 func (f *fakeBackend) Generate(ctx context.Context, model, prompt string, s ollama.Sampling) (string, ollama.Metrics, error) {
+	f.generateCalls++
+	if err := f.generateErrAt[f.generateCalls]; err != nil {
+		return "", ollama.Metrics{}, err
+	}
+	if f.generateErr != nil {
+		return "", ollama.Metrics{}, f.generateErr
+	}
 	if f.gi >= len(f.gens) {
 		return "ok", ollama.Metrics{}, nil
 	}
@@ -49,6 +69,14 @@ func (f *fakeBackend) Generate(ctx context.Context, model, prompt string, s olla
 }
 
 func (f *fakeBackend) Chat(ctx context.Context, model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) (ollama.Message, ollama.Metrics, error) {
+	f.chatCalls++
+	f.messagesSeen = append(f.messagesSeen, append([]ollama.Message(nil), msgs...))
+	if f.chatHook != nil {
+		f.chatHook(f.chatCalls)
+	}
+	if err := f.chatErrAt[f.chatCalls]; err != nil {
+		return ollama.Message{}, ollama.Metrics{}, err
+	}
 	f.toolsSeen = append(f.toolsSeen, len(tools))
 	if f.i >= len(f.turns) {
 		return ollama.Message{Role: "assistant", Content: "DONE"}, ollama.Metrics{}, nil
@@ -118,6 +146,29 @@ func TestPersistentDeadCallsAreCounted(t *testing.T) {
 	}
 	if r.DeadCalls != 3 {
 		t.Fatalf("DeadCalls = %d, want 3 - persistence past the error is the failure", r.DeadCalls)
+	}
+}
+
+func TestToolLoopCleanStopRequiresExactDoneToken(t *testing.T) {
+	for _, content := range []string{"not DONE", "I am DONE now", "DONE.", "work is done"} {
+		t.Run(content, func(t *testing.T) {
+			spec := withdrawalSpec(t)
+			backend := &fakeBackend{turns: []fakeTurn{
+				callTurn(ollama.Message{Role: "assistant", Content: content}),
+			}}
+			result, err := RunToolLoop(context.Background(), backend, "m", spec, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Ended != "stopped_without_done" || result.Pass {
+				t.Fatalf("content %q produced ended=%q pass=%v", content, result.Ended, result.Pass)
+			}
+		})
+	}
+	for _, content := range []string{"DONE", " done ", "\r\nDoNe\r\n"} {
+		if !exactDone(content) {
+			t.Fatalf("exact DONE token %q was rejected", content)
+		}
 	}
 }
 
@@ -261,3 +312,173 @@ func TestColdTTFTIsCapturedFromTheLoadingWarmup(t *testing.T) {
 }
 
 func callTurn(m ollama.Message) fakeTurn { return fakeTurn{msg: m} }
+
+func TestUnsafeExecTasksAreSkippedBeforeBackendOrFilesystem(t *testing.T) {
+	spec, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir() + "/not-created"
+	f := &fakeBackend{}
+	r, err := RunExec(context.Background(), f, "m", spec.CodeWrite, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Outcome != OutcomeSkipped || f.generateCalls != 0 {
+		t.Fatalf("outcome=%q generate calls=%d, want skipped before generation", r.Outcome, f.generateCalls)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("unsafe skip created work directory: %v", err)
+	}
+
+	tr, err := RunToolLoop(context.Background(), f, "m", spec.Agentic, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Outcome != OutcomeSkipped || f.chatCalls != 0 {
+		t.Fatalf("outcome=%q chat calls=%d, want skipped before chat", tr.Outcome, f.chatCalls)
+	}
+}
+
+func TestUnsafeExecPreflightFailsBeforeModelGeneration(t *testing.T) {
+	spec, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.CodeWrite.Runner = []string{"shell-not-allowed", "test.py"}
+	f := &fakeBackend{}
+	r, err := RunExec(WithUnsafeExecution(context.Background()), f, "m", spec.CodeWrite, t.TempDir())
+	var typed *Failure
+	if !errors.As(err, &typed) || typed.Kind != FailureExecutorPreflight {
+		t.Fatalf("preflight error = %#v", err)
+	}
+	if r.Outcome != OutcomeError || f.generateCalls != 0 {
+		t.Fatalf("preflight outcome=%q generate calls=%d", r.Outcome, f.generateCalls)
+	}
+}
+
+func TestBackendErrorsPropagateWithoutBecomingModelOutcomes(t *testing.T) {
+	spec, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendErr := errors.New("connection reset")
+
+	refusalBackend := &fakeBackend{generateErrAt: map[int]error{2: backendErr}}
+	refusal, _, err := RunRefusal(context.Background(), refusalBackend, "m", spec.Refusal)
+	var failureErr *Failure
+	if !errors.As(err, &failureErr) || failureErr.Kind != FailureTransport {
+		t.Fatalf("refusal error = %#v, want transport failure", err)
+	}
+	for key, result := range refusal {
+		if result.Outcome != OutcomeError {
+			t.Fatalf("refusal %s transport fault became outcome %q", key, result.Outcome)
+		}
+	}
+
+	checkBackend := &fakeBackend{generateErr: backendErr}
+	check, err := RunCheck(context.Background(), checkBackend, "m", spec.Checks[0], 1)
+	if !errors.As(err, &failureErr) || failureErr.Kind != FailureTransport || check.Outcome != OutcomeError {
+		t.Fatalf("check transport error = %#v outcome=%q", err, check.Outcome)
+	}
+
+	plumbingBackend := &fakeBackend{chatErrAt: map[int]error{1: backendErr}}
+	pr, err := RunPlumbing(context.Background(), plumbingBackend, "m", spec.Plumbing)
+	if !errors.As(err, &failureErr) || failureErr.Kind != FailureTransport {
+		t.Fatalf("plumbing error = %#v, want transport failure", err)
+	}
+	if pr.Outcome != OutcomeError {
+		t.Fatalf("transport error became model outcome %q", pr.Outcome)
+	}
+
+	loopBackend := &fakeBackend{chatErrAt: map[int]error{1: backendErr}}
+	lr, err := RunToolLoop(context.Background(), loopBackend, "m", spec.Withdrawal, t.TempDir())
+	if !errors.As(err, &failureErr) || failureErr.Kind != FailureTransport {
+		t.Fatalf("tool-loop error = %#v, want transport failure", err)
+	}
+	if lr.Ended != "transport_error" || lr.Outcome != OutcomeError {
+		t.Fatalf("tool-loop ended=%q outcome=%q", lr.Ended, lr.Outcome)
+	}
+}
+
+func TestPlumbingFaultMatrixNeverReturnsBinaryEvidence(t *testing.T) {
+	spec, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendErr := errors.New("injected transport fault")
+	validTurns := []fakeTurn{
+		callTurn(callTo("get_weather", `{"city":"Oslo"}`)),
+		callTurn(ollama.Message{Role: "assistant", Content: "minus 3 degrees"}),
+		callTurn(ollama.Message{Role: "assistant", Content: "Paris"}),
+	}
+	for _, test := range []struct {
+		name      string
+		showErr   error
+		chatErrAt map[int]error
+	}{
+		{name: "show", showErr: backendErr},
+		{name: "emit", chatErrAt: map[int]error{1: backendErr}},
+		{name: "roundtrip", chatErrAt: map[int]error{2: backendErr}},
+		{name: "irrelevance", chatErrAt: map[int]error{3: backendErr}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend := &fakeBackend{turns: validTurns, showErr: test.showErr, chatErrAt: test.chatErrAt}
+			result, err := RunPlumbing(context.Background(), backend, "m", spec.Plumbing)
+			var typed *Failure
+			if !errors.As(err, &typed) || typed.Kind != FailureTransport {
+				t.Fatalf("error = %#v", err)
+			}
+			if result.Outcome != OutcomeError {
+				t.Fatalf("outcome = %q, want error", result.Outcome)
+			}
+		})
+	}
+}
+
+func TestPlumbingRoundTripEchoesToolCallID(t *testing.T) {
+	spec, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := callTo("get_weather", `{"city":"Oslo"}`)
+	call.ToolCalls[0].ID = "call_weather_1"
+	backend := &fakeBackend{turns: []fakeTurn{
+		callTurn(call),
+		callTurn(ollama.Message{Role: "assistant", Content: "minus 3 degrees"}),
+		callTurn(ollama.Message{Role: "assistant", Content: "Paris"}),
+	}}
+	if _, err := RunPlumbing(context.Background(), backend, "m", spec.Plumbing); err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.messagesSeen) < 2 || len(backend.messagesSeen[1]) != 3 {
+		t.Fatalf("round-trip messages = %#v", backend.messagesSeen)
+	}
+	toolResult := backend.messagesSeen[1][2]
+	if toolResult.Role != "tool" || toolResult.ToolCallID != "call_weather_1" {
+		t.Fatalf("tool result did not echo tool_call_id: %+v", toolResult)
+	}
+}
+
+func TestToolFilesystemFailureCannotBecomeModelPassOrFail(t *testing.T) {
+	spec := withdrawalSpec(t)
+	dir := t.TempDir()
+	f := &fakeBackend{
+		turns: []fakeTurn{callTurn(callTo("list_files", `{}`))},
+		chatHook: func(call int) {
+			if call == 1 {
+				if err := os.RemoveAll(dir); err != nil {
+					t.Fatalf("remove injected workspace: %v", err)
+				}
+			}
+		},
+	}
+	r, err := RunToolLoop(context.Background(), f, "m", spec, dir)
+	var typed *Failure
+	if !errors.As(err, &typed) || typed.Kind != FailureFixtureIO {
+		t.Fatalf("filesystem failure = %#v", err)
+	}
+	if r.Outcome != OutcomeError || r.Pass {
+		t.Fatalf("filesystem failure became model evidence: %+v", r)
+	}
+}

@@ -6,13 +6,13 @@ body:
     attributes:
       value: |
         Read the [calibration protocol](https://github.com/blisspixel/fitr/blob/main/docs/calibration.md) first.
-        Attach only a `fitr.calibration.pair.v1` file produced by `fitr calibrate --out`.
+        Attach only a `fitr.calibration.pair.v2` file produced by `fitr calibrate --out`.
         Do not attach the raw result JSON from `~/.fitr`.
   - type: input
     id: version
     attributes:
       label: fitr version
-      placeholder: 0.3.0
+      placeholder: 0.4.0
     validations:
       required: true
   - type: input
@@ -38,6 +38,8 @@ body:
         - label: Both runs used the same physical device, runtime configuration, context, seedset, and fixed repeat count.
           required: true
         - label: Both runs used at least 10 instances per task.
+          required: true
+        - label: I understand this unsigned pair is an exploratory lead for written review, not authenticated campaign evidence.
           required: true
         - label: I reviewed the artifact and did not attach raw prompts, model responses, hostnames, or local paths.
           required: true

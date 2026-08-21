@@ -12,11 +12,13 @@ The *same model*, *same tag*, on the *same laptop* went from "crashes on
 load" to "daily driver" because of a GPU driver update. Nothing about the
 model changed.
 
-Every result embeds a fingerprint: GPU, driver, serving runtime and version,
-inference backend, and the config that actually moves numbers
+Every result embeds a fingerprint: OS, CPU, RAM, GPU, driver, serving runtime
+and version, inference placement, and the config that actually moves numbers
 (`OLLAMA_FLASH_ATTENTION`, `OLLAMA_KV_CACHE_TYPE`). `fitr board` groups by
-fingerprint and **refuses to rank across groups**. Change the driver and your
-old numbers are explicitly void.
+fingerprint and **refuses to rank across groups**. Requested context and the
+runtime-reported effective allocation are separate facts in fingerprint v2;
+an unverified effective context is visible in History but cannot enter a
+ranking. Change the driver and your old numbers are explicitly void.
 
 ## 2. "Is it good" is unanswerable. "Does it serve need X" is answerable.
 
@@ -26,7 +28,7 @@ and fail another, and one number cannot say that.
 | Need | Why separate |
 |---|---|
 | **fast + pretty good** | responsiveness; TTFT-dominated |
-| **great coding / reasoning** | executed assertions plus computed-answer checks, never judged by a model |
+| **great coding / reasoning** | computed-answer checks today; executable assertions stay INCONCLUSIVE until isolated |
 | **emits valid structured output** | quantization breaks JSON before prose - the earliest damage signal |
 | **follows exact instructions** | verifiable constraints, graded by code |
 | **no filtering / low refusal** | a first-class need, not a footnote |
@@ -36,7 +38,9 @@ and fail another, and one number cannot say that.
 | **reads images** | a capability, not a grade |
 | **your tasks** | `~/.fitr/tasks/*.json` - the built-ins are defaults, your work is the point |
 
-Verdicts are **PASS / FAIL / SKIP / n/a / BLKD**. `SKIP` means not measured.
+Verdicts are **PASS / FAIL / INCONCLUSIVE / SKIP / n/a / BLKD**. `SKIP` means
+not measured. `INCONCLUSIVE` means an observation exists but its integrity or
+uncertainty cannot support either binary claim.
 `n/a` means the model never claimed it - a text-only model is not *bad at
 vision*. `BLKD` means we could not fairly test it.
 
@@ -125,7 +129,9 @@ prints "not recommended."
 - **`advise` estimates by default.** The default is weights plus KV from GGUF
   metadata, with excluded compute buffers disclosed. `--load` observes an
   Ollama resident allocation and `--fit` uses `llama-fit-params` dummy
-  allocation. Unmeasured VRAM or architecture is SKIP, not a name-to-GB guess.
+  allocation. Hybrid recurrent architectures require one of those measured
+  paths, and split GGUFs require every shard. Unmeasured VRAM, incomplete
+  weights, or architecture is SKIP, not a name-to-GB guess.
 - **Sharing is opt-in.** `fitr export` / `--html` write a self-contained
   page that includes the fingerprint. JSON under `~/.fitr` stays local.
 

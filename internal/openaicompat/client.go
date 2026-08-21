@@ -38,25 +38,71 @@ import (
 const DefaultURL = "http://127.0.0.1:1234"
 
 type Client struct {
-	BaseURL string
-	HTTP    *http.Client
+	baseURL     string
+	origin      string
+	http        *http.Client
+	apiKey      string
+	modelSHA256 string
+	configErr   error
 }
 
 var _ llm.Backend = (*Client)(nil)
+var _ llm.ModelDigestVerifier = (*Client)(nil)
 
 func New() *Client {
 	base := os.Getenv("FITR_OPENAI_URL")
 	if base == "" {
 		base = DefaultURL
 	}
-	return &Client{
-		BaseURL: strings.TrimRight(base, "/"),
-		HTTP:    &http.Client{Timeout: 60 * time.Minute},
+	c, err := NewAt(base, CredentialsFromEnvironment)
+	if err != nil {
+		return &Client{baseURL: strings.TrimRight(base, "/"), configErr: err,
+			http: &http.Client{Timeout: 60 * time.Minute}}
 	}
+	return c
+}
+
+// NewAt binds a client to one final origin for its lifetime. Credentials are
+// captured once and can be disabled for discovery of an untrusted endpoint.
+func NewAt(baseURL string, credentialMode CredentialMode) (*Client, error) {
+	return newAtWithHTTP(baseURL, credentialMode, &http.Client{Timeout: 60 * time.Minute})
+}
+
+func newAtWithHTTP(baseURL string, credentialMode CredentialMode, httpClient *http.Client) (*Client, error) {
+	u, canonical, err := parseBaseURL(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	if credentialMode != CredentialsDisabled && credentialMode != CredentialsFromEnvironment {
+		return nil, fmt.Errorf("openai-compat credential mode is invalid")
+	}
+	key := ""
+	if credentialMode == CredentialsFromEnvironment {
+		key = envAPIKey(canonical)
+		if strings.ContainsAny(key, "\r\n") {
+			return nil, fmt.Errorf("openai-compat API key contains a line break")
+		}
+		if key != "" && !bearerTransportSafe(u) {
+			return nil, fmt.Errorf("openai-compat refuses to send a bearer credential over a non-loopback, non-HTTPS endpoint")
+		}
+	}
+	pin := strings.TrimSpace(os.Getenv("FITR_OPENAI_MODEL_SHA256"))
+	if pin != "" {
+		pin, err = normalizeModelDigest(pin)
+		if err != nil {
+			return nil, fmt.Errorf("FITR_OPENAI_MODEL_SHA256: %w", err)
+		}
+	}
+	origin := urlOrigin(u)
+	return &Client{
+		baseURL: canonical, origin: origin,
+		http:   cloneHTTPClient(httpClient, origin, key != ""),
+		apiKey: key, modelSHA256: pin,
+	}, nil
 }
 
 func (c *Client) Name() string { return "openai" }
-func (c *Client) URL() string  { return c.BaseURL }
+func (c *Client) URL() string  { return c.baseURL }
 
 // Accel is unknown on the generic OpenAI surface; returning empty is the
 // honest answer (design rule 6). vLLM's /version does not name the GPU API.
@@ -65,8 +111,11 @@ func (c *Client) Accel(ctx context.Context) string { return "" }
 func (c *Client) Reachable(ctx context.Context) bool {
 	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/v1/models", nil)
-	resp, err := c.HTTP.Do(req)
+	req, err := c.newRequest(cctx, http.MethodGet, "/v1/models", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := c.do(req)
 	if err != nil {
 		return false
 	}
@@ -79,13 +128,16 @@ func (c *Client) Reachable(ctx context.Context) bool {
 func (c *Client) Version(ctx context.Context) string {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/version", nil)
-	if resp, err := c.HTTP.Do(req); err == nil {
+	req, err := c.newRequest(cctx, http.MethodGet, "/version", nil)
+	if err != nil {
+		return "openai-compat"
+	}
+	if resp, err := c.do(req); err == nil {
 		defer resp.Body.Close()
 		var v struct {
 			Version string `json:"version"`
 		}
-		if resp.StatusCode == 200 && json.NewDecoder(resp.Body).Decode(&v) == nil && v.Version != "" {
+		if resp.StatusCode == 200 && decodeOneJSON(resp.Body, &v) == nil && v.Version != "" {
 			return "openai-compat " + v.Version
 		}
 	}
@@ -93,27 +145,46 @@ func (c *Client) Version(ctx context.Context) string {
 }
 
 func (c *Client) Tags(ctx context.Context) ([]ollama.ModelInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/v1/models", nil)
+	req, err := c.newRequest(ctx, http.MethodGet, "/v1/models", nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.responseError(resp)
+	}
 	var r struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID     string `json:"id"`
+			Digest string `json:"digest"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, err
+	if err := decodeOneJSON(resp.Body, &r); err != nil {
+		return nil, fmt.Errorf("openai-compat models response: %w", err)
+	}
+	if r.Data == nil {
+		return nil, fmt.Errorf("openai-compat models response is missing the data array")
 	}
 	out := make([]ollama.ModelInfo, 0, len(r.Data))
+	seen := make(map[string]bool, len(r.Data))
 	for _, m := range r.Data {
+		if m.ID == "" || strings.TrimSpace(m.ID) != m.ID {
+			return nil, fmt.Errorf("openai-compat models response contains an invalid model id %q", m.ID)
+		}
+		if seen[m.ID] {
+			return nil, fmt.Errorf("openai-compat models response contains duplicate model id %q", m.ID)
+		}
+		seen[m.ID] = true
+		digest, err := normalizeModelDigest(m.Digest)
+		if err != nil {
+			return nil, fmt.Errorf("openai-compat model %q: %w", m.ID, err)
+		}
 		out = append(out, ollama.ModelInfo{
-			Name: m.ID, Capabilities: []string{"completion", "tools"},
+			Name: m.ID, ReportedDigest: digest, Capabilities: []string{"completion", "tools"},
 		})
 	}
 	return out, nil
@@ -142,6 +213,7 @@ type completionsChunk struct {
 		FinishReason string `json:"finish_reason"`
 		Delta        struct {
 			Content string `json:"content"`
+			Refusal string `json:"refusal"`
 		} `json:"delta"`
 	} `json:"choices"`
 	Usage *struct {
@@ -155,16 +227,16 @@ type completionsChunk struct {
 // chat-only servers. stream_options.include_usage asks for token counts in
 // the final chunk; both vLLM and LM Studio honor it.
 func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sampling) (string, ollama.Metrics, error) {
+	start := time.Now()
+	if s.Format == "json" {
+		return c.generateViaChat(ctx, model, prompt, s, start)
+	}
 	payload := map[string]any{
 		"model": model, "prompt": prompt, "stream": true,
 		"max_tokens": s.NumPredict, "temperature": s.Temperature,
-		"top_k": s.TopK, "seed": s.Seed, "repeat_penalty": s.RepeatPenalty,
+		"seed":           s.Seed,
 		"stream_options": map[string]bool{"include_usage": true},
 	}
-	if s.Format == "json" {
-		payload["response_format"] = map[string]string{"type": "json_object"}
-	}
-	start := time.Now()
 	resp, err := c.post(ctx, "/v1/completions", payload)
 	if err != nil {
 		return "", ollama.Metrics{}, err
@@ -175,7 +247,7 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", ollama.Metrics{}, httpError(resp)
+		return "", ollama.Metrics{}, c.responseError(resp)
 	}
 	return c.consumeStream(resp, start, func(ch completionsChunk) (string, string) {
 		if len(ch.Choices) == 0 {
@@ -186,28 +258,22 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 }
 
 func (c *Client) generateViaChat(ctx context.Context, model, prompt string, s ollama.Sampling, start time.Time) (string, ollama.Metrics, error) {
-	payload := map[string]any{
-		"model": model, "messages": []map[string]string{{"role": "user", "content": prompt}},
-		"stream": true, "max_tokens": s.NumPredict, "temperature": s.Temperature,
-		"top_k": s.TopK, "seed": s.Seed, "repeat_penalty": s.RepeatPenalty,
-		"stream_options": map[string]bool{"include_usage": true},
-	}
-	if s.Format == "json" {
-		payload["response_format"] = map[string]string{"type": "json_object"}
-	}
+	payload := oai.StrictChatPayload(model, []ollama.Message{{Role: "user", Content: prompt}}, nil, s)
+	payload["stream"] = true
+	payload["stream_options"] = map[string]bool{"include_usage": true}
 	resp, err := c.post(ctx, "/v1/chat/completions", payload)
 	if err != nil {
 		return "", ollama.Metrics{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", ollama.Metrics{}, httpError(resp)
+		return "", ollama.Metrics{}, c.responseError(resp)
 	}
 	return c.consumeStream(resp, start, func(ch completionsChunk) (string, string) {
 		if len(ch.Choices) == 0 {
 			return "", ""
 		}
-		return ch.Choices[0].Delta.Content, ch.Choices[0].FinishReason
+		return ch.Choices[0].Delta.Content + ch.Choices[0].Delta.Refusal, ch.Choices[0].FinishReason
 	})
 }
 
@@ -222,21 +288,38 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 	var lastTok time.Time
 	var usagePrompt, usageCompletion int
 	finish := ""
+	seenUsage := false
+	seenDone := false
+	var eventData []string
+	var eventBytes, eventCount, totalBytes int
 
-	sc := bufio.NewScanner(resp.Body)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
-		line = bytes.TrimPrefix(line, []byte("data: "))
-		if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
-			continue
+	dispatch := func() (bool, error) {
+		if len(eventData) == 0 {
+			return false, nil
+		}
+		eventCount++
+		if eventCount > maxSSEEvents {
+			return false, fmt.Errorf("openai-compat: SSE event count exceeds %d", maxSSEEvents)
+		}
+		data := []byte(strings.Join(eventData, "\n"))
+		eventData = eventData[:0]
+		eventBytes = 0
+		if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+			seenDone = true
+			return true, nil
+		}
+		if apiErr := c.payloadError(data, resp.Header); apiErr != nil {
+			return false, apiErr
 		}
 		var ch completionsChunk
-		if err := json.Unmarshal(line, &ch); err != nil {
-			continue
+		if err := json.Unmarshal(data, &ch); err != nil {
+			return false, fmt.Errorf("openai-compat: decode SSE chunk: %w", err)
 		}
 		text, fr := pick(ch)
 		if text != "" {
+			if len(text) > maxGeneratedOutput-sb.Len() {
+				return false, fmt.Errorf("openai-compat: generated output exceeds %d bytes", maxGeneratedOutput)
+			}
 			if ttft == 0 {
 				ttft = time.Since(start).Seconds()
 			}
@@ -247,11 +330,67 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 			finish = fr
 		}
 		if ch.Usage != nil {
+			seenUsage = true
 			usagePrompt, usageCompletion = ch.Usage.PromptTokens, ch.Usage.CompletionTokens
 		}
+		return false, nil
+	}
+
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64*1024), maxSSELine)
+	for sc.Scan() {
+		line := strings.TrimSuffix(sc.Text(), "\r")
+		totalBytes += len(line) + 1
+		if totalBytes > maxSSETotal {
+			return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: SSE stream exceeds %d bytes", maxSSETotal)
+		}
+		if line == "" {
+			stop, err := dispatch()
+			if err != nil {
+				return sb.String(), ollama.Metrics{}, err
+			}
+			if stop {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		field, value, ok := strings.Cut(line, ":")
+		if !ok || field != "data" {
+			continue
+		}
+		if strings.HasPrefix(value, " ") {
+			value = strings.TrimPrefix(value, " ")
+		}
+		nextBytes := eventBytes + len(value)
+		if len(eventData) > 0 {
+			nextBytes++
+		}
+		if nextBytes > maxSSEEvent {
+			return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: SSE event exceeds %d bytes", maxSSEEvent)
+		}
+		eventData = append(eventData, value)
+		eventBytes = nextBytes
 	}
 	if err := sc.Err(); err != nil {
-		return sb.String(), ollama.Metrics{}, err
+		return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: read SSE stream: %w", err)
+	}
+	if !seenDone {
+		stop, err := dispatch()
+		if err != nil {
+			return sb.String(), ollama.Metrics{}, err
+		}
+		if stop {
+			seenDone = true
+		}
+	}
+	if !seenDone {
+		return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: stream ended before [DONE]")
+	}
+	if !seenUsage {
+		return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: stream ended without requested usage")
 	}
 
 	m := ollama.Metrics{
@@ -275,15 +414,16 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 // ---------------------------------------------------------------- chat
 func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) (ollama.Message, ollama.Metrics, error) {
 	start := time.Now()
-	resp, err := c.post(ctx, "/v1/chat/completions", oai.ChatPayload(model, msgs, tools, s))
+	resp, err := c.post(ctx, "/v1/chat/completions", oai.StrictChatPayload(model, msgs, tools, s))
 	if err != nil {
 		return ollama.Message{}, ollama.Metrics{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return ollama.Message{}, ollama.Metrics{}, httpError(resp)
+		return ollama.Message{}, ollama.Metrics{}, c.responseError(resp)
 	}
 	var r struct {
+		Error   json.RawMessage `json:"error"`
 		Choices []struct {
 			Message      oai.Message `json:"message"`
 			FinishReason string      `json:"finish_reason"`
@@ -293,18 +433,28 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 			CompletionTokens int `json:"completion_tokens"`
 		} `json:"usage"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	if err := decodeOneJSON(resp.Body, &r); err != nil {
 		return ollama.Message{}, ollama.Metrics{}, err
+	}
+	if len(r.Error) > 0 && string(r.Error) != "null" {
+		body := append([]byte(`{"error":`), r.Error...)
+		body = append(body, '}')
+		return ollama.Message{}, ollama.Metrics{}, c.apiError(http.StatusOK, resp.Header, body, false)
 	}
 	if len(r.Choices) == 0 {
 		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf("openai-compat: no choices in response")
 	}
+	if r.Choices[0].Message.Role != "assistant" {
+		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(
+			"openai-compat: first choice has role %q, want assistant", r.Choices[0].Message.Role)
+	}
 	m := ollama.Metrics{
-		WallSeconds:  round(time.Since(start).Seconds(), 2),
-		EvalCount:    r.Usage.CompletionTokens,
-		PromptTokens: r.Usage.PromptTokens,
-		DoneReason:   r.Choices[0].FinishReason,
-		Truncated:    r.Choices[0].FinishReason == "length",
+		WallSeconds:   round(time.Since(start).Seconds(), 2),
+		EvalCount:     r.Usage.CompletionTokens,
+		PromptTokens:  r.Usage.PromptTokens,
+		DoneReason:    r.Choices[0].FinishReason,
+		Truncated:     r.Choices[0].FinishReason == "length",
+		ClientDerived: true,
 	}
 	return oai.ToMessage(r.Choices[0].Message), m, nil
 }
@@ -314,18 +464,12 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+path, bytes.NewReader(b))
+	req, err := c.newRequest(ctx, http.MethodPost, path, bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return c.HTTP.Do(req)
-}
-
-func httpError(resp *http.Response) error {
-	buf := new(bytes.Buffer)
-	buf.ReadFrom(resp.Body)
-	return fmt.Errorf("openai-compat %d: %s", resp.StatusCode, strings.TrimSpace(buf.String()))
+	return c.do(req)
 }
 
 func round(v float64, places int) float64 {

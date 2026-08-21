@@ -1,8 +1,10 @@
 package eval
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -225,6 +227,57 @@ func TestUserChecksLoadFromDir(t *testing.T) {
 	write("broken.json", `{"id": "oops", "kind": "check"`)
 	if _, err := LoadUserChecks(dir); err == nil {
 		t.Fatal("a malformed user task must be a hard error, not a silently dropped task")
+	}
+}
+
+func TestUserChecksRejectExecutableIntent(t *testing.T) {
+	tests := map[string]string{
+		"case-insensitive kind": `{"id":"unsafe","kind":" EXEC "}`,
+	}
+	for kind := range executableUserTaskKinds {
+		tests["kind "+kind] = `{"id":"unsafe","kind":` + strconv.Quote(kind) + `}`
+	}
+	for _, field := range executableUserTaskFields {
+		tests["field "+field] = `{"id":"unsafe","kind":"check",` + strconv.Quote(field) + `:true}`
+	}
+
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := writeFile(dir, "unsafe.json", body); err != nil {
+				t.Fatal(err)
+			}
+			got, err := LoadUserChecks(dir)
+			if err == nil || got != nil {
+				t.Fatalf("got checks=%v error=%v, want a hard unsafe-task error", got, err)
+			}
+			var unsafe *Failure
+			if !errors.As(err, &unsafe) || unsafe.Kind != FailureUnsafeTask {
+				t.Fatalf("error = %#v, want %q failure", err, FailureUnsafeTask)
+			}
+		})
+	}
+}
+
+func TestUserChecksRejectUnknownTopLevelFields(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeFile(dir, "typo.json", `{
+	  "id":"typo", "kind":"check", "family":"static", "num_predict":20,
+	  "runer":["python"],
+	  "params":{"prompt":"Reply OK", "grader":{"type":"exact", "expected":"OK"}}
+	}`); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadUserChecks(dir)
+	if err == nil || got != nil {
+		t.Fatalf("got checks=%v error=%v, want unknown-field error", got, err)
+	}
+	if !strings.Contains(err.Error(), `unknown field "runer"`) {
+		t.Fatalf("error = %q, want the unknown field named", err)
+	}
+	var invalid *Failure
+	if !errors.As(err, &invalid) || invalid.Kind != FailureInvalidSpec {
+		t.Fatalf("error = %#v, want %q failure", err, FailureInvalidSpec)
 	}
 }
 

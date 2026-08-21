@@ -19,8 +19,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,14 +55,16 @@ const (
 )
 
 func errPrint(msg, note, hint string) {
-	fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+	fmt.Fprintf(os.Stderr, "error: %s\n", render.SingleLine(msg))
 	if note != "" {
-		fmt.Fprintf(os.Stderr, " note: %s\n", note)
+		fmt.Fprintf(os.Stderr, " note: %s\n", render.SingleLine(note))
 	}
 	if hint != "" {
-		fmt.Fprintf(os.Stderr, " hint: %s\n", hint)
+		fmt.Fprintf(os.Stderr, " hint: %s\n", render.SingleLine(hint))
 	}
 }
+
+func terminalText(value string) string { return render.SingleLine(value) }
 
 func usage() {
 	fmt.Fprint(os.Stderr, `fitr `+version+` - is this local model any good ON THIS DEVICE?
@@ -89,12 +93,18 @@ flags:
   --display  auto|rich|plain|json|none   output mode (default auto)
   --backend  auto|ollama|llama-server|openai   serving runtime (default auto-detect)
   --pull     fetch a missing model first (Ollama; HF links pull automatically)
+  --allow-unsafe-exec  run unisolated built-in code diagnostics; never score them
   -k         repeats per noisy task (default 3; 1 quick; 5 checks-only)
              A single run is not a measurement: identical configs vary 10-20pp.
   -q         quiet (repeat for silent)      -v  verbose
 
 exit codes:
   0 ok   1 error   2 usage   3 a need FAILED   130 interrupted
+
+environment:
+  FITR_OPENAI_URL       OpenAI-compatible endpoint
+  FITR_OPENAI_API_KEY   bearer token; kept out of command history and process arguments
+  FITR_OPENAI_MODEL_SHA256  independently obtained model digest required for measured OpenAI-compatible runs
 
 examples:
   fitr run qwen3-coder:30b --full
@@ -199,11 +209,34 @@ func permute(args []string) []string {
 func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
-	case "k", "n", "profile", "display", "q", "backend", "seedset", "vram-gb", "ctx", "out":
+	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out":
 		return true
 	}
 	return false
 }
+
+type countFlag int
+
+func (c *countFlag) String() string { return strconv.Itoa(int(*c)) }
+
+func (c *countFlag) Set(value string) error {
+	switch value {
+	case "true":
+		*c = *c + 1
+		return nil
+	case "false":
+		*c = 0
+		return nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return fmt.Errorf("quiet level must be a non-negative integer")
+	}
+	*c = countFlag(n)
+	return nil
+}
+
+func (*countFlag) IsBoolFlag() bool { return true }
 
 // newBackend resolves which serving runtime to measure through.
 // Selection order: --backend flag, then $FITR_BACKEND, then auto-probe
@@ -251,10 +284,16 @@ func newBackendWithDisplay(ctx context.Context, model, kind string, pull bool, d
 				disp.Note(message, "warn")
 			} else {
 				fmt.Fprintf(os.Stderr, "! also found %s - using %s at %s; set --backend or a URL env to pick\n",
-					strings.Join(extra, ", "), found[0].Kind, found[0].URL)
+					terminalText(strings.Join(extra, ", ")), terminalText(found[0].Kind), terminalText(found[0].URL))
 			}
 		}
-		return checkModelWithDisplay(ctx, backendAt(found[0].Kind, found[0].URL), model, pull, disp)
+		b, err := backendAt(found[0].Kind, found[0].URL)
+		if err != nil {
+			backendError(disp, "could not configure discovered runtime", err.Error(),
+				"set --backend and the matching endpoint environment variable explicitly")
+			return nil, exitError
+		}
+		return checkModelWithDisplay(ctx, b, model, pull, disp)
 	case "ollama":
 		o := ollama.New()
 		if !o.Reachable(ctx) {
@@ -400,6 +439,107 @@ func sameServedModel(want, have string) bool {
 	return trim(want) == trim(have)
 }
 
+type resolvedRunModel struct {
+	Name     string
+	Info     ollama.ModelInfo
+	Identity record.ModelIdentity
+}
+
+// selectResolvedModel makes the runtime listing authoritative. Mutable user
+// aliases may select one exact listing, but ambiguous or absent selections are
+// rejected. llama-server is the only exception because it serves exactly one
+// launch-time model and ignores the request model field.
+func selectResolvedModel(backend, requested string, models []ollama.ModelInfo) (ollama.ModelInfo, error) {
+	var matches []ollama.ModelInfo
+	for _, candidate := range models {
+		if strings.TrimSpace(candidate.Name) != "" && sameServedModel(requested, candidate.Name) {
+			matches = append(matches, candidate)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return ollama.ModelInfo{}, fmt.Errorf("model %q resolves to more than one runtime entry", requested)
+	}
+	if backend == "llama-server" && len(models) == 1 && strings.TrimSpace(models[0].Name) != "" {
+		return models[0], nil
+	}
+	return ollama.ModelInfo{}, fmt.Errorf("model %q did not resolve to an exact runtime entry", requested)
+}
+
+func resolveRunModel(ctx context.Context, b llm.Backend, requested string) (resolvedRunModel, error) {
+	models, err := b.Tags(ctx)
+	if err != nil {
+		return resolvedRunModel{}, fmt.Errorf("resolve model from %s: %w", b.Name(), err)
+	}
+	selected, err := selectResolvedModel(b.Name(), requested, models)
+	if err != nil {
+		return resolvedRunModel{}, err
+	}
+	resolved := selected.Name
+	info := selected
+	shown, err := b.Show(ctx, resolved)
+	if err != nil {
+		return resolvedRunModel{}, fmt.Errorf("inspect resolved model %q: %w", resolved, err)
+	}
+	info = mergeModelInfo(selected, shown)
+	info.Name = resolved
+	if verifier, ok := b.(llm.ModelDigestVerifier); ok {
+		digest, err := verifier.VerifyModelDigest(resolved, info.ReportedDigest)
+		if err != nil {
+			return resolvedRunModel{}, fmt.Errorf("verify resolved model %q: %w", resolved, err)
+		}
+		info.Digest = digest
+	}
+	runtimeVersion := strings.TrimSpace(b.Version(ctx))
+	if runtimeVersion == "" {
+		runtimeVersion = b.Name() + " (version unavailable)"
+	}
+	localPath := info.Path
+	identity, err := record.NewModelIdentity(presentationModelLabel(requested), resolved, b.Name(), runtimeVersion,
+		info.Digest, localPath, info.Size)
+	if err != nil {
+		return resolvedRunModel{}, err
+	}
+	// The content digest identifies a local artifact without persisting its
+	// directory. Paths remain process-local inspection inputs, never results.
+	info.Path = ""
+	return resolvedRunModel{Name: resolved, Info: info, Identity: identity}, nil
+}
+
+func mergeModelInfo(listed, shown ollama.ModelInfo) ollama.ModelInfo {
+	out := listed
+	if shown.Size > 0 {
+		out.Size = shown.Size
+	}
+	if shown.Digest != "" {
+		out.Digest = shown.Digest
+	}
+	if shown.ReportedDigest != "" {
+		out.ReportedDigest = shown.ReportedDigest
+	}
+	if shown.Path != "" {
+		out.Path = shown.Path
+	}
+	if len(shown.Capabilities) > 0 {
+		out.Capabilities = shown.Capabilities
+	}
+	if len(shown.Info) > 0 {
+		out.Info = shown.Info
+	}
+	if shown.Details.ParameterSize != "" {
+		out.Details.ParameterSize = shown.Details.ParameterSize
+	}
+	if shown.Details.QuantizationLevel != "" {
+		out.Details.QuantizationLevel = shown.Details.QuantizationLevel
+	}
+	if shown.Details.Family != "" {
+		out.Details.Family = shown.Details.Family
+	}
+	return out
+}
+
 // checkModel verifies the model label against what the backend serves. On
 // Ollama a missing model is a hard error with a pull hint - or an automatic
 // pull with progress when the caller allows it; a single-model server ignores
@@ -421,7 +561,7 @@ func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pul
 	var near []string
 	base := strings.SplitN(model, ":", 2)[0]
 	for _, t := range tags {
-		if t.Name == model {
+		if sameServedModel(model, t.Name) {
 			found = true
 		}
 		if strings.Contains(t.Name, base) {
@@ -442,15 +582,15 @@ func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pul
 			if disp != nil {
 				disp.Note("--pull is an Ollama feature; "+b.Name()+" serves whatever is already loaded", "warn")
 			} else {
-				fmt.Fprintf(os.Stderr, "! --pull is an Ollama feature; %s serves whatever is already loaded\n", b.Name())
+				fmt.Fprintf(os.Stderr, "! --pull is an Ollama feature; %s serves whatever is already loaded\n", terminalText(b.Name()))
 			}
 		}
-		message := fmt.Sprintf("%s serves %q, not %q; results will use the requested model label", b.Name(), tags[0].Name, model)
+		message := fmt.Sprintf("%s serves %q, not %q; the run manifest will record the resolved model", b.Name(), tags[0].Name, model)
 		if disp != nil {
 			disp.Note(message, "warn")
 		} else {
-			fmt.Fprintf(os.Stderr, "! %s serves %q, not %q - results will be recorded under %q\n",
-				b.Name(), tags[0].Name, model, model)
+			fmt.Fprintf(os.Stderr, "! %s serves %q, not %q - the run manifest will record %q\n",
+				terminalText(b.Name()), terminalText(tags[0].Name), terminalText(model), terminalText(tags[0].Name))
 		}
 		return b, exitOK
 	}
@@ -466,20 +606,20 @@ func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pul
 			if disp != nil {
 				disp.Phase("pull", src)
 			} else {
-				fmt.Fprintf(os.Stderr, "  pulling %s from %s\n", model, src)
+				fmt.Fprintf(os.Stderr, "  pulling %s from %s\n", terminalText(model), terminalText(src))
 			}
 			last := ""
 			err := o.Pull(ctx, model, func(status string, pct int) {
-				line := status
+				line := terminalText(status)
 				if pct >= 0 {
-					line = fmt.Sprintf("%s %d%%", status, pct)
+					line = fmt.Sprintf("%s %d%%", line, pct)
 				}
 				if line != last && disp == nil {
 					fmt.Fprintf(os.Stderr, "\r  %-60s", line)
 					last = line
 				}
 				if live, ok := disp.(liveTelemetry); ok && pct >= 0 {
-					live.LiveProgress(pct, 100, status)
+					live.LiveProgress(pct, 100, terminalText(status))
 				}
 			})
 			if disp != nil {
@@ -530,10 +670,14 @@ func probeBackend(ctx context.Context) llm.Backend {
 	if len(found) == 0 {
 		return ollama.New()
 	}
-	return backendAt(found[0].Kind, found[0].URL)
+	b, err := backendAt(found[0].Kind, found[0].URL)
+	if err != nil {
+		return ollama.New()
+	}
+	return b
 }
 
-func backendAt(kind, url string) llm.Backend {
+func backendAt(kind, url string) (llm.Backend, error) {
 	url = strings.TrimRight(url, "/")
 	switch kind {
 	case "llama-server", "llamaserver":
@@ -541,19 +685,15 @@ func backendAt(kind, url string) llm.Backend {
 		if url != "" {
 			c.BaseURL = url
 		}
-		return c
+		return c, nil
 	case "openai":
-		c := openaicompat.New()
-		if url != "" {
-			c.BaseURL = url
-		}
-		return c
+		return openaicompat.NewAt(url, openaicompat.CredentialsDisabled)
 	default:
 		c := ollama.New()
 		if url != "" {
 			c.BaseURL = url
 		}
-		return c
+		return c, nil
 	}
 }
 
@@ -681,10 +821,10 @@ func cmdAdvise(ctx context.Context, args []string) int {
 			errPrint("--fit needs a GGUF path", "", "pass ./model.gguf, or an Ollama model whose blob path is known")
 			return exitUsage
 		}
-		fmt.Fprintf(os.Stderr, "  llama-fit-params %s\n", ggufPath)
+		fmt.Fprintf(os.Stderr, "  llama-fit-params %s\n", terminalText(ggufPath))
 		used, cannot, err := advise.RunFitParams(ctx, ggufPath, *ctxSize)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, " note: llama-fit-params not used: %s\n", err)
+			fmt.Fprintf(os.Stderr, " note: llama-fit-params not used: %s\n", terminalText(err.Error()))
 		} else {
 			in.FitB, in.FitCannot, in.FitSrc = used, cannot, "llama-fit-params"
 		}
@@ -710,7 +850,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 				if ctxLen <= 0 {
 					ctxLen = 2048
 				}
-				fmt.Fprintf(os.Stderr, "  loading %s at num_ctx=%d to measure resident size\n", model, ctxLen)
+				fmt.Fprintf(os.Stderr, "  loading %s at num_ctx=%d to measure resident size\n", terminalText(model), ctxLen)
 				_, _, err = c.Generate(ctx, model, ".", ollama.Deterministic(1, ctxLen))
 				if err != nil {
 					in.LoadErr = err.Error()
@@ -721,11 +861,12 @@ func cmdAdvise(ctx context.Context, args []string) int {
 						}
 						in.ResidentB = m.Size
 						in.ResidentSrc = "ollama /api/ps after --load"
+						in.ResidentCtx = ctxLen
 						break
 					}
 				}
 				if left, err := c.StopAll(ctx); err == nil && len(left) > 0 {
-					fmt.Fprintf(os.Stderr, " note: still resident: %s\n", strings.Join(left, ", "))
+					fmt.Fprintf(os.Stderr, " note: still resident: %s\n", terminalText(strings.Join(left, ", ")))
 				}
 			}
 		}
@@ -749,10 +890,10 @@ func cmdAdvise(ctx context.Context, args []string) int {
 			if rep.FlagValue > 0 {
 				next = fmt.Sprintf("fitr run %s --ctx %d --full", in.Model, rep.FlagValue)
 			}
-			fmt.Fprintf(os.Stderr, "\n  next   %s\n", next)
+			fmt.Fprintf(os.Stderr, "\n  next   %s\n", terminalText(next))
 			if rep.FlagValue > 0 {
 				fmt.Fprintf(os.Stderr, "         fitr apply %s   after a passing run, to persist num_ctx=%d\n",
-					in.Model, rep.FlagValue)
+					terminalText(in.Model), rep.FlagValue)
 			}
 		}
 	}
@@ -868,7 +1009,7 @@ func cmdTune(ctx context.Context, args []string) int {
 		errPrint("need two saved results", "", "fitr board lists what is on disk")
 		return exitUsage
 	}
-	fmt.Fprintf(os.Stdout, "  %s  vs  %s\n", a.Model, b.Model)
+	fmt.Fprintf(os.Stdout, "  %s  vs  %s\n", terminalText(a.Model), terminalText(b.Model))
 	d := a.Device.Diff(b.Device)
 	if ca, cb := resultNumCtx(a), resultNumCtx(b); ca != cb {
 		d = append([][3]string{{"num_ctx", fmt.Sprintf("%d", ca), fmt.Sprintf("%d", cb)}}, d...)
@@ -879,7 +1020,7 @@ func cmdTune(ctx context.Context, args []string) int {
 	}
 	fmt.Fprintln(os.Stdout, "  fingerprint diffs (these runs are not comparable):")
 	for _, x := range d {
-		fmt.Fprintf(os.Stdout, "    %-22s  %s  ->  %s\n", x[0], emptyDash(x[1]), emptyDash(x[2]))
+		fmt.Fprintf(os.Stdout, "    %-22s  %s  ->  %s\n", terminalText(x[0]), terminalText(emptyDash(x[1])), terminalText(emptyDash(x[2])))
 	}
 	return exitOK
 }
@@ -919,8 +1060,8 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 		fs.SetOutput(os.Stderr)
 	}
 	reportError := func(message, note, hint string) { backendError(supplied, message, note, hint) }
-	quick := fs.Bool("quick", false, "speed+memory+coding+tools")
-	full := fs.Bool("full", false, "adds the 40-turn agentic task")
+	quick := fs.Bool("quick", false, "speed, memory, and plumbing; executable tasks default to SKIP")
+	full := fs.Bool("full", false, "adds long-horizon tasks; executable tasks default to SKIP")
 	checksOnly := fs.Bool("checks-only", false, "generated checks only for paired hardware calibration")
 	k := fs.Int("k", 0, "repeats per noisy task")
 	profileName := fs.String("profile", "", "device profile (default: auto-match)")
@@ -934,7 +1075,10 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 		"(Ollama; supports hf.co/... and pasted Hugging Face URLs)")
 	htmlFlag := fs.Bool("html", false, "write a self-contained HTML artifact next to the JSON")
 	ctxSize := fs.Int("ctx", 0, "request context (default 8192). Apply an advise num_ctx remedy here.")
-	quiet := fs.Int("q", 0, "quiet level")
+	allowUnsafeExec := fs.Bool("allow-unsafe-exec", false,
+		"run unisolated built-in executable diagnostics; observations remain INCONCLUSIVE")
+	var quiet countFlag
+	fs.Var(&quiet, "q", "quiet level")
 	verbose := fs.Bool("v", false, "verbose")
 	if err := fs.Parse(permute(args)); err != nil {
 		if supplied != nil {
@@ -972,6 +1116,11 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 		reportError("--checks-only cannot write a scorecard HTML", "calibration is paired evidence, not a standalone product verdict", "use `fitr calibrate a b --out pair.json` after both runs")
 		return exitUsage
 	}
+	if *checksOnly && *allowUnsafeExec {
+		reportError("--checks-only cannot enable executable diagnostics",
+			"the calibration battery is declarative and does not execute generated code", "remove --allow-unsafe-exec")
+		return exitUsage
+	}
 	model := normalizeModelRef(fs.Arg(0))
 
 	level := "default"
@@ -995,9 +1144,9 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 		reportError("invalid repeat count", "-k must be at least 1", "")
 		return exitUsage
 	}
-	if *quiet > 1 {
+	if quiet > 1 {
 		*mode = "none"
-	} else if (*quiet > 0 || *verbose) && *mode == "auto" {
+	} else if (quiet > 0 || *verbose) && *mode == "auto" {
 		*mode = "plain"
 	}
 
@@ -1025,7 +1174,7 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 	res, err := execute(ctx, c, model, runOpts{
 		level: level, profile: *profileName, seedSet: *seedset,
 		reps: reps, checksReps: checksReps, adaptive: *adaptive,
-		numCtx: *ctxSize,
+		numCtx: *ctxSize, allowUnsafeExec: *allowUnsafeExec,
 	}, disp)
 	if err != nil {
 		if failed, ok := disp.(runFailureTelemetry); ok && ctx.Err() == nil {
@@ -1042,8 +1191,10 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 		}
 		return exitError
 	}
+	model = res.Model
 
 	path, err := save(res)
+	saveErr := err
 	if status, ok := disp.(runSaveTelemetry); ok {
 		status.RunSaveStatus(err == nil, err)
 	}
@@ -1069,36 +1220,43 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 	if htmlErr != nil && supplied == nil {
 		errPrint("could not write HTML: "+htmlErr.Error(), "", "")
 	}
-	if supplied == nil && *quiet == 0 && render.Resolve(*mode) != "json" {
+	if supplied == nil && quiet == 0 && render.Resolve(*mode) != "json" {
 		if path != "" {
-			fmt.Fprintf(os.Stderr, "\n  saved  %s\n", path)
+			fmt.Fprintf(os.Stderr, "\n  saved  %s\n", terminalText(path))
 		}
 		if level == "checks" {
-			fmt.Fprintf(os.Stderr, "  next   run the paired model with --checks-only --seedset %s -k %d\n", *seedset, checksReps)
+			fmt.Fprintf(os.Stderr, "  next   run the paired model with --checks-only --seedset %s -k %d\n", terminalText(*seedset), checksReps)
 			fmt.Fprintf(os.Stderr, "         fitr calibrate <reference> <candidate> --out pair.json\n")
 		} else {
 			if htmlFile != "" {
-				fmt.Fprintf(os.Stderr, "  html   %s\n", htmlFile)
+				fmt.Fprintf(os.Stderr, "  html   %s\n", terminalText(htmlFile))
 			}
 			fmt.Fprintf(os.Stderr, "  next   fitr board\n")
 			if !*htmlFlag {
-				fmt.Fprintf(os.Stderr, "         fitr export %s   for a shareable HTML scorecard\n", model)
+				fmt.Fprintf(os.Stderr, "         fitr export %s   for a shareable HTML scorecard\n", terminalText(model))
 			}
 			if req := eval.ResolvedCtx(*ctxSize); req != eval.NumCtx {
-				fmt.Fprintf(os.Stderr, "         fitr apply %s   to persist num_ctx=%d on the server\n", model, req)
+				fmt.Fprintf(os.Stderr, "         fitr apply %s   to persist num_ctx=%d on the server\n", terminalText(model), req)
 			}
 			if h := retonr.Hint(model); h != "" {
-				fmt.Fprintf(os.Stderr, "         %s\n", h)
+				fmt.Fprintf(os.Stderr, "         %s\n", terminalText(h))
 			}
 			if reps < 3 {
-				fmt.Fprintf(os.Stderr, "         fitr run %s -k 3   for a rankable result\n", model)
+				fmt.Fprintf(os.Stderr, "         fitr run %s -k 3   for a rankable result\n", terminalText(model))
 			}
 		}
+	}
+	return runResultExitCode(res, level, saveErr, htmlErr)
+}
+
+func runResultExitCode(res *Result, level string, saveErr, artifactErr error) int {
+	if saveErr != nil || artifactErr != nil {
+		return exitError
 	}
 	if level == "checks" {
 		return exitOK
 	}
-	if res.Scorecard.Fails > 0 {
+	if res != nil && res.Scorecard.Fails > 0 {
 		return exitGates
 	}
 	return exitOK
@@ -1116,6 +1274,7 @@ type runOpts struct {
 	reps, checksReps        int
 	adaptive                bool
 	numCtx                  int
+	allowUnsafeExec         bool
 }
 
 // liveTelemetry is an optional extension implemented by the full-screen
@@ -1149,6 +1308,19 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	if err != nil {
 		return nil, err
 	}
+	var unsafeExecutor *eval.ExecutorReceipt
+	if opts.allowUnsafeExec && level != "checks" {
+		executor, err := eval.PreflightUnsafeExecutor(spec)
+		if err != nil {
+			return nil, err
+		}
+		unsafeExecutor = &executor
+		ctx = eval.WithUnsafeExecutor(ctx, executor)
+		disp.Note("unsafe executable diagnostics enabled: generated Python code is not sandboxed; "+
+			"observations are INCONCLUSIVE and excluded from PASS/FAIL scoring", "warn")
+	} else if level != "checks" {
+		disp.Note("generated-code execution is disabled by default; coding and executable agent tasks are SKIP", "")
+	}
 	// User tasks extend the battery without a fork. A malformed one is a hard
 	// error with the filename in it - silently dropping your own task would
 	// defeat the point of having one.
@@ -1164,12 +1336,43 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 			disp.Note(fmt.Sprintf("%d user task(s) loaded from %s", len(userChecks), eval.UserTasksDir()), "")
 		}
 	}
+	effectiveHashes, err := eval.EffectiveHashes(spec)
+	if err != nil {
+		return nil, err
+	}
+	disp.Phase("identity", "resolve the served artifact and seal its identity")
+	identityStart := time.Now()
+	resolved, err := resolveRunModel(ctx, c, model)
+	if err != nil {
+		return nil, err
+	}
+	disp.Done("identity", time.Since(identityStart).Seconds())
+	if resolved.Name != model {
+		disp.Note(fmt.Sprintf("runtime resolved %q as %q; the result uses the resolved identity", model, resolved.Name), "warn")
+	}
+	model = resolved.Name
 	fp := device.Detect(ctx, c)
 	prof, err := device.SelectProfile(profileName, fp)
 	if err != nil {
 		return nil, err
 	}
-	info, _ := c.Show(ctx, model)
+	if adaptive && !hasAdaptiveGates(spec, prof, level) {
+		adaptive = false
+		disp.Note("adaptive checks requested, but this battery/profile has no rate gates; using the fixed repeat plan", "warn")
+	}
+	softwareBuild, err := buildinfo.BinarySHA256()
+	if err != nil {
+		return nil, fmt.Errorf("identify fitr executable: %w", err)
+	}
+	provenance, err := record.NewRunProvenance(effectiveHashes.TaskSetSHA256,
+		effectiveHashes.SpecSHA256, prof, record.CurrentScoringPolicy(), record.SoftwareReceipt{
+			FitrVersion: version, SoftwareBuildSHA256: softwareBuild,
+			BackendProtocol: backendProtocolVersion(c.Name()),
+		})
+	if err != nil {
+		return nil, fmt.Errorf("build run provenance: %w", err)
+	}
+	info := resolved.Info
 
 	reqCtx := eval.ResolvedCtx(opts.numCtx)
 	ctx = eval.WithNumCtx(ctx, reqCtx)
@@ -1179,6 +1382,11 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		StartedAt:     time.Now().Format(time.RFC3339),
 		Level:         level, Repeats: reps, NumCtx: reqCtx,
 		Device: fp, DeviceKey: fp.Key(), Profile: prof.Name, ModelMeta: info,
+		ExecutionPolicy: record.ExecutionDisabled,
+		TaskPlan:        runTaskPlan(level, reps, checksReps, adaptive, len(spec.Checks), len(spec.Refusal.Prompts)),
+	}
+	if opts.allowUnsafeExec {
+		res.ExecutionPolicy = record.ExecutionUnsafe
 	}
 	if identified, ok := disp.(runIdentityTelemetry); ok {
 		res.RunID = identified.RunID()
@@ -1195,6 +1403,85 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	} else {
 		disp.Note("seedset "+seedSet+" pinned - instances repeat across runs that share it; "+
 			"use a fresh one when you are not pairing runs", "")
+	}
+
+	// One model resident at a time is non-negotiable between phases. A model
+	// that will not unload is recorded and warned about. The same owner also
+	// establishes the clean state needed by the context-allocation preflight.
+	stopAll := func() error {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cleanupCancel()
+		left, err := c.StopAll(cleanupCtx)
+		if err != nil {
+			disp.Note("could not confirm models unloaded: "+err.Error(), "warn")
+			return err
+		}
+		if len(left) == 0 {
+			return nil
+		}
+		res.Contamination = appendUnique(res.Contamination, left...)
+		disp.Note("still resident after unload: "+strings.Join(left, ", ")+
+			" - timings in this run may be contaminated", "warn")
+		return nil
+	}
+	defer func() { _ = stopAll() }()
+
+	if err := stopAll(); err != nil {
+		return nil, fmt.Errorf("establish clean runtime state: %w", err)
+	}
+	contextReceipt := device.ContextVerification{RequestedTokens: reqCtx}
+	if observer, ok := c.(llm.EffectiveContextObserver); ok {
+		if c.Name() == "ollama" {
+			_, metrics, err := c.Generate(ctx, model, "Reply with OK.", ollama.Deterministic(1, reqCtx))
+			if err != nil {
+				return nil, fmt.Errorf("preload model for context verification: %w", err)
+			}
+			served := metrics.PromptTokens + metrics.CachedTokens
+			if served > 0 {
+				contextReceipt.Probe = &device.ContextProbe{
+					PromptTokens: metrics.PromptTokens, CachedTokens: metrics.CachedTokens,
+					MinimumExpectedTokens: 1, Source: device.ContextSourceGeneration,
+				}
+			}
+		}
+		res.Device.InferenceDevice = device.InferenceDeviceFor(ctx, c, model)
+		effective, observed, err := observer.EffectiveContext(ctx, model)
+		if err != nil {
+			return nil, fmt.Errorf("verify effective context: %w", err)
+		}
+		if observed {
+			contextReceipt.EffectiveTokens = &effective
+			contextReceipt.EffectiveSource = device.ContextSourceRuntimeReport
+		}
+		if c.Name() == "ollama" {
+			if err := stopAll(); err != nil {
+				return nil, fmt.Errorf("reset after context verification: %w", err)
+			}
+		}
+	} else {
+		res.Device.InferenceDevice = device.InferenceDeviceFor(ctx, c, model)
+	}
+	fingerprintV2, err := device.NewFingerprintV2(res.Device, contextReceipt)
+	if err != nil {
+		return nil, fmt.Errorf("build device fingerprint v2: %w", err)
+	}
+	res.DeviceV2 = &fingerprintV2
+	if comparableKey, err := fingerprintV2.ComparabilityKey(); err == nil {
+		res.DeviceKey = comparableKey
+	} else {
+		disp.Note("effective context is unverified; this run remains visible but is excluded from ranking and comparison", "warn")
+	}
+	if contextReceipt.State() == device.ContextAdjusted {
+		disp.Note(fmt.Sprintf("runtime allocated %d context tokens for the %d-token request; comparison uses the effective value",
+			*contextReceipt.EffectiveTokens, reqCtx), "warn")
+	}
+	if unsafeExecutor != nil {
+		err = res.AttachManifestWithExecutor(resolved.Identity, *unsafeExecutor, provenance)
+	} else {
+		err = res.AttachManifest(resolved.Identity, provenance)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("seal run manifest: %w", err)
 	}
 	if prof.Name == "default" {
 		disp.Note("using the UNCALIBRATED default profile - verdicts are rough; "+
@@ -1227,27 +1514,9 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		return step(name, detail, fn)
 	}
 
-	// One model resident at a time is non-negotiable between phases. A model
-	// that will not unload is recorded and warned about -- data marked suspect
-	// beats data silently trusted.
-	stopAll := func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cleanupCancel()
-		left, err := c.StopAll(cleanupCtx)
-		if err != nil {
-			disp.Note("could not confirm models unloaded: "+err.Error(), "warn")
-			return
-		}
-		if len(left) == 0 {
-			return
-		}
-		res.Contamination = appendUnique(res.Contamination, left...)
-		disp.Note("still resident after unload: "+strings.Join(left, ", ")+
-			" - timings in this run may be contaminated", "warn")
+	if err := stopAll(); err != nil {
+		return nil, fmt.Errorf("establish clean runtime state: %w", err)
 	}
-	defer stopAll()
-
-	stopAll()
 	if err := standardStep("speed", fmt.Sprintf("x%d", reps), func() error {
 		for i := range reps {
 			// The nonce MUST vary: identical long prompts hit the prefix cache
@@ -1328,10 +1597,14 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	// need: keep generating fresh instances until each pool's rate is decided
 	// against its gate at alpha=beta=0.05, or six rounds pass. Undecided at
 	// the cap is a real answer - the sample cannot separate the rate from the
-	// gate - and the scorecard's borderline annotation will say so.
+	// gate - and the scorecard will report INCONCLUSIVE rather than forcing a
+	// binary claim.
 	if level != "quick" && len(spec.Checks) > 0 {
 		rounds := checksReps
 		var sprts map[string]*stats.SPRT
+		adaptiveGates := map[string]float64{}
+		adaptiveLimits := map[string]int{}
+		adaptivePasses := map[string]int{}
 		detail := fmt.Sprintf("%d generated tasks", len(spec.Checks)*checksReps)
 		if adaptive {
 			rounds = 6
@@ -1345,7 +1618,13 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 				if minRate, ok := prof.Float(need, "pass_rate_min"); ok {
 					if s, err := stats.GateSPRT(minRate); err == nil {
 						sprts[need] = s
+						adaptiveGates[need] = minRate
 					}
+				}
+			}
+			for _, cs := range spec.Checks {
+				if _, ok := sprts[cs.Need]; ok {
+					adaptiveLimits[cs.Need] += rounds
 				}
 			}
 		}
@@ -1366,8 +1645,11 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 						live.LiveProgress(completed, len(spec.Checks)*rounds,
 							fmt.Sprintf("%d of %d generated tasks", completed, len(spec.Checks)*rounds))
 					}
-					if s, ok := sprts[cs.Need]; ok {
+					if s, ok := sprts[cs.Need]; ok && s.State() == stats.SPRTContinue {
 						s.Add(o.Pass)
+						if o.Pass {
+							adaptivePasses[cs.Need]++
+						}
 					}
 				}
 				if adaptive && allDecided(sprts) {
@@ -1379,6 +1661,19 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 			return nil, err
 		}
 		if adaptive {
+			needs := make([]string, 0, len(sprts))
+			for need := range sprts {
+				needs = append(needs, need)
+			}
+			sort.Strings(needs)
+			for _, need := range needs {
+				decision, err := eval.CaptureAdaptiveDecision(need, adaptiveGates[need],
+					adaptiveLimits[need], adaptivePasses[need], sprts[need])
+				if err != nil {
+					return nil, fmt.Errorf("capture adaptive %s decision: %w", need, err)
+				}
+				res.AdaptiveDecisions = append(res.AdaptiveDecisions, decision)
+			}
 			disp.Note(adaptiveSummary(sprts, roundsRun, len(res.Checks)), "")
 		}
 	}
@@ -1387,37 +1682,60 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	// know the template and parser work.
 	if err := standardStep("plumbing", "tool round-trip", func() error {
 		p, err := eval.RunPlumbing(ctx, c, model, spec.Plumbing)
-		if err == nil {
-			res.Plumbing = &p
+		if err != nil {
+			return err
 		}
+		res.Plumbing = &p
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 
-	if err := standardStep("tools", fmt.Sprintf("x%d", reps), func() error {
-		for i := range reps {
-			t, err := eval.RunToolLoop(ctx, c, model, spec.Tools, filepath.Join(work, fmt.Sprintf("tl%d", i)))
-			if err != nil {
-				return err
-			}
-			res.Tools = append(res.Tools, t)
+	toolReady := res.Plumbing != nil && res.Plumbing.Outcome == eval.OutcomePass && res.Plumbing.Healthy
+	if !toolReady && level != "checks" {
+		reason := "tool capability not measured because plumbing is unavailable"
+		if res.Plumbing != nil && res.Plumbing.Verdict != "" {
+			reason = res.Plumbing.Verdict
 		}
-		return nil
-	}); err != nil {
-		return nil, err
+		disp.Note("tool and agent tasks skipped: "+reason, "warn")
+		for range reps {
+			res.Tools = append(res.Tools, eval.ToolLoopResult{
+				Outcome: eval.OutcomeSkipped, Ended: "plumbing_unavailable", Detail: reason,
+			})
+		}
 	}
-
-	if level != "quick" && level != "checks" {
-		if err := step("withdrawal", "a tool vanishes mid-loop", func() error {
-			w, err := eval.RunToolLoop(ctx, c, model, spec.Withdrawal, filepath.Join(work, "wd"))
-			if err != nil {
-				return err
+	if toolReady {
+		if err := standardStep("tools", fmt.Sprintf("x%d", reps), func() error {
+			for i := range reps {
+				t, err := eval.RunToolLoop(ctx, c, model, spec.Tools, filepath.Join(work, fmt.Sprintf("tl%d", i)))
+				if err != nil {
+					return err
+				}
+				res.Tools = append(res.Tools, t)
 			}
-			res.Withdrawal = &w
 			return nil
 		}); err != nil {
 			return nil, err
+		}
+	}
+
+	if level != "quick" && level != "checks" {
+		if toolReady {
+			if err := step("withdrawal", "a tool vanishes mid-loop", func() error {
+				w, err := eval.RunToolLoop(ctx, c, model, spec.Withdrawal, filepath.Join(work, "wd"))
+				if err != nil {
+					return err
+				}
+				res.Withdrawal = &w
+				return nil
+			}); err != nil {
+				return nil, err
+			}
+		} else {
+			res.Withdrawal = &eval.ToolLoopResult{
+				Outcome: eval.OutcomeSkipped, Ended: "plumbing_unavailable",
+				Detail: "tool plumbing did not establish a usable protocol",
+			}
 		}
 	}
 
@@ -1432,16 +1750,25 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	}
 
 	if level == "full" {
-		if err := step("agentic", fmt.Sprintf("up to %d unsupervised turns", spec.Agentic.MaxTurns), func() error {
-			stopAll()
-			a, err := eval.RunToolLoop(ctx, c, model, spec.Agentic, filepath.Join(work, "ag"))
-			if err != nil {
-				return err
+		if toolReady {
+			if err := step("agentic", fmt.Sprintf("up to %d unsupervised turns", spec.Agentic.MaxTurns), func() error {
+				if err := stopAll(); err != nil {
+					return fmt.Errorf("establish clean agentic runtime state: %w", err)
+				}
+				a, err := eval.RunToolLoop(ctx, c, model, spec.Agentic, filepath.Join(work, "ag"))
+				if err != nil {
+					return err
+				}
+				res.Agentic = &a
+				return nil
+			}); err != nil {
+				return nil, err
 			}
-			res.Agentic = &a
-			return nil
-		}); err != nil {
-			return nil, err
+		} else {
+			res.Agentic = &eval.ToolLoopResult{
+				Outcome: eval.OutcomeSkipped, Ended: "plumbing_unavailable",
+				Detail: "tool plumbing did not establish a usable protocol",
+			}
 		}
 	}
 
@@ -1464,8 +1791,161 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	// capped by design and would always look truncated.
 	res.Density = score.InformationDensity(longest)
 	res.WallSeconds = float64(int(time.Since(start).Seconds()*10)) / 10
+	// The deferred cleanup still protects every early return. This final check
+	// happens before scoring so a model that refuses the last unload cannot
+	// leave a persisted PASS or FAIL claim behind.
+	if err := stopAll(); err != nil {
+		return nil, fmt.Errorf("verify final runtime state: %w", err)
+	}
+	res.EvidenceCounts = buildEvidenceCounts(res)
+	for phase, counts := range res.EvidenceCounts {
+		if !counts.Complete() {
+			return nil, fmt.Errorf("%s evidence did not complete its immutable denominator: %+v", phase, counts)
+		}
+	}
 	res.Scorecard = score.Score(measure(res), prof)
+	if err := res.CompleteEvidence(prof); err != nil {
+		return nil, fmt.Errorf("seal completed evidence: %w", err)
+	}
 	return res, nil
+}
+
+func buildEvidenceCounts(r *Result) map[string]eval.OutcomeCounts {
+	counts := map[string]eval.OutcomeCounts{}
+	collect := func(expected int, values []eval.Outcome, fillSkipped bool) eval.OutcomeCounts {
+		if fillSkipped && len(values) < expected {
+			for len(values) < expected {
+				values = append(values, eval.OutcomeSkipped)
+			}
+		}
+		return eval.CountOutcomes(expected, values...)
+	}
+	legacy := func(outcome eval.Outcome, pass bool) eval.Outcome {
+		if outcome != "" {
+			return outcome
+		}
+		if pass {
+			return eval.OutcomePass
+		}
+		return eval.OutcomeFail
+	}
+
+	var code []eval.Outcome
+	for _, result := range r.CodeWrite {
+		code = append(code, legacy(result.Outcome, result.Pass))
+	}
+	for _, result := range r.CodeFix {
+		code = append(code, legacy(result.Outcome, result.Pass))
+	}
+	counts["coding"] = collect(r.TaskPlan.CodeTrials, code, false)
+
+	var checks []eval.Outcome
+	for _, result := range r.Checks {
+		checks = append(checks, legacy(result.Outcome, result.Pass))
+	}
+	counts["checks"] = collect(r.TaskPlan.CheckTrialsLimit, checks, true)
+
+	var tools []eval.Outcome
+	for _, result := range r.Tools {
+		tools = append(tools, legacy(result.Outcome, result.Pass))
+	}
+	counts["tools"] = collect(r.TaskPlan.ToolTrials, tools, false)
+
+	var refusal []eval.Outcome
+	for _, result := range r.Refusal {
+		refusal = append(refusal, result.Outcome)
+	}
+	counts["refusal"] = collect(r.TaskPlan.RefusalTrials, refusal, false)
+
+	var plumbing []eval.Outcome
+	if r.Plumbing != nil {
+		plumbing = append(plumbing, legacy(r.Plumbing.Outcome, r.Plumbing.Healthy))
+	}
+	plumbingExpected := 0
+	if r.TaskPlan.Plumbing {
+		plumbingExpected = 1
+	}
+	counts["plumbing"] = collect(plumbingExpected, plumbing, false)
+
+	var withdrawal []eval.Outcome
+	if r.Withdrawal != nil {
+		withdrawal = append(withdrawal, legacy(r.Withdrawal.Outcome, r.Withdrawal.Pass))
+	}
+	withdrawalExpected := 0
+	if r.TaskPlan.Withdrawal {
+		withdrawalExpected = 1
+	}
+	counts["withdrawal"] = collect(withdrawalExpected, withdrawal, false)
+
+	var agentic []eval.Outcome
+	if r.Agentic != nil {
+		agentic = append(agentic, legacy(r.Agentic.Outcome, r.Agentic.Pass))
+	}
+	counts["agentic"] = collect(r.TaskPlan.AgenticTrials, agentic, false)
+	return counts
+}
+
+func runTaskPlan(level string, repeats, checkRepeats int, adaptive bool, checks, refusalPrompts int) record.TaskPlan {
+	plan := record.TaskPlan{}
+	if level != "checks" {
+		plan.SpeedSamples = repeats
+		plan.Memory = true
+		plan.CodeTrials = 2 * repeats
+		plan.Plumbing = true
+		plan.ToolTrials = repeats
+	}
+	if level != "quick" {
+		rounds := checkRepeats
+		if adaptive {
+			rounds = 6
+		}
+		plan.CheckTrialsLimit = checks * rounds
+		plan.AdaptiveChecks = adaptive
+	}
+	if level != "quick" && level != "checks" {
+		plan.Withdrawal = true
+		plan.RefusalTrials = refusalPrompts
+	}
+	if level == "full" {
+		plan.AgenticTrials = 1
+	}
+	return plan
+}
+
+func hasAdaptiveGates(spec *eval.Spec, profile device.Profile, level string) bool {
+	if spec == nil || level == "quick" || len(spec.Checks) == 0 {
+		return false
+	}
+	for _, check := range spec.Checks {
+		if _, ok := profile.Float(check.Need, "pass_rate_min"); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func backendProtocolVersion(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "ollama":
+		return "fitr.backend.ollama.v1"
+	case "llama-server", "llamaserver":
+		return "fitr.backend.llama-server-native.v1"
+	case "openai":
+		return "fitr.backend.openai-compatible.v1"
+	default:
+		name = strings.ToLower(strings.TrimSpace(name))
+		name = strings.Map(func(r rune) rune {
+			if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
+				return r
+			}
+			return '-'
+		}, name)
+		name = strings.Trim(name, "._-")
+		if name == "" {
+			name = "unknown"
+		}
+		return "fitr.backend." + name + ".v1"
+	}
 }
 
 func allDecided(sprts map[string]*stats.SPRT) bool {
@@ -1509,7 +1989,7 @@ func adaptiveSummary(sprts map[string]*stats.SPRT, rounds, instances int) string
 func measure(r *Result) score.Measured {
 	m := score.Measured{
 		Model: r.Model, Capabilities: r.ModelMeta.Capabilities,
-		Rep: r.Rep,
+		Rep: r.Rep, Contamination: append([]string(nil), r.Contamination...),
 	}
 	if r.DecodeSum.N > 0 {
 		m.SpeedKnown = true
@@ -1532,15 +2012,23 @@ func measure(r *Result) score.Measured {
 	if r.Memory.ResidentGB > 0 {
 		m.MemoryKnown, m.ResidentGB32K = true, r.Memory.ResidentGB
 	}
-	if len(r.CodeWrite) > 0 {
-		m.CodeKnown = true
+	if len(r.CodeWrite)+len(r.CodeFix) > 0 {
 		var wOK, fOK []bool
 		for _, x := range r.CodeWrite {
-			wOK = append(wOK, x.Pass)
+			if pass, measured := eval.MeasuredOutcome(x.Outcome, x.Pass); measured {
+				wOK = append(wOK, pass)
+			}
 		}
 		for _, x := range r.CodeFix {
-			fOK = append(fOK, x.Pass)
+			if pass, measured := eval.MeasuredOutcome(x.Outcome, x.Pass); measured {
+				fOK = append(fOK, pass)
+			}
 		}
+		expected := r.TaskPlan.CodeTrials
+		if expected == 0 && r.SchemaVersion < 5 {
+			expected = r.Repeats * 2
+		}
+		m.CodeKnown = expected > 0 && len(wOK)+len(fOK) == expected
 		fw, ff := stats.Flakiness(wOK), stats.Flakiness(fOK)
 		m.CodeWritePass = fw.Passes*2 > fw.N
 		m.CodeFixPass = ff.Passes*2 > ff.N
@@ -1549,6 +2037,10 @@ func measure(r *Result) score.Measured {
 		m.CodeRepeats = fw.N + ff.N
 	}
 	for _, ck := range r.Checks {
+		pass, measured := eval.MeasuredOutcome(ck.Outcome, ck.Pass)
+		if !measured {
+			continue
+		}
 		var pool *score.Pool
 		switch ck.Need {
 		case "structured_output":
@@ -1561,25 +2053,59 @@ func measure(r *Result) score.Measured {
 			pool = &m.User
 		}
 		pool.N++
-		if ck.Pass {
+		if pass {
 			pool.Passes++
 		}
 	}
 	if r.Refusal != nil {
-		m.RefusalKnown, m.RefusedCount = true, r.Refused
-	}
-	if len(r.Tools) > 0 {
-		m.ToolsRan = true
-		pass := 0
-		for _, t := range r.Tools {
-			if t.Pass {
-				pass++
+		expected := r.TaskPlan.RefusalTrials
+		if expected == 0 && r.SchemaVersion < 5 {
+			expected = len(r.Refusal)
+		}
+		complete := expected > 0 && len(r.Refusal) == expected
+		refused := 0
+		for _, result := range r.Refusal {
+			outcome := result.Outcome
+			if outcome == "" {
+				switch result.Verdict {
+				case "answered":
+					outcome = eval.OutcomePass
+				case "partial", "refused", "empty":
+					outcome = eval.OutcomeFail
+				default:
+					complete = false
+				}
+			}
+			pass, measured := eval.MeasuredOutcome(outcome, false)
+			if !measured {
+				complete = false
+			} else if !pass {
+				refused++
 			}
 		}
-		m.ToolsPass = pass*2 > len(r.Tools)
+		m.RefusalKnown, m.RefusedCount = complete, refused
+	}
+	if len(r.Tools) > 0 {
+		passes, measured := 0, 0
+		for _, t := range r.Tools {
+			if pass, ok := eval.MeasuredOutcome(t.Outcome, t.Pass); ok {
+				measured++
+				if pass {
+					passes++
+				}
+			}
+		}
+		expected := r.TaskPlan.ToolTrials
+		if expected == 0 && r.SchemaVersion < 5 {
+			expected = r.Repeats
+		}
+		m.ToolsRan = measured > 0 && measured == expected
+		m.ToolsPass = m.ToolsRan && passes*2 > measured
 	}
 	if r.Agentic != nil {
-		m.AgenticRan, m.AgenticPass = true, r.Agentic.Pass
+		if pass, measured := eval.MeasuredOutcome(r.Agentic.Outcome, r.Agentic.Pass); measured {
+			m.AgenticRan, m.AgenticPass = true, pass
+		}
 		m.AgenticMalformed = r.Agentic.Malformed
 		m.AgenticTurns = r.Agentic.Turns
 		m.AgenticCtxCeiling = r.Agentic.CtxCeiling
@@ -1587,15 +2113,21 @@ func measure(r *Result) score.Measured {
 		m.AgenticCompacted = r.Agentic.Compacted
 	}
 	if r.Withdrawal != nil {
-		m.WithdrawRan = true
-		m.WithdrawDeadCalls = r.Withdrawal.DeadCalls
-		m.WithdrawClean = r.Withdrawal.Ended == "clean_stop"
+		if _, measured := eval.MeasuredOutcome(r.Withdrawal.Outcome, r.Withdrawal.Pass); measured {
+			m.WithdrawRan = true
+			m.WithdrawDeadCalls = r.Withdrawal.DeadCalls
+			m.WithdrawClean = r.Withdrawal.Ended == "clean_stop"
+		}
 	}
 	if r.Plumbing != nil {
-		m.PlumbingRan = true
-		m.PlumbingHealthy = r.Plumbing.Healthy
+		m.PlumbingRan = r.Plumbing.Outcome != eval.OutcomeSkipped &&
+			r.Plumbing.Outcome != eval.OutcomeError
+		if r.Plumbing.Outcome == "" {
+			m.PlumbingRan = true
+		}
+		m.PlumbingHealthy = m.PlumbingRan && r.Plumbing.Healthy
 		m.PlumbingVerdict = r.Plumbing.Verdict
-		if rung, ok := r.Plumbing.Rungs["5_irrelevance"]; ok {
+		if rung, ok := r.Plumbing.Rungs["5_irrelevance"]; ok && m.PlumbingRan {
 			m.IrrelevanceRan, m.IrrelevancePass = true, rung.Pass
 			if !rung.Pass {
 				m.SpuriousCalls = 1
@@ -1695,15 +2227,15 @@ func cmdExport(ctx context.Context, args []string) int {
 			errPrint("could not write HTML: "+err.Error(), "", "")
 			return exitError
 		}
-		fmt.Fprintf(os.Stderr, "  wrote  %s\n", html)
+		fmt.Fprintf(os.Stderr, "  wrote  %s\n", terminalText(html))
 	}
 	if *retonrFlag {
-		evPath := filepath.Join(resultsDir(), safeName(r.Model)+".retonr.json")
+		evPath := filepath.Join(resultsDir(), record.ArtifactStem(r.Model)+".retonr.json")
 		if err := writeRetonrEvidence(r, evPath, ""); err != nil {
 			errPrint("could not write retonr evidence: "+err.Error(), "", "")
 			return exitError
 		}
-		fmt.Fprintf(os.Stderr, "  wrote  %s\n", evPath)
+		fmt.Fprintf(os.Stderr, "  wrote  %s\n", terminalText(evPath))
 		fmt.Fprintln(os.Stderr, "  note   evidence for https://github.com/blisspixel/retonr; not a qualification")
 	}
 	return exitOK
@@ -1730,11 +2262,26 @@ func writeRetonrEvidence(r *Result, dest, jsonPath string) error {
 }
 
 func artifactFrom(r *Result) (render.Artifact, error) {
-	prof, err := device.SelectProfile(r.Profile, r.Device)
+	var (
+		prof device.Profile
+		sc   score.Scorecard
+		err  error
+	)
+	if r.SchemaVersion >= record.EvidenceSchemaVersion {
+		prof, err = r.OriginalProfile()
+		sc = r.Scorecard
+	} else {
+		prof, err = device.SelectProfile(r.Profile, r.Device)
+		if err == nil {
+			sc = score.Score(measure(r), prof)
+		}
+	}
 	if err != nil {
 		return render.Artifact{}, err
 	}
-	sc := score.Score(measure(r), prof)
+	if issue := r.EvidenceIntegrityIssue(); issue != "" {
+		sc = score.ExcludeEvidence(sc, issue)
+	}
 	meta := resultMeta(r, prof.Name)
 	return render.Artifact{
 		FitrVersion:   version,
@@ -1772,6 +2319,12 @@ func resultMeta(r *Result, profile string) render.Meta {
 		ResidentGB:  r.Memory.ResidentGB,
 		Calibration: r.Level == "checks",
 	}
+	if r.DeviceV2 != nil {
+		meta.ContextState = string(r.DeviceV2.Context.State())
+		if r.DeviceV2.Context.EffectiveTokens != nil {
+			meta.EffectiveCtx = *r.DeviceV2.Context.EffectiveTokens
+		}
+	}
 	for _, sample := range r.Speed {
 		meta.DecodeSeries = append(meta.DecodeSeries, sample.DecodeTPS)
 		meta.PrefillSeries = append(meta.PrefillSeries, sample.PrefillTPS)
@@ -1804,7 +2357,7 @@ func writeHTMLArtifact(r *Result, dest, jsonPath string) (string, error) {
 		if jsonPath != "" {
 			dest = strings.TrimSuffix(jsonPath, ".json") + ".html"
 		} else {
-			dest = filepath.Join(resultsDir(), safeName(r.Model)+".html")
+			dest = filepath.Join(resultsDir(), record.ArtifactStem(r.Model)+".html")
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -1845,17 +2398,12 @@ func cmdView(_ context.Context, args []string) int {
 	if fs.NArg() == 1 {
 		candidate := fs.Arg(0)
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			b, err := os.ReadFile(candidate)
+			r, err := record.NewStore(resultsDir()).Read(candidate)
 			if err != nil {
-				errPrint("could not read result: "+err.Error(), "", "")
-				return exitError
-			}
-			var r Result
-			if err := json.Unmarshal(b, &r); err != nil || r.Model == "" {
 				errPrint("not a fitr result", "expected a saved run JSON with a model", candidate)
 				return exitError
 			}
-			selected = &r
+			selected = r
 		} else {
 			results, err := loadResults()
 			if err != nil || len(results) == 0 {
@@ -1895,14 +2443,11 @@ func cmdView(_ context.Context, args []string) int {
 	}
 	scorecard := selected.Scorecard
 	meta := resultMeta(selected, selected.Profile)
-	if scorecard.Model == "" {
-		artifact, err := artifactFrom(selected)
-		if err != nil {
-			errPrint("could not render result: "+err.Error(), "", "")
-			return exitError
-		}
-		scorecard = artifact.Scorecard
-		meta = artifact.Meta
+	if artifact, err := artifactFrom(selected); err == nil {
+		scorecard, meta = artifact.Scorecard, artifact.Meta
+	} else {
+		scorecard = score.ExcludeEvidence(scorecard,
+			"the scoring profile is unavailable, so the stored verdict cannot be reproduced")
 	}
 	display := render.New(*mode)
 	defer display.Close()
@@ -1928,38 +2473,62 @@ func cmdBoard(ctx context.Context, args []string) int {
 		errPrint("no results yet", "", "run one first: fitr run <model> --full")
 		return exitError
 	}
-	cur := device.Detect(ctx, probeBackend(ctx)).Key()
-	curHW := eval.HardwareKey(cur)
+	curDevice := device.Detect(ctx, probeBackend(ctx))
+	cur := curDevice.Key()
 
 	// Group by fingerprint. Rows measured under different hardware/config are
 	// NOT comparable and must never be ranked against each other. A |ctx=N
 	// suffix is a config split, not a different box - labeled as such below.
 	groups := map[string][]*Result{}
 	var order []string
+	excludedContext := 0
 	for _, r := range results {
-		if _, ok := groups[r.DeviceKey]; !ok {
-			order = append(order, r.DeviceKey)
+		key, keyErr := r.ComparableDeviceKey()
+		if keyErr != nil {
+			excludedContext++
+			continue
 		}
-		groups[r.DeviceKey] = append(groups[r.DeviceKey], r)
+		if *current && !samePhysicalMachine(r.Device, curDevice) {
+			continue
+		}
+		if _, ok := groups[key]; !ok {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], r)
 	}
 	sort.Strings(order)
 
 	board := render.Board{}
+	excludedContaminated := 0
+	excludedUnverified := 0
+	unscoredProfiles := 0
 	visible := map[string][]*Result{}
 	for _, key := range order {
 		rows := groups[key]
-		hw := eval.HardwareKey(key)
-		if *current && hw != curHW {
+		clean := make([]*Result, 0, len(rows))
+		for _, result := range rows {
+			if len(result.Contamination) > 0 {
+				excludedContaminated++
+				continue
+			}
+			if result.EvidenceIntegrityIssue() != "" {
+				excludedUnverified++
+				continue
+			}
+			clean = append(clean, result)
+		}
+		if len(clean) == 0 {
 			continue
 		}
+		rows = clean
 		g := rows[len(rows)-1]
 		nctx := resultNumCtx(g)
-		note := "different hardware/config - not comparable to other blocks"
-		if hw == curHW {
+		note := "different hardware/config or effective context; not comparable to other blocks"
+		if samePhysicalMachine(g.Device, curDevice) {
 			if nctx != eval.NumCtx {
-				note = fmt.Sprintf("this machine, num_ctx=%d - not comparable to other context lengths", nctx)
+				note = fmt.Sprintf("this machine, requested num_ctx=%d; effective context is part of this block", nctx)
 			} else {
-				note = "this machine, current config"
+				note = "this machine, verified effective context and current config"
 			}
 		}
 		sort.Slice(rows, func(i, j int) bool {
@@ -1970,9 +2539,23 @@ func cmdBoard(ctx context.Context, args []string) int {
 			GPU: g.Device.GPU, Driver: g.Device.GPUDriver,
 			KV: g.Device.Config["OLLAMA_KV_CACHE_TYPE"], NumCtx: nctx, Note: note,
 		}
+		if g.DeviceV2 != nil {
+			group.ContextState = string(g.DeviceV2.Context.State())
+			if g.DeviceV2.Context.EffectiveTokens != nil {
+				group.EffectiveCtx = *g.DeviceV2.Context.EffectiveTokens
+			}
+		}
 		for _, r := range rows {
 			var codes []string
-			for _, s := range r.Scorecard.Serves {
+			scorecard := r.Scorecard
+			if artifact, err := artifactFrom(r); err == nil {
+				scorecard = artifact.Scorecard
+			} else {
+				scorecard = score.ExcludeEvidence(scorecard,
+					"the scoring profile is unavailable, so the stored verdict cannot be reproduced")
+				unscoredProfiles++
+			}
+			for _, s := range scorecard.Serves {
 				if code := score.NeedCode[s]; code != "" {
 					codes = append(codes, code)
 				}
@@ -1992,12 +2575,51 @@ func cmdBoard(ctx context.Context, args []string) int {
 		board.Results += len(rows)
 		board.Groups = append(board.Groups, group)
 	}
+	if excludedContaminated > 0 {
+		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d contaminated result(s) from board ranking and claims\n",
+			excludedContaminated)
+	}
+	if excludedUnverified > 0 {
+		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without a valid evidence contract from board ranking and claims\n",
+			excludedUnverified)
+	}
+	if excludedContext > 0 {
+		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without verified effective context from board ranking and claims\n",
+			excludedContext)
+	}
+	if unscoredProfiles > 0 {
+		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: %d board row(s) have no reproducible qualification because their scoring profile is unavailable\n",
+			unscoredProfiles)
+	}
 	if len(board.Groups) == 0 {
-		errPrint("no results for this machine", "", "run fitr run <model> --full")
+		if excludedContaminated > 0 || excludedUnverified > 0 || excludedContext > 0 {
+			detail := "all matching results lacked claimable evidence"
+			if excludedContaminated > 0 && excludedUnverified == 0 && excludedContext == 0 {
+				detail = "all matching results were contaminated"
+			} else if excludedUnverified > 0 && excludedContaminated == 0 && excludedContext == 0 {
+				detail = "all matching results lacked a valid evidence contract"
+			} else if excludedContext > 0 && excludedContaminated == 0 && excludedUnverified == 0 {
+				detail = "all matching results lacked verified effective context"
+			}
+			errPrint("no conclusive results for this machine", detail,
+				"re-run with the current fitr version after unloading all models")
+		} else {
+			errPrint("no results for this machine", "", "run fitr run <model> --full")
+		}
 		return exitError
 	}
 	if render.Resolve(*mode) == "json" {
-		b, _ := json.Marshal(map[string]any{"groups": visible, "current": cur})
+		payload := map[string]any{"groups": visible, "current": cur}
+		if excludedContaminated > 0 {
+			payload["inconclusive_excluded"] = excludedContaminated
+		}
+		if excludedUnverified > 0 {
+			payload["unverified_excluded"] = excludedUnverified
+		}
+		if excludedContext > 0 {
+			payload["context_unverified_excluded"] = excludedContext
+		}
+		b, _ := json.Marshal(payload)
 		fmt.Println(string(b))
 		return exitOK
 	}
@@ -2007,6 +2629,10 @@ func cmdBoard(ctx context.Context, args []string) int {
 
 func resultNumCtx(r *Result) int {
 	return r.ContextSize()
+}
+
+func samePhysicalMachine(a, b device.Fingerprint) bool {
+	return a.Host != "" && a.Host == b.Host && a.OS == b.OS && a.CPU == b.CPU && a.GPU == b.GPU
 }
 
 // ---------------------------------------------------------------- diag
@@ -2032,7 +2658,7 @@ func cmdDiag(ctx context.Context, args []string) int {
 		errPrint(err.Error(), "", "")
 		return exitError
 	}
-	fmt.Printf("tool plumbing: %s\n", model)
+	fmt.Printf("tool plumbing: %s\n", terminalText(model))
 	ctx = eval.WithNumCtx(ctx, *ctxSize)
 	r, err := eval.RunPlumbing(ctx, c, model, spec.Plumbing)
 	if err != nil {
@@ -2045,9 +2671,9 @@ func cmdDiag(ctx context.Context, args []string) int {
 		if rung.Pass {
 			mark = "PASS"
 		}
-		fmt.Printf("  [%s] %-20s %s\n", mark, id, render.Sanitize(rung.Detail))
+		fmt.Printf("  [%s] %-20s %s\n", mark, terminalText(id), terminalText(rung.Detail))
 	}
-	fmt.Printf("  => %s\n", r.Verdict)
+	fmt.Printf("  => %s\n", terminalText(r.Verdict))
 	if !r.Healthy {
 		return exitGates
 	}
@@ -2085,11 +2711,11 @@ func cmdDoctor(ctx context.Context, args []string) int {
 	}
 	defer lk.Release() //nolint:errcheck // cleanup failure is not worth failing a run over
 	if left, err := c.StopAll(ctx); err == nil && len(left) > 0 {
-		fmt.Fprintf(os.Stderr, "! still resident: %s - results may be contaminated\n", strings.Join(left, ", "))
+		fmt.Fprintf(os.Stderr, "! still resident: %s - results may be contaminated\n", terminalText(strings.Join(left, ", ")))
 	}
 
 	fp := device.Detect(ctx, c)
-	fmt.Printf("doctor: %s on %s (%s)\n", model, fp.GPU, fp.Runtime)
+	fmt.Printf("doctor: %s on %s (%s)\n", terminalText(model), terminalText(fp.GPU), terminalText(fp.Runtime))
 	ctx = eval.WithNumCtx(ctx, *ctxSize)
 	r, err := eval.RunDoctor(ctx, c, model, *n, eval.DoctorOpts{
 		Config: fp.Config,
@@ -2125,9 +2751,9 @@ func printDoctor(w io.Writer, r eval.DoctorResult, color bool) {
 				tag = "\x1b[31m" + tag + "\x1b[0m"
 			}
 		}
-		fmt.Fprintf(w, "  [%s] %-18s %s\n", tag, ck.ID, render.Sanitize(ck.Detail))
+		fmt.Fprintf(w, "  [%s] %-18s %s\n", tag, terminalText(ck.ID), terminalText(ck.Detail))
 	}
-	fmt.Fprintf(w, "  => %s\n", r.Verdict)
+	fmt.Fprintf(w, "  => %s\n", terminalText(r.Verdict))
 }
 
 // cmdStatus is what a bare `fitr` prints after install: what this box is,
@@ -2136,17 +2762,17 @@ func cmdStatus(ctx context.Context) int {
 	found := llm.Discover(ctx)
 	var b llm.Backend
 	if len(found) > 0 {
-		b = backendAt(found[0].Kind, found[0].URL)
+		b, _ = backendAt(found[0].Kind, found[0].URL)
 	}
 	fp := device.Detect(ctx, b)
-	fmt.Printf("  fitr %s\n", version)
-	fmt.Printf("  gpu       %s", fp.GPU)
+	fmt.Printf("  fitr %s\n", terminalText(version))
+	fmt.Printf("  gpu       %s", terminalText(fp.GPU))
 	if fp.GPUBackend != "" {
-		fmt.Printf("  (%s)", fp.GPUBackend)
+		fmt.Printf("  (%s)", terminalText(fp.GPUBackend))
 	}
 	fmt.Println()
 	if fp.VRAMGb > 0 {
-		fmt.Printf("  memory    %s\n", device.FormatVRAM(fp.VRAMGb, fp.VRAMSource))
+		fmt.Printf("  memory    %s\n", terminalText(device.FormatVRAM(fp.VRAMGb, fp.VRAMSource)))
 	}
 	if len(found) == 0 {
 		fmt.Println("  runtime   none reachable")
@@ -2159,14 +2785,14 @@ func cmdStatus(ctx context.Context) int {
 		if i > 0 {
 			label = "also"
 		}
-		fmt.Printf("  %-9s %s  %s\n", label, f.Kind, f.URL)
+		fmt.Printf("  %-9s %s  %s\n", terminalText(label), terminalText(f.Kind), terminalText(f.URL))
 	}
 	fmt.Println("  next      fitr advise <model>          # does this quant fit")
 	fmt.Println("            fitr doctor <model>          # can this box be measured fairly")
 	fmt.Println("            fitr run <model> --full      # then compare with fitr board")
 	fmt.Println("            fitr apply <model>           # print how to persist a measured ctx")
 	if h := retonr.Hint("<model>"); h != "" {
-		fmt.Printf("            %s\n", h)
+		fmt.Printf("            %s\n", terminalText(h))
 	}
 	return exitOK
 }
@@ -2181,16 +2807,16 @@ func cmdDevice(ctx context.Context, args []string) int {
 		fmt.Println(string(b))
 		return exitOK
 	}
-	fmt.Printf("  host               %s\n", fp.Host)
-	fmt.Printf("  os                 %s\n", fp.OS)
-	fmt.Printf("  cpu                %s\n", fp.CPU)
+	fmt.Printf("  host               %s\n", terminalText(fp.Host))
+	fmt.Printf("  os                 %s\n", terminalText(fp.OS))
+	fmt.Printf("  cpu                %s\n", terminalText(fp.CPU))
 	fmt.Printf("  ram_gb             %.1f\n", fp.RAMGb)
-	fmt.Printf("  vram_gb            %s\n", device.FormatVRAM(fp.VRAMGb, fp.VRAMSource))
-	fmt.Printf("  gpu                %s\n", fp.GPU)
-	fmt.Printf("  gpu_backend        %s\n", emptyDash(fp.GPUBackend))
-	fmt.Printf("  gpu_driver         %s  (%s)\n", fp.GPUDriver, fp.GPUDriverDate)
-	fmt.Printf("  runtime            %s\n", fp.Runtime)
-	fmt.Printf("  inference_device   %s\n", fp.InferenceDevice)
+	fmt.Printf("  vram_gb            %s\n", terminalText(device.FormatVRAM(fp.VRAMGb, fp.VRAMSource)))
+	fmt.Printf("  gpu                %s\n", terminalText(fp.GPU))
+	fmt.Printf("  gpu_backend        %s\n", terminalText(emptyDash(fp.GPUBackend)))
+	fmt.Printf("  gpu_driver         %s  (%s)\n", terminalText(fp.GPUDriver), terminalText(fp.GPUDriverDate))
+	fmt.Printf("  runtime            %s\n", terminalText(fp.Runtime))
+	fmt.Printf("  inference_device   %s\n", terminalText(fp.InferenceDevice))
 	fmt.Println("  config")
 	keys := make([]string, 0, len(fp.Config))
 	for k := range fp.Config {
@@ -2202,10 +2828,10 @@ func cmdDevice(ctx context.Context, args []string) int {
 		if v == "" {
 			v = "(unset)"
 		}
-		fmt.Printf("    %-26s %s\n", k, v)
+		fmt.Printf("    %-26s %s\n", terminalText(k), terminalText(v))
 	}
-	fmt.Printf("  profile            %s - %s\n", prof.Name, prof.Description)
-	fmt.Printf("  key                %s\n", fp.Key())
+	fmt.Printf("  profile            %s - %s\n", terminalText(prof.Name), terminalText(prof.Description))
+	fmt.Printf("  key                %s\n", terminalText(fp.Key()))
 	return exitOK
 }
 
@@ -2239,7 +2865,7 @@ func cmdProfiles(ctx context.Context, args []string) int {
 		if p.Name == active.Name {
 			mark = "*"
 		}
-		fmt.Printf(" %s %-12s %s\n", mark, p.Name, p.Description)
+		fmt.Printf(" %s %-12s %s\n", terminalText(mark), terminalText(p.Name), terminalText(p.Description))
 	}
 	fmt.Println("\n  * = auto-selected for this machine")
 	fmt.Println("  next   fitr profiles new [name]   # UNCALIBRATED local copy; edit the gates")
@@ -2258,7 +2884,7 @@ func cmdProfilesNew(ctx context.Context, name string) int {
 		errPrint(err.Error(), "", "pick a new name, or edit the existing file")
 		return exitError
 	}
-	fmt.Printf("  wrote  %s\n", path)
+	fmt.Printf("  wrote  %s\n", terminalText(path))
 	fmt.Println("  UNCALIBRATED copy of default. Run models you already have opinions")
 	fmt.Println("  about, then edit the gates so the verdicts match lived experience.")
 	fmt.Println("  Do not publish these numbers as a calibrated community profile.")
@@ -2312,8 +2938,10 @@ func cmdCalibrate(ctx context.Context, args []string) int {
 		return exitUsage
 	}
 	qa, qb := a.ModelMeta.Details.QuantizationLevel, b.ModelMeta.Details.QuantizationLevel
-	fmt.Printf("  calibrate  %s (%s)  vs  %s (%s)\n", a.Model, qa, b.Model, qb)
-	fmt.Printf("  seedset    %s\n", a.SeedSet)
+	fmt.Printf("  calibrate  %s (%s)  vs  %s (%s)\n", terminalText(a.Model), terminalText(qa), terminalText(b.Model), terminalText(qb))
+	fmt.Printf("  seedset    %s\n", terminalText(a.SeedSet))
+	assessment := calibration.AssessPair(report)
+	fmt.Printf("  evidence   exploratory only: %s\n", terminalText(strings.Join(assessment.Reasons, "; ")))
 	var kept, drop []eval.ItemStat
 	for _, s := range stats {
 		if s.Discriminated() {
@@ -2326,17 +2954,19 @@ func cmdCalibrate(ctx context.Context, args []string) int {
 		len(stats), len(kept), len(drop))
 	if ra, rb := eval.QuantRank(qa), eval.QuantRank(qb); ra == 0 || rb == 0 || ra == rb {
 		fmt.Println("  note       dtypes are not a ranked pair; this is discrimination, not directional quant damage")
+	} else {
+		fmt.Println("  note       same-base revision lineage is unverified; flips are discrimination only, not directional quant damage")
 	}
 	if len(kept) > 0 {
 		fmt.Println("\n  discriminated (these separate the two runs):")
 		for _, s := range kept {
-			fmt.Printf("    %-22s  %d/%d flipped  %s\n", s.TaskID, s.Flips, s.Shared, s.Need)
+			fmt.Printf("    %-22s  %d/%d flipped  %s\n", terminalText(s.TaskID), s.Flips, s.Shared, terminalText(s.Need))
 		}
 	}
 	if len(drop) > 0 {
 		fmt.Println("\n  never flipped (not evidence to drop until more devices and model pairs agree):")
 		for _, s := range drop {
-			fmt.Printf("    %-22s  %d/%d agree    %s\n", s.TaskID, s.Shared, s.Shared, s.Need)
+			fmt.Printf("    %-22s  %d/%d agree    %s\n", terminalText(s.TaskID), s.Shared, s.Shared, terminalText(s.Need))
 		}
 	}
 	if *out != "" {
@@ -2344,14 +2974,35 @@ func cmdCalibrate(ctx context.Context, args []string) int {
 			errPrint("could not write calibration report", err.Error(), "")
 			return exitError
 		}
-		fmt.Printf("\n  wrote      %s (no hostname, prompts, raw output, or result paths)\n", *out)
+		fmt.Printf("\n  wrote      %s (pseudonymous device, seedset, and local-model IDs; no prompts or raw output)\n", terminalText(*out))
 	}
 	fmt.Println("\n  this command does not rewrite spec/tasks. One pair is a lead, not a cull.")
 	return exitOK
 }
 
 func calibrationPair(a, b *Result, stats []eval.ItemStat) (calibration.PairReport, error) {
-	if a.DeviceKey == "" || b.DeviceKey == "" || a.DeviceKey != b.DeviceKey {
+	for index, result := range []*Result{a, b} {
+		label := []string{"reference", "candidate"}[index]
+		if result == nil {
+			return calibration.PairReport{}, fmt.Errorf("%s result is unavailable", label)
+		}
+		if len(result.Contamination) > 0 {
+			return calibration.PairReport{}, fmt.Errorf("%s result is contaminated by resident model(s): %s",
+				label, strings.Join(result.Contamination, ", "))
+		}
+		if issue := result.EvidenceIntegrityIssue(); issue != "" {
+			return calibration.PairReport{}, fmt.Errorf("%s result is unverified: %s", label, issue)
+		}
+	}
+	if err := record.ProvenanceCompatibilityError(a, b); err != nil {
+		return calibration.PairReport{}, fmt.Errorf("run provenance differs: %w", err)
+	}
+	aKey, aKeyErr := a.ComparableDeviceKey()
+	bKey, bKeyErr := b.ComparableDeviceKey()
+	if aKeyErr != nil || bKeyErr != nil {
+		return calibration.PairReport{}, fmt.Errorf("verified effective context is required: %v; %v", aKeyErr, bKeyErr)
+	}
+	if aKey != bKey {
 		return calibration.PairReport{}, errors.New("results were measured on different hardware or runtime configurations")
 	}
 	if diffs := a.Device.Diff(b.Device); len(diffs) > 0 {
@@ -2387,7 +3038,7 @@ func calibrationPair(a, b *Result, stats []eval.ItemStat) (calibration.PairRepor
 	}
 	fp := a.Device
 	dev := calibration.Device{
-		ID: calibration.PseudonymousDeviceID(a.DeviceKey),
+		ID: calibration.PseudonymousDeviceID(aKey),
 		OS: fp.OS, CPU: fp.CPU, RAMGB: fp.RAMGb, GPU: fp.GPU,
 		GPUDriver: fp.GPUDriver, GPUDriverDate: fp.GPUDriverDate,
 		GPUBackend: fp.GPUBackend, Runtime: fp.Runtime,
@@ -2430,6 +3081,26 @@ func cmdCalibrateMerge(args []string) int {
 	}
 	fmt.Printf("  calibration evidence  %d report(s), %d device(s), %d model pair(s), spec v%d\n",
 		summary.Reports, summary.Devices, summary.ModelPairs, summary.SpecVersion)
+	readiness := summary.Readiness
+	fmt.Printf("  authenticated          %d/%d report(s), %d/%d device(s), %d/%d model families\n",
+		readiness.DecisionGradeReports, summary.Reports,
+		readiness.Devices, readiness.MinimumDevices,
+		readiness.ModelFamilies, readiness.MinimumModelFamilies)
+	fmt.Printf("  readiness              UNVERIFIED: %s\n", terminalText(strings.Join(readiness.Missing, "; ")))
+	var exploratory []string
+	for _, report := range reports {
+		assessment := calibration.AssessPair(report)
+		if !assessment.DecisionGrade {
+			exploratory = append(exploratory, fmt.Sprintf("%s / %s: %s",
+				report.Reference.Model, report.Candidate.Model, strings.Join(assessment.Reasons, "; ")))
+		}
+	}
+	if len(exploratory) > 0 {
+		fmt.Println("\n  exploratory reports excluded from readiness:")
+		for _, reason := range exploratory {
+			fmt.Printf("    %s\n", terminalText(reason))
+		}
+	}
 	var observed, unseen []calibration.SummaryItem
 	for _, item := range summary.Items {
 		if item.Status == "observed" {
@@ -2442,13 +3113,13 @@ func cmdCalibrateMerge(args []string) int {
 		fmt.Println("\n  discrimination observed:")
 		for _, item := range observed {
 			fmt.Printf("    %-22s  %d flip(s)/%d shared  on %d/%d device(s)\n",
-				item.TaskID, item.Flips, item.Shared, item.DiscriminatedDevices, item.Devices)
+				terminalText(item.TaskID), item.Flips, item.Shared, item.DiscriminatedDevices, item.Devices)
 		}
 	}
 	if len(unseen) > 0 {
 		fmt.Println("\n  discrimination not yet observed:")
 		for _, item := range unseen {
-			fmt.Printf("    %-22s  0/%d shared  across %d device(s)\n", item.TaskID, item.Shared, item.Devices)
+			fmt.Printf("    %-22s  0/%d shared  across %d device(s)\n", terminalText(item.TaskID), item.Shared, item.Devices)
 		}
 	}
 	if *out != "" {
@@ -2456,7 +3127,7 @@ func cmdCalibrateMerge(args []string) int {
 			errPrint("could not write calibration summary", err.Error(), "")
 			return exitError
 		}
-		fmt.Printf("\n  wrote  %s\n", *out)
+		fmt.Printf("\n  wrote  %s\n", terminalText(*out))
 	}
 	fmt.Println("\n  evidence only: aggregation never deletes or rewrites a task.")
 	return exitOK
@@ -2485,11 +3156,66 @@ func cmdCompare(ctx context.Context, args []string) int {
 			return exitError
 		}
 	}
-	if a.DeviceKey != b.DeviceKey {
-		if eval.HardwareKey(a.DeviceKey) == eval.HardwareKey(b.DeviceKey) {
+	if len(a.Contamination) > 0 || len(b.Contamination) > 0 {
+		fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
+		fmt.Println("  INCONCLUSIVE  resident model contamination invalidates this comparison")
+		for _, result := range []*Result{a, b} {
+			if len(result.Contamination) == 0 {
+				continue
+			}
+			fmt.Printf("  %-12s %s\n", terminalText(result.Model)+":",
+				terminalText(strings.Join(result.Contamination, ", ")))
+		}
+		fmt.Println("  remedy       unload all models and re-run both measurements")
+		return exitError
+	}
+	if issueA, issueB := a.EvidenceIntegrityIssue(), b.EvidenceIntegrityIssue(); issueA != "" || issueB != "" {
+		fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
+		fmt.Println("  INCONCLUSIVE  a valid sealed evidence contract is required for comparison")
+		for i, issue := range []string{issueA, issueB} {
+			if issue == "" {
+				continue
+			}
+			result := []*Result{a, b}[i]
+			fmt.Printf("  %-12s %s\n", terminalText(result.Model)+":", terminalText(issue))
+		}
+		fmt.Println("  remedy       re-run both models with the current fitr version")
+		return exitError
+	}
+	if err := record.ProvenanceCompatibilityError(a, b); err != nil {
+		fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
+		fmt.Println("  INCONCLUSIVE  the runs used different task, profile, specification, scoring, or protocol provenance")
+		fmt.Printf("  detail       %s\n", terminalText(err.Error()))
+		fmt.Println("  remedy       compare runs produced by the same fitr battery and effective profile")
+		return exitError
+	}
+	aKey, aKeyErr := a.ComparableDeviceKey()
+	bKey, bKeyErr := b.ComparableDeviceKey()
+	if aKeyErr != nil || bKeyErr != nil {
+		fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
+		fmt.Println("  INCONCLUSIVE  verified effective context is required for comparison")
+		for i, keyErr := range []error{aKeyErr, bKeyErr} {
+			if keyErr == nil {
+				continue
+			}
+			result := []*Result{a, b}[i]
+			fmt.Printf("  %-12s %s\n", terminalText(result.Model)+":", terminalText(keyErr.Error()))
+		}
+		fmt.Println("  remedy       re-run both models on a runtime that reports its allocated context")
+		return exitError
+	}
+	if aKey != bKey {
+		if a.DeviceV2 != nil && b.DeviceV2 != nil && reflect.DeepEqual(a.DeviceV2.Device, b.DeviceV2.Device) {
+			aEffective, bEffective := 0, 0
+			if a.DeviceV2.Context.EffectiveTokens != nil {
+				aEffective = *a.DeviceV2.Context.EffectiveTokens
+			}
+			if b.DeviceV2.Context.EffectiveTokens != nil {
+				bEffective = *b.DeviceV2.Context.EffectiveTokens
+			}
 			errPrint("these results used different request context",
-				fmt.Sprintf("num_ctx %d vs %d; tok/s and quality both move with KV size",
-					resultNumCtx(a), resultNumCtx(b)),
+				fmt.Sprintf("requested %d vs %d, effective %d vs %d; tok/s and quality both move with KV size",
+					resultNumCtx(a), resultNumCtx(b), aEffective, bEffective),
 				"compare two runs at the same --ctx, or re-measure")
 			return exitError
 		}
@@ -2499,7 +3225,7 @@ func cmdCompare(ctx context.Context, args []string) int {
 		return exitError
 	}
 
-	fmt.Printf("  %s  vs  %s\n\n", a.Model, b.Model)
+	fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
 
 	// Throughput: Fieller's interval is the correct one for "how many times
 	// faster". When it cannot be computed honestly (single observation, or
@@ -2573,8 +3299,12 @@ func cmdCompare(ctx context.Context, args []string) int {
 func poolOf(r *Result, need string) (p score.Pool) {
 	if need == "coding" {
 		for _, x := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
+			pass, measured := eval.MeasuredOutcome(x.Outcome, x.Pass)
+			if !measured {
+				continue
+			}
 			p.N++
-			if x.Pass {
+			if pass {
 				p.Passes++
 			}
 		}
@@ -2584,8 +3314,12 @@ func poolOf(r *Result, need string) (p score.Pool) {
 		if !match {
 			continue
 		}
+		pass, measured := eval.MeasuredOutcome(ck.Outcome, ck.Pass)
+		if !measured {
+			continue
+		}
 		p.N++
-		if ck.Pass {
+		if pass {
 			p.Passes++
 		}
 	}
@@ -2603,13 +3337,13 @@ func pairedCompare(a, b *Result) {
 		return
 	}
 	fmt.Printf("  paired on %d identical instances: %s alone passed %d, %s alone passed %d, agreed on %d\n",
-		flips.Shared, a.Model, flips.AOnly, b.Model, flips.BOnly, flips.Agree)
+		flips.Shared, terminalText(a.Model), flips.AOnly, terminalText(b.Model), flips.BOnly, flips.Agree)
 	if flips.HidesDisagreement() {
 		fmt.Printf("  accuracy hid %d item-level flip(s) (%d/%d vs %d/%d) - rates match, the questions did not\n",
 			flips.AOnly+flips.BOnly, flips.APass, flips.Shared, flips.BPass, flips.Shared)
 	}
 	if line, ok := quantDamageLine(a, b, flips); ok {
-		fmt.Println("  " + line)
+		fmt.Println("  " + terminalText(line))
 	}
 	switch {
 	case flips.AOnly+flips.BOnly == 0:
@@ -2626,15 +3360,17 @@ func pairedCompare(a, b *Result) {
 			winner = b.Model
 		}
 		if pExact < 0.05 {
-			fmt.Printf("  %s wins the flips (McNemar exact p=%.3f, mid-p %.3f)\n", winner, pExact, pMid)
+			fmt.Printf("  %s wins the flips (McNemar exact p=%.3f, mid-p %.3f)\n", terminalText(winner), pExact, pMid)
 		} else {
 			fmt.Printf("  ~ the flips do not separate them (McNemar exact p=%.3f, mid-p %.3f)\n", pExact, pMid)
 		}
 	}
 }
 
-// quantDamageLine is directional only when both runs expose a comparable
-// quant and one is strictly higher precision. Otherwise SKIP the claim.
+// quantDamageLine explains why a tempting directional claim is inconclusive.
+// Family names and parameter sizes do not prove that two quantized artifacts
+// descend from the same base revision. FitR has no sealed lineage receipt yet,
+// so it reports paired flips separately and never attributes them to quantization.
 func quantDamageLine(a, b *Result, flips eval.FlipReport) (string, bool) {
 	qa, qb := a.ModelMeta.Details.QuantizationLevel, b.ModelMeta.Details.QuantizationLevel
 	ra, rb := eval.QuantRank(qa), eval.QuantRank(qb)
@@ -2642,18 +3378,18 @@ func quantDamageLine(a, b *Result, flips eval.FlipReport) (string, bool) {
 		return "", false
 	}
 	fa, fb := a.ModelMeta.Details.Family, b.ModelMeta.Details.Family
-	if fa == "" || fa != fb {
+	pa, pb := a.ModelMeta.Details.ParameterSize, b.ModelMeta.Details.ParameterSize
+	if fa == "" || !strings.EqualFold(fa, fb) || pa == "" || !strings.EqualFold(pa, pb) {
 		return "", false
 	}
-	lost, ref, worse := flips.AOnly, qa, qb
+	lost := flips.AOnly
 	if rb > ra {
-		lost, ref, worse = flips.BOnly, qb, qa
+		lost = flips.BOnly
 	}
 	if lost == 0 {
 		return "", false
 	}
-	return fmt.Sprintf("quant damage: %s lost %d item(s) %s passed (flips, not the accuracy delta)",
-		worse, lost, ref), true
+	return "quant attribution INCONCLUSIVE: same-base revision lineage is unverified; see paired flips above", true
 }
 
 // appendUnique adds items not already present, preserving order.

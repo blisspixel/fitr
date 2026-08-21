@@ -5,7 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"flag"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +18,9 @@ import (
 	"github.com/blisspixel/fitr/internal/calibration"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
+	"github.com/blisspixel/fitr/internal/llm"
+	"github.com/blisspixel/fitr/internal/ollama"
+	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/score"
 	"github.com/blisspixel/fitr/internal/stats"
@@ -50,6 +57,24 @@ func golden(t *testing.T) *Result {
 	return &r
 }
 
+func sealCurrentResult(t *testing.T, records ...*Result) {
+	t.Helper()
+	for _, result := range records {
+		if err := prepareMockEvidence(result); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func saveCurrentResults(t *testing.T, records ...*Result) {
+	t.Helper()
+	for _, result := range records {
+		if _, err := save(result); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func lappyProfile(t *testing.T) device.Profile {
 	t.Helper()
 	p, err := device.SelectProfile("lappy", device.Fingerprint{})
@@ -66,8 +91,8 @@ func TestGoldenResultScoresExactly(t *testing.T) {
 	want := map[string]score.State{
 		"fast_and_decent":       score.Pass,
 		"coding":                score.Pass,
-		"structured_output":     score.Pass, // 6/7 = 0.857 over the 0.75 gate
-		"instruction_precision": score.Pass, // 4/4
+		"structured_output":     score.Inconclusive, // point estimate clears the gate, interval does not
+		"instruction_precision": score.Inconclusive, // 4/4 is still thin evidence against a 0.70 gate
 		"uncensored":            score.Pass,
 		"unattended_agentic":    score.Pass,
 		"tool_restraint":        score.Pass,
@@ -142,9 +167,9 @@ func TestGoldenResultRendersCleanly(t *testing.T) {
 	}
 }
 
-// A degraded variant of the golden run: the same model with quant damage in
-// its structured output and a looping longest-sample. This pins the FAIL paths
-// end to end, not just the happy ones.
+// A degraded variant of the golden run with broken structured output and a
+// looping longest-sample. This pins the FAIL paths end to end, not just the
+// happy ones.
 func TestDegradedResultFailsTheRightNeeds(t *testing.T) {
 	r := golden(t)
 	for i := range r.Checks {
@@ -171,7 +196,7 @@ func TestDegradedResultFailsTheRightNeeds(t *testing.T) {
 	}
 }
 
-func TestQuantDamageLineIsDirectionalAndSkipsUnknown(t *testing.T) {
+func TestQuantDamageLineIsInconclusiveWithoutSameBaseLineage(t *testing.T) {
 	base := golden(t)
 	hi, lo := *base, *base
 	lo.Checks = append([]eval.CheckOutcome(nil), base.Checks...)
@@ -186,11 +211,11 @@ func TestQuantDamageLineIsDirectionalAndSkipsUnknown(t *testing.T) {
 	}
 	flips := eval.PairFlips(hi.Checks, lo.Checks)
 	line, ok := quantDamageLine(&hi, &lo, flips)
-	if !ok || !strings.Contains(line, "Q4_K_M lost") || !strings.Contains(line, "Q8_0") {
-		t.Fatalf("got %q ok=%v, want directional Q4 vs Q8", line, ok)
+	if !ok || !strings.Contains(line, "INCONCLUSIVE") || !strings.Contains(line, "same-base revision lineage") {
+		t.Fatalf("got %q ok=%v, want explicit unverified-lineage result", line, ok)
 	}
-	if strings.Contains(line, "accuracy") && !strings.Contains(line, "flips") {
-		t.Fatal("must say flips, not sell an accuracy delta")
+	if strings.Contains(line, "Q4_K_M lost") || strings.Contains(line, "quant damage:") {
+		t.Fatalf("unverified lineage produced directional attribution: %q", line)
 	}
 	lo.ModelMeta.Details.QuantizationLevel = "IQ4_XS"
 	if _, ok := quantDamageLine(&hi, &lo, flips); ok {
@@ -201,6 +226,11 @@ func TestQuantDamageLineIsDirectionalAndSkipsUnknown(t *testing.T) {
 	if _, ok := quantDamageLine(&hi, &lo, flips); ok {
 		t.Fatal("different families are not a quant pair")
 	}
+	lo.ModelMeta.Details.Family = hi.ModelMeta.Details.Family
+	lo.ModelMeta.Details.ParameterSize = "different"
+	if _, ok := quantDamageLine(&hi, &lo, flips); ok {
+		t.Fatal("different parameter sizes are not a quant pair")
+	}
 }
 
 func TestBoardDoesNotRankAcrossFingerprints(t *testing.T) {
@@ -208,17 +238,10 @@ func TestBoardDoesNotRankAcrossFingerprints(t *testing.T) {
 	t.Setenv("FITR_RESULTS", dir)
 	a, b := golden(t), golden(t)
 	a.Model, b.Model = "aa", "bb"
-	b.DeviceKey = a.DeviceKey + "|other"
+	b.Device.GPU = a.Device.GPU + " other"
 	b.Device.GPUDriver = "other-driver"
-	for _, r := range []*Result{a, b} {
-		raw, err := json.Marshal(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	sealCurrentResult(t, a, b)
+	saveCurrentResults(t, a, b)
 	oldOut, oldErr := os.Stdout, os.Stderr
 	or, ow, _ := os.Pipe()
 	er, ew, _ := os.Pipe()
@@ -238,6 +261,37 @@ func TestBoardDoesNotRankAcrossFingerprints(t *testing.T) {
 	}
 	if !strings.Contains(got, "aa") || !strings.Contains(got, "bb") {
 		t.Fatalf("both groups must still be shown:\n%s", got)
+	}
+}
+
+func TestBoardExcludesContaminatedResultsFromRankingAndClaims(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	clean, contaminated := golden(t), golden(t)
+	clean.Model, clean.Scorecard.Model = "clean", "clean"
+	contaminated.Model, contaminated.Scorecard.Model = "contaminated", "contaminated"
+	contaminated.DecodeSum.Mean = clean.DecodeSum.Mean * 10
+	contaminated.Scorecard.Serves = []string{"coding", "structured_output"}
+	contaminated.Contamination = []string{"leftover:7b"}
+	sealCurrentResult(t, clean, contaminated)
+	saveCurrentResults(t, clean, contaminated)
+
+	var stdout string
+	stderr, code := captureTopStderr(t, func() int {
+		var inner int
+		stdout, inner = captureTopStdout(t, func() int {
+			return cmdBoard(context.Background(), []string{"--display", "plain"})
+		})
+		return inner
+	})
+	if code != exitOK {
+		t.Fatalf("board exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "clean") || strings.Contains(stdout, "contaminated") {
+		t.Fatalf("board retained a contaminated ranking row:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "INCONCLUSIVE") || !strings.Contains(stderr, "excluded 1") {
+		t.Fatalf("board did not disclose the excluded result:\n%s", stderr)
 	}
 }
 
@@ -317,16 +371,9 @@ func TestCompareRefusesDifferentFingerprints(t *testing.T) {
 	t.Setenv("FITR_RESULTS", dir)
 	a, b := golden(t), golden(t)
 	a.Model, b.Model = "aa", "bb"
-	b.DeviceKey = a.DeviceKey + "|other"
-	for _, r := range []*Result{a, b} {
-		raw, err := json.Marshal(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	b.Device.GPU = a.Device.GPU + " other"
+	sealCurrentResult(t, a, b)
+	saveCurrentResults(t, a, b)
 	old := os.Stderr
 	er, ew, _ := os.Pipe()
 	os.Stderr = ew
@@ -336,6 +383,31 @@ func TestCompareRefusesDifferentFingerprints(t *testing.T) {
 	io.ReadAll(er)
 	if code != exitError {
 		t.Fatalf("code = %d, want error (never rank across fingerprints)", code)
+	}
+}
+
+func TestCompareIsInconclusiveWhenEitherRunIsContaminated(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "aa", "bb"
+	b.Contamination = []string{"leftover:7b"}
+	sealCurrentResult(t, a, b)
+	saveCurrentResults(t, a, b)
+
+	output, code := captureTopStdout(t, func() int {
+		return cmdCompare(context.Background(), []string{"aa", "bb"})
+	})
+	if code != exitError {
+		t.Fatalf("compare exit=%d, want error for invalid evidence", code)
+	}
+	if !strings.Contains(output, "INCONCLUSIVE") || !strings.Contains(output, "leftover:7b") {
+		t.Fatalf("comparison did not disclose contamination:\n%s", output)
+	}
+	for _, forbidden := range []string{"first is faster", "second is faster", "wins the flips", "decode tok/s"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("comparison retained claim %q:\n%s", forbidden, output)
+		}
 	}
 }
 
@@ -413,27 +485,25 @@ func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FITR_RESULTS", dir)
 	hi, lo := golden(t), golden(t)
+	spec, err := eval.LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hi.SchemaVersion, lo.SchemaVersion = spec.Version.ResultSchemaVersion, spec.Version.ResultSchemaVersion
 	hi.Model, lo.Model = "m-q8", "m-q4"
 	hi.SeedSet, lo.SeedSet = "night", "night"
 	hi.ModelMeta.Details.QuantizationLevel = "Q8_0"
 	lo.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
 	hi.Checks = []eval.CheckOutcome{
-		{TaskID: "json_object", Need: "structured_output", Seed: 1, Pass: true},
-		{TaskID: "date_math", Need: "instruction_precision", Seed: 1, Pass: true},
+		{TaskID: "json_object", Need: "structured_output", Seed: 1, Pass: true, Outcome: eval.OutcomePass},
+		{TaskID: "date_math", Need: "instruction_precision", Seed: 1, Pass: true, Outcome: eval.OutcomePass},
 	}
 	lo.Checks = []eval.CheckOutcome{
-		{TaskID: "json_object", Need: "structured_output", Seed: 1, Pass: false},
-		{TaskID: "date_math", Need: "instruction_precision", Seed: 1, Pass: true},
+		{TaskID: "json_object", Need: "structured_output", Seed: 1, Pass: false, Outcome: eval.OutcomeFail},
+		{TaskID: "date_math", Need: "instruction_precision", Seed: 1, Pass: true, Outcome: eval.OutcomePass},
 	}
-	for _, r := range []*Result{hi, lo} {
-		raw, err := json.Marshal(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	sealCurrentResult(t, hi, lo)
+	saveCurrentResults(t, hi, lo)
 	old := os.Stdout
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
@@ -448,6 +518,9 @@ func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
 	}
 	if !strings.Contains(got, "json_object") || !strings.Contains(got, "never flipped") {
 		t.Fatalf("must name the discriminator and the inert item:\n%s", got)
+	}
+	if !strings.Contains(got, "exploratory only") || !strings.Contains(got, "fewer than 10") {
+		t.Fatalf("must distinguish an exploratory pair from decision-grade evidence:\n%s", got)
 	}
 	if strings.Contains(got, "rewrites spec") {
 		t.Fatal("must not claim to rewrite the spec")
@@ -493,14 +566,50 @@ func TestCalibrateRejectsDifferentDeviceConfiguration(t *testing.T) {
 	a.SeedSet, b.SeedSet = "same", "same"
 	b.Device.GPUDriver = "different"
 	b.DeviceKey = b.Device.Key()
-	for _, r := range []*Result{a, b} {
-		raw, _ := json.Marshal(r)
-		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	sealCurrentResult(t, a, b)
+	saveCurrentResults(t, a, b)
 	if code := cmdCalibrate(context.Background(), []string{"aa", "bb"}); code != exitUsage {
 		t.Fatalf("code = %d, want usage when device configuration differs", code)
+	}
+}
+
+func TestCalibrationPairRejectsContaminatedAndUnreconciledEvidence(t *testing.T) {
+	makePair := func() (*Result, *Result) {
+		a, b := golden(t), golden(t)
+		a.Model, b.Model = "m-q8", "m-q4"
+		a.SeedSet, b.SeedSet = "shared", "shared"
+		a.ModelMeta.Details.QuantizationLevel = "Q8_0"
+		b.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
+		return a, b
+	}
+
+	a, b := makePair()
+	b.Contamination = []string{"leftover:7b"}
+	sealCurrentResult(t, a, b)
+	if _, err := calibrationPair(a, b, eval.ItemStats(a.Checks, b.Checks)); err == nil ||
+		!strings.Contains(err.Error(), "contaminated") {
+		t.Fatalf("contaminated calibration pair error = %v", err)
+	}
+
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b = makePair()
+	sealCurrentResult(t, a, b)
+	saveCurrentResults(t, a, b)
+	if err := os.RemoveAll(record.NewStore(dir).HistoryDir()); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadResults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b = latestNamed(loaded, "m-q8"), latestNamed(loaded, "m-q4")
+	if a == nil || b == nil {
+		t.Fatalf("reconciled pair was not loaded: %+v", loaded)
+	}
+	if _, err := calibrationPair(a, b, eval.ItemStats(a.Checks, b.Checks)); err == nil ||
+		!strings.Contains(err.Error(), "unverified") {
+		t.Fatalf("unreconciled calibration pair error = %v", err)
 	}
 }
 
@@ -508,18 +617,29 @@ func TestCalibrateMergeWritesMultiDeviceSummary(t *testing.T) {
 	dir := t.TempDir()
 	paths := []string{filepath.Join(dir, "a.json"), filepath.Join(dir, "b.json")}
 	for i, path := range paths {
+		family := []string{"fam-a", "fam-b"}[i]
 		report := calibration.NewPair(version, 2, []string{"seed-a", "seed-b"}[i],
 			calibration.Device{ID: []string{"1111111111111111", "2222222222222222"}[i], GPU: "gpu"},
-			calibration.Run{Model: "m-q8", Quant: "Q8_0", Family: "fam", ParameterSize: "8B", ResultSchemaVersion: 4},
-			calibration.Run{Model: "m-q4", Quant: "Q4_K_M", Family: "fam", ParameterSize: "8B", ResultSchemaVersion: 4},
-			[]eval.ItemStat{{TaskID: "json", Family: "json", Need: "structured_output", Shared: 5, Flips: i, APass: 5, BPass: 5 - i}})
+			calibration.Run{Model: family + "-q8", Quant: "Q8_0", Family: family, ParameterSize: "8B", ResultSchemaVersion: 4},
+			calibration.Run{Model: family + "-q4", Quant: "Q4_K_M", Family: family, ParameterSize: "8B", ResultSchemaVersion: 4},
+			[]eval.ItemStat{
+				{TaskID: "json", Family: "json", Need: "structured_output", Shared: 10, Flips: 1, APass: 10, BPass: 9},
+				{TaskID: "stable", Family: "reasoning", Need: "instruction_precision", Shared: 10, APass: 10, BPass: 10},
+			})
 		if err := calibration.WriteJSON(path, report); err != nil {
 			t.Fatal(err)
 		}
 	}
 	out := filepath.Join(dir, "summary.json")
-	if code := cmdCalibrateMerge([]string{paths[0], paths[1], "--out", out}); code != exitOK {
+	printed, code := captureTopStdout(t, func() int {
+		return cmdCalibrateMerge([]string{paths[0], paths[1], "--out", out})
+	})
+	if code != exitOK {
 		t.Fatalf("code = %d", code)
+	}
+	if !strings.Contains(printed, "UNVERIFIED") || !strings.Contains(printed, "0/2 report") ||
+		strings.Contains(printed, "READY FOR ITEM REVIEW") || strings.Contains(printed, "eligible for written review") {
+		t.Fatalf("unsigned imports must remain exploratory:\n%s", printed)
 	}
 	raw, err := os.ReadFile(out)
 	if err != nil {
@@ -529,8 +649,18 @@ func TestCalibrateMergeWritesMultiDeviceSummary(t *testing.T) {
 	if err := json.Unmarshal(raw, &summary); err != nil {
 		t.Fatal(err)
 	}
-	if summary.Devices != 2 || summary.Reports != 2 || summary.Items[0].Flips != 1 {
+	if summary.Devices != 2 || summary.Reports != 2 || summary.Readiness.ReadyForReview ||
+		summary.Readiness.ModelFamilies != 0 || summary.Readiness.DecisionGradeReports != 0 {
 		t.Fatalf("bad merged summary: %+v", summary)
+	}
+	var reviewCandidates int
+	for _, item := range summary.Items {
+		if item.ReviewCandidate {
+			reviewCandidates++
+		}
+	}
+	if reviewCandidates != 0 {
+		t.Fatalf("unsigned imports produced %d review candidate(s): %+v", reviewCandidates, summary.Items)
 	}
 }
 
@@ -676,7 +806,7 @@ func TestExportRetonrEvidenceIsNotAQualification(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("code = %d", code)
 	}
-	b, err := os.ReadFile(filepath.Join(dir, safeName(r.Model)+".retonr.json"))
+	b, err := os.ReadFile(filepath.Join(dir, record.ArtifactStem(r.Model)+".retonr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,6 +824,48 @@ func TestExportRetonrEvidenceIsNotAQualification(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, safeName(r.Model)+".html")); err == nil {
 		t.Fatal("--retonr alone must not also write HTML")
+	}
+}
+
+func TestDefaultShareArtifactsDoNotCollideAfterNameSanitization(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	models := []string{"org/model", "org:model"}
+	results := make([]*Result, 0, len(models))
+	for _, model := range models {
+		r := golden(t)
+		r.Model = model
+		results = append(results, r)
+	}
+	sealCurrentResult(t, results...)
+	saveCurrentResults(t, results...)
+
+	htmlPaths := map[string]bool{}
+	for _, result := range results {
+		path, err := writeHTMLArtifact(result, "auto", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		htmlPaths[path] = true
+		if _, err := os.Stat(path); err != nil {
+			t.Fatal(err)
+		}
+		stderr, code := captureTopStderr(t, func() int {
+			return cmdExport(context.Background(), []string{"--retonr", result.Model})
+		})
+		if code != exitOK {
+			t.Fatalf("export %q exit=%d stderr=%s", result.Model, code, stderr)
+		}
+		retPath := filepath.Join(dir, record.ArtifactStem(result.Model)+".retonr.json")
+		if _, err := os.Stat(retPath); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(htmlPaths) != len(results) {
+		t.Fatalf("default HTML paths collided: %v", htmlPaths)
+	}
+	if record.ArtifactStem(models[0]) == record.ArtifactStem(models[1]) {
+		t.Fatal("default retonr paths collided")
 	}
 }
 
@@ -777,6 +949,336 @@ func TestSameServedModelDoesNotGuess(t *testing.T) {
 	}
 	if sameServedModel("qwen3:30b", "qwen3:8b") || sameServedModel("qwen3:30b", "llama3:8b") {
 		t.Fatal("different tags must not match")
+	}
+}
+
+func TestSelectResolvedModelUsesCanonicalRuntimeIdentity(t *testing.T) {
+	models := []ollama.ModelInfo{{Name: "qwen:latest"}}
+	got, err := selectResolvedModel("ollama", "qwen", models)
+	if err != nil || got.Name != "qwen:latest" {
+		t.Fatalf("latest resolution = %+v, %v", got, err)
+	}
+	served, err := selectResolvedModel("llama-server", "user-alias", []ollama.ModelInfo{{Name: "actual.gguf"}})
+	if err != nil || served.Name != "actual.gguf" {
+		t.Fatalf("single served model = %+v, %v", served, err)
+	}
+}
+
+func TestSelectResolvedModelRejectsMissingAndAmbiguousIdentity(t *testing.T) {
+	if _, err := selectResolvedModel("openai", "missing", []ollama.ModelInfo{{Name: "actual"}}); err == nil {
+		t.Fatal("a missing OpenAI model was accepted")
+	}
+	duplicate := []ollama.ModelInfo{{Name: "qwen"}, {Name: "qwen:latest"}}
+	if _, err := selectResolvedModel("ollama", "qwen", duplicate); err == nil {
+		t.Fatal("an ambiguous alias was accepted")
+	}
+}
+
+func TestPersistenceFailureHasNonzeroPriority(t *testing.T) {
+	passing := &Result{}
+	if got := runResultExitCode(passing, "checks", errors.New("disk full"), nil); got != exitError {
+		t.Fatalf("checks save failure exit = %d, want %d", got, exitError)
+	}
+	failing := &Result{Scorecard: score.Scorecard{Fails: 1}}
+	if got := runResultExitCode(failing, "full", errors.New("permission denied"), nil); got != exitError {
+		t.Fatalf("failed-gate save failure exit = %d, want persistence error %d", got, exitError)
+	}
+	if got := runResultExitCode(failing, "full", nil, nil); got != exitGates {
+		t.Fatalf("saved failed-gate exit = %d, want %d", got, exitGates)
+	}
+}
+
+func TestRequestedHTMLFailureHasNonzeroPriority(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	r := golden(t)
+	r.Model = "html-failure"
+	sealCurrentResult(t, r)
+	jsonPath, err := save(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	htmlPath := strings.TrimSuffix(jsonPath, ".json") + ".html"
+	if err := os.Mkdir(htmlPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeHTMLArtifact(r, "auto", jsonPath); err == nil {
+		t.Fatal("requested HTML unexpectedly succeeded when its destination was a directory")
+	} else if got := runResultExitCode(r, "full", nil, err); got != exitError {
+		t.Fatalf("HTML failure exit = %d, want %d", got, exitError)
+	}
+	if info, err := os.Stat(jsonPath); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("saved result was not preserved: info=%v err=%v", info, err)
+	}
+}
+
+func TestQuietFlagCanBeRepeated(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "repeated", args: []string{"model", "-q", "-q"}},
+		{name: "explicit count", args: []string{"model", "-q=2"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fs := flag.NewFlagSet("quiet", flag.ContinueOnError)
+			fs.SetOutput(io.Discard)
+			var quiet countFlag
+			fs.Var(&quiet, "q", "quiet level")
+			if err := fs.Parse(permute(test.args)); err != nil {
+				t.Fatal(err)
+			}
+			if quiet != 2 {
+				t.Fatalf("quiet level = %d, want 2", quiet)
+			}
+			if fs.NArg() != 1 || fs.Arg(0) != "model" {
+				t.Fatalf("positional arguments = %q, want model", fs.Args())
+			}
+		})
+	}
+}
+
+func TestArtifactRejectsStoredScorecardTampering(t *testing.T) {
+	r := golden(t)
+	r.Model = "tamper-check"
+	sealCurrentResult(t, r)
+	r.Scorecard = score.Scorecard{
+		Model: r.Model,
+		Needs: map[string]score.Verdict{
+			"fabricated": {State: score.Pass, Why: "stored claim"},
+		},
+		Serves: []string{"fabricated"}, Passes: 1,
+	}
+	if _, err := artifactFrom(r); err == nil {
+		t.Fatalf("tampered stored scorecard was accepted: %v", err)
+	}
+}
+
+type runIntegrationBackend struct {
+	stopCalls     int
+	generateCalls int
+	stopErrAt     map[int]error
+	generateErrAt map[int]error
+	digest        string
+	effectiveCtx  int
+	contextErr    error
+}
+
+type digestVerifyingBackend struct {
+	*runIntegrationBackend
+	reported string
+	called   bool
+}
+
+func (b *digestVerifyingBackend) Tags(context.Context) ([]ollama.ModelInfo, error) {
+	return []ollama.ModelInfo{{Name: "model", ReportedDigest: b.reported, Size: 1024}}, nil
+}
+
+func (b *digestVerifyingBackend) VerifyModelDigest(model, reported string) (string, error) {
+	b.called = true
+	if model != "model" || reported != b.reported {
+		return "", errors.New("unexpected model identity input")
+	}
+	return integrationDigest(), nil
+}
+
+var _ llm.Backend = (*runIntegrationBackend)(nil)
+var _ llm.EffectiveContextObserver = (*runIntegrationBackend)(nil)
+
+func (b *runIntegrationBackend) Name() string                   { return "fake" }
+func (b *runIntegrationBackend) URL() string                    { return "fake://local" }
+func (b *runIntegrationBackend) Version(context.Context) string { return "fake-runtime-v1" }
+func (b *runIntegrationBackend) Reachable(context.Context) bool { return true }
+func (b *runIntegrationBackend) StopAll(context.Context) ([]string, error) {
+	b.stopCalls++
+	if err := b.stopErrAt[b.stopCalls]; err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+func (b *runIntegrationBackend) Tags(context.Context) ([]ollama.ModelInfo, error) {
+	return []ollama.ModelInfo{{Name: "model", Digest: b.digest, Size: 1024}}, nil
+}
+func (b *runIntegrationBackend) Show(context.Context, string) (ollama.ModelInfo, error) {
+	return ollama.ModelInfo{Name: "model", Capabilities: []string{"completion"}}, nil
+}
+func (b *runIntegrationBackend) PS(context.Context) ([]ollama.RunningModel, error) {
+	return []ollama.RunningModel{{Name: "model", Size: 1024, SizeVRAM: 1024}}, nil
+}
+func (b *runIntegrationBackend) EffectiveContext(context.Context, string) (int, bool, error) {
+	if b.contextErr != nil {
+		return 0, false, b.contextErr
+	}
+	return b.effectiveCtx, b.effectiveCtx > 0, nil
+}
+func (b *runIntegrationBackend) Generate(context.Context, string, string, ollama.Sampling) (string, ollama.Metrics, error) {
+	b.generateCalls++
+	if err := b.generateErrAt[b.generateCalls]; err != nil {
+		return "", ollama.Metrics{}, err
+	}
+	return "OK", ollama.Metrics{
+		DecodeTPS: 12, PrefillTPS: 100, TTFTSeconds: 0.2,
+		PromptTokens: 64, EvalCount: 8,
+	}, nil
+}
+func (b *runIntegrationBackend) Chat(context.Context, string, []ollama.Message, []ollama.Tool, ollama.Sampling) (ollama.Message, ollama.Metrics, error) {
+	return ollama.Message{Role: "assistant", Content: "DONE"}, ollama.Metrics{}, nil
+}
+
+func integrationDigest() string {
+	return "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
+
+func TestDiscoveredOpenAIBackendNeverReceivesEnvironmentCredential(t *testing.T) {
+	receivedAuth := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[]}`)
+	}))
+	defer server.Close()
+
+	t.Setenv("FITR_OPENAI_URL", "https://api.openai.com")
+	t.Setenv("OPENAI_API_KEY", "cloud-secret")
+	t.Setenv("FITR_OPENAI_API_KEY", "compatible-secret")
+	b, err := backendAt("openai", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !b.Reachable(context.Background()) {
+		t.Fatal("discovered backend was not reachable")
+	}
+	if receivedAuth != "" {
+		t.Fatalf("auto-discovery sent Authorization: %q", receivedAuth)
+	}
+}
+
+func TestResolveRunModelPromotesOnlyVerifierApprovedDigest(t *testing.T) {
+	b := &digestVerifyingBackend{
+		runIntegrationBackend: &runIntegrationBackend{},
+		reported:              integrationDigest(),
+	}
+	resolved, err := resolveRunModel(context.Background(), b, "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !b.called {
+		t.Fatal("model digest verifier was not called")
+	}
+	if resolved.Info.Digest != integrationDigest() || resolved.Identity.Value != integrationDigest() {
+		t.Fatalf("verified identity was not promoted: %+v", resolved)
+	}
+}
+
+func TestExecuteFakeBackendProducesCompleteSealedQuickRun(t *testing.T) {
+	backend := &runIntegrationBackend{digest: integrationDigest(), effectiveCtx: eval.NumCtx}
+	display := render.New("none")
+	defer display.Close()
+	result, err := execute(context.Background(), backend, "model", runOpts{
+		level: "quick", profile: "default", reps: 1, checksReps: 1,
+	}, display)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Manifest == nil || result.Manifest.Schema != record.RunManifestSchema ||
+		result.Manifest.Model.Value != integrationDigest() || result.Manifest.Provenance == nil {
+		t.Fatalf("manifest identity = %+v", result.Manifest)
+	}
+	if result.DeviceV2 == nil || result.DeviceV2.Context.State() != device.ContextVerified {
+		t.Fatalf("context receipt = %+v", result.DeviceV2)
+	}
+	if _, err := result.ComparableDeviceKey(); err != nil {
+		t.Fatalf("verified run is not comparable: %v", err)
+	}
+	if err := result.ValidateEvidenceContract(); err != nil {
+		t.Fatalf("evidence contract = %v", err)
+	}
+	for _, phase := range []string{"coding", "tools", "agentic"} {
+		if result.EvidenceCounts[phase].Scorable != 0 {
+			t.Fatalf("%s executable evidence became scoreable: %+v", phase, result.EvidenceCounts[phase])
+		}
+	}
+}
+
+func TestExecuteFakeBackendInfrastructureFaultsCannotReturnAResult(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		backend *runIntegrationBackend
+	}{
+		{name: "mutable identity", backend: &runIntegrationBackend{}},
+		{name: "generation transport", backend: &runIntegrationBackend{
+			digest: integrationDigest(), generateErrAt: map[int]error{2: errors.New("injected transport fault")},
+		}},
+		{name: "context receipt", backend: &runIntegrationBackend{
+			digest: integrationDigest(), contextErr: errors.New("injected context fault"),
+		}},
+		{name: "final unload", backend: &runIntegrationBackend{
+			digest: integrationDigest(), stopErrAt: map[int]error{3: errors.New("injected unload fault")},
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			display := render.New("none")
+			defer display.Close()
+			result, err := execute(context.Background(), test.backend, "model", runOpts{
+				level: "quick", profile: "default", reps: 1, checksReps: 1,
+			}, display)
+			if err == nil || result != nil {
+				t.Fatalf("result=%+v error=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestMeasureExcludesUnavailableTaskOutcomes(t *testing.T) {
+	r := &Result{
+		Repeats:   1,
+		CodeWrite: []eval.ExecResult{{Pass: true, Outcome: eval.OutcomeInconclusive}},
+		CodeFix:   []eval.ExecResult{{Pass: false, Outcome: eval.OutcomeSkipped}},
+		Tools:     []eval.ToolLoopResult{{Pass: true, Outcome: eval.OutcomeInconclusive}},
+		Refusal: map[string]eval.RefusalVerdict{
+			"political": {Verdict: "answered", Outcome: eval.OutcomePass},
+			"fiction":   {Verdict: "error", Outcome: eval.OutcomeError},
+		},
+	}
+	m := measure(r)
+	if m.CodeKnown || m.CodeRepeats != 0 {
+		t.Fatalf("unverified code entered scoring: known=%v repeats=%d", m.CodeKnown, m.CodeRepeats)
+	}
+	if m.ToolsRan {
+		t.Fatal("unverified tool observation entered scoring")
+	}
+	if m.RefusalKnown {
+		t.Fatal("partial refusal evidence became a known refusal result")
+	}
+	if p := poolOf(r, "coding"); p.N != 0 {
+		t.Fatalf("comparison denominator includes unavailable code: %+v", p)
+	}
+}
+
+func TestRunTaskPlanAndEvidenceCountsKeepImmutableDenominators(t *testing.T) {
+	plan := runTaskPlan("full", 3, 1, false, 16, 3)
+	if plan.CodeTrials != 6 || plan.CheckTrialsLimit != 16 || plan.ToolTrials != 3 ||
+		!plan.Withdrawal || plan.RefusalTrials != 3 || plan.AgenticTrials != 1 {
+		t.Fatalf("full plan = %+v", plan)
+	}
+	adaptive := runTaskPlan("default", 3, 1, true, 16, 3)
+	if adaptive.CheckTrialsLimit != 96 || !adaptive.AdaptiveChecks {
+		t.Fatalf("adaptive check limit = %d, want 96", adaptive.CheckTrialsLimit)
+	}
+	checks := runTaskPlan("checks", 5, 5, false, 16, 3)
+	if checks.CheckTrialsLimit != 80 || checks.CodeTrials != 0 || checks.Plumbing {
+		t.Fatalf("checks-only plan = %+v", checks)
+	}
+
+	r := &Result{SchemaVersion: 5, TaskPlan: record.TaskPlan{CodeTrials: 2}}
+	r.CodeWrite = []eval.ExecResult{{Outcome: eval.OutcomeSkipped}}
+	counts := buildEvidenceCounts(r)
+	if counts["coding"].Complete() {
+		t.Fatalf("one of two planned coding trials disappeared: %+v", counts["coding"])
+	}
+	r.CodeFix = []eval.ExecResult{{Outcome: eval.OutcomeSkipped}}
+	if got := buildEvidenceCounts(r)["coding"]; !got.Complete() || got.Skipped != 2 || got.Scorable != 0 {
+		t.Fatalf("explicitly skipped denominator = %+v", got)
 	}
 }
 
@@ -865,6 +1367,23 @@ func TestApplyJSONSaysMutatesFalse(t *testing.T) {
 	}
 }
 
+func TestApplyHumanOutputNeutralizesTerminalControls(t *testing.T) {
+	hostile := "safe\x1b[2J\x1b]0;forged title\a\x1bPforged payload\x1b\\\r\n\tleft\u202eright"
+	out, code := captureTopStdout(t, func() int {
+		return cmdApply(context.Background(), []string{hostile, "--ctx", "4096", "--backend", "ollama", "--display", "plain"})
+	})
+	if code != exitOK {
+		t.Fatalf("apply exit=%d output=%q", code, out)
+	}
+	if strings.ContainsAny(out, "\x1b\a\r\t\u202e") || strings.Contains(out, "forged title") ||
+		strings.Contains(out, "forged payload") {
+		t.Fatalf("apply leaked terminal controls: %q", out)
+	}
+	if !strings.Contains(out, "safe") || !strings.Contains(out, "leftright") {
+		t.Fatalf("apply lost ordinary model text: %q", out)
+	}
+}
+
 func TestBoardLabelsCtxSplitAsThisMachine(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FITR_RESULTS", dir)
@@ -878,15 +1397,8 @@ func TestBoardLabelsCtxSplitAsThisMachine(t *testing.T) {
 	b.NumCtx = 4096
 	b.Device = cur
 	b.DeviceKey = cur.Key() + eval.CtxKeySuffix(4096)
-	for _, r := range []*Result{a, b} {
-		raw, err := json.Marshal(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	sealCurrentResult(t, a, b)
+	saveCurrentResults(t, a, b)
 	oldOut, oldErr := os.Stdout, os.Stderr
 	or, ow, _ := os.Pipe()
 	er, ew, _ := os.Pipe()
@@ -919,15 +1431,8 @@ func TestCompareCtxSplitNamesTheKnob(t *testing.T) {
 	a.Model, b.Model = "aa", "bb"
 	b.NumCtx = 4096
 	b.DeviceKey = a.DeviceKey + eval.CtxKeySuffix(4096)
-	for _, r := range []*Result{a, b} {
-		raw, err := json.Marshal(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	sealCurrentResult(t, a, b)
+	saveCurrentResults(t, a, b)
 	old := os.Stderr
 	er, ew, _ := os.Pipe()
 	os.Stderr = ew

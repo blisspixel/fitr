@@ -91,13 +91,14 @@ significance, fitr sides with the conservative one.
 Pinned seedsets trade contamination resistance for pairing power, so fresh
 instances per run remain the default and the pinning is explicit.
 
-Accuracy deltas hide quant damage. A lower quant can fail three items the
-higher quant passed and pass three the higher failed, and both score 6/8.
+Accuracy deltas hide item-level disagreement. One run can fail three items the
+other passed and pass three the other failed, and both score 6/8.
 `fitr compare` on a shared seedset therefore prints the flips even when the
-rates match ("accuracy hid N item-level flips"). Directional "quant damage"
-is claimed only when both runs expose a comparable GGUF dtype of the same
-family and one is strictly higher precision; IQ and unknown schemes SKIP
-that claim rather than invent a ranking.
+rates match ("accuracy hid N item-level flips"). FitR does not attribute those
+flips to quantization: matching family, parameter size, and a ranked GGUF dtype
+do not prove both artifacts descend from the same exact base revision. Until a
+sealed same-base lineage receipt is available, directional quant attribution is
+INCONCLUSIVE. IQ and unknown schemes also SKIP dtype ordering.
 
 ## 5. Ratios of means: Fieller's theorem
 
@@ -177,7 +178,8 @@ is deliberately laxer because its warning gates advice rather than data).
 - CV: the coefficient of variation rides along with every mean +/- sd line;
   it is the one dimensionless stability number comparable across devices.
 - Borderline gates: when a gate value sits inside the Wilson interval of the
-  pool being judged, the verdict carries "borderline: gate inside the CI";
+  pool being judged, the verdict is `INCONCLUSIVE` because the interval does
+  not establish either side of the gate;
   the point estimate picked a side, the sample did not.
 - No error bar is ever printed from a single observation, and a summary at
   n = 1 is labeled "(abs, n=1)" instead of "+/- 0.00".

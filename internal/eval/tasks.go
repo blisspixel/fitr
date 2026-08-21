@@ -3,9 +3,9 @@ package eval
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -200,10 +200,14 @@ func keysOf(m map[string]string) []string {
 
 // ---------------------------------------------------------------- exec tasks
 type ExecResult struct {
-	Pass   bool   `json:"pass"`
-	Detail string `json:"detail"`
-	Raw    string `json:"raw"`
-	File   string `json:"file_edited,omitempty"`
+	Pass     bool                 `json:"pass"`
+	Outcome  Outcome              `json:"outcome,omitempty"`
+	Verified bool                 `json:"verified"`
+	Verifier *VerificationReceipt `json:"verifier,omitempty"`
+	Failure  *Failure             `json:"failure,omitempty"`
+	Detail   string               `json:"detail"`
+	Raw      string               `json:"raw"`
+	File     string               `json:"file_edited,omitempty"`
 }
 
 var (
@@ -238,24 +242,43 @@ func extractCode(text, prefer string) string {
 // RunExec writes fixtures, asks the model, applies its code, and EXECUTES the
 // tests. Pass/fail is execution, never a model's opinion about its own work.
 func RunExec(ctx context.Context, c llm.Backend, model string, spec ExecSpec, dir string) (ExecResult, error) {
-	var r ExecResult
+	r := ExecResult{Outcome: OutcomeSkipped}
+	if !unsafeExecutionEnabled(ctx) {
+		r.Detail = "disabled: generated code execution requires --allow-unsafe-exec and remains unverified"
+		return r, nil
+	}
+	runner, err := resolveTaskRunner(ctx, spec.Runner, spec.Files)
+	if err != nil {
+		f := failure(FailureExecutorPreflight, spec.ID, err)
+		r.Outcome, r.Failure = OutcomeError, f
+		return r, f
+	}
+	r.Outcome = OutcomeInconclusive
 	prompt, err := RenderPrompt(spec.Prompt, spec.Files)
 	if err != nil {
-		return r, err
+		f := failure(FailureInvalidSpec, spec.ID+".prompt", err)
+		r.Outcome, r.Failure = OutcomeError, f
+		return r, f
 	}
 	samp := ollama.Deterministic(spec.NumPredict, numCtx(ctx))
 	text, _, err := c.Generate(ctx, model, prompt, samp)
 	if err != nil {
-		return r, err
+		f := failure(FailureTransport, spec.ID+".generate", err)
+		r.Outcome, r.Failure = OutcomeError, f
+		return r, f
 	}
 	r.Raw = text
 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return r, err
+		f := failure(FailureFixtureIO, "mkdir", err)
+		r.Outcome, r.Failure = OutcomeError, f
+		return r, f
 	}
 	for name, body := range spec.Files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-			return r, err
+			f := failure(FailureFixtureIO, "write_fixture", err)
+			r.Outcome, r.Failure = OutcomeError, f
+			return r, f
 		}
 	}
 
@@ -271,6 +294,11 @@ func RunExec(ctx context.Context, c llm.Backend, model string, spec ExecSpec, di
 		if body == "" {
 			body = extractCode(text, "")
 		}
+		if strings.TrimSpace(body) == "" {
+			r.Detail = "no executable code was extracted"
+			r.Outcome = OutcomeInconclusive
+			return r, nil
+		}
 		// Only allow edits to files the task declares editable; a model naming
 		// some other path must not be able to write outside the fixture.
 		if !allowed(target, spec.Editable) {
@@ -278,17 +306,38 @@ func RunExec(ctx context.Context, c llm.Backend, model string, spec ExecSpec, di
 		}
 		r.File = target
 		if body != "" {
-			os.WriteFile(filepath.Join(dir, target), []byte(body), 0o644)
+			if err := os.WriteFile(filepath.Join(dir, target), []byte(body), 0o644); err != nil {
+				f := failure(FailureFixtureIO, "write_model_file", err)
+				r.Outcome, r.Failure = OutcomeError, f
+				return r, f
+			}
 		}
 	default:
 		code := extractCode(text, spec.Extract.PreferContaining)
 		r.File = spec.Entry
-		os.WriteFile(filepath.Join(dir, spec.Entry), []byte(code), 0o644)
+		if strings.TrimSpace(code) == "" {
+			r.Detail = "no executable code was extracted"
+			r.Outcome = OutcomeInconclusive
+			return r, nil
+		}
+		if err := os.WriteFile(filepath.Join(dir, spec.Entry), []byte(code), 0o644); err != nil {
+			f := failure(FailureFixtureIO, "write_model_file", err)
+			r.Outcome, r.Failure = OutcomeError, f
+			return r, f
+		}
 	}
 
-	out, _ := runIn(ctx, dir, spec.Runner)
-	r.Detail = tail(out, 400)
-	r.Pass = strings.Contains(out, spec.PassIfStdoutContains)
+	receipt := verifyIn(ctx, dir, runner, spec.PassIfStdoutContains)
+	r.Detail = tail(receipt.Output, 400)
+	r.Pass = receipt.SuccessfulExit && receipt.ExactFinalMarker
+	r.Verifier = &receipt
+	r.Failure = receipt.Failure
+	if receipt.Failure != nil {
+		r.Detail = strings.TrimSpace(r.Detail + "; " + receipt.Failure.Error())
+	}
+	// Executable observations stay inconclusive until an isolated worker keeps
+	// generated code away from the verifier and the user's machine.
+	r.Outcome = OutcomeInconclusive
 	return r, nil
 }
 
@@ -297,18 +346,6 @@ func allowed(name string, list []string) bool {
 		return true
 	}
 	return slices.Contains(list, name)
-}
-
-func runIn(ctx context.Context, dir string, argv []string) (string, error) {
-	if len(argv) == 0 {
-		return "", fmt.Errorf("no runner defined")
-	}
-	cctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(cctx, argv[0], argv[1:]...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	return string(out), err
 }
 
 func tail(s string, n int) string {
@@ -321,14 +358,19 @@ func tail(s string, n int) string {
 
 // ---------------------------------------------------------------- tool loops
 type ToolLoopResult struct {
-	Pass      bool   `json:"pass"`
-	Turns     int    `json:"turns"`
-	Calls     int    `json:"tool_calls"`
-	Malformed int    `json:"malformed_calls"`
-	Repeats   int    `json:"repeated_identical_calls"`
-	Looped    bool   `json:"looped"`
-	Ended     string `json:"ended"`
-	Sequence  string `json:"call_sequence"`
+	Pass                 bool                  `json:"pass"`
+	Outcome              Outcome               `json:"outcome,omitempty"`
+	Verified             bool                  `json:"verified"`
+	Verifier             *VerificationReceipt  `json:"verifier,omitempty"`
+	VerifierObservations []VerificationReceipt `json:"verifier_observations,omitempty"`
+	Failure              *Failure              `json:"failure,omitempty"`
+	Turns                int                   `json:"turns"`
+	Calls                int                   `json:"tool_calls"`
+	Malformed            int                   `json:"malformed_calls"`
+	Repeats              int                   `json:"repeated_identical_calls"`
+	Looped               bool                  `json:"looped"`
+	Ended                string                `json:"ended"`
+	Sequence             string                `json:"call_sequence"`
 	// MaxPromptTok is the largest transcript the model re-processed in one
 	// turn; CtxCeiling is set when it crossed 80% of the context window.
 	// A model that lets its transcript grow to the ceiling without managing
@@ -357,11 +399,34 @@ var seqCode = map[string]string{
 // an identical action, and failing to terminate.
 func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoopSpec, dir string) (ToolLoopResult, error) {
 	r := ToolLoopResult{Ended: "turn_cap"}
+	requiresExec := ToolLoopRequiresExecution(spec)
+	var runner resolvedTaskRunner
+	if requiresExec && !unsafeExecutionEnabled(ctx) {
+		r.Outcome = OutcomeSkipped
+		r.Ended = "unsafe_execution_disabled"
+		r.Detail = "disabled: generated code execution requires --allow-unsafe-exec and remains unverified"
+		return r, nil
+	}
+	if requiresExec {
+		var err error
+		runner, err = resolveTaskRunner(ctx, spec.Verify.Runner, spec.Files)
+		if err != nil {
+			f := failure(FailureExecutorPreflight, spec.ID, err)
+			r.Outcome, r.Failure = OutcomeError, f
+			return r, f
+		}
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return r, err
+		f := failure(FailureFixtureIO, "mkdir", err)
+		r.Outcome, r.Failure = OutcomeError, f
+		return r, f
 	}
 	for name, body := range spec.Files {
-		os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			f := failure(FailureFixtureIO, "write_fixture", err)
+			r.Outcome, r.Failure = OutcomeError, f
+			return r, f
+		}
 	}
 
 	written := map[string]bool{}
@@ -392,8 +457,9 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 		}
 		msg, tm, err := c.Chat(ctx, model, msgs, activeTools, samp)
 		if err != nil {
-			r.Ended = "error: " + err.Error()
-			break
+			f := failure(FailureTransport, "tool_loop.chat", err)
+			r.Outcome, r.Failure, r.Ended = OutcomeError, f, "transport_error"
+			return r, f
 		}
 		if tm.PromptTokens > r.MaxPromptTok {
 			r.MaxPromptTok = tm.PromptTokens
@@ -405,7 +471,7 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 			lastPrompt = tm.PromptTokens
 		}
 		if len(msg.ToolCalls) == 0 {
-			if strings.Contains(strings.ToUpper(msg.Content), "DONE") {
+			if exactDone(msg.Content) {
 				r.Ended = "clean_stop"
 			} else {
 				r.Ended = "stopped_without_done"
@@ -447,7 +513,16 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 				r.DeadCalls++
 				result = "ERROR: tool " + name + " is no longer available; it has been removed"
 			} else {
-				result = doTool(ctx, dir, name, p, content, args, spec, written)
+				var toolErr error
+				result, toolErr = doTool(ctx, dir, name, p, content, args, spec, written, runner, &r.VerifierObservations)
+				if toolErr != nil {
+					var typed *Failure
+					if !errors.As(toolErr, &typed) {
+						typed = failure(FailureFixtureIO, "tool_loop."+name, toolErr)
+					}
+					r.Outcome, r.Failure, r.Ended = OutcomeError, typed, "tool_error"
+					return r, typed
+				}
 			}
 			msgs = append(msgs, ollama.Message{
 				Role: "tool", ToolName: name, ToolCallID: tc.ID,
@@ -467,66 +542,101 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 	for f := range written {
 		r.FilesWrote = append(r.FilesWrote, f)
 	}
+	sort.Strings(r.FilesWrote)
 
 	// Behavioral tasks (withdrawal) have no verify runner: passing means the
 	// loop terminated cleanly; the behavioral counters are judged by the scorer.
 	if len(spec.Verify.Runner) == 0 {
 		r.Pass = r.Ended == "clean_stop"
+		r.Outcome = outcomeFor(r.Pass)
+		r.Verified = true
 		return r, nil
 	}
-	out, _ := runIn(ctx, dir, spec.Verify.Runner)
-	r.Detail = tail(out, 300)
-	r.Pass = strings.Contains(out, spec.Verify.PassIfStdoutContains)
+	receipt := verifyIn(ctx, dir, runner, spec.Verify.PassIfStdoutContains)
+	r.VerifierObservations = append(r.VerifierObservations, receipt)
+	r.Detail = tail(receipt.Output, 300)
+	r.Pass = receipt.SuccessfulExit && receipt.ExactFinalMarker &&
+		r.Ended == "clean_stop" && r.Malformed == 0 && !r.Looped
+	r.Verifier = &receipt
+	r.Failure = receipt.Failure
+	if receipt.Failure != nil {
+		r.Detail = strings.TrimSpace(r.Detail + "; " + receipt.Failure.Error())
+	}
+	r.Outcome = OutcomeInconclusive
 	return r, nil
 }
 
-func doTool(ctx context.Context, dir, name, p, content string, args map[string]any, spec ToolLoopSpec, written map[string]bool) string {
+func doTool(ctx context.Context, dir, name, p, content string, args map[string]any, spec ToolLoopSpec,
+	written map[string]bool, runner resolvedTaskRunner, observations *[]VerificationReceipt) (string, error) {
 	switch name {
 	case "list_files":
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return "ERROR: " + err.Error()
+			return "", failure(FailureFixtureIO, "list_files", err)
 		}
 		var names []string
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		return strings.Join(names, "\n")
+		sort.Strings(names)
+		return strings.Join(names, "\n"), nil
 	case "read_file":
-		b, err := os.ReadFile(filepath.Join(dir, filepath.Base(p)))
-		if err != nil {
-			return "ERROR: " + err.Error()
+		base := filepath.Base(p)
+		if p == "" || base != p || base == "." {
+			return "ERROR: invalid task-local path", nil
 		}
-		return string(b)
+		b, err := os.ReadFile(filepath.Join(dir, base))
+		if err != nil {
+			if _, fixture := spec.Files[base]; fixture || written[base] {
+				return "", failure(FailureFixtureIO, "read_file", err)
+			}
+			return "ERROR: " + err.Error(), nil
+		}
+		return string(b), nil
 	case "write_file":
 		base := filepath.Base(p)
+		if p == "" || base != p || base == "." {
+			return "ERROR: invalid task-local path", nil
+		}
 		if err := os.WriteFile(filepath.Join(dir, base), []byte(content), 0o644); err != nil {
-			return "ERROR: " + err.Error()
+			return "", failure(FailureFixtureIO, "write_file", err)
 		}
 		written[base] = true
-		return fmt.Sprintf("wrote %d bytes to %s", len(content), base)
+		return fmt.Sprintf("wrote %d bytes to %s", len(content), base), nil
 	case "run_tests":
-		out, _ := runIn(ctx, dir, spec.Verify.Runner)
-		if strings.Contains(out, spec.Verify.PassIfStdoutContains) {
-			return "PASS\n" + out
+		receipt := verifyIn(ctx, dir, runner, spec.Verify.PassIfStdoutContains)
+		*observations = append(*observations, receipt)
+		if receipt.SuccessfulExit && receipt.ExactFinalMarker {
+			return "PASS\n" + receipt.Output, nil
 		}
-		return "FAIL\n" + out
+		if receipt.Failure != nil {
+			switch receipt.Failure.Kind {
+			case FailureExecutorPreflight, FailureExecutorLaunch, FailureExecutorTimeout:
+				return "", receipt.Failure
+			}
+			return "INCONCLUSIVE: " + receipt.Failure.Error() + "\n" + receipt.Output, nil
+		}
+		return "FAIL\n" + receipt.Output, nil
 	case "lookup_part":
 		// Prices ship in the task's own parts.txt (NAME=PRICE per line), so
 		// the data stays in the spec, not in Go.
 		part, _ := args["part"].(string)
 		b, err := os.ReadFile(filepath.Join(dir, "parts.txt"))
 		if err != nil {
-			return "ERROR: " + err.Error()
+			return "", failure(FailureFixtureIO, "lookup_part", err)
 		}
 		for _, line := range strings.Split(string(b), "\n") {
 			if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok && k == part {
-				return v
+				return v, nil
 			}
 		}
-		return "ERROR: unknown part " + part
+		return "ERROR: unknown part " + part, nil
 	}
-	return "ERROR: unknown tool " + name
+	return "ERROR: unknown tool " + name, nil
+}
+
+func exactDone(content string) bool {
+	return strings.EqualFold(strings.TrimSpace(content), "DONE")
 }
 
 func shortHash(s string) string {

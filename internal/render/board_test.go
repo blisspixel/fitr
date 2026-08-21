@@ -43,14 +43,28 @@ func TestBoardRichUsesColorAndUnicode(t *testing.T) {
 	}
 }
 
+func TestBoardShowsVerifiedEffectiveContext(t *testing.T) {
+	var out strings.Builder
+	WriteBoard(&out, Board{Results: 1, Groups: []BoardGroup{{
+		GPU: "gpu", Driver: "driver", NumCtx: 8192, EffectiveCtx: 4096,
+		ContextState: "adjusted", Note: "verified",
+		Rows: []BoardRow{{Model: "m", DecodeMean: 1, Repeats: 3}},
+	}}}, "plain")
+	if got := out.String(); !strings.Contains(got, "ctx 8192 -> 4096 effective") {
+		t.Fatalf("board hid effective context:\n%s", got)
+	}
+}
+
 func TestBoardSanitizesUntrustedText(t *testing.T) {
 	var out strings.Builder
 	WriteBoard(&out, Board{Results: 1, Groups: []BoardGroup{{
-		GPU: "gpu\x1b[2J", Driver: "driver", NumCtx: 8192, Note: "safe\x07",
-		Rows: []BoardRow{{Model: "model\x1b[31mspoof", DecodeMean: 1, Repeats: 3}},
+		GPU: "gpu\x1b[2J\u202e", Driver: "driver\r\nspoof", NumCtx: 8192,
+		Note: "safe\x07\x1b]0;forged title\a",
+		Rows: []BoardRow{{Model: "model\x1b[31mspoof\x1bPforged payload\x1b\\", DecodeMean: 1, Repeats: 3}},
 	}}}, "plain")
 	got := out.String()
-	if strings.ContainsRune(got, '\x1b') || strings.ContainsRune(got, '\x07') {
+	if strings.ContainsAny(got, "\x1b\x07\r\u202e") || strings.Contains(got, "forged title") ||
+		strings.Contains(got, "forged payload") {
 		t.Fatalf("board leaked control bytes: %q", got)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,9 +15,10 @@ import (
 
 // ---------------------------------------------------------------- refusal
 type RefusalVerdict struct {
-	Verdict string `json:"verdict"` // answered | partial | refused | empty
-	Chars   int    `json:"chars"`
-	Text    string `json:"text"`
+	Verdict string  `json:"verdict"` // answered | partial | refused | empty
+	Outcome Outcome `json:"outcome,omitempty"`
+	Chars   int     `json:"chars"`
+	Text    string  `json:"text"`
 }
 
 var (
@@ -75,6 +77,7 @@ func RunRefusal(ctx context.Context, c llm.Backend, model string, spec RefusalSp
 	samp := ollama.Deterministic(spec.NumPredict, numCtx(ctx))
 	// Stable order so runs are comparable and the display never reshuffles.
 	keys := []string{"political", "fiction", "rewrite"}
+	var extra []string
 	for k := range spec.Prompts {
 		found := false
 		for _, kk := range keys {
@@ -83,9 +86,11 @@ func RunRefusal(ctx context.Context, c llm.Backend, model string, spec RefusalSp
 			}
 		}
 		if !found {
-			keys = append(keys, k)
+			extra = append(extra, k)
 		}
 	}
+	sort.Strings(extra)
+	keys = append(keys, extra...)
 	for _, k := range keys {
 		prompt, ok := spec.Prompts[k]
 		if !ok {
@@ -93,12 +98,18 @@ func RunRefusal(ctx context.Context, c llm.Backend, model string, spec RefusalSp
 		}
 		text, _, err := c.Generate(ctx, model, prompt, samp)
 		if err != nil {
-			out[k] = RefusalVerdict{Verdict: "error", Text: err.Error()}
-			continue
+			out = map[string]RefusalVerdict{}
+			for _, failedKey := range keys {
+				if _, exists := spec.Prompts[failedKey]; exists {
+					out[failedKey] = RefusalVerdict{Verdict: "error", Outcome: OutcomeError}
+				}
+			}
+			return out, 0, failure(FailureTransport, "refusal.generate", err)
 		}
 		v := ScoreRefusal(k, text, spec.RefusalMarkers)
-		out[k] = RefusalVerdict{Verdict: v, Chars: len(text), Text: text}
-		if v == "refused" || v == "partial" {
+		complied := v == "answered"
+		out[k] = RefusalVerdict{Verdict: v, Outcome: outcomeFor(complied), Chars: len(text), Text: text}
+		if !complied {
 			refused++
 		}
 	}
@@ -107,8 +118,9 @@ func RunRefusal(ctx context.Context, c llm.Backend, model string, spec RefusalSp
 
 // ---------------------------------------------------------------- plumbing
 type Rung struct {
-	Pass   bool   `json:"pass"`
-	Detail string `json:"detail"`
+	Pass    bool    `json:"pass"`
+	Outcome Outcome `json:"outcome,omitempty"`
+	Detail  string  `json:"detail"`
 }
 
 type PlumbingResult struct {
@@ -117,6 +129,7 @@ type PlumbingResult struct {
 	Order   []string        `json:"order"`
 	Verdict string          `json:"verdict"`
 	Healthy bool            `json:"healthy"` // rungs 1-4; rung 5 is a model trait
+	Outcome Outcome         `json:"outcome,omitempty"`
 }
 
 // RunPlumbing answers "can this model use tools AT ALL, in this setup?" before
@@ -129,14 +142,18 @@ type PlumbingResult struct {
 // irrelevant questions.
 func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec PlumbingSpec) (PlumbingResult, error) {
 	r := PlumbingResult{Model: model, Rungs: map[string]Rung{}}
+	fail := func(operation string, err error) (PlumbingResult, error) {
+		r.Outcome = OutcomeError
+		return r, failure(FailureTransport, operation, err)
+	}
 	add := func(id string, pass bool, detail string) {
-		r.Rungs[id] = Rung{Pass: pass, Detail: detail}
+		r.Rungs[id] = Rung{Pass: pass, Outcome: outcomeFor(pass), Detail: detail}
 		r.Order = append(r.Order, id)
 	}
 
 	info, err := c.Show(ctx, model)
 	if err != nil {
-		return r, err
+		return fail("plumbing.show", err)
 	}
 	hasTools := false
 	for _, cp := range info.Capabilities {
@@ -146,6 +163,7 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 	}
 	add("1_capability", hasTools, fmt.Sprintf("capabilities=%v", info.Capabilities))
 	if !hasTools {
+		r.Outcome = OutcomeSkipped
 		r.Verdict = "no tool support advertised - not a fair tools test"
 		return r, nil
 	}
@@ -159,9 +177,7 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 	}
 	msg, _, err := c.Chat(ctx, model, []ollama.Message{{Role: "user", Content: ask}}, spec.Tools, samp)
 	if err != nil {
-		add("2_emits_tool_call", false, err.Error())
-		r.Verdict = "chat call failed: " + err.Error()
-		return r, nil
+		return fail("plumbing.emit", err)
 	}
 	emits := len(msg.ToolCalls) > 0
 	detail := fmt.Sprintf("n=%d", len(msg.ToolCalls))
@@ -170,6 +186,7 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 	}
 	add("2_emits_tool_call", emits, detail)
 	if !emits {
+		r.Outcome = OutcomeInconclusive
 		r.Verdict = "template/parser problem - the model answered in prose instead " +
 			"of emitting a tool_calls array"
 		return r, nil
@@ -189,11 +206,17 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 	msgs := []ollama.Message{
 		{Role: "user", Content: ask},
 		{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls},
-		{Role: "tool", ToolName: "get_weather", Content: result},
+		{
+			Role: "tool", ToolName: "get_weather", ToolCallID: msg.ToolCalls[0].ID,
+			Content: result,
+		},
 	}
 	final, _, err := c.Chat(ctx, model, msgs, spec.Tools, samp)
-	rt := err == nil && (strings.Contains(final.Content, "-3") ||
-		strings.Contains(strings.ToLower(final.Content), "minus"))
+	if err != nil {
+		return fail("plumbing.roundtrip", err)
+	}
+	rt := strings.Contains(final.Content, "-3") ||
+		strings.Contains(strings.ToLower(final.Content), "minus")
 	add("4_roundtrip", rt, truncate(final.Content, 90))
 
 	// Rung 5 needs no ground truth and is the most common local failure.
@@ -204,10 +227,10 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 		}
 	}
 	m3, _, err := c.Chat(ctx, model, []ollama.Message{{Role: "user", Content: irr}}, spec.Tools, samp)
-	spurious := 0
-	if err == nil {
-		spurious = len(m3.ToolCalls)
+	if err != nil {
+		return fail("plumbing.irrelevance", err)
 	}
+	spurious := len(m3.ToolCalls)
 	if spurious == 0 {
 		add("5_irrelevance", true, "called nothing (correct)")
 	} else {
@@ -216,6 +239,7 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 
 	r.Healthy = r.Rungs["1_capability"].Pass && r.Rungs["2_emits_tool_call"].Pass &&
 		r.Rungs["3_valid_args"].Pass && r.Rungs["4_roundtrip"].Pass
+	r.Outcome = outcomeFor(r.Healthy)
 	switch {
 	case r.Healthy && spurious == 0:
 		r.Verdict = "tool plumbing is healthy - failures above this are the MODEL"

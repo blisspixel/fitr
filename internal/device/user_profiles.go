@@ -1,8 +1,10 @@
 package device
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,21 +43,38 @@ func loadUserProfiles() ([]Profile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("profile %s: %w", path, err)
 		}
-		var p Profile
-		if err := json.Unmarshal(b, &p); err != nil {
-			return nil, fmt.Errorf("profile %s: %w", path, err)
-		}
-		if p.Name == "" {
-			return nil, fmt.Errorf("profile %s: missing name", path)
-		}
-		for gname, g := range p.Gates {
-			if _, ok := g["why"]; !ok {
-				return nil, fmt.Errorf("profile %s: gate %q has no why", path, gname)
-			}
+		p, err := decodeProfile(path, b)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+func decodeProfile(source string, b []byte) (Profile, error) {
+	var p Profile
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		return Profile{}, fmt.Errorf("profile %s: %w", source, err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return Profile{}, fmt.Errorf("profile %s: content after the JSON value", source)
+		}
+		return Profile{}, fmt.Errorf("profile %s: %w", source, err)
+	}
+	if p.Name == "" {
+		return Profile{}, fmt.Errorf("profile %s: missing name", source)
+	}
+	for gateName, gate := range p.Gates {
+		if _, ok := gate["why"]; !ok {
+			return Profile{}, fmt.Errorf("profile %s: gate %q has no why", source, gateName)
+		}
+	}
+	return p, nil
 }
 
 // ScaffoldProfile copies default's gates onto a new UNCALIBRATED profile

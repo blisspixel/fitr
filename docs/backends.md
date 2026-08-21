@@ -10,6 +10,16 @@
 
 Force one with `--backend ollama|llama-server|openai` or `FITR_BACKEND`.
 
+For an OpenAI-compatible endpoint that requires bearer authentication, set
+`FITR_OPENAI_API_KEY`. `OPENAI_API_KEY` is used only when `FITR_OPENAI_URL`
+names the official HTTPS OpenAI endpoint, so a cloud credential is never
+silently forwarded to a local compatible server. Credentials are sent only in
+the `Authorization` header and are redacted if a server echoes them in an error
+response. Authenticated remote endpoints must use HTTPS; plain HTTP is allowed
+only on loopback. Credential-bearing redirects must preserve the exact origin
+and transport safety. Auto-discovered endpoints are always probed without
+credentials. Keep tokens out of endpoint URLs and command arguments.
+
 Auto-detect identifies the *runtime* by response shape, not by port:
 `/api/tags` is Ollama, `/props` with a build or model path is llama-server,
 `/v1/models` is OpenAI-compatible. llama-server also speaks `/v1/models`,
@@ -70,6 +80,25 @@ scorecard labels them so they cannot be mistaken for Ollama or llama-server
 counters; tool support is claimed optimistically and then **verified by the
 plumbing diagnostic** before any tools verdict is issued; vision is never
 claimed unverifiably; resident-memory needs SKIP.
+
+A rankable run also needs a verified artifact identity. Ollama supplies a
+runtime content digest. A local GGUF path reported by an already-running
+llama-server is not a receipt for the bytes already loaded: fitr records the
+observed file hash for inspection but excludes the result from artifact-ranked
+claims unless the runtime supplies a binding receipt.
+
+The generic OpenAI API does not standardize artifact identity. For a measured
+run, set `FITR_OPENAI_MODEL_SHA256` to the independently obtained expected
+SHA-256. The selected `/v1/models` entry must assert the same digest, using
+either 64 hexadecimal characters or canonical `sha256:` form. A server
+assertion alone is not trusted. Missing, malformed, or conflicting identities
+stop evaluation. Discovery and non-measurement commands still work.
+
+The generic API also does not standardize the context allocation the runtime
+actually chose. A strictly identified run can remain in History, but Board and
+Compare exclude it until the endpoint supplies a verified effective-context
+receipt. Ollama exposes `/api/ps.context_length`; llama-server exposes
+`/props.default_generation_settings.n_ctx`.
 
 Across all three, tool-call arguments are normalized to one shape, and
 malformed ones survive as malformed so the tool loop counts them instead of

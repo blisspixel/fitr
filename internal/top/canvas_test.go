@@ -42,15 +42,17 @@ func TestASCIIHasNoUnicodeGraphGlyphs(t *testing.T) {
 }
 
 func TestCanvasSanitizesTerminalControls(t *testing.T) {
-	canvas := NewCanvas(80, 3)
+	canvas := NewCanvas(80, 4)
 	canvas.SetLine(0, Span{Text: "safe\x1b[31mRED\x1b[0m"})
 	canvas.SetLine(1, Span{Text: "before\x1b]0;spoofed title\aafter"})
 	canvas.SetLine(2, Span{Text: "line\nnext\tfield\x00"})
+	canvas.SetLine(3, Span{Text: "left\u202eright before\x1bPforged payload\x1b\\after"})
 	got := canvas.Plain()
-	if strings.ContainsAny(got, "\x1b\x07\x00") || strings.Contains(got, "spoofed title") {
+	if strings.ContainsAny(got, "\x1b\x07\x00\u202e") || strings.Contains(got, "spoofed title") ||
+		strings.Contains(got, "forged payload") {
 		t.Fatalf("control sequence survived: %q", got)
 	}
-	for _, want := range []string{"safeRED", "beforeafter", "line next field"} {
+	for _, want := range []string{"safeRED", "beforeafter", "line next field", "leftright beforeafter"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("sanitized canvas missing %q: %q", want, got)
 		}
