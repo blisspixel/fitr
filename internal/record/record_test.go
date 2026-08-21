@@ -61,6 +61,14 @@ func TestStableRunIDSupportsLegacyRecords(t *testing.T) {
 
 func TestSavePreservesCanonicalAndAppendsPrivateHistory(t *testing.T) {
 	dir := t.TempDir()
+	rootMode := os.FileMode(0)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rootMode = info.Mode().Perm()
+	}
 	store := NewStore(dir)
 	r := testRecord("org/model:Q4_K_M", "2026-08-20T12:00:00.123456789Z")
 
@@ -100,13 +108,19 @@ func TestSavePreservesCanonicalAndAppendsPrivateHistory(t *testing.T) {
 		}
 	}
 	if runtime.GOOS != "windows" {
-		for _, path := range []string{dir, filepath.Join(dir, historyDirName)} {
-			info, err := os.Stat(path)
+		for _, check := range []struct {
+			path string
+			want os.FileMode
+		}{
+			{dir, rootMode},
+			{filepath.Join(dir, historyDirName), 0o700},
+		} {
+			info, err := os.Stat(check.path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := info.Mode().Perm(); got != 0o700 {
-				t.Fatalf("%s mode = %o, want 700", path, got)
+			if got := info.Mode().Perm(); got != check.want {
+				t.Fatalf("%s mode = %o, want %o", check.path, got, check.want)
 			}
 		}
 	}
