@@ -15,17 +15,20 @@ fitr run some-new-model:tag --full --pull
 fitr apply some-new-model:tag           # print how to persist the measured ctx
 fitr view                               # reopen the newest result with graphs
 fitr board                              # compare everything you have measured
+fitr top                                # full-screen Live, Result, Board, and History
 ```
 
 <img src="docs/assets/advise.svg" alt="fitr advise (demo data)" width="820">
 <img src="docs/assets/run.svg" alt="fitr run scorecard (demo data)" width="820">
 <img src="docs/assets/apply.svg" alt="fitr apply (demo data)" width="820">
 <img src="docs/assets/board.svg" alt="fitr board (demo data)" width="820">
+<img src="docs/assets/top.svg" alt="fitr top full-screen monitor (demo data)" width="820">
 
 The CLI is the primary product surface. Rich terminals get semantic color,
 throughput bars, and repeat-shape graphs; plain and JSON output remain clean
-automation interfaces. The [interface direction](docs/interface.md) takes this
-toward an opt-in full-screen TUI first, then truly native desktop clients.
+automation interfaces. `fitr top` adds an opt-in full-screen monitor with Live,
+Result, Board, and immutable History views. The [interface direction](docs/interface.md)
+keeps this renderer-neutral foundation on a path to truly native desktop clients.
 
 One run tells you, for this device and this config:
 
@@ -74,10 +77,12 @@ fitr run qwen3:30b --ctx 8192 --full
 fitr apply qwen3:30b             # print how to persist the measured ctx
 fitr view                        # data-rich view of the newest saved run
 fitr board
+fitr top                         # keyboard-first full-screen data view
+fitr top run qwen3:30b --full    # the same measurement with live monitoring
 ```
 
 From source (Go 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
-Pin a version with `FITR_VERSION=v0.3.0`, relocate with `FITR_BIN`.
+Pin a version with `FITR_VERSION=v0.4.0`, relocate with `FITR_BIN`.
 
 ## Commands
 
@@ -90,6 +95,11 @@ Pin a version with `FITR_VERSION=v0.3.0`, relocate with `FITR_BIN`.
 | `fitr export <model> [--out PATH]` | write a self-contained HTML scorecard (opt-in; contains the fingerprint) |
 | `fitr view [model\|result.json]` | reopen the newest or selected saved result with repeat-shape graphs |
 | `fitr board [--current]` | compare everything, grouped by device |
+| `fitr top [--view VIEW]` | opt-in full-screen Live, Result, Board, and History monitor |
+| `fitr top view [model\|result.json]` | open a selected saved result in the monitor |
+| `fitr top run <model> [run flags]` | run the same evaluator with structured live progress |
+| `fitr top --snapshot` | emit the versioned privacy-safe presentation snapshot |
+| `fitr top history [path\|clear --yes]` | browse, locate, or clear archived runs while keeping canonical results |
 | `fitr doctor <model>` | can this box be measured fairly at all? (~1 min) |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips on shared instances |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
@@ -122,6 +132,7 @@ Pin a version with `FITR_VERSION=v0.3.0`, relocate with `FITR_BIN`.
 | [Backends](docs/backends.md) | Ollama, llama-server, OpenAI-compatible - and what each can measure honestly |
 | [Usage](docs/usage.md) | flags, output modes, exit codes, device profiles |
 | [Interface direction](docs/interface.md) | CLI-first data UX, opt-in TUI, and truly native desktop path |
+| [Terminal monitor](docs/tui.md) | full-screen views, keys, privacy contract, history, and fallbacks |
 | [Roadmap](ROADMAP.md) | what is next and why |
 | [retonr](docs/retonr.md) | optional sister project; fitr works without it |
 
@@ -130,4 +141,5 @@ Screenshots use demo data and regenerate from the real printers via
 
 ## License
 
-MIT
+MIT. Dependency licenses are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

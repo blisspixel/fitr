@@ -15,7 +15,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
 That puts one static binary on your PATH. No Go, no Python, no venv. Pin a
-release with `FITR_VERSION=v0.3.0`; relocate with `FITR_BIN`.
+release with `FITR_VERSION=v0.4.0`; relocate with `FITR_BIN`.
 
 From source (Go 1.25+):
 
@@ -42,6 +42,11 @@ need `cargo`, not a rewrite.
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
 | `fitr view [model\|result.json]` | reopen the newest or selected saved result as a terminal data view |
 | `fitr board [--current]` | compare everything, grouped by device |
+| `fitr top [--view VIEW]` | open the keyboard-first Live, Result, Board, and History monitor |
+| `fitr top view [model\|result.json]` | open a selected saved result in the monitor |
+| `fitr top run <model> [run flags]` | run the same evaluator with structured live progress |
+| `fitr top --snapshot` | emit the versioned privacy-safe presentation snapshot as JSON |
+| `fitr top history [path\|clear --yes]` | browse, locate, or clear archived runs while keeping canonical results |
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips (accuracy can hide them) |
@@ -104,6 +109,8 @@ fitr view m --display json   # full saved result JSON
 fitr run m -q                # results only     -v  detail, no progress
 NO_COLOR=1 fitr board        # honored (empty string means unset)
 FITR_ASCII=1 fitr board      # force ASCII glyphs
+fitr top                     # interactive terminal only
+fitr top --snapshot          # pipe-safe presentation JSON, no terminal controls
 ```
 
 `--display auto` chooses `rich` on a capable terminal and `plain` when stdout
@@ -113,6 +120,13 @@ are stable automation surfaces. Unknown mode names are usage errors.
 Progress goes to **stderr**, results to **stdout**, so `fitr run m > out.txt`
 is clean. Errors are plain text on stderr even under `--display json`; the
 exit code is the machine channel.
+
+`fitr top` is deliberately opt-in and requires an interactive input and output
+terminal. It never emits terminal controls when redirected or when
+`TERM=dumb`; use `fitr top --snapshot`, `fitr view`, or `fitr board` in those
+environments. `top run` owns the screen while measurement is active, so
+diagnostics and save state appear inside the monitor instead of corrupting the
+terminal.
 
 | Exit | Meaning |
 |---|---|
@@ -176,6 +190,16 @@ Every threshold carries a `why`. **Copy `default.json`, tune it, set
 `match`.** Do not reuse another machine's numbers.
 
 Results are stored as JSON under `~/.fitr/results` (override with
-`$FITR_RESULTS`); `fitr board` and `fitr compare` read them from there.
-See [Interface direction](interface.md) for the CLI-first full-screen TUI and
-native desktop plan.
+`$FITR_RESULTS`). The canonical `<model>.json` files remain the source for
+ordinary `view`, `board`, `compare`, `calibrate`, and `export` commands.
+Completed runs are also copied atomically into a private `.history` directory
+for `fitr top History`. These archives contain the same raw prompts, responses,
+hostname, and device details as the canonical result, can grow without a fixed
+retention limit, and are never uploaded.
+
+Use `fitr top history path` to locate the archive and
+`fitr top history clear --yes` to delete archived copies while keeping the
+canonical latest result for each model. Deleting a canonical file removes that
+model from ordinary commands even if an archived copy remains. See
+[Terminal monitor](tui.md) for keys and fallbacks, and
+[Interface direction](interface.md) for the truly native desktop plan.

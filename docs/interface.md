@@ -24,8 +24,18 @@ fingerprints remain more important than visual density.
 
 ## The opt-in full-screen TUI
 
-After the calibration evidence and inventory-first recommendation loop are
-working, add an opt-in `fitr top` interface with four views:
+The opt-in `fitr top` interface ships in 0.4. Its explicit command contract
+keeps browsing and measurement separate:
+
+```text
+fitr top
+fitr top view [model|result.json]
+fitr top run <model> [run flags]
+fitr top --snapshot
+fitr top history [path|clear --yes]
+```
+
+It has four views:
 
 1. Live run: current phase, elapsed time, device placement, decode/prefill
    samples, memory, and warnings.
@@ -40,22 +50,26 @@ keyboard-driven, work on macOS, Linux, and Windows terminals, and degrade at
 narrow widths. Color is redundant with text and shape. Animation is optional
 and disabled when it obscures measurements or causes avoidable CPU use.
 
-[Bubble Tea](https://github.com/charmbracelet/bubbletea) is the leading
-high-level candidate because it supports inline and full-window Go TUIs and a
-state/update/view architecture. [tcell](https://github.com/gdamore/tcell) is
-the lower-level fallback with pure-Go support across mainstream Unix systems
-and Windows. Neither belongs in the dependency graph until a prototype proves
-terminal restoration, Windows behavior, accessibility, binary-size impact,
-and compatibility with the repository's Go floor. The current graph renderers
-use the standard library and establish the presentation model first.
+[tcell v3](https://github.com/gdamore/tcell/tree/v3.4.1) is the terminal
+adapter. It provides cell rendering, input, resize events, and restoration on
+the repository's Go 1.25 floor, including native Windows resize handling. A
+renderer-neutral canvas and pure state reducer sit above it; fitr does not use
+tcell's widget layer. This keeps the interaction contract testable without a
+terminal and reusable by later native clients.
+
+[Bubble Tea v2](https://github.com/charmbracelet/bubbletea/tree/v2.0.8) was
+the high-level alternative. Its released screen implementation still lacks
+Windows resize notifications, which conflicts with fitr's platform parity
+requirement. The framework decision and complete interaction contract are in
+[tui.md](tui.md).
 
 ## One core, several native surfaces
 
 Measurement, scoring, calibration, and recommendation stay in Go packages
-with no UI assumptions. Before a desktop client, extract a versioned,
-read-only presentation schema and a structured event stream from the CLI.
-Every interface consumes those contracts and must produce the same verdicts.
-No frontend is allowed to reimplement scoring.
+with no UI assumptions. Versioned read-only presentation snapshots and a
+structured live-event stream now separate those decisions from the terminal
+adapter. Every later interface consumes those contracts and must produce the
+same verdicts. No frontend is allowed to reimplement scoring.
 
 If native desktop applications earn their maintenance cost, use each
 platform's native UI stack:
@@ -77,8 +91,8 @@ native product direction.
 
 Desktop work starts only when all of these are true:
 
-- the result and live-event schemas are versioned and have compatibility tests;
-- the TUI has made the core navigation and data hierarchy routine;
+- the result and live-event schemas remain versioned and compatibility-tested;
+- real use of the TUI has validated the core navigation and data hierarchy;
 - calibration supports honest recommendations rather than a prettier guess;
 - the CLI remains independently complete and fully scriptable;
 - packaging, signing, updates, and accessibility have owners on all three

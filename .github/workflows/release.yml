@@ -23,7 +23,17 @@ jobs:
       - run: git diff --exit-code
       - run: go vet ./...
       - run: go test ./... -count=1
+      - run: go test -race ./... -count=1
       - run: make dist
+      - name: binary size gate
+        shell: bash
+        run: |
+          max_bytes=12000000
+          for binary in dist/fitr-*; do
+            size="$(stat -c %s "$binary")"
+            printf '%-32s %10d bytes\n' "$binary" "$size"
+            test "$size" -le "$max_bytes"
+          done
       - name: verify binary version
         shell: bash
         run: |
@@ -31,7 +41,7 @@ jobs:
       - name: checksums
         run: |
           cd dist
-          sha256sum fitr-* > SHA256SUMS
+          sha256sum fitr-* LICENSE THIRD_PARTY_NOTICES.md > SHA256SUMS
           cat SHA256SUMS
       - name: publish
         env:

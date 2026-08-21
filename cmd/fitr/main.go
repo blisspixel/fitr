@@ -34,6 +34,7 @@ import (
 	"github.com/blisspixel/fitr/internal/lock"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/openaicompat"
+	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/retonr"
 	"github.com/blisspixel/fitr/internal/score"
@@ -72,6 +73,10 @@ usage:
   fitr export <model> [--out PATH] [--retonr]
   fitr view [model|result.json] [--display MODE]
   fitr board [--current]
+  fitr top [--view live|result|board|history]
+  fitr top view [model|result.json]
+  fitr top run <model> [run flags]
+  fitr top history [path|clear --yes]
   fitr diag <model>
   fitr doctor <model> [-n N]
   fitr device
@@ -138,6 +143,8 @@ func run() int {
 		return cmdView(ctx, os.Args[2:])
 	case "board":
 		return cmdBoard(ctx, os.Args[2:])
+	case "top":
+		return cmdTop(ctx, os.Args[2:])
 	case "diag":
 		return cmdDiag(ctx, os.Args[2:])
 	case "doctor":
@@ -207,24 +214,28 @@ func takesValue(flagArg string) bool {
 // label to file results under while measuring whatever else is already
 // loaded. Prefer Ollama; refuse to pretend llama-server fetched it.
 func newBackend(ctx context.Context, model, kind string, pull bool) (llm.Backend, int) {
+	return newBackendWithDisplay(ctx, model, kind, pull, nil)
+}
+
+func newBackendWithDisplay(ctx context.Context, model, kind string, pull bool, disp render.Display) (llm.Backend, int) {
 	if kind == "" || kind == "auto" {
 		kind = os.Getenv("FITR_BACKEND")
 	}
 	if isHFRef(model) && (kind == "" || kind == "auto" || kind == "ollama") {
 		o := ollama.New()
 		if !o.Reachable(ctx) {
-			errPrint("Hugging Face refs need a running Ollama",
+			backendError(disp, "Hugging Face refs need a running Ollama",
 				"Ollama pulls GGUFs from hf.co/{user}/{repo}[:quant]; other servers already have a model loaded",
 				"start `ollama serve` and re-run, or pass the name of a model already being served")
 			return nil, exitError
 		}
-		return checkModel(ctx, o, model, pull)
+		return checkModelWithDisplay(ctx, o, model, pull, disp)
 	}
 	switch kind {
 	case "", "auto":
 		found := llm.Discover(ctx)
 		if len(found) == 0 {
-			errPrint("no serving runtime reachable",
+			backendError(disp, "no serving runtime reachable",
 				"tried "+strings.Join(llm.Candidates(), ", "),
 				"start one, or point fitr at it: OLLAMA_BASE_URL, LLAMA_SERVER_URL, FITR_OPENAI_URL, FITR_DISCOVER_URLS, or --backend")
 			return nil, exitError
@@ -234,39 +245,45 @@ func newBackend(ctx context.Context, model, kind string, pull bool) (llm.Backend
 			for _, f := range found[1:] {
 				extra = append(extra, f.Kind+" at "+f.URL)
 			}
-			fmt.Fprintf(os.Stderr, "! also found %s - using %s at %s; set --backend or a URL env to pick\n",
-				strings.Join(extra, ", "), found[0].Kind, found[0].URL)
+			message := fmt.Sprintf("also found %s; using %s; set --backend or a URL environment variable to choose",
+				strings.Join(extra, ", "), found[0].Kind)
+			if disp != nil {
+				disp.Note(message, "warn")
+			} else {
+				fmt.Fprintf(os.Stderr, "! also found %s - using %s at %s; set --backend or a URL env to pick\n",
+					strings.Join(extra, ", "), found[0].Kind, found[0].URL)
+			}
 		}
-		return checkModel(ctx, backendAt(found[0].Kind, found[0].URL), model, pull)
+		return checkModelWithDisplay(ctx, backendAt(found[0].Kind, found[0].URL), model, pull, disp)
 	case "ollama":
 		o := ollama.New()
 		if !o.Reachable(ctx) {
-			errPrint("cannot reach Ollama at "+o.URL(),
+			backendError(disp, "cannot reach Ollama",
 				"every measurement needs a running server",
 				"start it with `ollama serve`, or set OLLAMA_BASE_URL")
 			return nil, exitError
 		}
-		return checkModel(ctx, o, model, pull)
+		return checkModelWithDisplay(ctx, o, model, pull, disp)
 	case "llama-server", "llamaserver":
 		l := llamaserver.New()
 		if !l.Reachable(ctx) {
-			errPrint("cannot reach llama-server at "+l.URL(),
+			backendError(disp, "cannot reach llama-server",
 				"every measurement needs a running server",
 				"start it with `llama-server -m model.gguf`, or set LLAMA_SERVER_URL")
 			return nil, exitError
 		}
-		return checkModel(ctx, l, model, pull)
+		return checkModelWithDisplay(ctx, l, model, pull, disp)
 	case "openai":
 		g := openaicompat.New()
 		if !g.Reachable(ctx) {
-			errPrint("cannot reach an OpenAI-compatible server at "+g.URL(),
+			backendError(disp, "cannot reach an OpenAI-compatible server",
 				"every measurement needs a running server",
 				"start LM Studio / vLLM / SGLang, or set FITR_OPENAI_URL")
 			return nil, exitError
 		}
-		return checkModel(ctx, g, model, pull)
+		return checkModelWithDisplay(ctx, g, model, pull, disp)
 	default:
-		errPrint(fmt.Sprintf("unknown backend %q", kind), "",
+		backendError(disp, fmt.Sprintf("unknown backend %q", kind), "",
 			"valid: auto, ollama, llama-server, openai")
 		return nil, exitUsage
 	}
@@ -389,6 +406,10 @@ func sameServedModel(want, have string) bool {
 // the label at request time, so a mismatch there is a warning - the results
 // would otherwise be filed under a name the server never saw.
 func checkModel(ctx context.Context, b llm.Backend, model string, pull bool) (llm.Backend, int) {
+	return checkModelWithDisplay(ctx, b, model, pull, nil)
+}
+
+func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pull bool, disp render.Display) (llm.Backend, int) {
 	if model == "" {
 		return b, exitOK
 	}
@@ -412,16 +433,25 @@ func checkModel(ctx context.Context, b llm.Backend, model string, pull bool) (ll
 	}
 	if b.Name() != "ollama" {
 		if isHFRef(model) {
-			errPrint("Hugging Face refs need Ollama to pull",
+			backendError(disp, "Hugging Face refs need Ollama to pull",
 				b.Name()+" is serving its own model, not fetching from Hugging Face",
 				"start Ollama, or pass the served model name instead of an HF URL")
 			return nil, exitUsage
 		}
 		if pull {
-			fmt.Fprintf(os.Stderr, "! --pull is an Ollama feature; %s serves whatever is already loaded\n", b.Name())
+			if disp != nil {
+				disp.Note("--pull is an Ollama feature; "+b.Name()+" serves whatever is already loaded", "warn")
+			} else {
+				fmt.Fprintf(os.Stderr, "! --pull is an Ollama feature; %s serves whatever is already loaded\n", b.Name())
+			}
 		}
-		fmt.Fprintf(os.Stderr, "! %s serves %q, not %q - results will be recorded under %q\n",
-			b.Name(), tags[0].Name, model, model)
+		message := fmt.Sprintf("%s serves %q, not %q; results will use the requested model label", b.Name(), tags[0].Name, model)
+		if disp != nil {
+			disp.Note(message, "warn")
+		} else {
+			fmt.Fprintf(os.Stderr, "! %s serves %q, not %q - results will be recorded under %q\n",
+				b.Name(), tags[0].Name, model, model)
+		}
 		return b, exitOK
 	}
 	// Pasting an HF URL is the request to fetch it. Regular Ollama tags
@@ -433,21 +463,34 @@ func checkModel(ctx context.Context, b llm.Backend, model string, pull bool) (ll
 			if isHFRef(model) {
 				src = "Hugging Face via Ollama"
 			}
-			fmt.Fprintf(os.Stderr, "  pulling %s from %s\n", model, src)
+			if disp != nil {
+				disp.Phase("pull", src)
+			} else {
+				fmt.Fprintf(os.Stderr, "  pulling %s from %s\n", model, src)
+			}
 			last := ""
 			err := o.Pull(ctx, model, func(status string, pct int) {
 				line := status
 				if pct >= 0 {
 					line = fmt.Sprintf("%s %d%%", status, pct)
 				}
-				if line != last {
+				if line != last && disp == nil {
 					fmt.Fprintf(os.Stderr, "\r  %-60s", line)
 					last = line
 				}
+				if live, ok := disp.(liveTelemetry); ok && pct >= 0 {
+					live.LiveProgress(pct, 100, status)
+				}
 			})
-			fmt.Fprintln(os.Stderr)
+			if disp != nil {
+				if err == nil {
+					disp.Done("pull", 0)
+				}
+			} else {
+				fmt.Fprintln(os.Stderr)
+			}
 			if err != nil {
-				errPrint("pull failed: "+err.Error(), "", "")
+				backendError(disp, "model pull failed", err.Error(), "")
 				return nil, exitError
 			}
 			return b, exitOK
@@ -457,9 +500,28 @@ func checkModel(ctx context.Context, b llm.Backend, model string, pull bool) (ll
 	if len(near) > 0 {
 		hint = "did you mean: " + strings.Join(near, ", ")
 	}
-	errPrint(fmt.Sprintf("model %q is not installed", model),
+	backendError(disp, fmt.Sprintf("model %q is not installed", presentationModelLabel(model)),
 		fmt.Sprintf("%d model(s) available", len(tags)), hint)
 	return nil, exitUsage
+}
+
+func backendError(disp render.Display, message, note, hint string) {
+	if disp == nil {
+		errPrint(message, note, hint)
+		return
+	}
+	if failed, ok := disp.(runFailureTelemetry); ok {
+		failed.RunFailed(errors.New(message))
+		return
+	}
+	detail := message
+	if note != "" {
+		detail += ": " + note
+	}
+	if hint != "" {
+		detail += "; " + hint
+	}
+	disp.Note(detail, "warn")
 }
 
 // probeBackend is the no-error variant for commands that merely display state.
@@ -843,8 +905,20 @@ func latestNamed(all []*Result, name string) *Result {
 
 // ---------------------------------------------------------------- run
 func cmdRun(ctx context.Context, args []string) int {
+	return cmdRunWithDisplay(ctx, args, nil)
+}
+
+// cmdRunWithDisplay keeps the measurement path shared by the line-oriented
+// command and the full-screen interface. A supplied display receives the same
+// phases, notices, and final scorecard as every other output mode.
+func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Display) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	if supplied != nil {
+		fs.SetOutput(io.Discard)
+	} else {
+		fs.SetOutput(os.Stderr)
+	}
+	reportError := func(message, note, hint string) { backendError(supplied, message, note, hint) }
 	quick := fs.Bool("quick", false, "speed+memory+coding+tools")
 	full := fs.Bool("full", false, "adds the 40-turn agentic task")
 	checksOnly := fs.Bool("checks-only", false, "generated checks only for paired hardware calibration")
@@ -863,14 +937,17 @@ func cmdRun(ctx context.Context, args []string) int {
 	quiet := fs.Int("q", 0, "quiet level")
 	verbose := fs.Bool("v", false, "verbose")
 	if err := fs.Parse(permute(args)); err != nil {
+		if supplied != nil {
+			reportError("invalid run arguments", err.Error(), "fitr top run <model> [run flags]")
+		}
 		return exitUsage
 	}
 	if !render.ValidMode(*mode) {
-		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
+		reportError("invalid display mode", *mode, "use auto, rich, plain, json, or none")
 		return exitUsage
 	}
 	if fs.NArg() < 1 {
-		errPrint("missing model", "", "fitr run <model> --full")
+		reportError("missing model", "", "fitr run <model> --full")
 		return exitUsage
 	}
 	levels := 0
@@ -880,19 +957,19 @@ func cmdRun(ctx context.Context, args []string) int {
 		}
 	}
 	if levels > 1 {
-		errPrint("choose one run level", "--quick, --full, and --checks-only are mutually exclusive", "")
+		reportError("choose one run level", "--quick, --full, and --checks-only are mutually exclusive", "")
 		return exitUsage
 	}
 	if *checksOnly && *seedset == "" {
-		errPrint("--checks-only requires --seedset", "calibration pairs must face identical generated instances", "")
+		reportError("--checks-only requires --seedset", "calibration pairs must face identical generated instances", "")
 		return exitUsage
 	}
 	if *checksOnly && *adaptive {
-		errPrint("--checks-only cannot use --adaptive", "paired calibration needs both models to run every instance", "use a fixed -k value")
+		reportError("--checks-only cannot use --adaptive", "paired calibration needs both models to run every instance", "use a fixed -k value")
 		return exitUsage
 	}
 	if *checksOnly && *htmlFlag {
-		errPrint("--checks-only cannot write a scorecard HTML", "calibration is paired evidence, not a standalone product verdict", "use `fitr calibrate a b --out pair.json` after both runs")
+		reportError("--checks-only cannot write a scorecard HTML", "calibration is paired evidence, not a standalone product verdict", "use `fitr calibrate a b --out pair.json` after both runs")
 		return exitUsage
 	}
 	model := normalizeModelRef(fs.Arg(0))
@@ -915,7 +992,7 @@ func cmdRun(ctx context.Context, args []string) int {
 		}
 	}
 	if reps < 1 {
-		errPrint("invalid repeat count", "-k must be at least 1", "")
+		reportError("invalid repeat count", "-k must be at least 1", "")
 		return exitUsage
 	}
 	if *quiet > 1 {
@@ -924,11 +1001,14 @@ func cmdRun(ctx context.Context, args []string) int {
 		*mode = "plain"
 	}
 
-	c, code := newBackend(ctx, model, *backend, *pullFlag)
+	c, code := newBackendWithDisplay(ctx, model, *backend, *pullFlag, supplied)
 	if code != exitOK {
 		return code
 	}
-	disp := render.New(*mode)
+	disp := supplied
+	if disp == nil {
+		disp = render.New(*mode)
+	}
 	defer disp.Close()
 
 	// Check tasks generate a FRESH instance per repeat, so one pass per task is
@@ -948,20 +1028,32 @@ func cmdRun(ctx context.Context, args []string) int {
 		numCtx: *ctxSize,
 	}, disp)
 	if err != nil {
+		if failed, ok := disp.(runFailureTelemetry); ok && ctx.Err() == nil {
+			failed.RunFailed(err)
+		}
 		if ctx.Err() != nil {
-			fmt.Fprintln(os.Stderr, "\ninterrupted")
+			if supplied == nil {
+				fmt.Fprintln(os.Stderr, "\ninterrupted")
+			}
 			return exitInterrupt
 		}
-		errPrint(err.Error(), "", "re-run with -v for detail")
+		if supplied == nil {
+			errPrint(err.Error(), "", "re-run with -v for detail")
+		}
 		return exitError
 	}
 
 	path, err := save(res)
-	if err != nil {
-		errPrint("could not save result: "+err.Error(), "", "")
+	if status, ok := disp.(runSaveTelemetry); ok {
+		status.RunSaveStatus(err == nil, err)
 	}
-	res.Meta.SavedPath = path
-	disp.Result(res.Scorecard, res.Meta)
+	if err != nil {
+		if supplied == nil {
+			errPrint("could not save result: "+err.Error(), "", "")
+		}
+	}
+	meta := resultMeta(res, res.Profile)
+	meta.SavedPath = path
 
 	htmlDest := ""
 	if *htmlFlag {
@@ -969,10 +1061,18 @@ func cmdRun(ctx context.Context, args []string) int {
 	}
 	htmlFile, htmlErr := writeHTMLArtifact(res, htmlDest, path)
 	if htmlErr != nil {
+		if supplied != nil {
+			disp.Note("could not write HTML: "+htmlErr.Error(), "warn")
+		}
+	}
+	disp.Result(res.Scorecard, meta)
+	if htmlErr != nil && supplied == nil {
 		errPrint("could not write HTML: "+htmlErr.Error(), "", "")
 	}
-	if *quiet == 0 && render.Resolve(*mode) != "json" {
-		fmt.Fprintf(os.Stderr, "\n  saved  %s\n", path)
+	if supplied == nil && *quiet == 0 && render.Resolve(*mode) != "json" {
+		if path != "" {
+			fmt.Fprintf(os.Stderr, "\n  saved  %s\n", path)
+		}
 		if level == "checks" {
 			fmt.Fprintf(os.Stderr, "  next   run the paired model with --checks-only --seedset %s -k %d\n", *seedset, checksReps)
 			fmt.Fprintf(os.Stderr, "         fitr calibrate <reference> <candidate> --out pair.json\n")
@@ -1005,48 +1105,10 @@ func cmdRun(ctx context.Context, args []string) int {
 }
 
 // ---------------------------------------------------------------- result
-type Result struct {
-	SchemaVersion int    `json:"schema_version"`
-	Model         string `json:"model"`
-	StartedAt     string `json:"started_at"`
-	Level         string `json:"level"`
-	// SeedSet names the instance set the generated checks were drawn from.
-	// Unique per run by default (contamination resistance); pinned via
-	// --seedset so two models can face IDENTICAL instances, which upgrades
-	// `fitr compare` from an unpaired comparison to a paired one.
-	SeedSet     string             `json:"seedset,omitempty"`
-	Repeats     int                `json:"repeats"`
-	NumCtx      int                `json:"num_ctx,omitempty"`
-	WallSeconds float64            `json:"wall_s"`
-	Device      device.Fingerprint `json:"device"`
-	DeviceKey   string             `json:"device_key"`
-	Profile     string             `json:"profile"`
-	ModelMeta   ollama.ModelInfo   `json:"model_meta"`
-
-	Speed      []eval.SpeedResult             `json:"speed_repeats"`
-	DecodeSum  stats.Summary                  `json:"decode_summary"`
-	TTFTSum    stats.Summary                  `json:"ttft_summary"`
-	PrefillSum stats.Summary                  `json:"prefill_summary"`
-	Memory     eval.MemoryResult              `json:"memory"`
-	CodeWrite  []eval.ExecResult              `json:"code_write"`
-	CodeFix    []eval.ExecResult              `json:"code_fix"`
-	Checks     []eval.CheckOutcome            `json:"checks,omitempty"`
-	Tools      []eval.ToolLoopResult          `json:"tools"`
-	Withdrawal *eval.ToolLoopResult           `json:"tool_withdrawal,omitempty"`
-	Agentic    *eval.ToolLoopResult           `json:"agentic,omitempty"`
-	Refusal    map[string]eval.RefusalVerdict `json:"refusal,omitempty"`
-	Refused    int                            `json:"refused_count"`
-	Plumbing   *eval.PlumbingResult           `json:"plumbing,omitempty"`
-	Rep        score.Repetition               `json:"repetition"`
-	Density    score.Density                  `json:"density"`
-
-	// Contamination lists models that refused to unload. A non-empty value
-	// means every timing in this result is suspect.
-	Contamination []string `json:"contamination,omitempty"`
-
-	Scorecard score.Scorecard `json:"scorecard"`
-	Meta      render.Meta     `json:"-"`
-}
+// Result remains an alias while command code moves onto the internal record
+// boundary. Existing tests and helper signatures keep their source shape, and
+// persisted JSON remains compatible with schema 4.
+type Result = record.Record
 
 // runOpts carries the run configuration so execute's signature stays legible.
 type runOpts struct {
@@ -1055,6 +1117,18 @@ type runOpts struct {
 	adaptive                bool
 	numCtx                  int
 }
+
+// liveTelemetry is an optional extension implemented by the full-screen
+// display. Regular rich, plain, JSON, and silent displays are unchanged.
+type liveTelemetry interface {
+	LiveProgress(completed, total int, detail string)
+	LiveSpeed(sample eval.SpeedResult, completed, total int)
+	LiveMemory(residentGiB float64)
+}
+
+type runFailureTelemetry interface{ RunFailed(error) }
+type runSaveTelemetry interface{ RunSaveStatus(bool, error) }
+type runIdentityTelemetry interface{ RunID() string }
 
 func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	disp render.Display) (*Result, error) {
@@ -1106,6 +1180,9 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		Level:         level, Repeats: reps, NumCtx: reqCtx,
 		Device: fp, DeviceKey: fp.Key(), Profile: prof.Name, ModelMeta: info,
 	}
+	if identified, ok := disp.(runIdentityTelemetry); ok {
+		res.RunID = identified.RunID()
+	}
 	if suf := eval.CtxKeySuffix(reqCtx); suf != "" {
 		res.DeviceKey = res.DeviceKey + suf
 		disp.Note(fmt.Sprintf("num_ctx=%d (advise remedy applied; default is %d)", reqCtx, eval.NumCtx), "")
@@ -1154,7 +1231,9 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	// that will not unload is recorded and warned about -- data marked suspect
 	// beats data silently trusted.
 	stopAll := func() {
-		left, err := c.StopAll(ctx)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cleanupCancel()
+		left, err := c.StopAll(cleanupCtx)
 		if err != nil {
 			disp.Note("could not confirm models unloaded: "+err.Error(), "warn")
 			return
@@ -1166,6 +1245,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		disp.Note("still resident after unload: "+strings.Join(left, ", ")+
 			" - timings in this run may be contaminated", "warn")
 	}
+	defer stopAll()
 
 	stopAll()
 	if err := standardStep("speed", fmt.Sprintf("x%d", reps), func() error {
@@ -1178,6 +1258,9 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 				return err
 			}
 			res.Speed = append(res.Speed, s)
+			if live, ok := disp.(liveTelemetry); ok {
+				live.LiveSpeed(s, i+1, reps)
+			}
 		}
 		var dec, ttft, pre []float64
 		cached := 0
@@ -1209,6 +1292,9 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	if err := standardStep("memory", "resident @32K", func() error {
 		m, err := eval.RunMemory(ctx, c, model, 32768)
 		res.Memory = m
+		if live, ok := disp.(liveTelemetry); ok && m.ResidentGB > 0 {
+			live.LiveMemory(m.ResidentGB)
+		}
 		return err
 	}); err != nil {
 		return nil, err
@@ -1226,6 +1312,9 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 				return err
 			}
 			res.CodeFix = append(res.CodeFix, f)
+			if live, ok := disp.(liveTelemetry); ok {
+				live.LiveProgress(i+1, reps, fmt.Sprintf("repeat %d of %d", i+1, reps))
+			}
 		}
 		return nil
 	}); err != nil {
@@ -1262,6 +1351,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		}
 		roundsRun := 0
 		if err := step("checks", detail, func() error {
+			completed := 0
 			for round := 0; round < rounds; round++ {
 				roundsRun = round + 1
 				for _, cs := range spec.Checks {
@@ -1271,6 +1361,11 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 						return err
 					}
 					res.Checks = append(res.Checks, o)
+					completed++
+					if live, ok := disp.(liveTelemetry); ok {
+						live.LiveProgress(completed, len(spec.Checks)*rounds,
+							fmt.Sprintf("%d of %d generated tasks", completed, len(spec.Checks)*rounds))
+					}
 					if s, ok := sprts[cs.Need]; ok {
 						s.Add(o.Pass)
 					}
@@ -1369,10 +1464,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	// capped by design and would always look truncated.
 	res.Density = score.InformationDensity(longest)
 	res.WallSeconds = float64(int(time.Since(start).Seconds()*10)) / 10
-	stopAll()
-
 	res.Scorecard = score.Score(measure(res), prof)
-	res.Meta = resultMeta(res, prof.Name)
 	return res, nil
 }
 
@@ -1515,14 +1607,7 @@ func measure(r *Result) score.Measured {
 
 // ---------------------------------------------------------------- storage
 func resultsDir() string {
-	if d := os.Getenv("FITR_RESULTS"); d != "" {
-		return d
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "results"
-	}
-	return filepath.Join(home, ".fitr", "results")
+	return record.DefaultDir()
 }
 
 func safeName(s string) string {
@@ -1540,37 +1625,29 @@ func safeName(s string) string {
 }
 
 func save(r *Result) (string, error) {
-	dir := resultsDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	p := filepath.Join(dir, safeName(r.Model)+".json")
-	b, err := json.MarshalIndent(r, "", "  ")
+	saved, err := record.NewStore(resultsDir()).Save(r)
 	if err != nil {
 		return "", err
 	}
-	return p, os.WriteFile(p, b, 0o644)
+	return saved.CanonicalPath, nil
 }
 
 func loadResults() ([]*Result, error) {
-	dir := resultsDir()
-	entries, err := os.ReadDir(dir)
+	loaded, err := record.NewStore(resultsDir()).LoadCurrent()
 	if err != nil {
 		return nil, err
 	}
-	var out []*Result
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
+	// The legacy command surface reads canonical latest results only. History is
+	// intentionally exposed by `fitr top`, so deleting a canonical file retains
+	// its established meaning for board, view, compare, calibrate, and export.
+	seen := map[string]bool{}
+	out := make([]*Result, 0, len(loaded.Records))
+	for _, result := range loaded.Records {
+		if seen[result.Model] {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			continue
-		}
-		var r Result
-		if json.Unmarshal(b, &r) == nil && r.Model != "" {
-			out = append(out, &r)
-		}
+		seen[result.Model] = true
+		out = append(out, result)
 	}
 	return out, nil
 }
@@ -1929,16 +2006,7 @@ func cmdBoard(ctx context.Context, args []string) int {
 }
 
 func resultNumCtx(r *Result) int {
-	if r == nil {
-		return eval.NumCtx
-	}
-	if r.NumCtx > 0 {
-		return r.NumCtx
-	}
-	if n := eval.ParseKeyCtx(r.DeviceKey); n > 0 {
-		return n
-	}
-	return eval.NumCtx
+	return r.ContextSize()
 }
 
 // ---------------------------------------------------------------- diag

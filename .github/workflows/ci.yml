@@ -17,6 +17,9 @@ jobs:
       - run: git diff --exit-code
       - run: go vet ./...
       - run: go test ./... -count=1
+      - name: race detector
+        if: runner.os == 'Linux'
+        run: go test -race ./... -count=1
       - run: go build ./...
       - name: installer syntax
         if: runner.os == 'Linux'
@@ -39,6 +42,15 @@ jobs:
       - uses: actions/setup-go@v6
         with: { go-version: '1.25' }
       - run: make dist
+      - name: binary size gate
+        shell: bash
+        run: |
+          max_bytes=12000000
+          for binary in dist/fitr-*; do
+            size="$(stat -c %s "$binary")"
+            printf '%-32s %10d bytes\n' "$binary" "$size"
+            test "$size" -le "$max_bytes"
+          done
       - uses: actions/upload-artifact@v5
         with:
           name: binaries

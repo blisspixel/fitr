@@ -51,7 +51,7 @@ error; calibration reduces it.
 
 ---
 
-## Where it is now (0.3.0)
+## Where it is now (0.4.0)
 
 **Done and measured:**
 
@@ -60,6 +60,16 @@ error; calibration reduces it.
 - CLI data views: `fitr view` reopens the newest or selected saved run;
   scorecards and `board` show repeat-shape graphs, with color/Unicode fallbacks
   and unchanged plain/JSON channels
+- **`fitr top` full-screen monitor** with Live, Result, Board, and immutable
+  History views; keyboard-only navigation; responsive layouts; color, ASCII,
+  and non-interactive fallbacks; and terminal restoration across macOS, Linux,
+  and Windows
+- **Versioned presentation contracts** for privacy-safe snapshots and typed
+  live events. The reducer and canvas are independent of tcell so later native
+  clients can consume decisions without reimplementing scoring.
+- **Append-only local run history** alongside the canonical latest result,
+  with atomic writes, legacy loading, explicit retention disclosure, and a
+  clear command that preserves canonical results
 - Needs-based scoring - PASS / FAIL / SKIP / `n/a` / `BLKD` - instead of one number
 - Repeats with Wilson intervals, flakiness flags, `INDISTINGUISHABLE` verdicts,
   first-run-slow detection
@@ -103,7 +113,7 @@ error; calibration reduces it.
   copies are compared byte-for-byte in tests, `make spec-sync` repairs
 - Single static binary, 6 platforms (linux/darwin/windows × amd64/arm64),
   CI on 3 OSes
-- **One-command install** matching the grok/codex shape:
+- **One-command install** using the familiar single-command CLI shape:
   `curl -fsSL .../install.sh | sh` and
   `irm .../install.ps1 | iex`. Checksums on tagged releases; `FITR_VERSION`
   to pin, `FITR_BIN` to relocate.
@@ -241,7 +251,7 @@ loop, closable on someone else's machine.
 | Recommend what to try without naming a model first | **blocked on calibration**; inventory-first comes before any internet catalog |
 | Persist a measured setting without silent mutation | **done** - `fitr apply` prints the command; never restarts the server |
 | A result can leave the terminal | **done** - `fitr export` / `fitr run --html`, opt-in, fingerprint in the page |
-| Saved evidence is easy to inspect in the terminal | **first slice done** - `fitr view` plus graph-based `board`; opt-in full-screen TUI follows calibrated recommendation |
+| Saved evidence is easy to inspect in the terminal | **done** - `fitr view`, graph-based `board`, and the opt-in `fitr top` Live/Result/Board/History monitor |
 | Community device profiles beyond `lappy` | **scaffolded** - `fitr profiles new` writes an UNCALIBRATED local copy; no invented rtx-4090 numbers in the repo |
 
 We do **not** ship 1.0 with an uncalibrated `advise`, a public leaderboard,
@@ -305,12 +315,13 @@ The step that turns a chore into a product.
       the newest or selected run through the scorecard renderer. `fitr board`
       adds per-block throughput bars and repeat-shape graphs without a new
       dependency. Plain output stays ASCII and pipe-safe; JSON stays complete.
-- [ ] **Opt-in full-screen TUI after calibration and inventory-first advise.**
-      Add live run, result, board, and history views only after a structured
-      event model exists. Normal commands never take over the terminal.
-- [ ] **Versioned presentation contract.** Extract a read-only snapshot and
-      event schema so every interface consumes the same scoring decisions.
-      Frontends never reimplement gates or comparisons.
+- [x] **Opt-in full-screen TUI.** Live run, result, board, and immutable
+      history views share one keyboard-first responsive surface. Normal
+      commands never take over the terminal, and redirected streams remain
+      control-sequence free.
+- [x] **Versioned presentation contract.** A read-only privacy-safe snapshot
+      and typed event schema let every interface consume the same scoring
+      decisions. Frontends never reimplement gates or comparisons.
 - [ ] **Truly native desktop clients only after the terminal information
       architecture is proven.** SwiftUI/AppKit on macOS, WinUI 3 on Windows,
       and GTK 4/libadwaita on Linux. Three thin native frontends share the Go

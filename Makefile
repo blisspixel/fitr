@@ -41,6 +41,7 @@ dist:
 		GOOS=$$os GOARCH=$$arch go build -ldflags="$(LDFLAGS)" \
 			-o dist/$(BINARY)-$$os-$$arch$$ext ./cmd/fitr; \
 	done
+	@cp LICENSE THIRD_PARTY_NOTICES.md dist/
 	@ls -lh dist/
 
 install: build

@@ -1,0 +1,962 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/blisspixel/fitr/internal/eval"
+	"github.com/blisspixel/fitr/internal/record"
+	"github.com/blisspixel/fitr/internal/render"
+	"github.com/blisspixel/fitr/internal/score"
+	"github.com/blisspixel/fitr/internal/session"
+	"github.com/blisspixel/fitr/internal/top"
+)
+
+const presentationSnapshotSchema = "fitr.presentation.snapshot.v1"
+
+// cmdTop is deliberately opt-in. Normal commands keep their line-oriented
+// stream contract and never take over the terminal.
+func cmdTop(ctx context.Context, args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "run":
+			return cmdTopRun(ctx, args[1:])
+		case "view":
+			return cmdTopView(ctx, args[1:])
+		case "history":
+			return cmdTopHistory(ctx, args[1:])
+		}
+	}
+	return cmdTopBrowse(ctx, args)
+}
+
+func cmdTopHistory(ctx context.Context, args []string) int {
+	if len(args) == 0 {
+		return cmdTopBrowse(ctx, []string{"--view", "history"})
+	}
+	switch args[0] {
+	case "path":
+		if len(args) != 1 {
+			errPrint("history path takes no arguments", "", "fitr top history path")
+			return exitUsage
+		}
+		fmt.Println(record.NewStore(resultsDir()).HistoryDir())
+		return exitOK
+	case "clear":
+		fs := flag.NewFlagSet("top history clear", flag.ContinueOnError)
+		fs.SetOutput(os.Stderr)
+		yes := fs.Bool("yes", false, "confirm permanent history deletion")
+		if err := fs.Parse(args[1:]); err != nil {
+			return exitUsage
+		}
+		if fs.NArg() != 0 {
+			errPrint("unexpected history clear argument", fs.Arg(0), "fitr top history clear --yes")
+			return exitUsage
+		}
+		store := record.NewStore(resultsDir())
+		if !*yes {
+			errPrint("history clear needs --yes", "this permanently removes archived runs but keeps canonical latest results", "review first: fitr top history path")
+			return exitUsage
+		}
+		count, err := store.ClearHistory()
+		if err != nil {
+			errPrint("could not clear history: "+err.Error(), "", "")
+			return exitError
+		}
+		fmt.Printf("cleared %d archived result(s); canonical latest results were kept\n", count)
+		return exitOK
+	default:
+		errPrint("unknown history action", args[0], "use fitr top history, fitr top history path, or fitr top history clear --yes")
+		return exitUsage
+	}
+}
+
+func cmdTopBrowse(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("top", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	viewName := fs.String("view", "board", "live|result|board|history")
+	snapshotOnly := fs.Bool("snapshot", false, "write a privacy-safe presentation snapshot as JSON")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() != 0 {
+		errPrint("unexpected argument", fs.Arg(0), "fitr top  or  fitr top view [model|result.json]")
+		return exitUsage
+	}
+	view, ok := parseTopView(*viewName)
+	if !ok {
+		errPrint("invalid top view", *viewName, "use live, result, board, or history")
+		return exitUsage
+	}
+	data, warnings, err := loadTopSnapshot(nil)
+	if err != nil {
+		errPrint("could not load result history: "+err.Error(), "", "")
+		return exitError
+	}
+	data.Generation = 1
+	if *snapshotOnly {
+		return writeTopSnapshot(data, warnings, "")
+	}
+	if !interactiveTerminal() {
+		errPrint("fitr top needs an interactive terminal", "stdout or stdin is not a terminal, or TERM=dumb", "use fitr top --snapshot, fitr view, or fitr board instead")
+		return exitUsage
+	}
+	state := top.NewState(data)
+	state.View = view
+	state.Error = warningSummary(warnings)
+	return runTopBrowser(ctx, state, nil, nil, nil)
+}
+
+func cmdTopView(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("top view", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	snapshotOnly := fs.Bool("snapshot", false, "write a privacy-safe presentation snapshot as JSON")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() > 1 {
+		errPrint("too many arguments", "top view accepts one model or result path", "fitr top view [model|result.json]")
+		return exitUsage
+	}
+	var candidate *string
+	if fs.NArg() == 1 {
+		value := fs.Arg(0)
+		candidate = &value
+	}
+	data, warnings, err := loadTopSnapshot(candidate)
+	if err != nil {
+		errPrint("could not open result: "+err.Error(), "", "fitr top")
+		return exitError
+	}
+	if len(data.History) == 0 {
+		errPrint("no results yet", "", "run one first: fitr top run <model> --full")
+		return exitError
+	}
+	selectedID := ""
+	if candidate != nil {
+		selected, err := selectTopRun(data, *candidate)
+		if err != nil {
+			errPrint(err.Error(), "", "fitr top")
+			return exitError
+		}
+		selectedID = selected.ID
+	}
+	data.Generation = 1
+	if *snapshotOnly {
+		return writeTopSnapshot(data, warnings, selectedID)
+	}
+	if !interactiveTerminal() {
+		errPrint("fitr top needs an interactive terminal", "stdout or stdin is not a terminal, or TERM=dumb", "use fitr top view --snapshot or fitr view instead")
+		return exitUsage
+	}
+	state := top.NewState(data)
+	state.View = top.ViewResult
+	state.Error = warningSummary(warnings)
+	if selectedID != "" {
+		state.Selected[top.ViewResult] = selectedID
+		state.Selected[top.ViewHistory] = selectedID
+	}
+	return runTopBrowser(ctx, state, nil, nil, nil)
+}
+
+func cmdTopRun(ctx context.Context, args []string) int {
+	if hasFlag(args, "display") {
+		errPrint("--display is not valid with fitr top run", "top is already an explicit display mode", "use fitr run <model> --display MODE for stream output")
+		return exitUsage
+	}
+	preview, err := previewTopRun(args)
+	if err != nil {
+		errPrint(err.Error(), "", "fitr top run <model> [run flags]")
+		return exitUsage
+	}
+	if !interactiveTerminal() {
+		errPrint("fitr top needs an interactive terminal", "stdout or stdin is not a terminal, or TERM=dumb", "use fitr run <model> --display plain|json instead")
+		return exitUsage
+	}
+
+	initial, warnings, err := loadTopSnapshot(nil)
+	if err != nil {
+		errPrint("could not load result history: "+err.Error(), "", "")
+		return exitError
+	}
+	sink, err := session.NewSink(session.Options{})
+	if err != nil {
+		errPrint("could not create live session: "+err.Error(), "", "")
+		return exitError
+	}
+	if _, err := sink.Start(session.RunInfo{
+		Model: preview.model, Profile: preview.profile, Level: preview.level,
+		NumCtx: preview.numCtx, Repeats: preview.repeats,
+	}); err != nil {
+		errPrint("could not start live session: "+err.Error(), "", "")
+		return exitError
+	}
+	initial.Generation = 1
+	initial.Live = liveFromSession(sink.Snapshot())
+	state := top.NewState(initial)
+	state.View = top.ViewLive
+	state.Error = warningSummary(warnings)
+
+	events := make(chan top.Event, 64)
+	subscription, err := sink.Subscribe(32)
+	if err != nil {
+		errPrint("could not subscribe to live session: "+err.Error(), "", "")
+		return exitError
+	}
+	defer subscription.Close()
+	uiCtx, cancelUI := context.WithCancel(ctx)
+	defer cancelUI()
+	go relaySession(uiCtx, subscription, events)
+
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	sequence := &atomic.Uint64{}
+	sequence.Store(initial.Generation)
+	display := &topDisplay{ctx: runCtx, sink: sink, events: events, sequence: sequence, saved: true}
+	runDone := make(chan int, 1)
+	go func() {
+		code := cmdRunWithDisplay(runCtx, args, display)
+		display.finish(code, runCtx.Err())
+		runDone <- code
+	}()
+
+	code := runTopBrowser(uiCtx, state, cancelRun, runDone, sequence, events)
+	cancelUI()
+	if code != exitOK {
+		return code
+	}
+	select {
+	case completed := <-runDone:
+		return completed
+	default:
+		cancelRun()
+		return <-runDone
+	}
+}
+
+// runTopBrowser owns the terminal. When a measurement is active, cancellation
+// waits for the runner and its server cleanup before tcell restores the screen.
+func runTopBrowser(ctx context.Context, state top.State, cancel context.CancelFunc, done chan int, sequence *atomic.Uint64, supplied ...chan top.Event) int {
+	uiCtx, cancelUI := context.WithCancel(ctx)
+	defer cancelUI()
+	events := make(chan top.Event, 8)
+	if len(supplied) > 0 && supplied[0] != nil {
+		events = supplied[0]
+	}
+	if sequence == nil {
+		sequence = &atomic.Uint64{}
+		sequence.Store(max(state.Snapshot.Generation, 1))
+	}
+	var waitOnce sync.Once
+	runnerTimedOut := false
+	waitForRun := func() {
+		if cancel == nil || done == nil {
+			return
+		}
+		waitOnce.Do(func() {
+			cancel()
+			if !waitForRunCompletion(done, 12*time.Second) {
+				runnerTimedOut = true
+			}
+		})
+	}
+	app := top.App{
+		Initial: state, Events: events,
+		Theme:  top.DefaultTheme(os.Getenv("NO_COLOR") != ""),
+		Glyphs: top.DefaultGlyphs(os.Getenv("FITR_ASCII") != ""),
+		OnEffect: func(effect top.Effect) {
+			switch effect.Kind {
+			case top.EffectCancelRun:
+				waitForRun()
+			case top.EffectReload:
+				generation := sequence.Add(1)
+				go reloadTopSnapshot(uiCtx, events, generation)
+			}
+		},
+	}
+	final, err := app.Run(uiCtx)
+	cancelUI()
+	if runnerTimedOut {
+		errPrint("run cancellation did not finish within 12 seconds", "the terminal was restored; the serving backend did not stop promptly", "check the server before starting another measurement")
+		return exitError
+	}
+	if err != nil && !errors.Is(err, context.Canceled) {
+		errPrint("top stopped: "+err.Error(), "", "your terminal was restored")
+		waitForRun()
+		return exitError
+	}
+	if ctx.Err() != nil || final.Interrupted {
+		waitForRun()
+		return exitInterrupt
+	}
+	return exitOK
+}
+
+func waitForRunCompletion(done chan int, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case code := <-done:
+		done <- code
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+func reloadTopSnapshot(ctx context.Context, events chan top.Event, generation uint64) {
+	data, warnings, err := loadTopSnapshot(nil)
+	if err != nil {
+		emitTopEvent(ctx, events, top.ErrorEvent{Err: err, Generation: generation})
+		return
+	}
+	data.Generation = generation
+	emitTopEvent(ctx, events, top.SnapshotEvent{Snapshot: data})
+	if warning := warningSummary(warnings); warning != "" {
+		emitTopEvent(ctx, events, top.ErrorEvent{Err: errors.New(warning), Generation: generation})
+	}
+}
+
+type topRunPreview struct {
+	model, profile, level string
+	repeats, numCtx       int
+}
+
+func previewTopRun(args []string) (topRunPreview, error) {
+	fs := flag.NewFlagSet("top run", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	quick := fs.Bool("quick", false, "")
+	full := fs.Bool("full", false, "")
+	checks := fs.Bool("checks-only", false, "")
+	k := fs.Int("k", 0, "")
+	profile := fs.String("profile", "", "")
+	_ = fs.String("display", "auto", "")
+	_ = fs.String("backend", "auto", "")
+	seedset := fs.String("seedset", "", "")
+	adaptive := fs.Bool("adaptive", false, "")
+	_ = fs.Bool("pull", false, "")
+	html := fs.Bool("html", false, "")
+	numCtx := fs.Int("ctx", 0, "")
+	_ = fs.Int("q", 0, "")
+	_ = fs.Bool("v", false, "")
+	if err := fs.Parse(permute(args)); err != nil {
+		return topRunPreview{}, err
+	}
+	if fs.NArg() != 1 {
+		return topRunPreview{}, errors.New("top run needs exactly one model")
+	}
+	levels := 0
+	for _, selected := range []bool{*quick, *full, *checks} {
+		if selected {
+			levels++
+		}
+	}
+	if levels > 1 {
+		return topRunPreview{}, errors.New("--quick, --full, and --checks-only are mutually exclusive")
+	}
+	if *checks && *seedset == "" {
+		return topRunPreview{}, errors.New("--checks-only requires --seedset")
+	}
+	if *checks && *adaptive {
+		return topRunPreview{}, errors.New("--checks-only cannot use --adaptive")
+	}
+	if *checks && *html {
+		return topRunPreview{}, errors.New("--checks-only cannot use --html")
+	}
+	level := "default"
+	if *quick {
+		level = "quick"
+	} else if *full {
+		level = "full"
+	} else if *checks {
+		level = "checks"
+	}
+	repeats := *k
+	if repeats == 0 {
+		repeats = 3
+		if level == "quick" {
+			repeats = 1
+		} else if level == "checks" {
+			repeats = 5
+		}
+	}
+	if repeats < 1 {
+		return topRunPreview{}, errors.New("-k must be at least 1")
+	}
+	return topRunPreview{
+		model: presentationModelLabel(normalizeModelRef(fs.Arg(0))), profile: *profile, level: level,
+		repeats: repeats, numCtx: eval.ResolvedCtx(*numCtx),
+	}, nil
+}
+
+type topDisplay struct {
+	ctx          context.Context
+	sink         *session.Sink
+	events       chan top.Event
+	sequence     *atomic.Uint64
+	currentPhase string
+	saved        bool
+	once         sync.Once
+}
+
+var _ render.Display = (*topDisplay)(nil)
+var _ liveTelemetry = (*topDisplay)(nil)
+
+func (d *topDisplay) RunID() string { return d.sink.RunID() }
+
+func (d *topDisplay) Phase(name, detail string) {
+	d.currentPhase = name
+	_, _ = d.sink.PhaseStarted(name, presentationMessage(detail), 0)
+}
+
+func (d *topDisplay) Note(message, level string) {
+	noticeLevel := session.NoticeInfo
+	if level == "warn" {
+		noticeLevel = session.NoticeWarning
+	}
+	_, _ = d.sink.Notify(session.Notice{Level: noticeLevel, Message: presentationMessage(message)})
+}
+
+func (d *topDisplay) Done(name string, _ float64) {
+	_, _ = d.sink.PhaseCompleted(name)
+	if d.currentPhase == name {
+		d.currentPhase = ""
+	}
+}
+
+func (d *topDisplay) Result(sc score.Scorecard, _ render.Meta) {
+	d.once.Do(func() {
+		_, _ = d.sink.Complete(session.Completion{Passes: sc.Passes, Fails: sc.Fails, Unproven: sc.Unproven, Saved: d.saved})
+		data, warnings, err := loadTopSnapshot(nil)
+		if err != nil {
+			emitTopEvent(d.ctx, d.events, top.ErrorEvent{Err: err})
+			return
+		}
+		generation := d.sequence.Add(1)
+		data.Generation = generation
+		data.Live = liveFromSession(d.sink.Snapshot())
+		emitTopEvent(d.ctx, d.events, top.SnapshotEvent{Snapshot: data})
+		if warning := warningSummary(warnings); warning != "" {
+			emitTopEvent(d.ctx, d.events, top.ErrorEvent{Err: errors.New(warning), Generation: generation})
+		}
+	})
+}
+
+func (*topDisplay) Emit(any) {}
+func (*topDisplay) Close()   {}
+
+func (d *topDisplay) RunFailed(err error) {
+	d.once.Do(func() {
+		_, _ = d.sink.Fail(session.Failure{
+			Code: "run_failed", Summary: presentationError(err), Remedy: "review the error and retry",
+		})
+		emitTopEvent(d.ctx, d.events, top.LiveEvent{Live: liveFromSession(d.sink.Snapshot())})
+	})
+}
+
+func (d *topDisplay) RunSaveStatus(saved bool, err error) {
+	d.saved = saved
+	if err != nil {
+		_, _ = d.sink.Notify(session.Notice{
+			Level: session.NoticeWarning, Code: "save_failed",
+			Message: "the measurement completed but its result could not be saved",
+			Remedy:  "check the result directory permissions and free space",
+		})
+	}
+}
+
+func (d *topDisplay) LiveProgress(completed, total int, detail string) {
+	if d.currentPhase == "" || total <= 0 {
+		return
+	}
+	_, _ = d.sink.PhaseProgress(d.currentPhase, completed, total, presentationMessage(detail))
+}
+
+func (d *topDisplay) LiveSpeed(sample eval.SpeedResult, completed, total int) {
+	d.LiveProgress(completed, total, fmt.Sprintf("repeat %d of %d", completed, total))
+	for _, metric := range []session.MetricSample{
+		{Phase: d.currentPhase, Metric: session.MetricDecodeTPS, Value: sample.DecodeTPS, Sample: completed, Total: total, Source: metricSource(sample)},
+		{Phase: d.currentPhase, Metric: session.MetricPrefillTPS, Value: sample.PrefillTPS, Sample: completed, Total: total, Source: metricSource(sample)},
+		{Phase: d.currentPhase, Metric: session.MetricTTFTSeconds, Value: sample.TTFT, Sample: completed, Total: total, Source: metricSource(sample), Cached: sample.GatedTTFTContaminated()},
+	} {
+		if metric.Value > 0 {
+			_, _ = d.sink.Observe(metric)
+		}
+	}
+}
+
+func (d *topDisplay) LiveMemory(residentGiB float64) {
+	if d.currentPhase == "" || residentGiB <= 0 {
+		return
+	}
+	_, _ = d.sink.Observe(session.MetricSample{
+		Phase: d.currentPhase, Metric: session.MetricResidentGiB,
+		Value: residentGiB, Source: session.SourceDevice,
+	})
+}
+
+func (d *topDisplay) finish(code int, runErr error) {
+	d.once.Do(func() {
+		if runErr != nil || code == exitInterrupt {
+			_, _ = d.sink.Cancel(session.Cancellation{Reason: session.CancelInterrupt, Message: "measurement cancelled"})
+		} else {
+			_, _ = d.sink.Fail(session.Failure{Code: "run_failed", Summary: "measurement failed", Remedy: "review the error and retry"})
+		}
+		emitTopEvent(d.ctx, d.events, top.LiveEvent{Live: liveFromSession(d.sink.Snapshot())})
+	})
+}
+
+func metricSource(sample eval.SpeedResult) session.MetricSource {
+	if sample.ClientDerived {
+		return session.SourceClient
+	}
+	return session.SourceServer
+}
+
+func relaySession(ctx context.Context, subscription *session.Subscription, events chan top.Event) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case update, ok := <-subscription.C:
+			if !ok {
+				return
+			}
+		drain:
+			for {
+				select {
+				case newer, more := <-subscription.C:
+					if !more {
+						break drain
+					}
+					update = newer
+				default:
+					break drain
+				}
+			}
+			if update.Snapshot.State == session.StateCompleted || update.Snapshot.State == session.StateFailed || update.Snapshot.State == session.StateCancelled {
+				return
+			}
+			emitTopEvent(ctx, events, top.LiveEvent{Live: liveFromSession(update.Snapshot)})
+		}
+	}
+}
+
+// emitTopEvent is cancellation-aware. Live sampling reaches this channel only
+// through the nonblocking session subscription, so backpressure here cannot
+// alter measurement timing. Final delivery unblocks when the run is canceled.
+func emitTopEvent(ctx context.Context, events chan top.Event, event top.Event) bool {
+	select {
+	case events <- event:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func liveFromSession(snapshot session.Snapshot) top.Live {
+	live := top.Live{
+		Active:    snapshot.State == session.StateRunning,
+		Completed: snapshot.State == session.StateCompleted || snapshot.State == session.StateFailed || snapshot.State == session.StateCancelled,
+		Cancelled: snapshot.State == session.StateCancelled,
+		RunID:     snapshot.RunID, Sequence: snapshot.LastSequence,
+		StartedAt: snapshot.StartedAt, UpdatedAt: snapshot.UpdatedAt,
+	}
+	if snapshot.Completion != nil {
+		live.Saved = snapshot.Completion.Saved
+	}
+	if snapshot.Run != nil {
+		live.Model = snapshot.Run.Model
+		live.Placement = strings.TrimSpace(strings.Join([]string{snapshot.Run.GPU, snapshot.Run.Backend}, " "))
+		live.Repeats = snapshot.Run.Repeats
+	}
+	for index, phase := range snapshot.Phases {
+		live.Phases = append(live.Phases, top.LivePhase{
+			Name: phase.Name, Detail: phase.Detail, State: string(phase.State),
+			Completed: phase.Completed, Total: phase.Total,
+		})
+		if phase.State == session.PhaseRunning || index == len(snapshot.Phases)-1 {
+			live.Phase, live.Detail = phase.Name, phase.Detail
+			live.CompletedSteps, live.TotalSteps = phase.Completed, phase.Total
+		}
+	}
+	for _, series := range snapshot.Metrics {
+		values := make([]float64, 0, len(series.Samples))
+		for _, observation := range series.Samples {
+			values = append(values, observation.Sample.Value)
+		}
+		if len(values) == 0 {
+			continue
+		}
+		latest := values[len(values)-1]
+		switch series.Metric {
+		case session.MetricDecodeTPS:
+			live.Decode, live.DecodeSeries = latest, values
+		case session.MetricPrefillTPS:
+			live.Prefill, live.PrefillSeries = latest, values
+		case session.MetricTTFTSeconds:
+			live.TTFT, live.TTFTSeries = latest, values
+		case session.MetricResidentGiB:
+			live.MemoryGB = latest
+		}
+	}
+	for _, notice := range snapshot.Notices {
+		if notice.Notice.Level == session.NoticeWarning {
+			live.Warnings = append(live.Warnings, notice.Notice.Message)
+		}
+	}
+	if snapshot.Failure != nil {
+		live.Error = snapshot.Failure.Summary
+	}
+	if snapshot.Cancellation != nil {
+		live.Error = snapshot.Cancellation.Message
+	}
+	return live
+}
+
+func loadTopSnapshot(candidate *string) (top.Snapshot, []record.FileWarning, error) {
+	store := record.NewStore(resultsDir())
+	loaded, err := store.LoadAll()
+	if err != nil {
+		return top.Snapshot{}, nil, err
+	}
+	records := loaded.Records
+	if candidate != nil {
+		if info, statErr := os.Stat(*candidate); statErr == nil && !info.IsDir() {
+			selected, readErr := store.Read(*candidate)
+			if readErr != nil {
+				return top.Snapshot{}, loaded.Warnings, readErr
+			}
+			id := selected.EnsureRunID()
+			found := false
+			for _, existing := range records {
+				if existing.StableRunID() == id {
+					found = true
+					break
+				}
+			}
+			if !found {
+				records = append([]*Result{selected}, records...)
+			}
+		}
+	}
+	return buildTopSnapshot(records), loaded.Warnings, nil
+}
+
+func buildTopSnapshot(records []*Result) top.Snapshot {
+	now := time.Now().UTC()
+	snapshot := top.Snapshot{UpdatedAt: now}
+	groups := make(map[string][]top.Run)
+	groupRecords := make(map[string]*Result)
+	seenBoard := make(map[string]bool)
+	for _, result := range records {
+		if result == nil {
+			continue
+		}
+		run := presentTopRun(result)
+		snapshot.History = append(snapshot.History, run)
+		groupKey := result.DeviceKey
+		if groupKey == "" {
+			groupKey = "unknown:" + run.ID
+		}
+		boardKey := groupKey + "\x00" + result.Model
+		if seenBoard[boardKey] {
+			continue
+		}
+		seenBoard[boardKey] = true
+		groups[groupKey] = append(groups[groupKey], run)
+		if groupRecords[groupKey] == nil {
+			groupRecords[groupKey] = result
+		}
+	}
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		runs := groups[key]
+		sort.SliceStable(runs, func(i, j int) bool { return runs[i].DecodeMean > runs[j].DecodeMean })
+		representative := groupRecords[key]
+		title := representative.Device.GPU
+		if title == "" {
+			title = representative.Device.InferenceDevice
+		}
+		if title == "" {
+			title = "unknown device"
+		}
+		if representative.Device.Runtime != "" {
+			title = strings.TrimSpace(title + " | " + representative.Device.Runtime)
+		}
+		note := "same hardware, runtime, and config; rows are comparable"
+		comparable := representative.DeviceKey != ""
+		if !comparable {
+			note = "missing device fingerprint; this run is not rankable"
+		}
+		if len(runs) < 2 {
+			if comparable {
+				note = "one saved model for this hardware, runtime, and config"
+			}
+		}
+		snapshot.Board = append(snapshot.Board, top.BoardGroup{
+			ID: privacyID(key), Title: title, Note: note, Comparable: comparable, Runs: runs,
+		})
+	}
+	return snapshot
+}
+
+func presentTopRun(result *Result) top.Run {
+	started, _ := time.Parse(time.RFC3339Nano, result.StartedAt)
+	scorecard := result.Scorecard
+	if scorecard.Model == "" {
+		if artifact, err := artifactFrom(result); err == nil {
+			scorecard = artifact.Scorecard
+		}
+	}
+	verdicts := make([]top.Verdict, 0, len(scorecard.Needs))
+	for _, need := range score.SortedNeeds(scorecard.Needs) {
+		verdict := scorecard.Needs[need]
+		label := score.NeedLabel[need]
+		if label == "" {
+			label = need
+		}
+		verdicts = append(verdicts, top.Verdict{Need: need, Label: label, State: string(verdict.State), Why: verdict.Why})
+	}
+	serves := make([]string, 0, len(scorecard.Serves))
+	for _, need := range scorecard.Serves {
+		if code := score.NeedCode[need]; code != "" {
+			serves = append(serves, code)
+		}
+	}
+	warnings := make([]string, 0, len(result.Contamination)+1)
+	for _, contaminated := range result.Contamination {
+		warnings = append(warnings, "resident model: "+presentationModelLabel(contaminated))
+	}
+	if result.Profile == "default" {
+		warnings = append(warnings, "uncalibrated default profile")
+	}
+	clientDerived, cachedGated := false, false
+	for _, sample := range result.Speed {
+		clientDerived = clientDerived || sample.ClientDerived
+		cachedGated = cachedGated || sample.GatedTTFTContaminated()
+	}
+	if clientDerived {
+		warnings = append(warnings, "timings are client-derived wall-clock observations")
+	}
+	if cachedGated {
+		warnings = append(warnings, "the gated TTFT prompt was cache-contaminated")
+	}
+	if result.Repeats < 3 {
+		warnings = append(warnings, "fewer than 3 repeats; this result is not rankable")
+	}
+	decodeSeries := make([]float64, 0, len(result.Speed))
+	for _, sample := range result.Speed {
+		decodeSeries = append(decodeSeries, sample.DecodeTPS)
+	}
+	config := fmt.Sprintf("num_ctx=%d", result.ContextSize())
+	if backend := result.Device.GPUBackend; backend != "" {
+		config += " | " + backend
+	}
+	for _, key := range []string{"OLLAMA_KV_CACHE_TYPE", "OLLAMA_FLASH_ATTENTION"} {
+		if value := result.Device.Config[key]; value != "" {
+			config += " | " + strings.ToLower(strings.TrimPrefix(key, "OLLAMA_")) + "=" + value
+		}
+	}
+	meta := resultMeta(result, result.Profile)
+	modelLabel := presentationModelLabel(result.Model)
+	nextCommand := "fitr export " + modelLabel
+	if result.Repeats < 3 {
+		nextCommand = "fitr run " + modelLabel + " -k 3"
+	} else if result.ContextSize() != eval.NumCtx {
+		nextCommand = "fitr apply " + modelLabel
+	}
+	deviceID, hardwareID := "", ""
+	if result.DeviceKey != "" {
+		deviceID = privacyID(result.DeviceKey)
+		hardwareID = privacyID(eval.HardwareKey(result.DeviceKey))
+	}
+	return top.Run{
+		ID: result.StableRunID(), Model: modelLabel,
+		Family: result.ModelMeta.Details.Family, ParamSize: result.ModelMeta.Details.ParameterSize,
+		Quant:    result.ModelMeta.Details.QuantizationLevel,
+		DeviceID: deviceID, HardwareID: hardwareID, Device: result.Device.GPU,
+		Driver: result.Device.GPUDriver, Runtime: result.Device.Runtime,
+		Config: config, Profile: result.Profile, Level: result.Level, UseFor: scorecard.UseFor,
+		StartedAt: started, Duration: time.Duration(result.WallSeconds * float64(time.Second)),
+		Context: result.ContextSize(), Repeats: result.Repeats, Trials: meta.Trials, MDEpp: meta.MDEpp,
+		DecodeMean: result.DecodeSum.Mean, DecodeSD: result.DecodeSum.SD,
+		PrefillMean: result.PrefillSum.Mean, TTFTMean: result.TTFTSum.Mean,
+		MemoryGB: result.Memory.ResidentGB, DecodeSeries: decodeSeries,
+		Serves: serves, Warnings: warnings, Verdicts: verdicts, NextCommand: nextCommand,
+	}
+}
+
+func selectTopRun(snapshot top.Snapshot, candidate string) (top.Run, error) {
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		selected, readErr := record.NewStore(resultsDir()).Read(candidate)
+		if readErr != nil {
+			return top.Run{}, readErr
+		}
+		id := selected.StableRunID()
+		for _, run := range snapshot.History {
+			if run.ID == id {
+				return run, nil
+			}
+		}
+	}
+	normalized := normalizeModelRef(candidate)
+	for _, run := range snapshot.History {
+		if run.Model == normalized || strings.Contains(run.Model, normalized) {
+			return run, nil
+		}
+	}
+	return top.Run{}, fmt.Errorf("no stored result for %q", candidate)
+}
+
+func parseTopView(value string) (top.View, bool) {
+	switch strings.ToLower(value) {
+	case "live":
+		return top.ViewLive, true
+	case "result":
+		return top.ViewResult, true
+	case "board":
+		return top.ViewBoard, true
+	case "history":
+		return top.ViewHistory, true
+	default:
+		return top.ViewLive, false
+	}
+}
+
+func writeTopSnapshot(snapshot top.Snapshot, warnings []record.FileWarning, selectedRunID string) int {
+	payload := struct {
+		Schema        string       `json:"schema"`
+		SelectedRunID string       `json:"selected_run_id,omitempty"`
+		Snapshot      top.Snapshot `json:"snapshot"`
+		Warnings      []string     `json:"warnings,omitempty"`
+	}{Schema: presentationSnapshotSchema, SelectedRunID: selectedRunID, Snapshot: snapshot}
+	if warning := warningSummary(warnings); warning != "" {
+		payload.Warnings = append(payload.Warnings, warning)
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(payload); err != nil {
+		errPrint("could not write presentation snapshot: "+err.Error(), "", "")
+		return exitError
+	}
+	return exitOK
+}
+
+func warningSummary(warnings []record.FileWarning) string {
+	if len(warnings) == 0 {
+		return ""
+	}
+	if len(warnings) == 1 {
+		return "1 saved result could not be read; press r after repairing it"
+	}
+	return fmt.Sprintf("%d saved results could not be read; press r after repairing them", len(warnings))
+}
+
+func privacyID(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:8])
+}
+
+func presentationModelLabel(value string) string {
+	value = strings.TrimSpace(value)
+	lower := strings.ToLower(value)
+	isLocal := filepath.IsAbs(value) || strings.HasPrefix(value, "/") ||
+		strings.HasPrefix(value, "./") || strings.HasPrefix(value, "../") ||
+		strings.HasPrefix(value, `.\`) || strings.HasPrefix(value, `..\`) ||
+		strings.HasPrefix(lower, "file://") || strings.Contains(value, `\`) ||
+		(strings.HasSuffix(lower, ".gguf") && strings.Contains(value, "/") && !strings.HasPrefix(lower, "hf.co/"))
+	if !isLocal {
+		return value
+	}
+	clean := strings.TrimPrefix(strings.TrimPrefix(value, "file://"), "file:")
+	clean = strings.ReplaceAll(clean, `\`, "/")
+	if base := filepath.Base(clean); base != "." && base != string(filepath.Separator) && base != "" {
+		return base
+	}
+	return "local model"
+}
+
+var (
+	presentationURLPattern          = regexp.MustCompile(`(?i)\b(?:https?|file)://[^\s]+`)
+	presentationWindowsPathPattern  = regexp.MustCompile(`(?i)\b[A-Z]:[\\/][^\r\n,;]+`)
+	presentationUnixPathPattern     = regexp.MustCompile(`(^|[\s("'=])/(?:[^\r\n,;]+)`)
+	presentationRelativePathPattern = regexp.MustCompile(`(^|[\s("'=])\.{1,2}[\\/](?:[^\r\n,;]+)`)
+)
+
+func presentationMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return ""
+	}
+	return presentationError(errors.New(message))
+}
+
+func presentationError(err error) string {
+	if err == nil {
+		return "measurement failed"
+	}
+	message := err.Error()
+	for _, item := range []struct{ path, label string }{
+		{eval.UserTasksDir(), "<tasks>"},
+		{resultsDir(), "<results>"},
+		{os.TempDir(), "<temp>"},
+	} {
+		if item.path != "" {
+			message = strings.ReplaceAll(message, item.path, item.label)
+		}
+	}
+	if home, homeErr := os.UserHomeDir(); homeErr == nil && home != "" {
+		message = strings.ReplaceAll(message, home, "<home>")
+	}
+	message = presentationURLPattern.ReplaceAllString(message, "<endpoint>")
+	message = presentationWindowsPathPattern.ReplaceAllString(message, "<path>")
+	message = presentationUnixPathPattern.ReplaceAllString(message, "${1}<path>")
+	message = presentationRelativePathPattern.ReplaceAllString(message, "${1}<path>")
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return "measurement failed"
+	}
+	return message
+}
+
+func hasFlag(args []string, name string) bool {
+	long, short := "--"+name, "-"+name
+	for _, arg := range args {
+		if arg == long || arg == short || strings.HasPrefix(arg, long+"=") || strings.HasPrefix(arg, short+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+func interactiveTerminal() bool {
+	if strings.EqualFold(os.Getenv("TERM"), "dumb") {
+		return false
+	}
+	for _, file := range []*os.File{os.Stdin, os.Stdout} {
+		info, err := file.Stat()
+		if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+			return false
+		}
+	}
+	return true
+}

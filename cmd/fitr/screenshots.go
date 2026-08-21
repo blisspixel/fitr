@@ -20,6 +20,7 @@ import (
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/score"
 	"github.com/blisspixel/fitr/internal/stats"
+	"github.com/blisspixel/fitr/internal/top"
 )
 
 func cmdScreenshots(ctx context.Context, args []string) int {
@@ -48,7 +49,7 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		fn   func(ctx context.Context) (string, error)
 	}{
 		{"advise", shotAdvise}, {"run", shotRun}, {"apply", shotApply},
-		{"board", shotBoard}, {"doctor", shotDoctor}, {"compare", shotCompare},
+		{"board", shotBoard}, {"top", shotTop}, {"doctor", shotDoctor}, {"compare", shotCompare},
 	}
 	for _, s := range shots {
 		text, err := captureStdout(ctx, s.fn)
@@ -64,6 +65,59 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		fmt.Fprintf(os.Stderr, "wrote %s\n", path)
 	}
 	return exitOK
+}
+
+func shotTop(context.Context) (string, error) {
+	a := mockResult("qwen3:30b-q4", 23.16, .44, 226.64, 3.10, 6, 6, 14, 16)
+	a.ModelMeta.Details.ParameterSize = "30.5B"
+	a.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
+	a.Memory.ResidentGB = 20.34
+	a.Scorecard.Serves = []string{"fast_and_decent", "coding", "structured_output"}
+	b := mockResult("llama3.1:8b", 14.61, .52, 148.20, 4.70, 4, 6, 5, 16)
+	b.ModelMeta.Details.ParameterSize = "8.0B"
+	b.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
+	b.Memory.ResidentGB = 5.10
+	b.Scorecard.Serves = []string{"fast_and_decent", "low_footprint"}
+	a.DeviceKey = "demo-device|ctx=8192"
+	b.DeviceKey = a.DeviceKey
+	a.Device.GPU, b.Device.GPU = "Demo GPU 24 GB", "Demo GPU 24 GB"
+	a.Device.Runtime, b.Device.Runtime = "llama-server b7000", "llama-server b7000"
+	snapshot := buildTopSnapshot([]*Result{a, b})
+	state := top.NewState(snapshot)
+	state.View, state.Width, state.Height = top.ViewBoard, 110, 18
+	return "$ fitr top\n\n" + topCanvasANSI(top.Render(state, top.DefaultGlyphs(false))), nil
+}
+
+func topCanvasANSI(canvas top.Canvas) string {
+	var out strings.Builder
+	for _, row := range canvas.Rows {
+		for _, span := range row {
+			style := ""
+			switch span.Role {
+			case top.RoleMuted:
+				style = "\x1b[90m"
+			case top.RoleHeader:
+				style = "\x1b[1;34m"
+			case top.RoleAccent:
+				style = "\x1b[35m"
+			case top.RolePass:
+				style = "\x1b[32m"
+			case top.RoleFail:
+				style = "\x1b[31m"
+			case top.RoleWarning:
+				style = "\x1b[33m"
+			case top.RoleSelected:
+				style = "\x1b[7m"
+			}
+			out.WriteString(style)
+			out.WriteString(span.Text)
+			if style != "" {
+				out.WriteString("\x1b[0m")
+			}
+		}
+		out.WriteByte('\n')
+	}
+	return out.String()
 }
 
 func restoreEnv(key, value string, existed bool) {
