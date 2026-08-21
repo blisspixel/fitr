@@ -1,5 +1,15 @@
 # Design: what fitr believes and why
 
+A new model lands every few days. The datacenter number is not your number.
+The post skipped the quant. The leaderboard ran on someone else's GPU. fitr
+exists so this exact artifact, at this precision, on this box, with this
+runtime, either becomes a daily driver or hands you the next flag.
+
+The default path is four commands (`advise` → `run` → `apply` → `board`).
+The interior is strict so that surface can be trusted. You should not need
+the vocabulary below to get through Thursday night. You should be able to
+see it when you look.
+
 fitr's verdicts rest on four commitments. The first three are becoming
 industry consensus - `homebench`, `bench-loop`, `PocketPal` and `llmfit` all
 partition by hardware now, and Wilson intervals ship in several local

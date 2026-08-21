@@ -24,7 +24,7 @@ fingerprints remain more important than visual density.
 
 ## The opt-in full-screen TUI
 
-The opt-in `fitr top` interface ships in 0.4. Its explicit command contract
+The opt-in `fitr top` interface shipped in 0.4. Its explicit command contract
 keeps browsing and measurement separate:
 
 ```text

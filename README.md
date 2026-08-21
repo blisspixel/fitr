@@ -4,18 +4,18 @@
 
 **Is this local model any good - on your machine?**
 
-Everyone has this problem. A model is all over your feed. You still do not
-know which quant fits in *your* VRAM, or what it actually does on this box
-in a benchmark you can compare to the last one you tried. The posts skip the
-quant. The leaderboard was someone else's hardware.
+A new model lands on your feed. The post skipped the quant. The leaderboard
+was someone else's GPU. The datacenter number is not your number. You still
+do not know whether this artifact fits in *your* VRAM, or what it actually
+does on this box, in a measurement you can compare to the last one you tried.
 
 ```bash
-fitr advise some-new-model:tag          # does it fit, which flag if not
-fitr run some-new-model:tag --full --pull
-fitr apply some-new-model:tag           # print how to persist the measured ctx
-fitr view                               # reopen the newest result with graphs
-fitr board                              # compare everything you have measured
-fitr top                                # full-screen Live, Result, Board, and History
+fitr                              # this box, what is already serving
+fitr advise some-new-model:tag    # does it fit, which flag if not
+fitr run some-new-model:tag --pull
+fitr apply some-new-model:tag     # print how to persist the measured ctx
+fitr board                        # compare everything you have measured
+fitr top                          # the same loop, full-screen
 ```
 
 <img src="docs/assets/advise.svg" alt="fitr advise (demo data)" width="820">
@@ -26,47 +26,59 @@ fitr top                                # full-screen Live, Result, Board, and H
 
 The CLI is the primary product surface. Rich terminals get semantic color,
 throughput bars, and repeat-shape graphs; plain and JSON output remain clean
-automation interfaces. `fitr top` adds an opt-in full-screen monitor with Live,
+automation interfaces. `fitr top` is an opt-in full-screen monitor with Live,
 Result, Board, and immutable History views. The [interface direction](docs/interface.md)
 keeps this renderer-neutral foundation on a path to truly native desktop clients.
 
-One run tells you, for this device and this config:
+One evening, one device, one config:
 
-- **What the model is actually for here** - independent PASS, FAIL,
-  INCONCLUSIVE, SKIP, `n/a`, and blocked results, never one number. Executable
-  coding and agent evidence stays unproven until it can run in an isolated
-  worker.
-- **What is silently broken** - the Q4 that writes clean prose but emits
-  malformed tool calls, the parser that swallows them, the loop your GPU
-  triggers and nobody else's does. No other harness reports this.
-- **How sure to be** - every rate carries its confidence interval, every run
-  prints what it cannot resolve, and "cannot separate" is a real answer.
+- **Keep it, drop it, or try this flag.** Compatible / Low memory /
+  Incompatible. A no always carries the next command (`try --ctx 4096`).
+  Too large is not the end of the answer.
+- **What is silently broken.** The Q4 that writes clean prose and emits
+  malformed tool calls. The chat template that looks fine and produces zero
+  calls. The loop this GPU triggers and the screenshot's GPU did not.
+- **What it is actually for here.** Independent PASS, FAIL, INCONCLUSIVE,
+  SKIP, `n/a`, and blocked results. Never one number. Never a rank across
+  CUDA and Vulkan, or last month's driver and this one.
+- **What it refuses to guess.** If the run cannot be named, fairly tested, or
+  separated from noise, the scorecard says so. INCONCLUSIVE is a real answer.
 
 > `llmfit` tells you what fits. Leaderboards tell you what is smart on
-> someone else's machine. **`fitr` tells you what is true on yours.**
+> someone else's machine. **`fitr` tells you what is true on yours** - and
+> what is quietly wrong.
+
+## Why this exists
+
+Local models ship faster than anyone can re-bench them on your hardware.
+Folklore ("Q4_K_M should fit," "looks fine in chat") is how evenings
+disappear and how a silently broken quant becomes the daily driver. Fit
+tools stop at memory. Public boards stop at someone else's machine.
+
+fitr exists so the measurement and the next flag live in the same loop.
+`advise` says whether it belongs in VRAM, and what to change if not. `run`
+says whether it holds up here: structured output, instruction following,
+tool plumbing, loops, long sessions. `apply` prints how to keep the context
+that actually worked. `board` compares only runs this device can honestly
+compare.
+
+The interior is strict so the surface can be trusted: independent needs
+instead of one score, INCONCLUSIVE instead of a lie, no ranking across
+fingerprints, no fabricated GB from a GPU name. You should not need that
+vocabulary to get through Thursday night. You should be able to see it
+when you look.
 
 The default evidence path is one static binary with no Python runtime, venv, or
 package manager. Generated-code execution is disabled by default. The explicit
 `--allow-unsafe-exec` diagnostic requires Python on PATH, is not sandboxed, and
 can never contribute PASS or FAIL evidence. See [task safety](docs/tasks.md).
 
-fitr works against **Ollama, llama.cpp's llama-server, or an
-OpenAI-compatible server with a verifiable model identity**. Ollama supplies a
-runtime content digest. Generic OpenAI-compatible runs require an operator-set
-`FITR_OPENAI_MODEL_SHA256` pin that matches the endpoint's assertion. A GGUF
-path reported by an already-running llama-server is useful for inspection, but
-its post-load file hash does not prove which bytes the process loaded, so that
-run remains visible but unrankable without a runtime binding receipt. Mutable
-labels are never accepted as artifact identity. New run manifests seal the
-exact fitr executable, backend protocol version, effective merged task battery,
-selected profile, scoring policy, and a v2 device receipt with requested and
-runtime-reported context kept separate. The local completion receipt then
-binds that sealed manifest and the completed evidence.
-Board, Compare, and Calibrate accept only a canonical current result with an
-exact private-history twin; archived or external files remain inspectable but
-display-only. This local reconciliation is tamper evidence, not external
-attestation. Signed releases and externally anchored share provenance remain
-Release C work.
+fitr works against **Ollama, llama.cpp's llama-server, or an OpenAI-compatible
+server whose model identity can be verified**. Ranking needs a runtime digest
+we can check; a mutable label is never enough. How each backend is identified,
+and what remains visible but unrankable, is in [backends](docs/backends.md).
+Signed releases and externally anchored share provenance remain later trust
+work; local history reconciliation is tamper evidence, not attestation.
 
 Optional sister: [retonr](https://github.com/blisspixel/retonr) reconstructs
 drafts in your style under fidelity gates. fitr can export device-measurement
@@ -92,36 +104,46 @@ Then:
 ```bash
 fitr                             # what this box is, what is already serving
 fitr advise qwen3:30b            # does it fit, and if not, which flag to try
-fitr run qwen3:30b --ctx 8192 --full
+fitr run qwen3:30b --ctx 8192    # default battery; --quick to smoke-test, --full for the long agent loop
 fitr apply qwen3:30b             # print how to persist the measured ctx
 fitr view                        # data-rich view of the newest saved run
 fitr board
 fitr top                         # keyboard-first full-screen data view
-fitr top run qwen3:30b --full    # the same measurement with live monitoring
+fitr top run qwen3:30b           # the same measurement with live monitoring
 ```
 
 From source (Go 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
-Pin a version with `FITR_VERSION=v0.4.0`, relocate with `FITR_BIN`.
+Pin a release with `FITR_VERSION=v0.5.0`, relocate with `FITR_BIN`.
+
+`--quick` is speed, memory, and plumbing. The default run adds generated
+checks, refusal, and tool withdrawal. `--full` adds a long agentic loop;
+coding and executable-agent evidence stay SKIP until an isolated worker
+exists. A default run tells *broken* from *working*, not 71 from 74.
 
 ## Commands
 
+Everyday loop:
+
 | Command | Does |
 |---|---|
-| `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model on this device; generated-code execution is disabled by default |
+| `fitr` | this box, reachable runtimes, a next command |
 | `fitr advise <model>` | does it fit here, and if not, which flag to try (`--load` / `--fit` to measure) |
+| `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model on this device; generated-code execution is disabled by default |
 | `fitr apply [model]` | print how to persist a measured context; never restarts the server |
-| `fitr tune [a b]` | request-level knobs; fingerprint diff of two saved runs (no silent sweep) |
-| `fitr export <model> [--out PATH]` | write a self-contained HTML scorecard (opt-in; contains the fingerprint) |
 | `fitr view [model\|result.json]` | reopen the newest or selected saved result with repeat-shape graphs |
 | `fitr board [--current]` | compare everything, grouped by device |
 | `fitr top [--view VIEW]` | opt-in full-screen Live, Result, Board, and History monitor |
-| `fitr top view [model\|result.json]` | open a selected saved result in the monitor |
-| `fitr top run <model> [run flags]` | run the same evaluator with structured live progress |
-| `fitr top --snapshot` | emit the versioned privacy-safe presentation snapshot |
-| `fitr top history [path\|clear --yes]` | browse, locate, or clear archived runs while keeping canonical results |
-| `fitr doctor <model>` | can this box be measured fairly at all? (~1 min) |
+
+Also:
+
+| Command | Does |
+|---|---|
+| `fitr top view` / `top run` / `top history` | open a result, run with live progress, or browse archives; `top --snapshot` emits the privacy-safe presentation snapshot |
+| `fitr doctor <model>` | can this box be measured fairly at all? (several short generations; typically ~1 min on a loaded GPU) |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips on shared instances |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
+| `fitr tune [a b]` | request-level knobs; fingerprint diff of two saved runs (no silent sweep) |
+| `fitr export <model> [--out PATH]` | write a self-contained HTML scorecard (opt-in; contains the fingerprint) |
 | `fitr device` / `fitr profiles [new]` | fingerprint and gates; `new` scaffolds an UNCALIBRATED local profile |
 | `fitr calibrate <a> <b> [--out PATH] [--lineage PATH]` | paired discrimination; optional same-base lineage receipt |
 | `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads; decision-grade still needs lineage, trust, and coverage |
@@ -134,11 +156,10 @@ Pin a version with `FITR_VERSION=v0.4.0`, relocate with `FITR_BIN`.
 2. **Tasks are generated, answers are computed, never stored.** There is no
    answer string in this repo to leak into training data, and every repeat
    is an independent trial.
-3. **The statistics are built for n=3 to n=50** - the regime where most
-   benchmark statistics quietly stop being true. Wilson and Newcombe
-   intervals, Fieller ratios, McNemar paired tests, Wald sequential
-   decisions, exact zero-event bounds. Every formula pinned to published
-   reference values in tests.
+3. **Small samples get honest statistics.** Most local runs live in n=3 to
+   n=50, the regime where a lot of benchmark statistics quietly stop being
+   true. Every run prints how sure to be, including "cannot separate." The
+   methods and references live in [statistics](docs/statistics.md).
 
 ## Documentation
 

@@ -61,8 +61,8 @@ func unicodeOK() bool {
 			return true
 		}
 	}
-	// Windows consoles are cp-something unless told otherwise; default to ASCII.
-	return os.Getenv("WT_SESSION") != "" && os.Getenv("OS") == ""
+	// Windows Terminal is UTF-8. Legacy conhost is a code page; stay ASCII.
+	return os.Getenv("WT_SESSION") != "" || os.Getenv("WT_PROFILE_ID") != ""
 }
 
 type glyphs struct{ Dot, Dash, PM, Ell string }

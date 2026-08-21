@@ -40,12 +40,36 @@ func TestUnicodeFallsBackWhenNotUTF(t *testing.T) {
 	t.Setenv("LC_CTYPE", "")
 	t.Setenv("LANG", "C")
 	t.Setenv("WT_SESSION", "")
+	t.Setenv("WT_PROFILE_ID", "")
 	if unicodeOK() {
 		t.Fatal("a non-UTF locale must fall back to ASCII glyphs")
 	}
 	t.Setenv("LANG", "en_US.UTF-8")
 	if !unicodeOK() {
 		t.Fatal("a UTF locale should allow unicode glyphs")
+	}
+}
+
+func TestUnicodeOnWindowsTerminal(t *testing.T) {
+	t.Setenv("FITR_ASCII", "")
+	t.Setenv("FITR_UNICODE", "")
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
+	t.Setenv("LANG", "")
+	t.Setenv("OS", "Windows_NT")
+	t.Setenv("WT_SESSION", "")
+	t.Setenv("WT_PROFILE_ID", "")
+	if unicodeOK() {
+		t.Fatal("legacy Windows console without WT_SESSION must stay ASCII")
+	}
+	t.Setenv("WT_SESSION", "a1b2c3d4-session")
+	if !unicodeOK() {
+		t.Fatal("Windows Terminal (WT_SESSION) must get Unicode glyphs")
+	}
+	t.Setenv("WT_SESSION", "")
+	t.Setenv("WT_PROFILE_ID", "a1b2c3d4-profile")
+	if !unicodeOK() {
+		t.Fatal("Windows Terminal (WT_PROFILE_ID) must get Unicode glyphs")
 	}
 }
 

@@ -19,26 +19,214 @@ backed by two commitments that make it worth trusting: measurements that are
 honest about their own resolution, and **a remedy attached to every negative
 verdict** (design rule 7).
 
+The default path is that loop on a Thursday night when a new 30B MoE drops.
+The interior is strict so the surface can be trusted. You should not need the
+evidence-contract vocabulary to get a keep / drop / try-this-flag answer.
+You should be able to see it when you look.
+
 ---
 
-## Trust sequence: A and B on main as 0.5.0, C next
+## Now / next / later
 
-v0.4.0 is the tagged TUI/history release. The A/B evidence contract lives on
-`main` as unreleased 0.5.0: typed outcomes, sealed manifests, fingerprint v2,
-runtime identity pins, and ranking surfaces that exclude contaminated
-evidence. Release C turns those local guarantees into an independently
-reproducible benchmark protocol before fitr adds a model catalog or another
-task family. Every verdict must remain traceable to complete, correctly
-attributed observations. An unavailable fact stays unavailable instead of
-quietly becoming a score.
+| Horizon | Tag | What | Why this, not something else |
+|---|---|---|---|
+| **Shipped** | 0.4.0 | TUI, history, advise, apply, backends | Tagged. |
+| **Shipped** | **0.5.0** | Evidence contract (A/B), lineage, family-stratified aggregation | Tagged with this docs pass. Install `latest` matches the contract the README describes. |
+| **Now** | **0.6.0** | Installed inventory | After install, the runtime already knows the names. The stranger should not have to. |
+| **Next** | 0.7.x | Context-fit table, then one next-command grammar | People actually choose among 4k / 8k / 16k, not one window. |
+| **1.0** | 1.0 | A stranger closes advise → run → apply from inventory, on their machine | Still no public leaderboard, no LLM-as-judge, no invented SKU gates. |
+| **Later** | Trust C and loop extras | Isolation, signing, catalog, vision, community profiles | Real work. None of it is the next product week. |
 
-Family-stratified aggregation and the same-base lineage receipt are on
-`main`. Isolation is next for verified coding PASS/FAIL: executable coding
-stays SKIP until confinement is the same test on all six targets. Hardware
-calibration can collect exploratory pairs now; decision-grade still needs
-trusted signers, two devices, and two families.
+---
 
-### Release A: evidence integrity
+## Now (0.6.0): installed inventory
+
+With no model argument, show what is already available locally, what has
+current fitr evidence, what is stale, and the cheapest next measurement that
+would resolve a decision. Unmeasured means candidate, never recommended.
+
+Bare `fitr` becomes that table. `fitr advise` with no model is the same table.
+`fitr advise <model>` stays the one-artifact fit verdict. There is no
+`fitr inventory` command.
+
+| State | Meaning | Next command |
+|---|---|---|
+| `measured` | Canonical current result, uncontaminated, fingerprint still matches | `fitr view <model>` |
+| `unproven` | Installed, no rankable current result | `fitr advise <model>` then `fitr run <model>` |
+| `incompatible` | Weights exceed the measured budget, or a load refusal | the advise remedy; do not suggest `run` |
+| `stale` | A result exists, but fingerprint / runtime / schema no longer matches | `fitr run <model>` |
+
+Calendar age is not staleness. Color does not carry state. Inventory is the
+runtime's installed list (`Tags()`), not a disk crawl of GGUFs and not a
+Hugging Face catalog.
+
+- [ ] Bare `fitr` / no-arg `advise` list installed models joined to current evidence
+- [ ] Four plain states, one remedy command per row (design rule 7)
+- [ ] No ranking of unproven rows; no pull/load/run from this screen
+- [ ] JSON / plain / rich; screenshot `docs/assets/inventory.svg`; README hero leads with `fitr`
+
+**Not in 0.6.0:** `--load`/`--fit` across the library, a TUI fifth view, live
+discovery, quality ranking, isolation, community SKU profiles, gate edits from
+calibration pairs.
+
+This is not blocked on battery calibration. Listing installed models is not a
+recommendation. Calibration is required to change built-in gates and to claim
+directional quant damage. It is not required to print what is already serving.
+
+---
+
+## Next (0.7.x): context visible, then loop cohesion
+
+### Context made visible
+
+Present weights, KV or recurrent state, runtime buffers, and safety headroom
+as separate measured or estimated components. Show how memory, prefill,
+decode, and usable task depth change at several context points. Hybrid
+attention and incomplete split GGUFs stay SKIP until their architecture and
+complete shard set are verified.
+
+- [ ] Context-fit table at 2k / 4k / 8k / 16k / 32k / architecture max
+- [ ] Buffers only when `--load` or `--fit` measured them; otherwise `n/a`
+- [ ] Overlay decode/prefill only from saved runs at that ctx
+- [ ] Low-memory remedy is a marked row, not a magic number in prose
+
+### One story
+
+- [ ] Inventory rows that already have architecture show fit tier
+- [ ] `fitr top` Inventory view (or idle default); do not start native desktop
+- [ ] One next-command grammar on CLI, TUI, and HTML: inventory → advise/run → view → apply
+- [ ] `board` stays the measured comparable surface; inventory stays installed including unproven
+- [ ] Stop advertising `--full` as the first measurement; `--full` remains the optional 40-turn loop, coding still SKIP
+
+The terminal views for this loop are an Inventory table, a Context fit graph,
+a Candidate evidence pane (`view` / Result), and a Change log (History).
+Every row carries one of four plain states: measured, unproven, incompatible,
+or stale.
+
+---
+
+## Later
+
+### Loop, later
+
+These follow the evidence contract so candidate metadata can never be mistaken
+for measured quality.
+
+- [ ] **Replaceable live discovery.** Query a free public model index through an
+      adapter, cache source timestamps and immutable artifact metadata locally,
+      and rank only by fit eligibility plus the user's stated workflows. Catalog
+      recency is not quality evidence. A candidate becomes a recommendation only
+      after a local run clears the relevant gates.
+- [ ] **Research receipts.** For each candidate, show why it entered the set,
+      source freshness, license, architecture, quant and shard completeness,
+      expected fit range, runtime support, missing evidence, and the exact command
+      that would test it. No opaque "best model" answer.
+- [ ] **Opt-in recurring reevaluation.** Print and install an OS-native scheduled
+      command only after explicit confirmation. The default is a dry-run plan.
+      A cycle refreshes metadata, detects new candidates or stale evidence, spends
+      no cloud inference money, and asks before downloads or evaluations. Budgets
+      cover network bytes, disk, wall time, thermals, and any external cost.
+- [ ] **Truly native desktop clients** only after the terminal information
+      architecture is proven. SwiftUI/AppKit on macOS, WinUI 3 on Windows,
+      and GTK 4/libadwaita on Linux. WebView wrappers are not the desktop plan.
+      Sequencing is in [docs/interface.md](docs/interface.md).
+
+### Trust C (does not block Now)
+
+Release A (evidence integrity) and B (reproducibility) shipped in 0.5.0.
+Family-stratified aggregation and the same-base lineage receipt shipped with
+them. Isolation is the next *trust* project. Inventory is the next *product*.
+They are not the same week.
+
+Every verdict must remain traceable to complete, correctly attributed
+observations. An unavailable fact stays unavailable instead of quietly becoming
+a score.
+
+- [ ] Calibrated profile provenance and community calibration tooling
+- [ ] Cross-platform isolated worker (executable coding stays SKIP until
+      confinement is the same test on all six targets)
+- [ ] Real vision tasks
+- [ ] Privacy-safe share artifacts beyond the current opt-in HTML
+- [ ] Signed releases, SBOMs, and attestations
+- [ ] Externally anchored share provenance and a trust-root workflow for
+      decision-grade community evidence
+- [ ] Published repeatability and test-retest studies
+- [ ] Formal backend-conformance corpus
+
+Exit criterion: an independent user can reproduce the protocol and distinguish
+unsupported, inconclusive, contaminated, and measured outcomes without reading
+the source.
+
+### Waiting on purpose
+
+| Item | Why it waits |
+|---|---|
+| Community SKU profiles (`rtx-4090`, `m3-max`, `strix-halo`) | Would be invented GB. `fitr profiles new` already writes an UNCALIBRATED local copy. Collect measured gates on real boxes. |
+| Battery calibration that rewrites `spec/` | Protocol is done. Changing items still needs lineage-verified pairs on two devices and two families. Collect in the background; do not hold the loop for a cull. |
+| `fitr tune` sweeps | Needs server restart orchestration fitr does not have. llama-bench owns throughput-only. A flash-attention quality regression is why throughput-only is not enough. |
+| Live discovery / `internal/scout` | Catalog recency is not quality. Inventory before internet. |
+| Exec-kind user tasks | Arbitrary code from JSON. Wait for the isolated worker. |
+| Long-context / needle tests; decode at 3+ depths | Explicit later list; does not close advise → run → apply. |
+| Sustained-throughput mode | Thermal reality vs burst. Homelab work, after context-at-depth. |
+| Same-config pairwise matchups (Glicko-2 style) | Extracts signal our flat refusal-to-rank discards, but sits in tension with design rule 1; decide deliberately, not by drift. |
+
+---
+
+## Path to 1.0
+
+1.0 ships when a stranger can install in one command, point fitr at whatever
+is already serving, and get a verdict they can act on - including *what to
+run next* when the answer is no. That is the advise → run → tune → apply
+loop, closable on someone else's machine.
+
+The target user is someone who would rather buy a capable machine every few
+years than keep several cloud subscriptions, while still preserving enough
+detail for expert audit. The product question is workflow-first: which of this
+person's real jobs does this exact artifact, quant, context, runtime, and device
+cover, with what evidence?
+
+| Bar | Status |
+|---|---|
+| One-command install (curl / irm) | **done** |
+| Honest measurement on Ollama, llama-server, OpenAI-compat | **done with fail-closed identity gates** - generic OpenAI runs require an operator SHA-256 pin matching the endpoint assertion; post-load llama-server path hashes remain unrankable without a runtime binding receipt |
+| Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals, quant flips) | **mostly done** - check-battery calibration still needs hardware; flip machinery is in `compare` |
+| `fitr advise <model>` returns a fit verdict + remedy | **done**; `--load` observes resident allocation and `--fit` dummy-allocates |
+| Recommend what to try without naming a model first | **inventory is 0.6.0** - list what is serving without ranking unmeasured rows; calibrated ranking among measured jobs comes later. Not blocked on a hardware campaign. |
+| Persist a measured setting without silent mutation | **done** - `fitr apply` prints the command; never restarts the server |
+| A result can leave the terminal | **done** - `fitr export` / `fitr run --html`, opt-in, fingerprint in the page |
+| Saved evidence is easy to inspect in the terminal | **done** - `fitr view`, graph-based `board`, and the opt-in `fitr top` Live/Result/Board/History monitor |
+| Community device profiles beyond `lappy` | **scaffolded** - `fitr profiles new` writes an UNCALIBRATED local copy; no invented rtx-4090 numbers in the repo |
+
+We do **not** ship 1.0 with an uncalibrated ranking, a public leaderboard,
+or LLM-as-judge. Battery calibration still needs hardware. `tune` can trail
+advise: a one-line remedy (`try num_ctx=4096`) is advise; `fitr run --ctx 4096`
+measures it; `fitr apply` prints how to persist it (and never restarts the
+server). Sweeping knobs is tune.
+
+---
+
+## Honest limitations right now
+
+| Limitation | Consequence |
+|---|---|
+| ~23 binary trials per default run | MDE ~ 29pp. Better than the ~33pp of six tasks, still separates *broken* from *working*, not *good* from *slightly better*. `-k 3` on checks triples the sample. |
+| OpenAI-backend timings are client-derived | usage gives counts, not server timings; decode/prefill rates there are wall-clock estimates |
+| 2 device profiles | `lappy` and an uncalibrated `default` |
+| `advise` default is still weights+KV for conventional attention | `--load` / `--fit` measure compute buffers. Hybrid recurrent models stay SKIP without that receipt, and incomplete split GGUFs are rejected. No model catalog. |
+| Bare `fitr` is status, not inventory | Hardware, reachable runtimes, and a generic next command. It does not yet list installed tags joined to evidence. That is 0.6.0. |
+| `--full` is a long loop, not a coding grade | The 40-turn agentic task still SKIPs executable evidence until isolation. First measurement should be the default battery, not `--full`. |
+
+---
+
+## Shipped history
+
+Do not reopen these as current work. Detail stays here so the trust sequence
+is not lost.
+
+### 0.5.0 — evidence contract
+
+Release A: no injected infrastructure failure can create or alter a model
+PASS or FAIL.
 
 - [x] Disable tasks that execute generated code by default and preflight every
       executable before any model output is requested.
@@ -60,10 +248,9 @@ trusted signers, two devices, and two families.
       and execute-level injection tests prove those paths cannot mint a
       model PASS or FAIL.
 
-Exit criterion: no injected infrastructure failure can create or alter a model
-PASS or FAIL.
-
-### Release B: reproducibility
+Release B: a stored result contains enough information to reproduce the
+task battery, scoring policy, backend protocol, model identity, and execution
+environment.
 
 - [x] Fingerprint v2 and effective-context verification.
 - [x] Task, profile, scoring-policy, specification, and exact executable
@@ -80,81 +267,16 @@ PASS or FAIL.
       results with private history, and keep external or archived imports
       display-only on ranking surfaces.
 
-Exit criterion: a stored result contains enough information to reproduce the
-task battery, scoring policy, backend protocol, model identity, and execution
-environment.
-
-### Release C: benchmark quality
+Also in 0.5.0:
 
 - [x] Family-stratified statistical aggregation.
 - [x] Same-base lineage receipt (`fitr.lineage.same-base.v1`) from a
       publisher conversion manifest or matching GGUF base-digest metadata.
       A pair signature still cannot manufacture lineage.
-- [ ] Calibrated profile provenance and community calibration tooling.
-- [ ] Cross-platform isolated worker.
-- [ ] Real vision tasks.
-- [ ] Privacy-safe share artifacts.
-- [ ] Signed releases, SBOMs, and attestations.
-- [ ] Externally anchored share provenance and a trust-root workflow for
-      decision-grade community evidence.
-- [ ] Published repeatability and test-retest studies.
-- [ ] Formal backend-conformance corpus.
 
-Exit criterion: an independent user can reproduce the protocol and distinguish
-unsupported, inconclusive, contaminated, and measured outcomes without reading
-the source.
+### 0.4.0 — TUI / history
 
-Model discovery, context guidance, recurring reevaluation, and native desktop
-clients remain valuable. They follow the evidence contract so candidate
-metadata can never be mistaken for measured quality.
-
-### After the trust gates: close the everyday-user loop
-
-The target user is someone who would rather buy a capable machine every few
-years than keep several cloud subscriptions, while still preserving enough
-detail for expert audit. The product question is workflow-first: which of this
-person's real jobs does this exact artifact, quant, context, runtime, and device
-cover, with what evidence?
-
-The next product sequence is:
-
-1. **Installed inventory first.** With no model argument, show what is already
-   available locally, what has current fitr evidence, what is stale, and the
-   cheapest next measurement that would resolve a decision. Unmeasured means
-   candidate, never recommended.
-2. **Context made visible.** Present weights, KV or recurrent state, runtime
-   buffers, and safety headroom as separate measured or estimated components.
-   Show how memory, prefill, decode, and usable task depth change at several
-   context points. Hybrid attention and incomplete split GGUFs stay SKIP until
-   their architecture and complete shard set are verified.
-3. **Replaceable live discovery.** Query a free public model index through an
-   adapter, cache source timestamps and immutable artifact metadata locally,
-   and rank only by fit eligibility plus the user's stated workflows. Catalog
-   recency is not quality evidence. A candidate becomes a recommendation only
-   after a local run clears the relevant gates.
-4. **Research receipts.** For each candidate, show why it entered the set,
-   source freshness, license, architecture, quant and shard completeness,
-   expected fit range, runtime support, missing evidence, and the exact command
-   that would test it. No opaque "best model" answer.
-5. **Opt-in recurring reevaluation.** Print and install an OS-native scheduled
-   command only after explicit confirmation. The default is a dry-run plan.
-   A cycle refreshes metadata, detects new candidates or stale evidence, spends
-   no cloud inference money, and asks before downloads or evaluations. Budgets
-   cover network bytes, disk, wall time, thermals, and any external cost.
-
-The terminal views for this loop are an Inventory table, a Context fit graph,
-a Candidate evidence pane, and a Change log. Every row carries one of four
-plain states: measured, unproven, incompatible, or stale. Color and graphs add
-density but never carry the state alone. Native clients later consume the same
-versioned snapshots and decisions.
-
----
-
-## Where it is now (0.4.0)
-
-**Done and measured:**
-
-- Device fingerprint v2 embedded in every current result; requested and
+- Device fingerprint embedded in every current result; requested and
   effective context stay separate, and `board` refuses unverified or
   cross-fingerprint ranking
 - CLI data views: `fitr view` reopens the newest or selected saved run;
@@ -170,6 +292,9 @@ versioned snapshots and decisions.
 - **Append-only local run history** alongside a collision-safe canonical
   latest result, with atomic writes, legacy migration, explicit retention
   disclosure, and a clear command that preserves canonical results
+
+### Measurement engine (through 0.4)
+
 - Needs-based scoring - PASS / FAIL / INCONCLUSIVE / SKIP / `n/a` / `BLKD` - instead of one number
 - Repeats with Wilson intervals, flakiness flags, `INDISTINGUISHABLE` verdicts,
   first-run-slow detection
@@ -182,22 +307,20 @@ versioned snapshots and decisions.
   data, and every repeat is an independent trial. The whole battery self-tests
   without a model: each family's computed canonical answer must pass its own
   grader.
-- Two new needs with their own gates: **structured output** and **instruction
+- Two needs with their own gates: **structured output** and **instruction
   precision**, each scored as a pooled pass rate with its Wilson interval shown
 - **`fitr doctor`** - can this box be measured fairly at all? Real-token
   preflight (HTTP 200 is not inference), N-run byte-identical determinism in
   plain text AND grammar-constrained JSON mode (a known local-stack
   reproducibility break), served-context probe, placement check (partial
-  offload is a RAM benchmark wearing a GPU badge), config red flags. Nothing
-  else in the ecosystem verifies any of this; every benchmark assumes it.
+  offload is a RAM benchmark wearing a GPU badge), config red flags.
 - **User tasks without forking** - `~/.fitr/tasks/*.json` (or `$FITR_TASKS`).
   Declarative only: a user task can prompt and grade (exact / contains / regex /
   json_object / number), it cannot execute anything. Malformed files are hard
   errors with the filename; id collisions are rejected.
 - **Golden-corpus regression** - a frozen full-run result pins
   `measure -> Score -> render` end to end, including the FAIL paths
-- The minimum detectable effect is now **printed on every run** - previously
-  this roadmap claimed it was said out loud when it was only computed in a test
+- The minimum detectable effect is printed on every run
 - **A statistics engine built for n=3 to n=50**, documented with references in
   docs/statistics.md: Newcombe difference intervals as the sole arbiter of comparisons
   (the intervals-overlap rule is an effective alpha of ~0.006 and was
@@ -248,18 +371,7 @@ versioned snapshots and decisions.
 - **Shareable HTML scorecard** - `fitr export` / `fitr run --html`. Opt-in,
   self-contained, fingerprint on the page, raw model output omitted.
 
-**Honest limitations right now:**
-
-| Limitation | Consequence |
-|---|---|
-| ~23 binary trials per default run | MDE ~ 29pp. Better than the ~33pp of six tasks, still separates *broken* from *working*, not *good* from *slightly better*. `-k 3` on checks triples the sample. |
-| OpenAI-backend timings are client-derived | usage gives counts, not server timings; decode/prefill rates there are wall-clock estimates |
-| 2 device profiles | `lappy` and an uncalibrated `default` |
-| `advise` default is still weights+KV for conventional attention | `--load` / `--fit` measure compute buffers. Hybrid recurrent models stay SKIP without that receipt, and incomplete split GGUFs are rejected. No model catalog. |
-
----
-
-## Shipped: meet people where their models already are
+### Backends (shipped)
 
 Promoted above everything else that remained, for two reasons found in the
 August 2026 research pass: it roughly **triples the addressable users**, and
@@ -296,7 +408,7 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
       from `/props` / the Ollama log `library=`; `board` refuses to rank
       across it.
 
-## Trust work
+### Trust work already on main
 
 - [x] **40-turn agentic floor** (was 20 - that measured early-abort behaviour)
       and **`reasoning_content` round-trip** in the loop; the Message struct
@@ -317,7 +429,7 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
       lineage receipt exists; collect reviewed, authenticated pairs that carry
       it across at least two physical devices and two model families. Only then
       review items that never discriminate and thresholds that do not match
-      known usefulness.
+      known usefulness. (Hardware campaign; does not block inventory.)
 - [x] **Quant comparison as item-level agreement** (machinery). `fitr compare` on
       a shared seedset reports item-level flips, including when the two rates
       match - accuracy hid the disagreements. Matching family, parameter size,
@@ -340,32 +452,7 @@ exposes cached-token counts (the only honest cold/warm TTFT split), logprobs,
 - [ ] **`fitr tune` sweeps** quality + degeneracy + throughput jointly per
       request-level point, once restart orchestration exists for server env.
 
-## Path to 1.0
-
-1.0 ships when a stranger can install in one command, point fitr at whatever
-is already serving, and get a verdict they can act on - including *what to
-run next* when the answer is no. That is the advise → run → tune → apply
-loop, closable on someone else's machine.
-
-| Bar | Status |
-|---|---|
-| One-command install (curl / irm) | **done** |
-| Honest measurement on Ollama, llama-server, OpenAI-compat | **done with fail-closed identity gates** - generic OpenAI runs require an operator SHA-256 pin matching the endpoint assertion; post-load llama-server path hashes remain unrankable without a runtime binding receipt |
-| Scorecard refuses to lie (doctor, degeneracy, compaction, cache-split TTFT, intervals, quant flips) | **mostly done** - check-battery calibration still needs hardware; flip machinery is in `compare` |
-| `fitr advise <model>` returns a fit verdict + remedy | **done**; `--load` observes resident allocation and `--fit` dummy-allocates |
-| Recommend what to try without naming a model first | **blocked on calibration**; inventory-first comes before any internet catalog |
-| Persist a measured setting without silent mutation | **done** - `fitr apply` prints the command; never restarts the server |
-| A result can leave the terminal | **done** - `fitr export` / `fitr run --html`, opt-in, fingerprint in the page |
-| Saved evidence is easy to inspect in the terminal | **done** - `fitr view`, graph-based `board`, and the opt-in `fitr top` Live/Result/Board/History monitor |
-| Community device profiles beyond `lappy` | **scaffolded** - `fitr profiles new` writes an UNCALIBRATED local copy; no invented rtx-4090 numbers in the repo |
-
-We do **not** ship 1.0 with an uncalibrated `advise`, a public leaderboard,
-or LLM-as-judge. Battery calibration still needs hardware. `tune` can trail
-advise: a one-line remedy (`try num_ctx=4096`) is advise; `fitr run --ctx 4096`
-measures it; `fitr apply` prints how to persist it (and never restarts the
-server). Sweeping knobs is tune.
-
-## Shipped: `fitr advise`
+### `fitr advise` (single-model, shipped)
 
 The step that turns a chore into a product.
 
@@ -373,7 +460,7 @@ The step that turns a chore into a product.
       memory (`try num_ctx=4096 -> fits in 21.3 GB`) / Incompatible. SKIP
       when VRAM, weights, or architecture cannot be measured - never a
       fabricated GB number, never a guess from the GPU's name. Next line is
-      `fitr run --ctx N --full`; `fitr apply` prints how to persist N.
+      `fitr run --ctx N`; `fitr apply` prints how to persist N.
 - [x] **Measure fit, don't model it** - `advise --load` observes Ollama
       resident size (compute buffers included); `advise --fit` runs
       `llama-fit-params` on a GGUF when present. Live resident still beats
@@ -384,18 +471,15 @@ The step that turns a chore into a product.
       parameters, not total. A 30B MoE (~3B active) at 24.8 tok/s beat an 8B
       dense at 14.6 on the same box; naive total-parameter math recommends
       exactly the wrong thing. Pinned against Qwen3-30B-A3B architecture.
-- [ ] **Inventory-first recommendation after calibration.** With no model
-      named, use the serving runtime's installed-model list plus saved fitr
-      measurements. Unmeasured models are candidates to measure, never
-      confidently ranked. This closes a useful loop with no stale catalog and
-      no network dependency.
+- [ ] **Inventory-first listing** - 0.6.0 above. Unmeasured models are
+      candidates to measure, never confidently ranked.
 - [ ] **Live discovery only after evidence-backed local recommendation.** Use a
       replaceable GGUF index adapter, not a curated list baked into the binary.
       Every recommendation must name its fit source, measured gate evidence,
       and remedy. Until then, `advise` answers "does THIS fit", not "what
       should I download".
 
-## Share the map
+### Share the map
 
 - [x] **Local profile scaffold** - `fitr profiles new` copies default into
       `~/.fitr/profiles`, matched to this GPU, marked UNCALIBRATED. User
@@ -407,14 +491,14 @@ The step that turns a chore into a product.
       or `fitr run --html`. Never automatic: the page contains a hardware
       fingerprint and is not uploaded. Raw model output is omitted.
 
-## Optional sister: retonr
+### Optional sister: retonr
 
 - [x] **Opt-in handoff, no dependency.** `fitr export --retonr` writes
       `fitr.retonr.evidence.v1` device-measurement JSON. A PATH hint appears
       only if `retonr` is already installed. Missing retonr is never an
       error. The file is not a qualification, activation, or license.
 
-## Interface path: CLI first, native later
+### Interface path: CLI first, native later
 
 - [x] **Replayable terminal data view.** `fitr view [model|result.json]` opens
       the newest or selected run through the scorecard renderer. `fitr board`
@@ -428,22 +512,7 @@ The step that turns a chore into a product.
       and typed event schema let every interface consume the same scoring
       decisions. Frontends never reimplement gates or comparisons.
 - [ ] **Truly native desktop clients only after the terminal information
-      architecture is proven.** SwiftUI/AppKit on macOS, WinUI 3 on Windows,
-      and GTK 4/libadwaita on Linux. Three thin native frontends share the Go
-      domain contracts. WebView wrappers are not the desktop plan.
-
-The detailed sequencing, accessibility rules, and framework decision gates are
-in [docs/interface.md](docs/interface.md).
-
-## Later, if they earn it
-
-- [ ] Exec-kind user tasks behind an explicit trust gate (they are arbitrary
-      code execution from JSON; declarative stays the default)
-- [ ] Long-context / needle tests; decode at 3+ context depths
-- [ ] Sustained-throughput mode (thermal reality vs burst numbers)
-- [ ] Same-config pairwise matchups (Glicko-2 style) - extracts signal our
-      flat refusal-to-rank discards, but sits in tension with design rule 1;
-      decide deliberately, not by drift
+      architecture is proven.** See Later, above.
 
 ---
 

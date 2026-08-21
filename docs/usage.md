@@ -15,7 +15,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
 That puts one static binary on your PATH. The default evidence path needs no Go,
-Python, or venv. Pin a release with `FITR_VERSION=v0.4.0`; relocate with
+Python, or venv. Pin a release with `FITR_VERSION=v0.5.0`; relocate with
 `FITR_BIN`.
 
 From source (Go 1.25+):
@@ -72,10 +72,14 @@ enter a PASS or FAIL denominator.
 
 | Level | Runs | ~Time |
 |---|---|---|
-| `--quick` | speed, memory, plumbing; executable tasks recorded as SKIP | model-dependent |
-| *(default)* | + 16 generated checks, refusal, safe tool withdrawal | model-dependent |
-| `--full` | + long-horizon agent task, SKIP while execution is disabled | model-dependent |
+| `--quick` | speed, memory, plumbing; executable tasks recorded as SKIP | minutes; smoke-test the stack |
+| *(default)* | + 16 generated checks, refusal, safe tool withdrawal | many minutes; first real measurement |
+| `--full` | + long-horizon agent task, SKIP while execution is disabled | tens of minutes; coding still unproven |
 | `--checks-only` | generated checks only; requires `--seedset`, defaults to 5 repeats | model-dependent |
+
+A default run tells *broken* from *working*, not 71 from 74. `--full` adds up
+to 40 agent turns; it is not a coding grade until the isolated worker exists.
+Ctrl-C is safe (exit 130).
 
 ## Flags worth knowing
 
@@ -100,7 +104,7 @@ enter a PASS or FAIL denominator.
 - `--backend auto|ollama|llama-server|openai` picks the serving runtime;
   see [backends.md](backends.md). Extra listen URLs: `$FITR_DISCOVER_URLS`.
 - `--ctx N` sets the request context (default 8192). This is how you *measure*
-  an `advise` remedy: `fitr run m --ctx 4096 --full`. A non-default ctx is
+  an `advise` remedy: `fitr run m --ctx 4096`. A non-default ctx is
   recorded beside the runtime-reported effective context. `board` and
   `compare` require that effective receipt and will not rank a request the
   runtime did not verify. `fitr apply` then prints the command to persist that
@@ -137,6 +141,7 @@ fitr view m --display json   # full saved result JSON
 fitr run m -q                # results only     -v  detail, no progress
 NO_COLOR=1 fitr board        # honored (empty string means unset)
 FITR_ASCII=1 fitr board      # force ASCII glyphs
+FITR_UNICODE=1 fitr board    # force Unicode; Windows Terminal already enables it
 fitr top                     # interactive terminal only
 fitr top --snapshot          # pipe-safe presentation JSON, no terminal controls
 ```
