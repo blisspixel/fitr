@@ -72,8 +72,9 @@ func usage() {
 	fmt.Fprint(os.Stderr, `fitr `+version+` - is this local model any good ON THIS DEVICE?
 
 usage:
+  fitr [--display MODE]             installed models, evidence, next command
+  fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]
   fitr run <model> [--quick|--full|--checks-only] [-k N] [--ctx N] [--profile P] [--display MODE] [--html]
-  fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]
   fitr apply [model] [--ctx N]
   fitr tune [model-a model-b]
   fitr export <model> [--out PATH] [--retonr]
@@ -109,6 +110,8 @@ environment:
   FITR_OPENAI_MODEL_SHA256  independently obtained model digest required for measured OpenAI-compatible runs
 
 examples:
+  fitr
+  fitr advise --display json
   fitr run qwen3-coder:30b --full
   fitr run https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
   fitr run some-new-model:tag -k 3 --pull
@@ -135,7 +138,7 @@ func run() int {
 	if len(os.Args) < 2 {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
-		return cmdStatus(ctx)
+		return cmdStatus(ctx, nil)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -178,6 +181,9 @@ func run() int {
 		fmt.Println("fitr", version)
 		return exitOK
 	default:
+		if strings.HasPrefix(os.Args[1], "-") {
+			return cmdStatus(ctx, os.Args[1:])
+		}
 		errPrint(fmt.Sprintf("unknown command %q", os.Args[1]), "",
 			"run `fitr --help` for usage")
 		return exitUsage
@@ -721,8 +727,11 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		return exitUsage
 	}
 	if fs.NArg() < 1 {
-		errPrint("missing model", "", "fitr advise <model>  or  fitr advise ./model.gguf")
-		return exitUsage
+		if *loadFlag || *fitFlag || *pullFlag || *ctxSize != 0 || *vram >= 0 {
+			errPrint("missing model", "fit/load/ctx flags need a model", "fitr advise <model>  or  fitr advise ./model.gguf")
+			return exitUsage
+		}
+		return cmdStatus(ctx, []string{"--display", *mode, "--backend", *backend})
 	}
 	raw := fs.Arg(0)
 	model := normalizeModelRef(raw)
@@ -2731,46 +2740,141 @@ func printDoctor(w io.Writer, r eval.DoctorResult, color bool) {
 	fmt.Fprintf(w, "  => %s\n", terminalText(r.Verdict))
 }
 
-// cmdStatus is what a bare `fitr` prints after install: what this box is,
-// what is already serving, and the next command. Not a usage error.
-func cmdStatus(ctx context.Context) int {
+// cmdStatus is what a bare `fitr` prints after install: this box, what is
+// already serving, current evidence, and one next command per row.
+func cmdStatus(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("fitr", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
+	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
+	if err := fs.Parse(permute(args)); err != nil {
+		return exitUsage
+	}
+	if !render.ValidMode(*mode) {
+		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
+		return exitUsage
+	}
+	if fs.NArg() > 0 {
+		errPrint(fmt.Sprintf("unknown command %q", fs.Arg(0)), "", "run `fitr --help` for usage")
+		return exitUsage
+	}
+	return printInventory(ctx, *backend, *mode)
+}
+
+func printInventory(ctx context.Context, backendKind, mode string) int {
 	found := llm.Discover(ctx)
 	var b llm.Backend
-	if len(found) > 0 {
+	also := []string{}
+	if backendKind != "" && backendKind != "auto" {
+		url := ""
+		for _, f := range found {
+			if f.Kind == backendKind {
+				url = f.URL
+				break
+			}
+		}
+		b, _ = backendAt(backendKind, url)
+	} else if len(found) > 0 {
 		b, _ = backendAt(found[0].Kind, found[0].URL)
+		for _, f := range found[1:] {
+			also = append(also, f.Kind+"  "+f.URL)
+		}
 	}
 	fp := device.Detect(ctx, b)
-	fmt.Printf("  fitr %s\n", terminalText(version))
-	fmt.Printf("  cpu       %s\n", terminalText(device.FormatCPU(fp.CPU)))
-	fmt.Printf("  gpu       %s", terminalText(fp.GPU))
-	if fp.GPUBackend != "" {
-		fmt.Printf("  (%s)", terminalText(fp.GPUBackend))
+	prof, _ := device.SelectProfile("", fp)
+	inv := render.Inventory{
+		Fitr:         version,
+		CPU:          device.FormatCPU(fp.CPU),
+		GPU:          fp.GPU,
+		GPUBackend:   fp.GPUBackend,
+		MemoryGB:     fp.VRAMGb,
+		MemorySource: fp.VRAMSource,
+		Profile:      prof.Name,
+		Uncalibrated: profileUncalibrated(prof),
+		Also:         also,
 	}
-	fmt.Println()
-	if fp.VRAMGb > 0 {
-		fmt.Printf("  memory    %s\n", terminalText(device.FormatVRAM(fp.VRAMGb, fp.VRAMSource)))
-	}
-	if len(found) == 0 {
-		fmt.Println("  runtime   none reachable")
-		fmt.Println("  next      start Ollama, llama-server, or an OpenAI-compatible server")
-		fmt.Println("            then: fitr advise <model>   and   fitr run <model>")
+	if b == nil {
+		inv.Empty = "none reachable"
+		render.WriteInventory(os.Stdout, inv, mode)
 		return exitOK
 	}
-	for i, f := range found {
-		label := "runtime"
-		if i > 0 {
-			label = "also"
+	inv.RuntimeKind = b.Name()
+	inv.RuntimeURL = b.URL()
+
+	listCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	tags, err := b.Tags(listCtx)
+	if err != nil {
+		errPrint("could not list installed models: "+err.Error(), "",
+			"is the runtime still up?")
+		return exitError
+	}
+	installed := make([]advise.InstalledModel, 0, len(tags))
+	for _, tag := range tags {
+		installed = append(installed, advise.InstalledModel{
+			Name: tag.Name, Size: tag.Size, Quant: tag.Details.QuantizationLevel,
+		})
+	}
+	var loaded []string
+	if running, err := b.PS(listCtx); err == nil {
+		for _, m := range running {
+			loaded = append(loaded, m.Name)
 		}
-		fmt.Printf("  %-9s %s  %s\n", terminalText(label), terminalText(f.Kind), terminalText(f.URL))
 	}
-	fmt.Println("  next      fitr advise <model>          # does this quant fit")
-	fmt.Println("            fitr doctor <model>          # can this box be measured fairly")
-	fmt.Println("            fitr run <model>             # then compare with fitr board")
-	fmt.Println("            fitr apply <model>           # print how to persist a measured ctx")
-	if h := retonr.Hint("<model>"); h != "" {
-		fmt.Printf("            %s\n", terminalText(h))
+	var evidence []advise.InventoryEvidence
+	if stored, err := record.NewStore(resultsDir()).LoadCurrent(); err == nil {
+		evidence = evidenceFromRecords(stored.Records)
 	}
+	table := advise.Join(advise.InventoryQuery{
+		Tags:       installed,
+		Loaded:     loaded,
+		Evidence:   evidence,
+		CurrentKey: fp.Key(),
+		HaveGB:     fp.VRAMGb,
+		HaveSrc:    fp.VRAMSource,
+	})
+	inv.Rows = make([]render.InventoryRow, 0, len(table.Rows))
+	for _, row := range table.Rows {
+		inv.Rows = append(inv.Rows, render.InventoryRow{
+			Model: row.Model, State: row.State, SizeB: row.SizeB,
+			Loaded: row.Loaded, Next: row.Next, Note: row.Note,
+		})
+	}
+	inv.Hidden = table.Hidden
+	if len(inv.Rows) == 0 {
+		inv.Empty = "reachable, no models"
+	}
+	render.WriteInventory(os.Stdout, inv, mode)
 	return exitOK
+}
+
+func evidenceFromRecords(recs []*record.Record) []advise.InventoryEvidence {
+	out := make([]advise.InventoryEvidence, 0, len(recs))
+	for _, rec := range recs {
+		if rec == nil {
+			continue
+		}
+		out = append(out, advise.InventoryEvidence{
+			Model:          rec.Model,
+			DeviceKey:      rec.Device.Key(),
+			Level:          rec.Level,
+			IntegrityIssue: rec.EvidenceIntegrityIssue(),
+			Contaminated:   len(rec.Contamination) > 0,
+		})
+	}
+	return out
+}
+
+func profileUncalibrated(p device.Profile) bool {
+	if p.Name == "default" || p.Name == "" {
+		return true
+	}
+	blob := p.Description
+	for _, note := range p.Notes {
+		blob += " " + note
+	}
+	u := strings.ToUpper(blob)
+	return strings.Contains(u, "UNCALIBRATED") || strings.Contains(u, "NOT CALIBRATED")
 }
 
 // ---------------------------------------------------------------- device

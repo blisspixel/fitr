@@ -274,6 +274,7 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	}
 	placement := inferenceDevice(ctx, b, "")
 	wg.Wait()
+	vram, vsrc = preferUnifiedMemory(gpu, ram, vram, vsrc)
 	return Fingerprint{
 		Host: host, OS: runtime.GOOS, CPU: cpu, RAMGb: ram,
 		GPU: gpu, GPUDriver: drv, GPUDriverDate: date,
@@ -285,6 +286,47 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 // FormatCPU is display-only. Logical CPU count is not part of Fingerprint.Key:
 // adding it would void comparable history without changing what a measurement
 // means. The serving runtime, not fitr, owns inference threads.
+// preferUnifiedMemory replaces a discrete-carve VRAM reading on APUs with
+// system RAM. Windows registry qwMemorySize often reports ~2 GB of shared
+// graphics memory on a 32–128 GB 780M / Strix Halo box; treating that as the
+// model budget marks everything incompatible. NVIDIA remains nvidia-smi.
+func preferUnifiedMemory(gpu string, ram, vram float64, src string) (float64, string) {
+	if ram <= 0 || !unifiedMemoryGPU(gpu) {
+		return vram, src
+	}
+	if src == "nvidia-smi" || src == "unified memory (system RAM)" || src == "drm sysfs" {
+		return vram, src
+	}
+	if vram > 0 && ram < vram*2 {
+		return vram, src
+	}
+	return ram, "unified memory (system RAM)"
+}
+
+func unifiedMemoryGPU(name string) bool {
+	u := strings.ToLower(name)
+	if u == "" {
+		return false
+	}
+	if strings.Contains(u, "nvidia") || strings.Contains(u, "geforce") || strings.Contains(u, "rtx ") {
+		return false
+	}
+	if strings.Contains(u, " rx ") || strings.HasPrefix(strings.TrimSpace(u), "rx ") {
+		return false
+	}
+	if strings.Contains(u, "iris") || strings.Contains(u, "uhd graphics") || strings.Contains(u, "intel graphics") {
+		return true
+	}
+	if strings.Contains(u, "apple") || strings.Contains(u, "metal") {
+		return true
+	}
+	if strings.Contains(u, "radeon") {
+		return strings.Contains(u, "strix") || strings.Contains(u, "graphics") ||
+			strings.Contains(u, "m") || strings.Contains(u, "8060s") || strings.Contains(u, "8050s")
+	}
+	return false
+}
+
 func FormatCPU(name string) string {
 	if name == "" {
 		name = "unknown"

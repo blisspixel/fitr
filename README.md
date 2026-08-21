@@ -10,7 +10,7 @@ do not know whether this artifact fits in *your* VRAM, or what it actually
 does on this box, in a measurement you can compare to the last one you tried.
 
 ```bash
-fitr                              # this box, what is already serving
+fitr                              # what's installed, what's measured, what to run next
 fitr advise some-new-model:tag    # does it fit, which flag if not
 fitr run some-new-model:tag --pull
 fitr apply some-new-model:tag     # print how to persist the measured ctx
@@ -18,6 +18,7 @@ fitr board                        # compare everything you have measured
 fitr top                          # the same loop, full-screen
 ```
 
+<img src="docs/assets/inventory.svg" alt="fitr inventory (demo data)" width="820">
 <img src="docs/assets/advise.svg" alt="fitr advise (demo data)" width="820">
 <img src="docs/assets/run.svg" alt="fitr run scorecard (demo data)" width="820">
 <img src="docs/assets/apply.svg" alt="fitr apply (demo data)" width="820">
@@ -102,7 +103,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 Then:
 
 ```bash
-fitr                             # what this box is, what is already serving
+fitr                             # what's installed, what's measured, what next
 fitr advise qwen3:30b            # does it fit, and if not, which flag to try
 fitr run qwen3:30b --ctx 8192    # default battery; --quick to smoke-test, --full for the long agent loop
 fitr apply qwen3:30b             # print how to persist the measured ctx
@@ -113,7 +114,7 @@ fitr top run qwen3:30b           # the same measurement with live monitoring
 ```
 
 From source (Go 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
-Pin a release with `FITR_VERSION=v0.5.0`, relocate with `FITR_BIN`.
+Pin a release with `FITR_VERSION=v0.6.0`, relocate with `FITR_BIN`.
 
 `--quick` is speed, memory, and plumbing. The default run adds generated
 checks, refusal, and tool withdrawal. `--full` adds a long agentic loop;
@@ -126,8 +127,8 @@ Everyday loop:
 
 | Command | Does |
 |---|---|
-| `fitr` | this box, reachable runtimes, a next command |
-| `fitr advise <model>` | does it fit here, and if not, which flag to try (`--load` / `--fit` to measure) |
+| `fitr` | installed models joined to evidence: measured, unproven, incompatible, or stale; one next command per row |
+| `fitr advise [model]` | no model: the same inventory table. With a model: does it fit, and if not, which flag (`--load` / `--fit` to measure) |
 | `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model on this device; generated-code execution is disabled by default |
 | `fitr apply [model]` | print how to persist a measured context; never restarts the server |
 | `fitr view [model\|result.json]` | reopen the newest or selected saved result with repeat-shape graphs |

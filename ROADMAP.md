@@ -32,7 +32,7 @@ You should be able to see it when you look.
 |---|---|---|---|
 | **Shipped** | 0.4.0 | TUI, history, advise, apply, backends | Tagged. |
 | **Shipped** | **0.5.0** | Evidence contract (A/B), lineage, family-stratified aggregation | Tagged with this docs pass. Install `latest` matches the contract the README describes. |
-| **Now** | **0.6.0** | Installed inventory | After install, the runtime already knows the names. The stranger should not have to. |
+| **Now** | **0.6.0** | Installed inventory | On main. Bare `fitr` lists what's serving. Tag when screenshots and first-run feel right. |
 | **Next** | 0.7.x | Context-fit table, then one next-command grammar | People actually choose among 4k / 8k / 16k, not one window. |
 | **1.0** | 1.0 | A stranger closes advise → run → apply from inventory, on their machine | Still no public leaderboard, no LLM-as-judge, no invented SKU gates. |
 | **Later** | Trust C and loop extras | Isolation, signing, catalog, vision, community profiles | Real work. None of it is the next product week. |
@@ -60,10 +60,10 @@ Calendar age is not staleness. Color does not carry state. Inventory is the
 runtime's installed list (`Tags()`), not a disk crawl of GGUFs and not a
 Hugging Face catalog.
 
-- [ ] Bare `fitr` / no-arg `advise` list installed models joined to current evidence
-- [ ] Four plain states, one remedy command per row (design rule 7)
-- [ ] No ranking of unproven rows; no pull/load/run from this screen
-- [ ] JSON / plain / rich; screenshot `docs/assets/inventory.svg`; README hero leads with `fitr`
+- [x] Bare `fitr` / no-arg `advise` list installed models joined to current evidence
+- [x] Four plain states, one remedy command per row (design rule 7)
+- [x] No ranking of unproven rows; no pull/load/run from this screen
+- [x] JSON / plain / rich; screenshot `docs/assets/inventory.svg`; README hero leads with `fitr`
 
 **Not in 0.6.0:** `--load`/`--fit` across the library, a TUI fifth view, live
 discovery, quality ranking, isolation, community SKU profiles, gate edits from
@@ -216,7 +216,7 @@ server). Sweeping knobs is tune.
 | OpenAI-backend timings are client-derived | usage gives counts, not server timings; decode/prefill rates there are wall-clock estimates |
 | 2 device profiles | `lappy` and an uncalibrated `default` |
 | `advise` default is still weights+KV for conventional attention | `--load` / `--fit` measure compute buffers. Hybrid recurrent models stay SKIP without that receipt, and incomplete split GGUFs are rejected. No model catalog. |
-| Bare `fitr` is status, not inventory | Hardware, reachable runtimes, and a generic next command. It does not yet list installed tags joined to evidence. That is 0.6.0. |
+| Inventory is the runtime's installed list | llama-server has one row. No disk crawl of GGUFs. Unmeasured is never ranked. |
 | `--full` is a long loop, not a coding grade | The 40-turn agentic task still SKIPs executable evidence until isolation. First measurement should be the default battery, not `--full`. |
 | Scored inference is single-flight | Using 16 cores to fire 16 prompts would make tok/s a shared-GPU number. The process lock and doctor's `OLLAMA_NUM_PARALLEL` warning exist because concurrent evals produced plausible-and-wrong timings. |
 
@@ -241,8 +241,9 @@ context. The wall clock of `fitr run` is the model, not the harness.
 **Where cores earn a later checkbox:**
 
 - [x] Discover probes concurrently; fingerprint probes and split-GGUF stats overlap
+- [x] Installed inventory from `Tags()`; no disk crawl, no Show() per row
 - [ ] Isolated worker overlaps generated-code execution with the next prompt (Trust C)
-- [ ] Inventory of many local GGUFs parses headers in parallel (with 0.6.0 listing, not a disk crawl)
+- [ ] Inventory of many local GGUFs parses headers in parallel (later; not a catalog)
 
 Non-goal: `FITR_PARALLEL=N` for scored inference. Faster runs come from
 `--quick`, fewer repeats, or a smaller model.

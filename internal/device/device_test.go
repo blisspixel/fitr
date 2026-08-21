@@ -20,6 +20,21 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestPreferUnifiedMemoryOnAPU(t *testing.T) {
+	gb, src := preferUnifiedMemory("AMD Radeon(TM) 780M", 32, 2, "registry qwMemorySize")
+	if gb != 32 || src != "unified memory (system RAM)" {
+		t.Fatalf("780M unified = %v %q", gb, src)
+	}
+	gb, src = preferUnifiedMemory("NVIDIA GeForce RTX 4090", 32, 24, "nvidia-smi")
+	if gb != 24 || src != "nvidia-smi" {
+		t.Fatalf("4090 must keep nvidia-smi: %v %q", gb, src)
+	}
+	gb, src = preferUnifiedMemory("Radeon RX 7900 XTX", 32, 20, "registry qwMemorySize")
+	if src == "unified memory (system RAM)" {
+		t.Fatalf("discrete RX must not be treated as unified: %v %q", gb, src)
+	}
+}
+
 func TestFormatCPUIsDisplayOnly(t *testing.T) {
 	got := FormatCPU("Example CPU")
 	want := fmt.Sprintf("(%d logical)", runtime.NumCPU())

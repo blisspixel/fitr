@@ -15,7 +15,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
 That puts one static binary on your PATH. The default evidence path needs no Go,
-Python, or venv. Pin a release with `FITR_VERSION=v0.5.0`; relocate with
+Python, or venv. Pin a release with `FITR_VERSION=v0.6.0`; relocate with
 `FITR_BIN`.
 
 From source (Go 1.25+):
@@ -50,9 +50,9 @@ enter a PASS or FAIL denominator.
 
 | Command | Does |
 |---|---|
-| `fitr` | status: hardware, reachable runtimes, next command |
+| `fitr` | installed inventory: measured / unproven / incompatible / stale, one next command per row |
 | `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model; checks-only runs the generated battery for calibration |
-| `fitr advise <model> [--vram-gb N] [--ctx N] [--load] [--fit]` | does it fit here, and if not, which flag to try |
+| `fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]` | no model: inventory. With a model: does it fit, and if not, which flag to try |
 | `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
@@ -168,6 +168,13 @@ terminal.
 | 2 | usage |
 | 3 | ran fine, a need FAILED (`advise`: low memory or incompatible) |
 | 130 | interrupted |
+
+Bare `fitr` and `fitr advise` with no model print the installed inventory:
+what the serving runtime already has, joined to current fitr evidence. Each
+row is **measured**, **unproven**, **incompatible**, or **stale**, with one
+next command. Unmeasured is a candidate, never a recommendation. Color does
+not carry the state. `fitr advise <model>` remains the one-artifact fit
+verdict; inventory does not `Show()` every blob or pull anything.
 
 ## Cores
 

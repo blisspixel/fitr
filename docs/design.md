@@ -5,7 +5,10 @@ The post skipped the quant. The leaderboard ran on someone else's GPU. fitr
 exists so this exact artifact, at this precision, on this box, with this
 runtime, either becomes a daily driver or hands you the next flag.
 
-The default path is four commands (`advise` → `run` → `apply` → `board`).
+The default path is five commands (`fitr` → `advise` → `run` → `apply` → `board`).
+Bare `fitr` is the installed inventory: measured, unproven, incompatible, or
+stale, each with one next command. Unmeasured is a candidate, never a
+recommendation.
 The interior is strict so that surface can be trusted. You should not need
 the vocabulary below to get through Thursday night. You should be able to
 see it when you look.

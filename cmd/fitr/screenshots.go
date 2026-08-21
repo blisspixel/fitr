@@ -52,6 +52,7 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		name string
 		fn   func(ctx context.Context) (string, error)
 	}{
+		{"inventory", shotInventory},
 		{"advise", shotAdvise}, {"run", shotRun}, {"apply", shotApply},
 		{"board", shotBoard}, {"top", shotTop}, {"doctor", shotDoctor}, {"compare", shotCompare},
 	}
@@ -217,6 +218,26 @@ func shotRun(ctx context.Context) (string, error) {
 	disp := render.New("rich")
 	disp.Result(sc, meta)
 	return pre, nil
+}
+
+func shotInventory(context.Context) (string, error) {
+	fmt.Println("$ fitr")
+	fmt.Println()
+	render.WriteInventory(os.Stdout, render.Inventory{
+		Fitr: "0.6.0", CPU: "AMD Ryzen 7 7840U  (16 logical)", GPU: "AMD Radeon 780M",
+		GPUBackend: "rocm", MemoryGB: 32, MemorySource: "unified memory (system RAM)",
+		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
+		Profile: "lappy", Uncalibrated: false,
+		Rows: []render.InventoryRow{
+			{Model: "qwen3:8b", State: "measured", SizeB: 5 << 30, Loaded: true, Next: "fitr view qwen3:8b"},
+			{Model: "gemma4:12b", State: "unproven", SizeB: 8 << 30, Next: "fitr advise gemma4:12b"},
+			{Model: "qwen3:32b", State: "stale", SizeB: 20 << 30, Next: "fitr run qwen3:32b",
+				Note: "device or runtime changed since the last measurement"},
+			{Model: "llama3.1:70b", State: "incompatible", SizeB: 40 << 30, Next: "try a smaller quant",
+				Note: "weights 40.0 GB exceed 32.0 GB (unified memory (system RAM))"},
+		},
+	}, "rich")
+	return "", nil
 }
 
 // shotDoctor prints a representative doctor result through the shared printer.

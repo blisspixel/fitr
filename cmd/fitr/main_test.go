@@ -424,16 +424,19 @@ func TestBareFitrIsStatusNotUsage(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-	code := cmdStatus(context.Background())
+	code := cmdStatus(context.Background(), nil)
 	w.Close()
 	os.Stdout = old
 	out, _ := io.ReadAll(r)
 	got := string(out)
-	if !strings.Contains(got, "fitr "+version) || !strings.Contains(got, "next") {
+	if !strings.Contains(got, "fitr "+version) {
 		t.Fatalf("bare fitr must be a status page:\n%s", got)
 	}
 	if !strings.Contains(got, "cpu") || !strings.Contains(got, "logical") {
 		t.Fatalf("bare fitr must show logical CPUs as display-only:\n%s", got)
+	}
+	if !strings.Contains(got, "none reachable") && !strings.Contains(got, "STATE") && !strings.Contains(got, "no models") {
+		t.Fatalf("bare fitr must be inventory or an empty-runtime page:\n%s", got)
 	}
 	if strings.Contains(got, "run <model> --full") {
 		t.Fatalf("first-run next must be the default battery, not --full:\n%s", got)
@@ -441,8 +444,28 @@ func TestBareFitrIsStatusNotUsage(t *testing.T) {
 	if code == exitUsage {
 		t.Fatal("bare fitr is not a usage error")
 	}
-	if code != exitOK {
-		t.Fatalf("bare fitr with no runtime is status, not an error; got exit %d", code)
+}
+
+func TestAdviseWithoutModelIsInventory(t *testing.T) {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	code := cmdAdvise(context.Background(), nil)
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	got := string(out)
+	if code == exitUsage {
+		t.Fatalf("advise with no model is inventory, not usage:\n%s", got)
+	}
+	if !strings.Contains(got, "fitr "+version) {
+		t.Fatalf("advise inventory missing header:\n%s", got)
+	}
+}
+
+func TestAdviseLoadWithoutModelIsUsage(t *testing.T) {
+	if code := cmdAdvise(context.Background(), []string{"--load"}); code != exitUsage {
+		t.Fatalf("advise --load with no model must be usage, got %d", code)
 	}
 }
 
@@ -951,9 +974,9 @@ func TestDefaultShareArtifactsDoNotCollideAfterNameSanitization(t *testing.T) {
 	}
 }
 
-func TestAdviseMissingModelIsUsage(t *testing.T) {
-	if code := cmdAdvise(context.Background(), nil); code != exitUsage {
-		t.Fatalf("code = %d, want usage", code)
+func TestAdviseMissingModelIsInventory(t *testing.T) {
+	if code := cmdAdvise(context.Background(), nil); code == exitUsage {
+		t.Fatal("advise with no model is inventory, not usage")
 	}
 }
 
