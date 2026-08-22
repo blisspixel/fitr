@@ -218,10 +218,24 @@ func permute(args []string) []string {
 func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
-	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage":
+	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view":
 		return true
 	}
 	return false
+}
+
+// parseCommandFlags keeps subcommand help on the success path. The standard
+// flag package writes the requested help before returning flag.ErrHelp; that
+// is not a bad invocation and must not become exit 2.
+func parseCommandFlags(fs *flag.FlagSet, args []string) (int, bool) {
+	err := fs.Parse(permute(args))
+	if err == nil {
+		return exitOK, true
+	}
+	if errors.Is(err, flag.ErrHelp) {
+		return exitOK, false
+	}
+	return exitUsage, false
 }
 
 type countFlag int
@@ -736,11 +750,27 @@ func cmdAdvise(ctx context.Context, args []string) int {
 	pullFlag := fs.Bool("pull", false, "pull the model first if it is not installed")
 	loadFlag := fs.Bool("load", false, "load the model on Ollama and read resident size (dummy allocation)")
 	fitFlag := fs.Bool("fit", false, "run llama-fit-params on a GGUF if it is on PATH")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if !render.ValidMode(*mode) {
 		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
+		return exitUsage
+	}
+	if _, ok := canonicalBackendKind(*backend); !ok {
+		errPrint("invalid backend", *backend, "use auto, ollama, llama-server, or openai")
+		return exitUsage
+	}
+	if *ctxSize < 0 {
+		errPrint("invalid context size", "--ctx cannot be negative", "omit --ctx for the model default, or pass a positive token count")
+		return exitUsage
+	}
+	if *vram < -1 {
+		errPrint("invalid VRAM size", "--vram-gb cannot be negative", "omit --vram-gb for automatic detection, or pass a non-negative size")
+		return exitUsage
+	}
+	if fs.NArg() > 1 {
+		errPrint("too many arguments", "advise accepts at most one model", "fitr advise [model] [flags]")
 		return exitUsage
 	}
 	if fs.NArg() < 1 {
@@ -967,11 +997,19 @@ func cmdApply(ctx context.Context, args []string) int {
 	ctxSize := fs.Int("ctx", 0, "context to persist (default: latest result, else 4096 as the worked example)")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if !render.ValidMode(*mode) {
 		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
+		return exitUsage
+	}
+	if fs.NArg() > 1 {
+		errPrint("too many arguments", "apply accepts at most one model", "fitr apply [model] [--ctx N]")
+		return exitUsage
+	}
+	if *ctxSize < 0 {
+		errPrint("invalid context size", "--ctx cannot be negative", "omit --ctx for the latest measured context, or pass a positive token count")
 		return exitUsage
 	}
 	model := ""
@@ -1039,7 +1077,11 @@ func cmdApply(ctx context.Context, args []string) int {
 func cmdTune(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("tune", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(permute(args)); err != nil {
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	if fs.NArg() != 0 && fs.NArg() != 2 {
+		errPrint("tune diffs two saved results", "received an incomplete model pair", "fitr tune  or  fitr tune <model-a> <model-b>")
 		return exitUsage
 	}
 	fmt.Fprint(os.Stdout, `  request-level knobs (no server restart):
@@ -1061,10 +1103,6 @@ func cmdTune(ctx context.Context, args []string) int {
 	if fs.NArg() == 0 {
 		fmt.Fprintln(os.Stdout, "  next   fitr tune <model-a> <model-b>   to diff two saved fingerprints")
 		return exitOK
-	}
-	if fs.NArg() != 2 {
-		errPrint("tune diffs two saved results", "", "fitr tune <model-a> <model-b>")
-		return exitUsage
 	}
 	all, err := loadResults()
 	if err != nil || len(all) == 0 {
@@ -1149,6 +1187,9 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 	fs.Var(&quiet, "q", "quiet level")
 	verbose := fs.Bool("v", false, "verbose")
 	if err := fs.Parse(permute(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
 		if supplied != nil {
 			reportError("invalid run arguments", err.Error(), "fitr top run <model> [run flags]")
 		}
@@ -1160,6 +1201,14 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 	}
 	if fs.NArg() < 1 {
 		reportError("missing model", "", "fitr run <model>")
+		return exitUsage
+	}
+	if fs.NArg() > 1 {
+		reportError("too many arguments", "run accepts exactly one model", "fitr run <model> [flags]")
+		return exitUsage
+	}
+	if *ctxSize < 0 {
+		reportError("invalid context size", "--ctx cannot be negative", "omit --ctx for the default, or pass a positive token count")
 		return exitUsage
 	}
 	levels := 0
@@ -1255,7 +1304,7 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 			return exitInterrupt
 		}
 		if supplied == nil {
-			errPrint(err.Error(), "", "re-run with -v for detail")
+			errPrint(err.Error(), "", runFailureHint(err, model))
 		}
 		return exitError
 	}
@@ -1330,6 +1379,20 @@ func runResultExitCode(res *Result, level string, saveErr, artifactErr error) in
 	return exitOK
 }
 
+func runFailureHint(err error, model string) string {
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	if strings.Contains(message, "FITR_OPENAI_MODEL_SHA256") {
+		return "set FITR_OPENAI_MODEL_SHA256 from an independent SHA-256 and configure the endpoint to report the same digest"
+	}
+	if strings.Contains(message, "resolved model") || strings.Contains(message, "model identity") {
+		return "run `fitr` to confirm the served model name and artifact identity, then retry"
+	}
+	return "fix the error above and retry; `fitr doctor " + model + "` checks serving-runtime health"
+}
+
 // ---------------------------------------------------------------- result
 // Result remains an alias while command code moves onto the internal record
 // boundary. Existing tests and helper signatures keep their source shape, and
@@ -1372,6 +1435,21 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	}
 	defer lk.Release() //nolint:errcheck // cleanup failure is not worth failing a run over
 
+	// Identity is the first evidence gate. Resolve it before loading optional
+	// tasks or printing execution-policy notes so an unverifiable endpoint
+	// fails with one focused, actionable diagnostic.
+	disp.Phase("identity", "resolve the served artifact and seal its identity")
+	identityStart := time.Now()
+	resolved, err := resolveRunModel(ctx, c, model)
+	if err != nil {
+		return nil, err
+	}
+	disp.Done("identity", time.Since(identityStart).Seconds())
+	if resolved.Name != model {
+		disp.Note(fmt.Sprintf("runtime resolved %q as %q; the result uses the resolved identity", model, resolved.Name), "warn")
+	}
+	model = resolved.Name
+
 	spec, err := eval.LoadSpec()
 	if err != nil {
 		return nil, err
@@ -1408,17 +1486,6 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	if err != nil {
 		return nil, err
 	}
-	disp.Phase("identity", "resolve the served artifact and seal its identity")
-	identityStart := time.Now()
-	resolved, err := resolveRunModel(ctx, c, model)
-	if err != nil {
-		return nil, err
-	}
-	disp.Done("identity", time.Since(identityStart).Seconds())
-	if resolved.Name != model {
-		disp.Note(fmt.Sprintf("runtime resolved %q as %q; the result uses the resolved identity", model, resolved.Name), "warn")
-	}
-	model = resolved.Name
 	fp := device.Detect(ctx, c)
 	prof, err := device.SelectProfile(profileName, fp)
 	if err != nil {
@@ -2234,11 +2301,15 @@ func cmdExport(ctx context.Context, args []string) int {
 	fs.SetOutput(os.Stderr)
 	out := fs.String("out", "", "HTML path (default: <results>/<model>.html)")
 	retonrFlag := fs.Bool("retonr", false, "also write opt-in evidence JSON for the retonr sister project")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if fs.NArg() < 1 {
 		errPrint("missing model", "", "fitr export <model>  or  fitr export <model> --retonr")
+		return exitUsage
+	}
+	if fs.NArg() > 1 {
+		errPrint("too many arguments", "export accepts exactly one model", "fitr export <model> [--out PATH] [--retonr]")
 		return exitUsage
 	}
 	model := normalizeModelRef(fs.Arg(0))
@@ -2431,8 +2502,8 @@ func cmdView(_ context.Context, args []string) int {
 	fs := flag.NewFlagSet("view", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if !render.ValidMode(*mode) {
 		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
@@ -2510,11 +2581,15 @@ func cmdBoard(ctx context.Context, args []string) int {
 	fs.SetOutput(os.Stderr)
 	current := fs.Bool("current", false, "only this machine, including its measured context variants")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if !render.ValidMode(*mode) {
 		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
+		return exitUsage
+	}
+	if fs.NArg() != 0 {
+		errPrint("unexpected argument", fs.Arg(0), "fitr board [--current] [--display MODE]")
 		return exitUsage
 	}
 	results, err := loadResults()
@@ -2690,11 +2765,19 @@ func cmdDiag(ctx context.Context, args []string) int {
 	fs.SetOutput(os.Stderr)
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	ctxSize := fs.Int("ctx", 0, "request context (default 8192)")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if fs.NArg() < 1 {
 		errPrint("missing model", "", "fitr diag <model>")
+		return exitUsage
+	}
+	if fs.NArg() > 1 {
+		errPrint("too many arguments", "diag accepts exactly one model", "fitr diag <model> [--ctx N]")
+		return exitUsage
+	}
+	if *ctxSize < 0 {
+		errPrint("invalid context size", "--ctx cannot be negative", "omit --ctx for the default, or pass a positive token count")
 		return exitUsage
 	}
 	model := normalizeModelRef(fs.Arg(0))
@@ -2739,11 +2822,23 @@ func cmdDoctor(ctx context.Context, args []string) int {
 	n := fs.Int("n", 5, "identical generations per determinism probe")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	ctxSize := fs.Int("ctx", 0, "request context (default 8192)")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if fs.NArg() < 1 {
 		errPrint("missing model", "", "fitr doctor <model>")
+		return exitUsage
+	}
+	if fs.NArg() > 1 {
+		errPrint("too many arguments", "doctor accepts exactly one model", "fitr doctor <model> [-n N] [--ctx N]")
+		return exitUsage
+	}
+	if *n < 2 {
+		errPrint("invalid determinism repeat count", "-n must be at least 2", "omit -n for the default of 5, or pass 2 or more")
+		return exitUsage
+	}
+	if *ctxSize < 0 {
+		errPrint("invalid context size", "--ctx cannot be negative", "omit --ctx for the default, or pass a positive token count")
 		return exitUsage
 	}
 	model := normalizeModelRef(fs.Arg(0))
@@ -2812,8 +2907,8 @@ func cmdStatus(ctx context.Context, args []string) int {
 	fs.SetOutput(os.Stderr)
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if !render.ValidMode(*mode) {
 		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
@@ -3072,12 +3167,34 @@ func profileUncalibrated(p device.Profile) bool {
 
 // ---------------------------------------------------------------- device
 func cmdDevice(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("device", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	if !render.ValidMode(*mode) {
+		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
+		return exitUsage
+	}
+	if fs.NArg() != 0 {
+		errPrint("unexpected argument", fs.Arg(0), "fitr device [--display MODE]")
+		return exitUsage
+	}
 	fp := device.Detect(ctx, probeBackend(ctx))
 	prof, _ := device.SelectProfile("", fp)
-	if len(args) > 0 && args[0] == "--display=json" {
-		b, _ := json.MarshalIndent(map[string]any{
-			"fingerprint": fp, "key": fp.Key(), "profile": prof.Name}, "", "  ")
-		fmt.Println(string(b))
+	switch render.Resolve(*mode) {
+	case "json":
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(map[string]any{
+			"fingerprint": fp, "key": fp.Key(), "profile": prof.Name,
+		}); err != nil {
+			errPrint("could not render device: "+err.Error(), "", "")
+			return exitError
+		}
+		return exitOK
+	case "none":
 		return exitOK
 	}
 	fmt.Printf("  host               %s\n", terminalText(fp.Host))
@@ -3112,12 +3229,20 @@ func cmdProfiles(ctx context.Context, args []string) int {
 	if len(args) > 0 {
 		switch args[0] {
 		case "new":
+			if len(args) > 2 {
+				errPrint("too many arguments", "profiles new accepts at most one name", "fitr profiles new [name]")
+				return exitUsage
+			}
 			name := ""
 			if len(args) > 1 {
 				name = args[1]
 			}
 			return cmdProfilesNew(ctx, name)
 		case "-h", "--help", "help":
+			if len(args) > 1 {
+				errPrint("unexpected argument", args[1], "fitr profiles --help")
+				return exitUsage
+			}
 			fmt.Fprint(os.Stderr, "usage: fitr profiles [new [name]]\n")
 			return exitOK
 		default:
@@ -3176,8 +3301,8 @@ func cmdCalibrate(ctx context.Context, args []string) int {
 	fs.SetOutput(os.Stderr)
 	out := fs.String("out", "", "write a privacy-safe calibration pair as JSON")
 	lineagePath := fs.String("lineage", "", "publisher conversion manifest binding both artifacts to one base revision")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if fs.NArg() != 2 {
 		errPrint("need two saved results", "",
@@ -3456,8 +3581,8 @@ func cmdCalibrateMerge(args []string) int {
 	fs := flag.NewFlagSet("calibrate merge", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	out := fs.String("out", "", "write the aggregate calibration summary as JSON")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if fs.NArg() < 1 {
 		errPrint("need calibration pair reports", "", "fitr calibrate merge pair-a.json pair-b.json --out summary.json")
@@ -3533,7 +3658,11 @@ func cmdCalibrateMerge(args []string) int {
 
 // ---------------------------------------------------------------- compare
 func cmdCompare(ctx context.Context, args []string) int {
-	if len(args) < 2 {
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
+		fmt.Fprintln(os.Stderr, "usage: fitr compare <model-a> <model-b>")
+		return exitOK
+	}
+	if len(args) != 2 {
 		errPrint("need two models", "", "fitr compare <a> <b>")
 		return exitUsage
 	}

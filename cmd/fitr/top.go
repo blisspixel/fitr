@@ -63,8 +63,8 @@ func cmdTopHistory(ctx context.Context, args []string) int {
 		fs := flag.NewFlagSet("top history clear", flag.ContinueOnError)
 		fs.SetOutput(os.Stderr)
 		yes := fs.Bool("yes", false, "confirm permanent history deletion")
-		if err := fs.Parse(args[1:]); err != nil {
-			return exitUsage
+		if code, ok := parseCommandFlags(fs, args[1:]); !ok {
+			return code
 		}
 		if fs.NArg() != 0 {
 			errPrint("unexpected history clear argument", fs.Arg(0), "fitr top history clear --yes")
@@ -82,6 +82,13 @@ func cmdTopHistory(ctx context.Context, args []string) int {
 		}
 		fmt.Printf("cleared %d archived result(s); canonical latest results were kept\n", count)
 		return exitOK
+	case "-h", "--help", "help":
+		if len(args) != 1 {
+			errPrint("unexpected history help argument", args[1], "fitr top history --help")
+			return exitUsage
+		}
+		fmt.Fprintln(os.Stderr, "usage: fitr top history [path|clear --yes]")
+		return exitOK
 	default:
 		errPrint("unknown history action", args[0], "use fitr top history, fitr top history path, or fitr top history clear --yes")
 		return exitUsage
@@ -93,8 +100,8 @@ func cmdTopBrowse(ctx context.Context, args []string) int {
 	fs.SetOutput(os.Stderr)
 	viewName := fs.String("view", "inventory", "live|result|board|history|inventory")
 	snapshotOnly := fs.Bool("snapshot", false, "write a privacy-safe presentation snapshot as JSON")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if fs.NArg() != 0 {
 		errPrint("unexpected argument", fs.Arg(0), "fitr top  or  fitr top view [model|result.json]")
@@ -132,8 +139,8 @@ func cmdTopView(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("top view", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	snapshotOnly := fs.Bool("snapshot", false, "write a privacy-safe presentation snapshot as JSON")
-	if err := fs.Parse(permute(args)); err != nil {
-		return exitUsage
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if fs.NArg() > 1 {
 		errPrint("too many arguments", "top view accepts one model or result path", "fitr top view [model|result.json]")
@@ -182,6 +189,10 @@ func cmdTopView(ctx context.Context, args []string) int {
 }
 
 func cmdTopRun(ctx context.Context, args []string) int {
+	if hasFlag(args, "help") || hasFlag(args, "h") {
+		fmt.Fprintln(os.Stderr, "usage: fitr top run <model> [run flags]")
+		return cmdRun(ctx, []string{"--help"})
+	}
 	if hasFlag(args, "display") {
 		errPrint("--display is not valid with fitr top run", "top is already an explicit display mode", "use fitr run <model> --display MODE for stream output")
 		return exitUsage
@@ -410,6 +421,9 @@ func previewTopRun(args []string) (topRunPreview, error) {
 	}
 	if repeats < 1 {
 		return topRunPreview{}, errors.New("-k must be at least 1")
+	}
+	if *numCtx < 0 {
+		return topRunPreview{}, errors.New("--ctx cannot be negative")
 	}
 	return topRunPreview{
 		model: presentationModelLabel(normalizeModelRef(fs.Arg(0))), profile: *profile, level: level,

@@ -47,6 +47,9 @@ A new user can:
 
 ### Remaining release work
 
+The native and backend evidence matrix is tracked in
+[release acceptance](docs/release-acceptance.md).
+
 - [ ] Run the complete clean-machine acceptance path on all three supported
       operating systems.
 - [ ] Exercise Ollama, llama-server, and a generic OpenAI-compatible endpoint
@@ -54,8 +57,9 @@ A new user can:
 - [ ] Resolve every release-blocking defect found by that matrix and keep the
       cross-platform CI, race detector, vulnerability scan, fuzz smoke tests,
       distribution build, and installer syntax checks green.
-- [ ] Review every command's first-run error and next-action text from a new
-      user's perspective.
+- [x] Review every command's first-run error and next-action text from a new
+      user's perspective. Cross-platform command-contract tests pin successful
+      help, exact positional arguments, numeric validation, and useful hints.
 - [ ] Cut a 1.0 release candidate, verify all six binaries and checksums through
       the installers, then publish 1.0.
 

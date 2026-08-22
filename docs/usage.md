@@ -73,7 +73,7 @@ Terminal views of the loop, regenerated from the real printers:
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips (accuracy can hide them) |
-| `fitr device` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
+| `fitr device [--display MODE]` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
 | `fitr calibrate <a> <b> [--out PATH] [--lineage PATH]` | paired item discrimination; optional same-base lineage receipt |
 | `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads without claiming verified campaign readiness |
 
@@ -140,6 +140,10 @@ Ctrl-C is safe (exit 130).
   rank it against another device. Never uploaded.
 
 ## Output modes and exit codes
+
+Every documented subcommand accepts `--help` and exits 0 after printing its
+flag help. Malformed invocations write a diagnostic and next action to stderr,
+exit 2, and do not begin runtime discovery or modify stored evidence.
 
 ```bash
 fitr run m --display json    # NDJSON on stdout, nothing else

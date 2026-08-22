@@ -53,6 +53,17 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: '1.25' }
       - run: make dist
+      - name: binary CLI contract
+        shell: bash
+        run: |
+          ./dist/fitr-linux-amd64 --help >/dev/null 2>&1
+          ./dist/fitr-linux-amd64 run --help >/dev/null 2>&1
+          set +e
+          diagnostic="$(./dist/fitr-linux-amd64 device unexpected 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          grep -F "hint: fitr device" <<<"$diagnostic"
       - name: binary size gate
         shell: bash
         run: |
