@@ -678,13 +678,13 @@ func TestStreamingConformanceMatrix(t *testing.T) {
 func TestVersionTriesVLLMEndpoint(t *testing.T) {
 	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/version" {
-			w.Write([]byte(`{"version":"0.9.3"}`))
+			w.Write([]byte(`{"version":"0.9.4"}`))
 			return
 		}
 		http.Error(w, "no", 404)
 	})
 	defer done()
-	if v := c.Version(context.Background()); v != "openai-compat 0.9.3" {
+	if v := c.Version(context.Background()); v != "openai-compat 0.9.4" {
 		t.Fatalf("version = %q", v)
 	}
 }

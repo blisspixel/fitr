@@ -1,6 +1,7 @@
 BINARY := fitr
 LDFLAGS := -s -w
 BUILD_FLAGS := -trimpath
+CGO := 0
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 .PHONY: all build test vet fmt lint dist clean install spec-sync screenshots
@@ -20,7 +21,7 @@ spec-sync:
 	@echo "spec synced"
 
 build:
-	go build $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fitr
+	CGO_ENABLED=$(CGO) go build $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fitr
 
 test:
 	go test ./... -count=1
@@ -40,14 +41,14 @@ dist:
 		os=$${p%/*}; arch=$${p#*/}; ext=""; \
 		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
 		echo "  $$os/$$arch"; \
-		GOOS=$$os GOARCH=$$arch go build $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" \
+		CGO_ENABLED=$(CGO) GOOS=$$os GOARCH=$$arch go build $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" \
 			-o dist/$(BINARY)-$$os-$$arch$$ext ./cmd/fitr; \
 	done
 	@cp LICENSE THIRD_PARTY_NOTICES.md dist/
 	@ls -lh dist/
 
 install: build
-	go install $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" ./cmd/fitr
+	CGO_ENABLED=$(CGO) go install $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" ./cmd/fitr
 
 clean:
 	rm -rf dist $(BINARY) $(BINARY).exe

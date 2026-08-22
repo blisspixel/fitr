@@ -36,8 +36,15 @@ jobs:
       - name: reproducible Linux binary
         shell: bash
         run: |
-          go build -trimpath -ldflags="-s -w" -o "${RUNNER_TEMP}/fitr-linux-amd64" ./cmd/fitr
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${RUNNER_TEMP}/fitr-linux-amd64" ./cmd/fitr
           cmp dist/fitr-linux-amd64 "${RUNNER_TEMP}/fitr-linux-amd64"
+      - name: static Linux binary
+        shell: bash
+        run: |
+          if readelf -l dist/fitr-linux-amd64 | grep -q 'Requesting program interpreter'; then
+            echo "Linux release binary has a dynamic loader" >&2
+            exit 1
+          fi
       - name: binary size gate
         shell: bash
         run: |

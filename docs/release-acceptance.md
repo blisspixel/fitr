@@ -15,7 +15,7 @@ Last updated: 2026-08-22.
 | Evidence contract | Tests cover runtime-bound model identity, context verification, device fingerprints, immutable history, signed completion records, contamination, and comparison refusal. |
 | Release binary smoke | The built Linux binary must pass global and subcommand help, then reject a malformed command with exit 2 and a useful hint. |
 | Installer smoke | Windows, macOS, and Linux runners download the latest public release, bind the native asset to its exact checksum entry, and validate its version command. |
-| Release quality | Formatting, vet, unit tests, race detection, cross-compilation, reproducible Linux build comparison, size limits, vulnerability scanning, fuzz smoke tests, and installer syntax checks must all pass. |
+| Release quality | Formatting, vet, unit tests, race detection, cross-compilation, reproducible Linux build comparison, static ELF verification, size limits, vulnerability scanning, fuzz smoke tests, and installer syntax checks must all pass. |
 
 ## Native operating-system matrix
 

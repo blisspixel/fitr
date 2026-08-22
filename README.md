@@ -49,7 +49,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
-Pin a release with `FITR_VERSION=v0.9.3`. Relocate with `FITR_BIN`. Installers
+Pin a release with `FITR_VERSION=v0.9.4`. Relocate with `FITR_BIN`. Installers
 bind the downloaded asset to its exact `SHA256SUMS` entry. From source (Go
 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
 
