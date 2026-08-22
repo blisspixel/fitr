@@ -34,7 +34,8 @@ You should be able to see it when you look.
 | **Shipped** | **0.5.0** | Evidence contract (A/B), lineage, family-stratified aggregation | Tagged. |
 | **Shipped** | **0.6.0** | Installed inventory | Bare `fitr` lists what's serving. |
 | **Shipped** | **0.7.0** | Context-fit table on advise | Weights / KV / buffers / headroom at 2k–32k. |
-| **Now** | **0.8.0** | Loop cohesion | Inventory fit tier, TUI inventory view, one next-command grammar. |
+| **Shipped** | **0.8.0** | Loop cohesion | Inventory fit tier, TUI inventory view, one next-command grammar. |
+| **Now** | **0.9.0** | Close apply | Serving vs measured ctx, windows on inventory, `fitr <model>` is advise. |
 | **1.0** | 1.0 | A stranger closes advise → run → apply from inventory, on their machine | Still no public leaderboard, no LLM-as-judge, no invented SKU gates. |
 | **Later** | Trust C and loop extras | Isolation, signing, catalog, vision, community profiles | Real work. None of it is the next product week. |
 
@@ -103,6 +104,20 @@ The terminal views for this loop are an Inventory table, a Context fit graph,
 a Candidate evidence pane (`view` / Result), and a Change log (History).
 Every row carries one of four plain states: measured, unproven, incompatible,
 or stale.
+
+### Close apply (0.9.0)
+
+The loop is advise → run → apply. Inventory used to suggest `view` after any
+successful default-battery run, even when the measured ctx was not 8192 and
+even when a loaded process was still sitting at a different window. Apply
+printed recipes with no idea whether the server already matched.
+
+- [x] Measured inventory rows use the shared next-command grammar (battery before apply)
+- [x] Live PS `context_length` is serving context; absence is not 8192
+- [x] `fitr apply` when measured and serving differ; `fitr view` when they match
+- [x] Compact context-fit graph on inventory rows that already have architecture
+- [x] `fitr <model>` is named advise
+- [x] Apply names the live serving window when one is observed; it still never restarts the server
 
 ---
 

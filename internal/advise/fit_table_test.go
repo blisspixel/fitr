@@ -59,6 +59,13 @@ func TestContextFitLlamaTable(t *testing.T) {
 	if !saw8k.Suggested && !suggestedAt(tble, 16384) {
 		t.Fatal("largest compatible window should be suggested when requested does not fit")
 	}
+	got := CompactWindows(tble)
+	if !strings.Contains(got, "8k ok") || !strings.Contains(got, ">32k no") {
+		t.Fatalf("compact windows = %q", got)
+	}
+	if !strings.Contains(got, "*") {
+		t.Fatalf("suggested window must be marked: %q", got)
+	}
 }
 
 func suggestedAt(tble *FitTable, ctx int) bool {

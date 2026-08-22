@@ -224,13 +224,17 @@ func shotInventory(context.Context) (string, error) {
 	fmt.Println("$ fitr")
 	fmt.Println()
 	render.WriteInventory(os.Stdout, render.Inventory{
-		Fitr: "0.6.0", CPU: "AMD Ryzen 7 7840U  (16 logical)", GPU: "AMD Radeon 780M",
+		Fitr: "0.9.0", CPU: "AMD Ryzen 7 7840U  (16 logical)", GPU: "AMD Radeon 780M",
 		GPUBackend: "rocm", MemoryGB: 32, MemorySource: "unified memory (system RAM)",
 		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
 		Profile: "lappy", Uncalibrated: false,
 		Rows: []render.InventoryRow{
-			{Model: "qwen3:8b", State: "measured", Fit: "compatible", SizeB: 5 << 30, Loaded: true, Next: "fitr view qwen3:8b"},
-			{Model: "gemma4:12b", State: "unproven", Fit: "compatible", SizeB: 8 << 30, Next: "fitr run gemma4:12b"},
+			{Model: "qwen3:30b-q4", State: "measured", Fit: "low_memory", SizeB: 18 << 30, Loaded: true,
+				Ctx: "16k/8k", Next: "fitr apply qwen3:30b-q4",
+				Note:    "measured ctx=16384; serving ctx=8192",
+				Windows: "2k ok | 4k ok | 8k ok | *16k ok | >32k no"},
+			{Model: "gemma4:12b", State: "unproven", Fit: "compatible", SizeB: 8 << 30,
+				Next: "fitr run gemma4:12b", Windows: "2k ok | 4k ok | *8k ok | 16k ok | 32k no"},
 			{Model: "qwen3:32b", State: "stale", SizeB: 20 << 30, Next: "fitr run qwen3:32b",
 				Note: "device or runtime changed since the last measurement"},
 			{Model: "llama3.1:70b", State: "incompatible", Fit: "incompatible", SizeB: 40 << 30, Next: "try a smaller quant",

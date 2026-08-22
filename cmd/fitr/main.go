@@ -73,6 +73,7 @@ func usage() {
 
 usage:
   fitr [--display MODE]             installed models, evidence, next command
+  fitr <model>                      named advise (same as fitr advise <model>)
   fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]
   fitr run <model> [--quick|--full|--checks-only] [-k N] [--ctx N] [--profile P] [--display MODE] [--html]
   fitr apply [model] [--ctx N]
@@ -111,6 +112,7 @@ environment:
 
 examples:
   fitr
+  fitr qwen3:30b
   fitr advise --display json
   fitr run qwen3-coder:30b --full
   fitr run https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
@@ -184,9 +186,8 @@ func run() int {
 		if strings.HasPrefix(os.Args[1], "-") {
 			return cmdStatus(ctx, os.Args[1:])
 		}
-		errPrint(fmt.Sprintf("unknown command %q", os.Args[1]), "",
-			"run `fitr --help` for usage")
-		return exitUsage
+		// A positional that is not a command is a model: the named advise.
+		return cmdAdvise(ctx, os.Args[1:])
 	}
 }
 
@@ -971,7 +972,7 @@ func cmdApply(ctx context.Context, args []string) int {
 		}
 		if n <= 0 {
 			errPrint("no saved result for this model", "",
-				"fitr run "+model+" --full   or   fitr apply "+model+" --ctx 4096")
+				"fitr run "+model+"   or   fitr apply "+model+" --ctx 4096")
 			return exitError
 		}
 	}
@@ -986,6 +987,12 @@ func cmdApply(ctx context.Context, args []string) int {
 		n = 4096
 	}
 	plan := advise.PlanApply(kind, model, n)
+	if model != "" {
+		if serving, ok := observeServingCtx(ctx, model); ok {
+			plan.ServingCtx = serving
+			plan.ServingKnown = true
+		}
+	}
 	switch render.Resolve(*mode) {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
@@ -1025,7 +1032,7 @@ func cmdTune(ctx context.Context, args []string) int {
     OLLAMA_KV_CACHE_TYPE     f16 vs q8_0 vs q4_0; changes the fingerprint
 
   measure a point: set the knob, then
-    fitr run <model> [--ctx N] --full
+    fitr run <model> [--ctx N]
     fitr compare <a> <b>
   score quality + degeneracy + throughput jointly. llama-bench already owns
   throughput-only sweeps. Persist a measured ctx with fitr apply.
@@ -2217,7 +2224,7 @@ func cmdExport(ctx context.Context, args []string) int {
 	model := normalizeModelRef(fs.Arg(0))
 	results, err := loadResults()
 	if err != nil || len(results) == 0 {
-		errPrint("no results yet", "", "fitr run "+model+" --full")
+		errPrint("no results yet", "", "fitr run "+model)
 		return exitError
 	}
 	var r *Result
@@ -2228,7 +2235,7 @@ func cmdExport(ctx context.Context, args []string) int {
 	}
 	if r == nil {
 		errPrint(fmt.Sprintf("no stored result for %q", model), "",
-			"fitr run "+model+" --full")
+			"fitr run "+model)
 		return exitError
 	}
 	path := *out
@@ -2429,7 +2436,7 @@ func cmdView(_ context.Context, args []string) int {
 		} else {
 			results, err := loadResults()
 			if err != nil || len(results) == 0 {
-				errPrint("no results yet", "", "fitr run "+normalizeModelRef(candidate)+" --full")
+				errPrint("no results yet", "", "fitr run "+normalizeModelRef(candidate))
 				return exitError
 			}
 			selected = latestNamed(results, normalizeModelRef(candidate))
@@ -2793,8 +2800,9 @@ func cmdStatus(ctx context.Context, args []string) int {
 		return exitUsage
 	}
 	if fs.NArg() > 0 {
-		errPrint(fmt.Sprintf("unknown command %q", fs.Arg(0)), "", "run `fitr --help` for usage")
-		return exitUsage
+		rest := []string{fs.Arg(0), "--display", *mode, "--backend", *backend}
+		rest = append(rest, fs.Args()[1:]...)
+		return cmdAdvise(ctx, rest)
 	}
 	return printInventory(ctx, *backend, *mode)
 }
@@ -2849,6 +2857,8 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 		inv.Rows = append(inv.Rows, render.InventoryRow{
 			Model: row.Model, State: row.State, Fit: row.Fit, SizeB: row.SizeB,
 			Loaded: row.Loaded, Next: row.Next, Note: row.Note,
+			Ctx: row.Ctx, Windows: row.Windows, MeasuredCtx: row.MeasuredCtx,
+			ServingCtx: row.ServingCtx, ServingKnown: row.ServingKnown,
 		})
 	}
 	inv.Hidden = table.Hidden
@@ -2885,9 +2895,13 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 		installed = append(installed, item)
 	}
 	var loaded []string
+	serving := map[string]int{}
 	if running, err := b.PS(listCtx); err == nil {
 		for _, m := range running {
 			loaded = append(loaded, m.Name)
+			if m.ContextLength > 0 {
+				serving[m.Name] = m.ContextLength
+			}
 		}
 	}
 	var evidence []advise.InventoryEvidence
@@ -2897,6 +2911,7 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 	return advise.Join(advise.InventoryQuery{
 		Tags: installed, Loaded: loaded, Evidence: evidence,
 		CurrentKey: fp.Key(), HaveGB: fp.VRAMGb, HaveSrc: fp.VRAMSource,
+		Serving: serving,
 	}), nil
 }
 
@@ -2905,6 +2920,13 @@ func evidenceFromRecords(recs []*record.Record) []advise.InventoryEvidence {
 	for _, rec := range recs {
 		if rec == nil {
 			continue
+		}
+		toolsBlocked := false
+		for need, verdict := range rec.Scorecard.Needs {
+			if strings.Contains(need, "tool") && verdict.State == score.Blocked {
+				toolsBlocked = true
+				break
+			}
 		}
 		out = append(out, advise.InventoryEvidence{
 			Model:          rec.Model,
@@ -2915,9 +2937,43 @@ func evidenceFromRecords(recs []*record.Record) []advise.InventoryEvidence {
 			Arch:           advise.ArchFromKVs(rec.ModelMeta.Info),
 			WeightsB:       rec.ModelMeta.Size,
 			NumCtx:         rec.ContextSize(),
+			Repeats:        rec.Repeats,
+			ToolsBlocked:   toolsBlocked,
 		})
 	}
 	return out
+}
+
+func observeServingCtx(ctx context.Context, model string) (int, bool) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return 0, false
+	}
+	found := llm.Discover(ctx)
+	if len(found) == 0 {
+		return 0, false
+	}
+	b, err := backendAt(found[0].Kind, found[0].URL)
+	if err != nil || b == nil {
+		return 0, false
+	}
+	listCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	running, err := b.PS(listCtx)
+	if err != nil {
+		return 0, false
+	}
+	n, seen := 0, false
+	for _, m := range running {
+		if !advise.SameModel(m.Name, model) || m.ContextLength <= 0 {
+			continue
+		}
+		if seen {
+			return 0, false
+		}
+		n, seen = m.ContextLength, true
+	}
+	return n, seen
 }
 
 func profileUncalibrated(p device.Profile) bool {
@@ -3412,7 +3468,7 @@ func cmdCompare(ctx context.Context, args []string) int {
 	for i, r := range []*Result{a, b} {
 		if r == nil {
 			errPrint(fmt.Sprintf("no stored result for %q", args[i]), "",
-				"fitr run "+args[i]+" --full")
+				"fitr run "+args[i])
 			return exitError
 		}
 	}

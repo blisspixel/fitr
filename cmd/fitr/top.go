@@ -662,6 +662,7 @@ func attachTopInventory(ctx context.Context, snapshot *top.Snapshot) {
 		snapshot.Inventory = append(snapshot.Inventory, top.InventoryItem{
 			ID: row.Model, Model: row.Model, State: row.State, Fit: row.Fit,
 			SizeB: row.SizeB, Loaded: row.Loaded, Next: row.Next, Note: row.Note,
+			Ctx: row.Ctx, Windows: row.Windows,
 		})
 	}
 }

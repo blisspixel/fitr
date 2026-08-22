@@ -568,12 +568,14 @@ func formatParams(r Report) string {
 // ApplyPlan is the copy-paste to persist a measured context. Mutates is
 // always false: fitr prints these commands, it never restarts a server.
 type ApplyPlan struct {
-	Model   string   `json:"model,omitempty"`
-	Ctx     int      `json:"ctx"`
-	Backend string   `json:"backend,omitempty"`
-	Mutates bool     `json:"mutates"`
-	Note    string   `json:"note"`
-	Steps   []string `json:"steps"`
+	Model        string   `json:"model,omitempty"`
+	Ctx          int      `json:"ctx"`
+	Backend      string   `json:"backend,omitempty"`
+	Mutates      bool     `json:"mutates"`
+	Note         string   `json:"note"`
+	Steps        []string `json:"steps"`
+	ServingCtx   int      `json:"serving_ctx,omitempty"`
+	ServingKnown bool     `json:"serving_known,omitempty"`
 }
 
 // PlanApply names the commands that persist ctx on a serving runtime.
@@ -646,6 +648,13 @@ func WriteApply(w io.Writer, p ApplyPlan) {
 	fmt.Fprintf(w, "  ctx            %d\n", p.Ctx)
 	if p.Backend != "" {
 		fmt.Fprintf(w, "  runtime        %s\n", render.SingleLine(p.Backend))
+	}
+	if p.ServingKnown && p.ServingCtx > 0 {
+		if p.ServingCtx == p.Ctx {
+			fmt.Fprintf(w, "  serving        %d (this process already has this window)\n", p.ServingCtx)
+		} else {
+			fmt.Fprintf(w, "  serving        %d\n", p.ServingCtx)
+		}
 	}
 	fmt.Fprintln(w)
 	for _, s := range p.Steps {

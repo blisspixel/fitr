@@ -27,7 +27,9 @@ func testSnapshot() Snapshot {
 		},
 		History: []Run{a, b, c},
 		Inventory: []InventoryItem{
-			{ID: "alpha:8b", Model: "alpha:8b", State: "measured", Fit: "compatible", Next: "fitr view alpha:8b"},
+			{ID: "alpha:8b", Model: "alpha:8b", State: "measured", Fit: "compatible",
+				Ctx: "16k/8k", Next: "fitr apply alpha:8b", Windows: "2k ok | 4k ok | *8k ok | >16k no",
+				Note: "measured ctx=16384; serving ctx=8192"},
 			{ID: "new:7b", Model: "new:7b", State: "unproven", Next: "fitr advise new:7b"},
 		},
 	}

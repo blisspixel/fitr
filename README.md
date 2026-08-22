@@ -11,7 +11,8 @@ does on this box, in a measurement you can compare to the last one you tried.
 
 ```bash
 fitr                              # what's installed, what's measured, what to run next
-fitr advise some-new-model:tag    # does it fit, which flag if not
+fitr some-new-model:tag           # named advise: does it fit, which flag if not
+fitr advise some-new-model:tag    # same as `fitr some-new-model:tag`
 fitr run some-new-model:tag --pull
 fitr apply some-new-model:tag     # print how to persist the measured ctx
 fitr board                        # compare everything you have measured
@@ -28,7 +29,7 @@ fitr top                          # the same loop, full-screen
 The CLI is the primary product surface. Rich terminals get semantic color,
 throughput bars, and repeat-shape graphs; plain and JSON output remain clean
 automation interfaces. `fitr top` is an opt-in full-screen monitor with Live,
-Result, Board, and immutable History views. The [interface direction](docs/interface.md)
+Result, Board, History, and Inventory views. The [interface direction](docs/interface.md)
 keeps this renderer-neutral foundation on a path to truly native desktop clients.
 
 One evening, one device, one config:
@@ -127,8 +128,8 @@ Everyday loop:
 
 | Command | Does |
 |---|---|
-| `fitr` | installed models joined to evidence: measured, unproven, incompatible, or stale; one next command per row |
-| `fitr advise [model]` | no model: inventory. With a model: fit verdict plus a context-fit table (weights / KV / buffers / headroom at 2k–32k) |
+| `fitr` | installed models joined to evidence: measured, unproven, incompatible, or stale; fit windows; one next command per row |
+| `fitr [model]` / `fitr advise [model]` | no model: inventory. With a model: fit verdict plus a context-fit table (weights / KV / buffers / headroom at 2k–32k) |
 | `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model on this device; generated-code execution is disabled by default |
 | `fitr apply [model]` | print how to persist a measured context; never restarts the server |
 | `fitr view [model\|result.json]` | reopen the newest or selected saved result with repeat-shape graphs |

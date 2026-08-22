@@ -32,7 +32,7 @@ func TestRenderInventoryListsStateInText(t *testing.T) {
 	state.View = ViewInventory
 	state.Width, state.Height = 100, 24
 	got := Render(state, DefaultGlyphs(false)).Plain()
-	for _, want := range []string{"INVENTORY", "measured", "unproven", "not a ranking"} {
+	for _, want := range []string{"INVENTORY", "measured", "unproven", "not a ranking", "16k/8k", "2k ok", "fitr apply"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("inventory canvas missing %q:\n%s", want, got)
 		}

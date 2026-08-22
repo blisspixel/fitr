@@ -45,7 +45,8 @@ It has five views:
    explicit boundary between blocks.
 4. History: inspect configuration changes and open a valid pairwise compare.
 5. Inventory: installed models with measured/unproven/incompatible/stale
-   state, optional fit tier, and one next command. Not a ranking.
+   state, optional fit tier, measured/serving ctx, a compact context-fit
+   graph on the selected row, and one next command. Not a ranking.
 
 The TUI must restore the terminal after interrupts and panics, remain fully
 keyboard-driven, work on macOS, Linux, and Windows terminals, and degrade at

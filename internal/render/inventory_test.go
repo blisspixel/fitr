@@ -14,7 +14,8 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
 		Profile: "default", Uncalibrated: true,
 		Rows: []InventoryRow{
-			{Model: "qwen3:8b", State: "measured", SizeB: 5 << 30, Next: "fitr view qwen3:8b"},
+			{Model: "qwen3:8b", State: "measured", SizeB: 5 << 30, Ctx: "16k/8k", Next: "fitr apply qwen3:8b",
+				Note: "measured ctx=16384; serving ctx=8192", Windows: "2k ok | 4k ok | 8k ok | *16k ok | 32k no"},
 			{Model: "gemma4:12b", State: "unproven", SizeB: 8 << 30, Loaded: true, Next: "fitr advise gemma4:12b"},
 			{Model: "llama3.1:70b", State: "incompatible", SizeB: 40 << 30, Next: "try a smaller quant", Note: "weights 40.0 GB exceed 16.0 GB (nvidia-smi)"},
 		},
@@ -22,8 +23,8 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"fitr 0.6.0", "cpu", "gpu", "ollama", "UNCALIBRATED",
-		"measured", "unproven", "incompatible", "FIT",
-		"fitr view qwen3:8b", "fitr advise gemma4:12b", "try a smaller quant",
+		"measured", "unproven", "incompatible", "FIT", "CTX", "16k/8k", "*16k ok",
+		"fitr apply qwen3:8b", "fitr advise gemma4:12b", "try a smaller quant",
 		"* gemma4:12b", "never a recommendation",
 	} {
 		if !strings.Contains(got, want) {

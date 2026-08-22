@@ -50,9 +50,9 @@ enter a PASS or FAIL denominator.
 
 | Command | Does |
 |---|---|
-| `fitr` | installed inventory: measured / unproven / incompatible / stale, one next command per row |
+| `fitr` | installed inventory: measured / unproven / incompatible / stale, fit windows, one next command per row |
 | `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model; checks-only runs the generated battery for calibration |
-| `fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]` | no model: inventory. With a model: does it fit, and if not, which flag to try |
+| `fitr [model]` / `fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]` | no model: inventory. With a model: does it fit, and if not, which flag to try |
 | `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
@@ -172,9 +172,13 @@ terminal.
 Bare `fitr` and `fitr advise` with no model print the installed inventory:
 what the serving runtime already has, joined to current fitr evidence. Each
 row is **measured**, **unproven**, **incompatible**, or **stale**, with one
-next command. Unmeasured is a candidate, never a recommendation. Color does
-not carry the state. `fitr advise <model>` remains the one-artifact fit
-verdict; inventory does not `Show()` every blob or pull anything.
+next command. Architecture, when already known, adds a compact context-fit
+graph (`2k ok | 4k ok | *8k ok | 16k no`). CTX is the measured window, or
+`measured/serving` when a live process reports a different allocation.
+A measured run at a non-default ctx asks `fitr apply` until the server is
+already serving that window. Unmeasured is a candidate, never a
+recommendation. Color does not carry the state. `fitr <model>` is named
+advise; inventory does not `Show()` every blob or pull anything.
 
 A named `fitr advise` prints a context-fit table at 2k / 4k / 8k / 16k / 32k
 and the architecture max: weights, KV, buffers, need, and headroom.

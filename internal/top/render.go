@@ -432,7 +432,7 @@ func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: "unmeasured is a candidate, never a recommendation", Role: RoleMuted})
 		return
 	}
-	w.line(Span{Text: "MODEL                    STATE        FIT          NEXT", Role: RoleMuted})
+	w.line(Span{Text: "MODEL                    STATE        FIT        CTX       NEXT", Role: RoleMuted})
 	offset := min(state.Offset[ViewInventory], max(len(items)-1, 0))
 	for _, item := range items[offset:] {
 		selected := item.ID == state.Selected[ViewInventory]
@@ -453,10 +453,20 @@ func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
 		}
 		line := prefix + padCells(clipCells(name, 22, glyphs.Ellipsis), 22)
 		line += "  " + padCells(item.State, 12)
-		line += padCells(fitLabel, 12)
-		line += clipCells(item.Next, max(canvas.Width-54, 10), glyphs.Ellipsis)
+		line += padCells(fitLabel, 10)
+		ctxCol := item.Ctx
+		if ctxCol == "" {
+			ctxCol = "-"
+		}
+		line += padCells(ctxCol, 9)
+		line += clipCells(item.Next, max(canvas.Width-61, 10), glyphs.Ellipsis)
 		if !w.line(Span{Text: line, Role: role}) {
 			break
+		}
+		if selected && item.Windows != "" {
+			if !w.line(Span{Text: "    " + clipCells(item.Windows, max(canvas.Width-6, 8), glyphs.Ellipsis), Role: RoleMuted}) {
+				break
+			}
 		}
 		if selected && item.Note != "" {
 			if !w.line(Span{Text: "    " + clipCells(item.Note, max(canvas.Width-6, 8), glyphs.Ellipsis), Role: RoleMuted}) {
@@ -464,7 +474,7 @@ func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
 			}
 		}
 	}
-	w.line(Span{Text: "* loaded   Enter opens a measured result   board still ranks only comparable runs", Role: RoleMuted})
+	w.line(Span{Text: "* loaded   CTX measured/serving   Enter opens a measured result   board still ranks only comparable runs", Role: RoleMuted})
 }
 
 func renderComparison(canvas *Canvas, state State) {

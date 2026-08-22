@@ -1,5 +1,10 @@
 package advise
 
+import (
+	"strconv"
+	"strings"
+)
+
 // FitTable is weights / KV / buffers / headroom at several context points.
 // Buffers are n/a unless a resident or dummy-allocation was measured at that
 // exact ctx. Decode/prefill overlay only from saved runs at that ctx.
@@ -206,4 +211,56 @@ func anyBuffersKnown(points []FitPoint) bool {
 		}
 	}
 	return false
+}
+
+// CompactWindows is the one-line context-fit graph:
+// "2k ok | 4k ok | *8k ok | >16k no". Empty when nothing was sized.
+// * is the suggested window; > is the requested window when it does not fit.
+func CompactWindows(t *FitTable) string {
+	if t == nil || len(t.Points) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(t.Points))
+	for _, p := range t.Points {
+		label := compactCtx(p.Ctx)
+		if label == "" {
+			continue
+		}
+		mark := "ok"
+		if p.Tier != Compatible {
+			mark = "no"
+		}
+		prefix := ""
+		if p.Suggested {
+			prefix = "*"
+		} else if p.Requested {
+			prefix = ">"
+		}
+		parts = append(parts, prefix+label+" "+mark)
+	}
+	return strings.Join(parts, " | ")
+}
+
+func compactCtx(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n%1024 == 0 && n >= 1024 {
+		return strconv.Itoa(n/1024) + "k"
+	}
+	return strconv.Itoa(n)
+}
+
+func compactCtxPair(measured, serving int, known bool) string {
+	if measured <= 0 && !(known && serving > 0) {
+		return ""
+	}
+	m := compactCtx(measured)
+	if !known || serving <= 0 || serving == measured {
+		if m != "" {
+			return m
+		}
+		return compactCtx(serving)
+	}
+	return m + "/" + compactCtx(serving)
 }

@@ -383,6 +383,12 @@ func TestPlanApplyNeverMutates(t *testing.T) {
 	if !strings.Contains(out, "does not restart") || !strings.Contains(out, "qwen3:30b") {
 		t.Fatalf("WriteApply:\n%s", out)
 	}
+	p.ServingKnown, p.ServingCtx = true, 4096
+	buf.Reset()
+	WriteApply(&buf, p)
+	if !strings.Contains(buf.String(), "already has this window") {
+		t.Fatalf("matching serving ctx:\n%s", buf.String())
+	}
 }
 
 func TestHumanWritersNeutralizeTerminalControls(t *testing.T) {

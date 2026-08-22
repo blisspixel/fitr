@@ -38,6 +38,8 @@ type InventoryEvidence struct {
 	Arch           Arch
 	WeightsB       int64
 	NumCtx         int
+	Repeats        int
+	ToolsBlocked   bool
 }
 
 // InventoryQuery is everything Join needs. Tags are the runtime's list, not
@@ -49,18 +51,24 @@ type InventoryQuery struct {
 	CurrentKey string
 	HaveGB     float64
 	HaveSrc    string
+	Serving    map[string]int // observed PS context_length; missing/0 = unknown
 }
 
 // InventoryRow is one installed model joined to current evidence.
 type InventoryRow struct {
-	Model  string
-	State  string
-	SizeB  int64
-	Quant  string
-	Loaded bool
-	Fit    string // compatible / low_memory / incompatible / skip; empty if unknown
-	Next   string
-	Note   string
+	Model        string
+	State        string
+	SizeB        int64
+	Quant        string
+	Loaded       bool
+	Fit          string // compatible / low_memory / incompatible / skip; empty if unknown
+	Next         string
+	Note         string
+	Ctx          string // compact measured, or measured/serving when they differ
+	Windows      string // compact context-fit graph; empty if architecture unknown
+	MeasuredCtx  int
+	ServingCtx   int
+	ServingKnown bool
 }
 
 // InventoryTable is the joined, sorted, capped inventory.
@@ -70,8 +78,9 @@ type InventoryTable struct {
 }
 
 // Join lists what is already serving. Unmeasured is a candidate, never a
-// recommendation. Weights-versus-budget is the only fit check: architecture
-// KV sizing stays on `fitr advise <model>`.
+// recommendation. Architecture, when already known, attaches a fit tier and
+// a compact context-fit graph. Serving context comes only from a live PS
+// observation, never from a guessed default.
 func Join(q InventoryQuery) InventoryTable {
 	loaded := map[string]bool{}
 	for _, name := range q.Loaded {
@@ -119,14 +128,18 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 	weightsExceed := memoryBudgetTrusted(q.HaveSrc) && q.HaveGB > 0 && tag.Size > 0 &&
 		float64(tag.Size) > q.HaveGB*GiB
 
+	serving, servingKnown := servingOf(tag.Name, q.Serving)
+	row.ServingCtx = serving
+	row.ServingKnown = servingKnown
 	switch {
 	case ev != nil && evidenceUsable(*ev, q.CurrentKey):
 		row.State = StateMeasured
+		row.MeasuredCtx = ev.NumCtx
+		row.Next = MeasuredNext(tag.Name, ev.Repeats, ev.NumCtx, ev.Level, ev.ToolsBlocked, serving, servingKnown)
 		if ev.Level == "quick" || ev.Level == "checks-only" {
-			row.Next = "fitr run " + shellModel(tag.Name)
 			row.Note = "measured at --" + ev.Level + "; default battery still unproven"
-		} else {
-			row.Next = "fitr view " + shellModel(tag.Name)
+		} else if note := applyNote(ev.NumCtx, serving, servingKnown); note != "" {
+			row.Note = note
 		}
 	case ev != nil:
 		row.State = StateStale
@@ -146,6 +159,7 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 		row.Next = "fitr advise " + shellModel(tag.Name)
 	}
 	attachFit(&row, tag, ev, q)
+	row.Ctx = compactCtxPair(row.MeasuredCtx, row.ServingCtx, row.ServingKnown)
 	return row
 }
 
@@ -170,11 +184,13 @@ func attachFit(row *InventoryRow, tag InstalledModel, ev *InventoryEvidence, q I
 	if !arch.KVReady() && !arch.Hybrid {
 		return
 	}
-	r := evaluateCore(Input{
+	in := Input{
 		WeightsB: weights, HaveGB: q.HaveGB, HaveSrc: q.HaveSrc,
 		Ctx: ctx, Arch: arch,
-	})
+	}
+	r := evaluateCore(in)
 	row.Fit = r.Tier
+	row.Windows = CompactWindows(ContextFit(in))
 	if row.State != StateUnproven {
 		return
 	}
@@ -182,6 +198,37 @@ func attachFit(row *InventoryRow, tag InstalledModel, ev *InventoryEvidence, q I
 		row.Next = next
 	}
 }
+
+func servingOf(name string, serving map[string]int) (int, bool) {
+	if n, ok := serving[name]; ok && n > 0 {
+		return n, true
+	}
+	for have, n := range serving {
+		if n > 0 && sameInventoryModel(name, have) {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+func applyNote(measured, serving int, known bool) string {
+	if measured <= 0 {
+		return ""
+	}
+	if known && serving > 0 && serving != measured {
+		return fmt.Sprintf("measured ctx=%d; serving ctx=%d", measured, serving)
+	}
+	if known && serving == measured && measured != defaultRunCtx {
+		return fmt.Sprintf("serving the measured ctx=%d", measured)
+	}
+	if !known && measured != defaultRunCtx {
+		return fmt.Sprintf("measured ctx=%d; persist so the next load keeps it", measured)
+	}
+	return ""
+}
+
+// SameModel is the inventory name match, including :latest aliases.
+func SameModel(a, b string) bool { return sameInventoryModel(a, b) }
 
 func evidenceUsable(ev InventoryEvidence, currentKey string) bool {
 	if ev.IntegrityIssue != "" || ev.Contaminated {

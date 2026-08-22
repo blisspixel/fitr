@@ -19,6 +19,64 @@ func TestJoinUnprovenWhenNoEvidence(t *testing.T) {
 	}
 }
 
+func TestJoinMeasuredNonDefaultCtxAsksApply(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:       []InstalledModel{{Name: "m"}},
+		CurrentKey: "k",
+		Evidence:   []InventoryEvidence{{Model: "m", DeviceKey: "k", Level: "default", NumCtx: 16384, Repeats: 3}},
+	})
+	row := table.Rows[0]
+	if row.State != StateMeasured || row.Next != "fitr apply m" {
+		t.Fatalf("measured custom ctx = %+v", row)
+	}
+	if !strings.Contains(row.Note, "16384") {
+		t.Fatalf("apply pending must name the measured ctx: %q", row.Note)
+	}
+}
+
+func TestJoinMeasuredServingMatchViews(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:       []InstalledModel{{Name: "m"}},
+		CurrentKey: "k",
+		Serving:    map[string]int{"m": 16384},
+		Evidence:   []InventoryEvidence{{Model: "m", DeviceKey: "k", Level: "default", NumCtx: 16384, Repeats: 3}},
+	})
+	row := table.Rows[0]
+	if row.Next != "fitr view m" {
+		t.Fatalf("already serving measured ctx = %+v", row)
+	}
+	if row.Ctx != "16k" {
+		t.Fatalf("ctx column = %q", row.Ctx)
+	}
+}
+
+func TestJoinServingDiffersShowsPair(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:       []InstalledModel{{Name: "m"}},
+		CurrentKey: "k",
+		Serving:    map[string]int{"m": 8192},
+		Evidence:   []InventoryEvidence{{Model: "m", DeviceKey: "k", Level: "default", NumCtx: 16384, Repeats: 3}},
+	})
+	row := table.Rows[0]
+	if row.Next != "fitr apply m" || row.Ctx != "16k/8k" {
+		t.Fatalf("serving differs = %+v", row)
+	}
+}
+
+func TestJoinAttachesWindowsWhenArchitectureKnown(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:   []InstalledModel{{Name: "llama", Size: 5 * GiB, Arch: llama8B()}},
+		HaveGB: 8, HaveSrc: "nvidia-smi",
+	})
+	row := table.Rows[0]
+	if row.Windows == "" || !strings.Contains(row.Windows, "ok") {
+		t.Fatalf("windows = %q", row.Windows)
+	}
+	if row.Fit == "" {
+		t.Fatal("fit tier must be set when architecture is known")
+	}
+}
+
 func TestJoinMeasuredSameDevice(t *testing.T) {
 	table := Join(InventoryQuery{
 		Tags:       []InstalledModel{{Name: "qwen3:8b", Size: 5 << 30}},

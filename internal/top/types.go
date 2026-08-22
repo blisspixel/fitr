@@ -144,14 +144,16 @@ type Live struct {
 // InventoryItem is one installed model on the TUI inventory view.
 // State and Fit are plain text. Color never carries them alone.
 type InventoryItem struct {
-	ID     string `json:"id"`
-	Model  string `json:"model"`
-	State  string `json:"state"`
-	Fit    string `json:"fit,omitempty"`
-	SizeB  int64  `json:"size_bytes,omitempty"`
-	Loaded bool   `json:"loaded,omitempty"`
-	Next   string `json:"next"`
-	Note   string `json:"note,omitempty"`
+	ID      string `json:"id"`
+	Model   string `json:"model"`
+	State   string `json:"state"`
+	Fit     string `json:"fit,omitempty"`
+	SizeB   int64  `json:"size_bytes,omitempty"`
+	Loaded  bool   `json:"loaded,omitempty"`
+	Next    string `json:"next"`
+	Note    string `json:"note,omitempty"`
+	Ctx     string `json:"ctx,omitempty"`
+	Windows string `json:"windows,omitempty"`
 }
 
 // Snapshot is a complete point-in-time presentation snapshot.

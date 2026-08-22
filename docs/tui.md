@@ -36,8 +36,11 @@ Inventory answers: what is already serving, and what is the cheapest next comman
 
 Installed models only. Each row is measured, unproven, incompatible, or stale.
 Fit (compatible / low mem / skip) appears when architecture is already known
-from a saved result or a GGUF path the runtime exposed. Unmeasured is never
-ranked. Enter opens a measured result; it does not pull or run.
+from a saved result or a GGUF path the runtime exposed. CTX is the measured
+window, or measured/serving when a live process reports a different
+allocation. The selected row shows the compact context-fit graph and whether
+apply is still pending. Unmeasured is never ranked. Enter opens a measured
+result; it does not pull or run.
 
 ### Live
 

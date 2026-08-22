@@ -28,13 +28,18 @@ type Inventory struct {
 }
 
 type InventoryRow struct {
-	Model  string
-	State  string
-	SizeB  int64
-	Loaded bool
-	Fit    string
-	Next   string
-	Note   string
+	Model        string
+	State        string
+	SizeB        int64
+	Loaded       bool
+	Fit          string
+	Next         string
+	Note         string
+	Ctx          string
+	Windows      string
+	MeasuredCtx  int
+	ServingCtx   int
+	ServingKnown bool
 }
 
 type inventoryJSON struct {
@@ -60,13 +65,18 @@ type inventoryRuntime struct {
 }
 
 type inventoryJSONRow struct {
-	Model  string `json:"model"`
-	State  string `json:"state"`
-	Fit    string `json:"fit,omitempty"`
-	SizeB  int64  `json:"size_bytes,omitempty"`
-	Loaded bool   `json:"loaded,omitempty"`
-	Next   string `json:"next"`
-	Note   string `json:"note,omitempty"`
+	Model        string `json:"model"`
+	State        string `json:"state"`
+	Fit          string `json:"fit,omitempty"`
+	SizeB        int64  `json:"size_bytes,omitempty"`
+	Loaded       bool   `json:"loaded,omitempty"`
+	Next         string `json:"next"`
+	Note         string `json:"note,omitempty"`
+	Ctx          string `json:"ctx,omitempty"`
+	Windows      string `json:"windows,omitempty"`
+	MeasuredCtx  int    `json:"measured_ctx,omitempty"`
+	ServingCtx   int    `json:"serving_ctx,omitempty"`
+	ServingKnown bool   `json:"serving_known,omitempty"`
 }
 
 // WriteInventory renders the installed list. Unmeasured is a candidate, never
@@ -134,7 +144,7 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "  %-24s %-12s %-12s %8s  %s\n", "MODEL", "STATE", "FIT", "SIZE", "NEXT")
+	fmt.Fprintf(w, "  %-24s %-12s %-12s %-8s %8s  %s\n", "MODEL", "STATE", "FIT", "CTX", "SIZE", "NEXT")
 	for _, row := range inv.Rows {
 		name := row.Model
 		if row.Loaded {
@@ -149,14 +159,21 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 			fitLabel = "low mem"
 		}
 		fitCol := p.wrap(fitTierColor(p, row.Fit), fmt.Sprintf("%-12s", fitLabel))
+		ctxCol := row.Ctx
+		if ctxCol == "" {
+			ctxCol = "-"
+		}
 		size := "-"
 		if row.SizeB > 0 {
 			size = fmt.Sprintf("%.1f GB", float64(row.SizeB)/(1024*1024*1024))
 		}
-		fmt.Fprintf(w, "  %-24s %s %s %8s  %s\n",
-			fit(name, 24, g.Ell), state, fitCol, size, SingleLine(row.Next))
+		fmt.Fprintf(w, "  %-24s %s %s %-8s %8s  %s\n",
+			fit(name, 24, g.Ell), state, fitCol, ctxCol, size, SingleLine(row.Next))
 		if row.Note != "" {
 			fmt.Fprintf(w, "  %-24s %s\n", "", p.wrap(p.Muted, SingleLine(row.Note)))
+		}
+		if row.Windows != "" {
+			fmt.Fprintf(w, "  %-24s %s\n", "", p.wrap(p.Muted, SingleLine(row.Windows)))
 		}
 	}
 	fmt.Fprintln(w)
@@ -164,7 +181,9 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, fmt.Sprintf("showing %d of %d installed; name one with fitr advise <model>",
 			len(inv.Rows), len(inv.Rows)+inv.Hidden)))
 	}
-	fmt.Fprintln(w, p.wrap(p.Muted, "  * loaded    unmeasured is a candidate, never a recommendation"))
+	fmt.Fprintln(w, p.wrap(p.Muted, "  * loaded    CTX is measured, or measured/serving when they differ"))
+	fmt.Fprintln(w, p.wrap(p.Muted, "  * suggested window   > requested window that does not fit"))
+	fmt.Fprintln(w, p.wrap(p.Muted, "  unmeasured is a candidate, never a recommendation"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  next is one command per row; board compares only measured runs"))
 }
 
@@ -204,6 +223,8 @@ func writeInventoryJSON(w io.Writer, inv Inventory) {
 		payload.Rows = append(payload.Rows, inventoryJSONRow{
 			Model: row.Model, State: row.State, Fit: row.Fit, SizeB: row.SizeB,
 			Loaded: row.Loaded, Next: row.Next, Note: row.Note,
+			Ctx: row.Ctx, Windows: row.Windows, MeasuredCtx: row.MeasuredCtx,
+			ServingCtx: row.ServingCtx, ServingKnown: row.ServingKnown,
 		})
 	}
 	enc := json.NewEncoder(w)

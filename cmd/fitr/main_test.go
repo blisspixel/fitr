@@ -446,6 +446,29 @@ func TestBareFitrIsStatusNotUsage(t *testing.T) {
 	}
 }
 
+func TestBareModelIsAdvise(t *testing.T) {
+	path := writeMiniGGUF(t)
+	oldArgs := os.Args
+	os.Args = []string{"fitr", path, "--vram-gb=8", "--ctx=4096", "--display=json"}
+	defer func() { os.Args = oldArgs }()
+	oldOut, oldErr := os.Stdout, os.Stderr
+	or, ow, _ := os.Pipe()
+	er, ew, _ := os.Pipe()
+	os.Stdout, os.Stderr = ow, ew
+	code := run()
+	ow.Close()
+	ew.Close()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	io.ReadAll(er)
+	out, _ := io.ReadAll(or)
+	if code != exitOK && code != exitGates {
+		t.Fatalf("code = %d, output:\n%s", code, out)
+	}
+	if !strings.Contains(string(out), `"tier"`) {
+		t.Fatalf("fitr <model> must be named advise:\n%s", out)
+	}
+}
+
 func TestAdviseWithoutModelIsInventory(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
