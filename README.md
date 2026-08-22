@@ -115,7 +115,7 @@ fitr top run qwen3:30b           # the same measurement with live monitoring
 ```
 
 From source (Go 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
-Pin a release with `FITR_VERSION=v0.8.0`, relocate with `FITR_BIN`.
+Pin a release with `FITR_VERSION=v0.9.0`, relocate with `FITR_BIN`.
 
 `--quick` is speed, memory, and plumbing. The default run adds generated
 checks, refusal, and tool withdrawal. `--full` adds a long agentic loop;

@@ -15,7 +15,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
 That puts one static binary on your PATH. The default evidence path needs no Go,
-Python, or venv. Pin a release with `FITR_VERSION=v0.8.0`; relocate with
+Python, or venv. Pin a release with `FITR_VERSION=v0.9.0`; relocate with
 `FITR_BIN`.
 
 From source (Go 1.25+):
