@@ -15,7 +15,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
 That puts one static binary on your PATH. The default evidence path needs no Go,
-Python, or venv. Pin a release with `FITR_VERSION=v0.6.0`; relocate with
+Python, or venv. Pin a release with `FITR_VERSION=v0.7.0`; relocate with
 `FITR_BIN`.
 
 From source (Go 1.25+):
@@ -175,6 +175,13 @@ row is **measured**, **unproven**, **incompatible**, or **stale**, with one
 next command. Unmeasured is a candidate, never a recommendation. Color does
 not carry the state. `fitr advise <model>` remains the one-artifact fit
 verdict; inventory does not `Show()` every blob or pull anything.
+
+A named `fitr advise` prints a context-fit table at 2k / 4k / 8k / 16k / 32k
+and the architecture max: weights, KV, buffers, need, and headroom.
+Buffers are `n/a` until `--load` or `--fit` measured that exact window.
+Decode/prefill appear only from a saved run at that ctx. Hybrid recurrent
+models skip the algebraic table until a measurement exists. The suggested
+row is the largest window that still fits when the requested one does not.
 
 ## Cores
 

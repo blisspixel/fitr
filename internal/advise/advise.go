@@ -61,6 +61,16 @@ type Input struct {
 	// LoadErr is set when --load was asked and the server refused. That is
 	// a measurement (the box could not take the model), not a skip.
 	LoadErr string
+	// Timings overlay decode/prefill from saved runs at an exact ctx. Empty
+	// means no overlay; never invent speed from file size.
+	Timings []SavedTiming
+}
+
+// SavedTiming is a measured decode/prefill at one request context.
+type SavedTiming struct {
+	Ctx        int
+	DecodeTPS  float64
+	PrefillTPS float64
 }
 
 type Arch struct {
@@ -153,30 +163,31 @@ func (a Arch) ActiveParams() (int64, bool) {
 }
 
 type Report struct {
-	Tier          string   `json:"tier"`
-	Model         string   `json:"model,omitempty"`
-	Quant         string   `json:"quant,omitempty"`
-	Why           string   `json:"why"`
-	Remedy        string   `json:"remedy,omitempty"`
-	Hint          string   `json:"hint,omitempty"`
-	Flag          string   `json:"flag,omitempty"`
-	FlagValue     int      `json:"flag_value,omitempty"`
-	NeedGB        float64  `json:"need_gb,omitempty"`
-	HaveGB        float64  `json:"have_gb,omitempty"`
-	WeightsGB     float64  `json:"weights_gb,omitempty"`
-	ObservedGB    float64  `json:"observed_gb,omitempty"`
-	KVGB          float64  `json:"kv_gb,omitempty"`
-	FitsGB        float64  `json:"fits_gb,omitempty"`
-	Ctx           int      `json:"ctx,omitempty"`
-	MaxCtx        int      `json:"max_ctx,omitempty"`
-	TotalParamsB  float64  `json:"total_params_b,omitempty"`
-	ActiveParamsB float64  `json:"active_params_b,omitempty"`
-	ActiveKnown   bool     `json:"active_known,omitempty"`
-	Experts       int      `json:"experts,omitempty"`
-	ExpertUsed    int      `json:"expert_used,omitempty"`
-	Gaps          []string `json:"gaps,omitempty"`
-	Source        string   `json:"source,omitempty"`
-	HaveSource    string   `json:"have_source,omitempty"`
+	Tier          string    `json:"tier"`
+	Model         string    `json:"model,omitempty"`
+	Quant         string    `json:"quant,omitempty"`
+	Why           string    `json:"why"`
+	Remedy        string    `json:"remedy,omitempty"`
+	Hint          string    `json:"hint,omitempty"`
+	Flag          string    `json:"flag,omitempty"`
+	FlagValue     int       `json:"flag_value,omitempty"`
+	NeedGB        float64   `json:"need_gb,omitempty"`
+	HaveGB        float64   `json:"have_gb,omitempty"`
+	WeightsGB     float64   `json:"weights_gb,omitempty"`
+	ObservedGB    float64   `json:"observed_gb,omitempty"`
+	KVGB          float64   `json:"kv_gb,omitempty"`
+	FitsGB        float64   `json:"fits_gb,omitempty"`
+	Ctx           int       `json:"ctx,omitempty"`
+	MaxCtx        int       `json:"max_ctx,omitempty"`
+	TotalParamsB  float64   `json:"total_params_b,omitempty"`
+	ActiveParamsB float64   `json:"active_params_b,omitempty"`
+	ActiveKnown   bool      `json:"active_known,omitempty"`
+	Experts       int       `json:"experts,omitempty"`
+	ExpertUsed    int       `json:"expert_used,omitempty"`
+	Gaps          []string  `json:"gaps,omitempty"`
+	Source        string    `json:"source,omitempty"`
+	HaveSource    string    `json:"have_source,omitempty"`
+	Fit           *FitTable `json:"context_fit,omitempty"`
 }
 
 func (r Report) ExitCode() int {
@@ -241,6 +252,12 @@ func kvElemBytes(in Input) (float64, string, bool) {
 }
 
 func Evaluate(in Input) Report {
+	r := evaluateCore(in)
+	r.Fit = ContextFit(in)
+	return r
+}
+
+func evaluateCore(in Input) Report {
 	r := Report{
 		Model:      in.Model,
 		Quant:      in.Quant,
@@ -512,6 +529,23 @@ func Write(w io.Writer, r Report) {
 	if r.HaveSource != "" && r.Tier != Skip {
 		fmt.Fprintf(w, "  memory         %s GB (%s)\n", trim1(r.HaveGB), render.SingleLine(r.HaveSource))
 	}
+	if r.Fit != nil && len(r.Fit.Points) > 0 {
+		render.WriteContextFit(w, fitPresentation(*r.Fit), "auto")
+	}
+}
+
+func fitPresentation(t FitTable) render.ContextFit {
+	out := render.ContextFit{HaveGB: t.HaveGB, Note: t.Note}
+	for _, p := range t.Points {
+		out.Points = append(out.Points, render.ContextFitPoint{
+			Ctx: p.Ctx, Tier: p.Tier, WeightsGB: p.WeightsGB, KVGB: p.KVGB,
+			BuffersGB: p.BuffersGB, BuffersKnown: p.BuffersKnown,
+			NeedGB: p.NeedGB, HeadroomGB: p.HeadroomGB,
+			DecodeTPS: p.DecodeTPS, PrefillTPS: p.PrefillTPS,
+			Requested: p.Requested, Suggested: p.Suggested, Note: p.Note,
+		})
+	}
+	return out
 }
 
 func formatParams(r Report) string {

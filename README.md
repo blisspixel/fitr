@@ -114,7 +114,7 @@ fitr top run qwen3:30b           # the same measurement with live monitoring
 ```
 
 From source (Go 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
-Pin a release with `FITR_VERSION=v0.6.0`, relocate with `FITR_BIN`.
+Pin a release with `FITR_VERSION=v0.7.0`, relocate with `FITR_BIN`.
 
 `--quick` is speed, memory, and plumbing. The default run adds generated
 checks, refusal, and tool withdrawal. `--full` adds a long agentic loop;
@@ -128,7 +128,7 @@ Everyday loop:
 | Command | Does |
 |---|---|
 | `fitr` | installed models joined to evidence: measured, unproven, incompatible, or stale; one next command per row |
-| `fitr advise [model]` | no model: the same inventory table. With a model: does it fit, and if not, which flag (`--load` / `--fit` to measure) |
+| `fitr advise [model]` | no model: inventory. With a model: fit verdict plus a context-fit table (weights / KV / buffers / headroom at 2k–32k) |
 | `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model on this device; generated-code execution is disabled by default |
 | `fitr apply [model]` | print how to persist a measured context; never restarts the server |
 | `fitr view [model\|result.json]` | reopen the newest or selected saved result with repeat-shape graphs |

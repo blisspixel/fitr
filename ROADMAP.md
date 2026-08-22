@@ -31,9 +31,10 @@ You should be able to see it when you look.
 | Horizon | Tag | What | Why this, not something else |
 |---|---|---|---|
 | **Shipped** | 0.4.0 | TUI, history, advise, apply, backends | Tagged. |
-| **Shipped** | **0.5.0** | Evidence contract (A/B), lineage, family-stratified aggregation | Tagged with this docs pass. Install `latest` matches the contract the README describes. |
-| **Now** | **0.6.0** | Installed inventory | On main. Bare `fitr` lists what's serving. Tag when screenshots and first-run feel right. |
-| **Next** | 0.7.x | Context-fit table, then one next-command grammar | People actually choose among 4k / 8k / 16k, not one window. |
+| **Shipped** | **0.5.0** | Evidence contract (A/B), lineage, family-stratified aggregation | Tagged. |
+| **Shipped** | **0.6.0** | Installed inventory | Bare `fitr` lists what's serving. |
+| **Now** | **0.7.0** | Context-fit table on advise | Weights / KV / buffers / headroom at 2k–32k. Buffers n/a until measured. |
+| **Next** | 0.7.x | Loop cohesion | Inventory fit tier, TUI inventory view, one next-command grammar. |
 | **1.0** | 1.0 | A stranger closes advise → run → apply from inventory, on their machine | Still no public leaderboard, no LLM-as-judge, no invented SKU gates. |
 | **Later** | Trust C and loop extras | Isolation, signing, catalog, vision, community profiles | Real work. None of it is the next product week. |
 
@@ -75,7 +76,7 @@ directional quant damage. It is not required to print what is already serving.
 
 ---
 
-## Next (0.7.x): context visible, then loop cohesion
+## 0.7.0: context visible, then loop cohesion
 
 ### Context made visible
 
@@ -85,10 +86,10 @@ decode, and usable task depth change at several context points. Hybrid
 attention and incomplete split GGUFs stay SKIP until their architecture and
 complete shard set are verified.
 
-- [ ] Context-fit table at 2k / 4k / 8k / 16k / 32k / architecture max
-- [ ] Buffers only when `--load` or `--fit` measured them; otherwise `n/a`
-- [ ] Overlay decode/prefill only from saved runs at that ctx
-- [ ] Low-memory remedy is a marked row, not a magic number in prose
+- [x] Context-fit table at 2k / 4k / 8k / 16k / 32k / architecture max
+- [x] Buffers only when `--load` or `--fit` measured them; otherwise `n/a`
+- [x] Overlay decode/prefill only from saved runs at that ctx
+- [x] Low-memory remedy is a marked row, not a magic number in prose
 
 ### One story
 
@@ -96,7 +97,7 @@ complete shard set are verified.
 - [ ] `fitr top` Inventory view (or idle default); do not start native desktop
 - [ ] One next-command grammar on CLI, TUI, and HTML: inventory → advise/run → view → apply
 - [ ] `board` stays the measured comparable surface; inventory stays installed including unproven
-- [ ] Stop advertising `--full` as the first measurement; `--full` remains the optional 40-turn loop, coding still SKIP
+- [x] Stop advertising `--full` as the first measurement; `--full` remains the optional 40-turn loop, coding still SKIP
 
 The terminal views for this loop are an Inventory table, a Context fit graph,
 a Candidate evidence pane (`view` / Result), and a Change log (History).

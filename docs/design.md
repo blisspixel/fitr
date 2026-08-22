@@ -160,6 +160,9 @@ how to persist it and does not restart the server. "Too large" is a dead
 end; the flag is the product. MoE decode class uses active parameters, not
 total. The request context is on the scorecard, the HTML fingerprint, and
 the board header, because a number without its config is meaningless.
+`fitr advise` also prints a context-fit table at several windows so the
+4k / 8k / 16k choice is a row with a GB, not folklore. Compute buffers stay
+`n/a` until `--load` or `--fit` measures that exact ctx.
 
 ## Why Go
 

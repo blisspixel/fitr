@@ -737,6 +737,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 	model := normalizeModelRef(raw)
 
 	in := advise.Input{Model: model, Ctx: *ctxSize}
+	fpKey := ""
 	if *backend != "" && *backend != "auto" {
 		in.Backend = *backend
 	}
@@ -747,6 +748,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		fp := device.Detect(ctx, nil)
 		in.HaveGB = fp.VRAMGb
 		in.HaveSrc = fp.VRAMSource
+		fpKey = fp.Key()
 	}
 	if kv := os.Getenv("OLLAMA_KV_CACHE_TYPE"); kv != "" {
 		if n, ok := advise.KVElemBytes(kv); ok {
@@ -779,6 +781,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 		in.Backend = c.Name()
 		fp := device.Detect(ctx, c)
+		fpKey = fp.Key()
 		if *vram < 0 {
 			in.HaveGB = fp.VRAMGb
 			in.HaveSrc = fp.VRAMSource
@@ -883,6 +886,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 	}
 
+	in.Timings = adviseTimings(in.Model, fpKey)
 	rep := advise.Evaluate(in)
 	switch render.Resolve(*mode) {
 	case "json":
@@ -897,9 +901,9 @@ func cmdAdvise(ctx context.Context, args []string) int {
 	default:
 		advise.Write(os.Stdout, rep)
 		if rep.Tier == advise.Compatible || rep.Tier == advise.LowMemory {
-			next := fmt.Sprintf("fitr run %s --full", in.Model)
+			next := fmt.Sprintf("fitr run %s", in.Model)
 			if rep.FlagValue > 0 {
-				next = fmt.Sprintf("fitr run %s --ctx %d --full", in.Model, rep.FlagValue)
+				next = fmt.Sprintf("fitr run %s --ctx %d", in.Model, rep.FlagValue)
 			}
 			fmt.Fprintf(os.Stderr, "\n  next   %s\n", terminalText(next))
 			if rep.FlagValue > 0 {
@@ -909,6 +913,36 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 	}
 	return rep.ExitCode()
+}
+
+func adviseTimings(model, deviceKey string) []advise.SavedTiming {
+	if model == "" {
+		return nil
+	}
+	stored, err := record.NewStore(resultsDir()).LoadCurrent()
+	if err != nil {
+		return nil
+	}
+	var out []advise.SavedTiming
+	for _, rec := range stored.Records {
+		if rec == nil || !sameServedModel(model, rec.Model) {
+			continue
+		}
+		if rec.EvidenceIntegrityIssue() != "" || len(rec.Contamination) > 0 {
+			continue
+		}
+		if deviceKey != "" && rec.Device.Key() != deviceKey {
+			continue
+		}
+		ctxN := rec.ContextSize()
+		if ctxN <= 0 {
+			continue
+		}
+		out = append(out, advise.SavedTiming{
+			Ctx: ctxN, DecodeTPS: rec.DecodeSum.Mean, PrefillTPS: rec.PrefillSum.Mean,
+		})
+	}
+	return out
 }
 
 // ---------------------------------------------------------------- apply
