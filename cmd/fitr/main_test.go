@@ -1281,6 +1281,52 @@ func TestDiscoveredOpenAIBackendNeverReceivesEnvironmentCredential(t *testing.T)
 	}
 }
 
+func TestBackendAtRejectsUnknownKind(t *testing.T) {
+	if b, err := backendAt("typo", ""); err == nil || b != nil {
+		t.Fatalf("unknown backend = %T, %v", b, err)
+	}
+}
+
+func TestBackendAtUsesConfiguredOpenAIURLWhenExplicit(t *testing.T) {
+	t.Setenv("FITR_OPENAI_URL", "http://127.0.0.1:32123")
+	t.Setenv("FITR_OPENAI_API_KEY", "")
+	b, err := backendAt("openai", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := b.URL(); got != "http://127.0.0.1:32123" {
+		t.Fatalf("OpenAI-compatible URL = %q", got)
+	}
+}
+
+func TestServingCtxFromRunningRejectsOnlyConflicts(t *testing.T) {
+	running := []ollama.RunningModel{
+		{Name: "qwen3:8b", ContextLength: 8192},
+		{Name: "qwen3:8b:latest", ContextLength: 8192},
+	}
+	if n, ok := servingCtxFromRunning(running, "qwen3:8b"); !ok || n != 8192 {
+		t.Fatalf("matching observations = %d, %v", n, ok)
+	}
+	running[1].ContextLength = 16384
+	if n, ok := servingCtxFromRunning(running, "qwen3:8b"); ok || n != 0 {
+		t.Fatalf("conflicting observations = %d, %v", n, ok)
+	}
+}
+
+func TestResidentSizeFromRunningRejectsOnlyConflicts(t *testing.T) {
+	running := []ollama.RunningModel{
+		{Name: "qwen3:8b", Size: 8 << 30},
+		{Name: "qwen3:8b:latest", Size: 8 << 30},
+	}
+	if n, ok := residentSizeFromRunning(running, "qwen3:8b"); !ok || n != 8<<30 {
+		t.Fatalf("matching allocations = %d, %v", n, ok)
+	}
+	running[1].Size = 12 << 30
+	if n, ok := residentSizeFromRunning(running, "qwen3:8b"); ok || n != 0 {
+		t.Fatalf("conflicting allocations = %d, %v", n, ok)
+	}
+}
+
 func TestResolveRunModelPromotesOnlyVerifierApprovedDigest(t *testing.T) {
 	b := &digestVerifyingBackend{
 		runIntegrationBackend: &runIntegrationBackend{},

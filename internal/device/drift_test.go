@@ -9,9 +9,9 @@ import (
 	"testing"
 )
 
-// spec/profiles is canonical; the embedded copy here exists only because
-// go:embed cannot reach outside the package directory. This test keeps the
-// two identical. `make spec-sync` repairs a mismatch.
+// spec/profiles is canonical. Embedded files cannot reach outside the package
+// directory, so this test keeps the two copies identical. `make spec-sync`
+// repairs a mismatch.
 func TestEmbeddedProfilesMatchCanonical(t *testing.T) {
 	root := filepath.Join("..", "..", "spec", "profiles")
 	if _, err := os.Stat(root); err != nil {

@@ -196,7 +196,7 @@ do not move the user's selection to a different result.
 ## Terminal architecture
 
 The full-screen adapter uses
-[tcell v3](https://github.com/gdamore/tcell/tree/v3.4.1) for terminal input,
+[tcell v3](https://github.com/gdamore/tcell/tree/v3.4.2) for terminal input,
 resize events, cell output, and restoration. The application does not use
 tcell's widget layer. State transitions and layout render into a small
 renderer-neutral canvas first, then a thin adapter copies cells to tcell.
@@ -204,7 +204,7 @@ renderer-neutral canvas first, then a thin adapter copies cells to tcell.
 This keeps fitr's interaction model deterministic and portable. It also avoids
 a current Windows resize limitation in
 [Bubble Tea v2](https://github.com/charmbracelet/bubbletea/blob/v2.0.8/screen.go).
-tcell v3.4.1 supports the repository's Go 1.25 floor and its current release
+tcell v3.4.2 supports the repository's Go 1.25 floor and its current release
 includes Windows input and screen lifecycle fixes.
 
 Only the event-loop goroutine touches the terminal. Evaluation, persistence,
@@ -216,7 +216,7 @@ backend cleanup and the evaluation lock before the shell regains control.
 
 The terminal milestone is complete only when:
 
-1. All four views work by keyboard.
+1. All five views work by keyboard.
 2. A deterministic full-run replay can be followed from Live to Result.
 3. A partial run cannot show a final verdict.
 4. Board cannot sort or scale across device/config blocks.

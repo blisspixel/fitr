@@ -53,7 +53,7 @@ keyboard-driven, work on macOS, Linux, and Windows terminals, and degrade at
 narrow widths. Color is redundant with text and shape. Animation is optional
 and disabled when it obscures measurements or causes avoidable CPU use.
 
-[tcell v3](https://github.com/gdamore/tcell/tree/v3.4.1) is the terminal
+[tcell v3](https://github.com/gdamore/tcell/tree/v3.4.2) is the terminal
 adapter. It provides cell rendering, input, resize events, and restoration on
 the repository's Go 1.25 floor, including native Windows resize handling. A
 renderer-neutral canvas and pure state reducer sit above it; fitr does not use

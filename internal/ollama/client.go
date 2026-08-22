@@ -493,7 +493,7 @@ func (c *Client) EffectiveContext(ctx context.Context, model string) (int, bool,
 		return 0, false, nil
 	}
 	if match.ContextLength < 0 {
-		return 0, false, fmt.Errorf("Ollama reported a negative context length for model %q", model)
+		return 0, false, fmt.Errorf("ollama reported a negative context length for model %q", model)
 	}
 	return match.ContextLength, true, nil
 }

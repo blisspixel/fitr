@@ -642,7 +642,7 @@ func VisibleInventory(s State) []InventoryItem {
 	items := make([]InventoryItem, 0, len(s.Snapshot.Inventory))
 	filter := strings.ToLower(strings.TrimSpace(s.Filter))
 	for _, item := range s.Snapshot.Inventory {
-		if filter != "" && !strings.Contains(strings.ToLower(item.Model+" "+item.State+" "+item.Fit+" "+item.Ctx+" "+item.Windows), filter) {
+		if filter != "" && !strings.Contains(strings.ToLower(item.Model+" "+item.State+" "+item.Fit+" "+item.Ctx+" "+item.Windows+" "+item.Next), filter) {
 			continue
 		}
 		items = append(items, item)

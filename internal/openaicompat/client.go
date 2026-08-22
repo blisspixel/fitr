@@ -361,9 +361,7 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 		if !ok || field != "data" {
 			continue
 		}
-		if strings.HasPrefix(value, " ") {
-			value = strings.TrimPrefix(value, " ")
-		}
+		value = strings.TrimPrefix(value, " ")
 		nextBytes := eventBytes + len(value)
 		if len(eventData) > 0 {
 			nextBytes++

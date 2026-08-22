@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v3"
+	"github.com/gdamore/tcell/v3/color"
 )
 
 // Screen is the narrow terminal contract used by App. A tcell.Screen satisfies
@@ -309,20 +310,20 @@ func styleFor(theme Theme, role Role) tcell.Style {
 func tcellColor(value Color) tcell.Color {
 	switch value {
 	case ColorRed:
-		return tcell.ColorRed
+		return color.Red
 	case ColorGreen:
-		return tcell.ColorGreen
+		return color.Green
 	case ColorYellow:
-		return tcell.ColorYellow
+		return color.Yellow
 	case ColorBlue:
-		return tcell.ColorBlue
+		return color.Blue
 	case ColorMagenta:
-		return tcell.ColorPurple
+		return color.Purple
 	case ColorCyan:
-		return tcell.ColorTeal
+		return color.Teal
 	case ColorGray:
-		return tcell.ColorGray
+		return color.Gray
 	default:
-		return tcell.ColorDefault
+		return color.Default
 	}
 }

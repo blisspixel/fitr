@@ -185,6 +185,61 @@ func TestJoinLoadedBeatsWeightBudget(t *testing.T) {
 	if row.State == StateIncompatible {
 		t.Fatal("a running process is not incompatible")
 	}
+	if row.Fit == Incompatible {
+		t.Fatalf("FIT must not mint incompatible for a loaded process: %+v", row)
+	}
+}
+
+func TestJoinUnprovenServingDoesNotFillCtx(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:    []InstalledModel{{Name: "m"}},
+		Serving: map[string]int{"m": 8192},
+	})
+	if table.Rows[0].State != StateUnproven || table.Rows[0].Ctx != "" {
+		t.Fatalf("CTX is measured, not serving-only: %+v", table.Rows[0])
+	}
+}
+
+func TestJoinLoadedResidentSkipWhenOverBudget(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:   []InstalledModel{{Name: "huge", Size: 40 * GiB, ResidentB: 20 * GiB}},
+		Loaded: []string{"huge"},
+		HaveGB: 16, HaveSrc: "nvidia-smi",
+	})
+	row := table.Rows[0]
+	if row.State != StateUnproven || row.Fit != Skip {
+		t.Fatalf("resident over the reading is skip, not incompatible: %+v", row)
+	}
+}
+
+func TestJoinLoadedResidentCompatibleWithoutArchitecture(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:    []InstalledModel{{Name: "loaded", ResidentB: 8 * GiB}},
+		Loaded:  []string{"loaded"},
+		HaveGB:  16,
+		HaveSrc: "nvidia-smi",
+	})
+	row := table.Rows[0]
+	if row.State != StateUnproven || row.Fit != Compatible {
+		t.Fatalf("measured resident should establish current fit: %+v", row)
+	}
+	if row.Windows != "" {
+		t.Fatalf("resident measurement must not invent context windows: %q", row.Windows)
+	}
+}
+
+func TestServingOfAmbiguousAliasIsUnknown(t *testing.T) {
+	n, ok := servingOf("qwen3:8b", map[string]int{"qwen3:8b:latest": 8192, "qwen3:8b:LATEST": 16384})
+	if ok || n != 0 {
+		t.Fatalf("ambiguous serving = %d, %v", n, ok)
+	}
+}
+
+func TestServingOfExactConflictStaysUnknown(t *testing.T) {
+	n, ok := servingOf("qwen3:8b", map[string]int{"qwen3:8b": 0, "qwen3:8b:latest": 8192})
+	if ok || n != 0 {
+		t.Fatalf("conflicting exact observation = %d, %v", n, ok)
+	}
 }
 
 func TestJoinMeasuredEvenWhenWeightsExceedVRAM(t *testing.T) {

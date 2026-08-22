@@ -338,14 +338,6 @@ func TestEvidenceContractRejectsUnknownFutureSchema(t *testing.T) {
 	}
 }
 
-func repeatOutcome(outcome eval.Outcome, count int) []eval.Outcome {
-	values := make([]eval.Outcome, count)
-	for i := range values {
-		values[i] = outcome
-	}
-	return values
-}
-
 func TestStoreRejectsTamperedManifestBeforeWriting(t *testing.T) {
 	dir := t.TempDir()
 	r := manifestRecord("model", "2026-08-21T12:00:00Z")

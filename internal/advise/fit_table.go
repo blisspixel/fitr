@@ -252,15 +252,12 @@ func compactCtx(n int) string {
 }
 
 func compactCtxPair(measured, serving int, known bool) string {
-	if measured <= 0 && !(known && serving > 0) {
+	if measured <= 0 {
 		return ""
 	}
 	m := compactCtx(measured)
 	if !known || serving <= 0 || serving == measured {
-		if m != "" {
-			return m
-		}
-		return compactCtx(serving)
+		return m
 	}
 	return m + "/" + compactCtx(serving)
 }

@@ -114,14 +114,14 @@ examples:
   fitr
   fitr qwen3:30b
   fitr advise --display json
-  fitr run qwen3-coder:30b --full
+  fitr run qwen3-coder:30b
   fitr run https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
   fitr run some-new-model:tag -k 3 --pull
   fitr diag dolphin3:8b
   fitr doctor qwen3-coder:30b
   fitr advise qwen3:30b
   fitr advise ./model.gguf --vram-gb 8 --fit
-  fitr run qwen3:30b --ctx 4096 --full
+  fitr run qwen3:30b --ctx 4096
   fitr apply qwen3:30b
   fitr tune
   fitr tune qwen3:30b qwen3:30b-q8
@@ -549,15 +549,11 @@ func mergeModelInfo(listed, shown ollama.ModelInfo) ollama.ModelInfo {
 	return out
 }
 
-// checkModel verifies the model label against what the backend serves. On
-// Ollama a missing model is a hard error with a pull hint - or an automatic
-// pull with progress when the caller allows it; a single-model server ignores
-// the label at request time, so a mismatch there is a warning - the results
-// would otherwise be filed under a name the server never saw.
-func checkModel(ctx context.Context, b llm.Backend, model string, pull bool) (llm.Backend, int) {
-	return checkModelWithDisplay(ctx, b, model, pull, nil)
-}
-
+// checkModelWithDisplay verifies the model label against what the backend
+// serves. On Ollama a missing model is a hard error with a pull hint, or an
+// automatic pull when the caller allows it. A single-model server ignores the
+// label at request time, so a mismatch there is a warning; otherwise results
+// would be filed under a name the server never saw.
 func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pull bool, disp render.Display) (llm.Backend, int) {
 	if model == "" {
 		return b, exitOK
@@ -696,13 +692,33 @@ func backendAt(kind, url string) (llm.Backend, error) {
 		}
 		return c, nil
 	case "openai":
+		if url == "" {
+			return openaicompat.New(), nil
+		}
 		return openaicompat.NewAt(url, openaicompat.CredentialsDisabled)
-	default:
+	case "ollama":
 		c := ollama.New()
 		if url != "" {
 			c.BaseURL = url
 		}
 		return c, nil
+	default:
+		return nil, fmt.Errorf("unknown backend %q", kind)
+	}
+}
+
+func canonicalBackendKind(kind string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "", "auto":
+		return strings.ToLower(strings.TrimSpace(kind)), true
+	case "ollama":
+		return "ollama", true
+	case "llama-server", "llamaserver":
+		return "llama-server", true
+	case "openai":
+		return "openai", true
+	default:
+		return "", false
 	}
 }
 
@@ -962,7 +978,11 @@ func cmdApply(ctx context.Context, args []string) int {
 	if fs.NArg() > 0 {
 		model = normalizeModelRef(fs.Arg(0))
 	}
-	kind := *backend
+	kind, ok := canonicalBackendKind(*backend)
+	if !ok {
+		errPrint("invalid backend", *backend, "use auto, ollama, llama-server, or openai")
+		return exitUsage
+	}
 	n := *ctxSize
 	if model != "" && n <= 0 {
 		if all, err := loadResults(); err == nil {
@@ -988,7 +1008,7 @@ func cmdApply(ctx context.Context, args []string) int {
 	}
 	plan := advise.PlanApply(kind, model, n)
 	if model != "" {
-		if serving, ok := observeServingCtx(ctx, model); ok {
+		if serving, ok := observeServingCtx(ctx, model, kind); ok {
 			plan.ServingCtx = serving
 			plan.ServingKnown = true
 		}
@@ -2808,6 +2828,13 @@ func cmdStatus(ctx context.Context, args []string) int {
 }
 
 func printInventory(ctx context.Context, backendKind, mode string) int {
+	rawBackendKind := backendKind
+	var ok bool
+	backendKind, ok = canonicalBackendKind(backendKind)
+	if !ok {
+		errPrint("invalid backend", rawBackendKind, "use auto, ollama, llama-server, or openai")
+		return exitUsage
+	}
 	found := llm.Discover(ctx)
 	var b llm.Backend
 	also := []string{}
@@ -2819,9 +2846,19 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 				break
 			}
 		}
-		b, _ = backendAt(backendKind, url)
+		var err error
+		b, err = backendAt(backendKind, url)
+		if err != nil {
+			errPrint("could not configure backend", err.Error(), "check the backend name and endpoint environment variable")
+			return exitUsage
+		}
 	} else if len(found) > 0 {
-		b, _ = backendAt(found[0].Kind, found[0].URL)
+		var err error
+		b, err = backendAt(found[0].Kind, found[0].URL)
+		if err != nil {
+			errPrint("could not configure discovered runtime", err.Error(), "set --backend explicitly")
+			return exitError
+		}
 		for _, f := range found[1:] {
 			also = append(also, f.Kind+"  "+f.URL)
 		}
@@ -2900,7 +2937,16 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 		for _, m := range running {
 			loaded = append(loaded, m.Name)
 			if m.ContextLength > 0 {
-				serving[m.Name] = m.ContextLength
+				if prior, exists := serving[m.Name]; exists && prior != m.ContextLength {
+					serving[m.Name] = 0
+				} else {
+					serving[m.Name] = m.ContextLength
+				}
+			}
+		}
+		for i := range installed {
+			if size, ok := residentSizeFromRunning(running, installed[i].Name); ok {
+				installed[i].ResidentB = size
 			}
 		}
 	}
@@ -2944,17 +2990,34 @@ func evidenceFromRecords(recs []*record.Record) []advise.InventoryEvidence {
 	return out
 }
 
-func observeServingCtx(ctx context.Context, model string) (int, bool) {
+func observeServingCtx(ctx context.Context, model, kind string) (int, bool) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return 0, false
 	}
 	found := llm.Discover(ctx)
-	if len(found) == 0 {
-		return 0, false
-	}
-	b, err := backendAt(found[0].Kind, found[0].URL)
-	if err != nil || b == nil {
+	var b llm.Backend
+	switch {
+	case kind != "":
+		url := ""
+		for _, f := range found {
+			if f.Kind == kind {
+				url = f.URL
+				break
+			}
+		}
+		var err error
+		b, err = backendAt(kind, url)
+		if err != nil || b == nil {
+			return 0, false
+		}
+	case len(found) > 0:
+		var err error
+		b, err = backendAt(found[0].Kind, found[0].URL)
+		if err != nil || b == nil {
+			return 0, false
+		}
+	default:
 		return 0, false
 	}
 	listCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -2963,17 +3026,36 @@ func observeServingCtx(ctx context.Context, model string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
+	return servingCtxFromRunning(running, model)
+}
+
+func servingCtxFromRunning(running []ollama.RunningModel, model string) (int, bool) {
 	n, seen := 0, false
 	for _, m := range running {
 		if !advise.SameModel(m.Name, model) || m.ContextLength <= 0 {
 			continue
 		}
-		if seen {
+		if seen && m.ContextLength != n {
 			return 0, false
 		}
 		n, seen = m.ContextLength, true
 	}
 	return n, seen
+}
+
+func residentSizeFromRunning(running []ollama.RunningModel, model string) (int64, bool) {
+	var size int64
+	seen := false
+	for _, m := range running {
+		if !advise.SameModel(m.Name, model) || m.Size <= 0 {
+			continue
+		}
+		if seen && m.Size != size {
+			return 0, false
+		}
+		size, seen = m.Size, true
+	}
+	return size, seen
 }
 
 func profileUncalibrated(p device.Profile) bool {

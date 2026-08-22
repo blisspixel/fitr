@@ -52,6 +52,16 @@ func TestInventoryViewListsInstalledWithoutRanking(t *testing.T) {
 	}
 }
 
+func TestInventoryFilterIncludesNextCommand(t *testing.T) {
+	state := NewState(testSnapshot())
+	state.View = ViewInventory
+	state.Filter = "apply"
+	items := VisibleInventory(state)
+	if len(items) != 1 || items[0].Model != "alpha:8b" {
+		t.Fatalf("inventory next-command filter = %+v", items)
+	}
+}
+
 func apply(t *testing.T, state State, event Event) (State, []Effect) {
 	t.Helper()
 	next, effects := Update(state, event)

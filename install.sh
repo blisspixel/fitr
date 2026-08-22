@@ -151,4 +151,4 @@ esac
 echo
 echo "  next:  fitr                        # hardware and reachable runtime"
 echo "         fitr advise <model>         # does this quant fit"
-echo "         fitr run <model> --full     # measure it on this machine"
+echo "         fitr run <model>            # measure it on this machine"

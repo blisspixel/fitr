@@ -20,11 +20,12 @@ const maxInventoryRows = 100
 // InstalledModel is one entry from the serving runtime's installed list.
 // Size 0 means the runtime did not report a file size.
 type InstalledModel struct {
-	Name  string
-	Size  int64
-	Quant string
-	Path  string // GGUF path when the runtime exposed one; never crawled
-	Arch  Arch   // zero unless the caller already has architecture
+	Name      string
+	Size      int64
+	Quant     string
+	Path      string // GGUF path when the runtime exposed one; never crawled
+	Arch      Arch   // zero unless the caller already has architecture
+	ResidentB int64  // live PS allocation when the process is loaded; 0 unknown
 }
 
 // InventoryEvidence is the saved-run facts inventory needs. Callers map
@@ -178,37 +179,57 @@ func attachFit(row *InventoryRow, tag InstalledModel, ev *InventoryEvidence, q I
 			ctx = ev.NumCtx
 		}
 	}
-	if weights <= 0 || !memoryBudgetTrusted(q.HaveSrc) || q.HaveGB <= 0 {
+	if !memoryBudgetTrusted(q.HaveSrc) || q.HaveGB <= 0 {
 		return
 	}
-	if !arch.KVReady() && !arch.Hybrid {
+	// A live allocation can answer whether the current process fits even when
+	// the runtime does not expose weights or architecture metadata. Projection
+	// to other context windows still requires both.
+	if tag.ResidentB <= 0 && (weights <= 0 || (!arch.KVReady() && !arch.Hybrid)) {
 		return
 	}
 	in := Input{
 		WeightsB: weights, HaveGB: q.HaveGB, HaveSrc: q.HaveSrc,
 		Ctx: ctx, Arch: arch,
+		ResidentB: tag.ResidentB,
+	}
+	if tag.ResidentB > 0 {
+		in.ResidentSrc = "runtime PS"
+		if row.ServingKnown {
+			in.ResidentCtx = row.ServingCtx
+		}
 	}
 	r := evaluateCore(in)
 	row.Fit = r.Tier
+	// A running process beats a file-size budget. Incompatible from weights
+	// alone is not a loaded-process verdict.
+	if row.Loaded && r.Tier == Incompatible {
+		row.Fit = Skip
+	}
 	row.Windows = CompactWindows(ContextFit(in))
 	if row.State != StateUnproven {
 		return
 	}
-	if next := AdviseNext(row.Model, r.Tier, r.FlagValue); next != "" {
+	if next := AdviseNext(row.Model, row.Fit, r.FlagValue); next != "" {
 		row.Next = next
 	}
 }
 
 func servingOf(name string, serving map[string]int) (int, bool) {
-	if n, ok := serving[name]; ok && n > 0 {
-		return n, true
+	if n, ok := serving[name]; ok {
+		return n, n > 0
 	}
-	for have, n := range serving {
-		if n > 0 && sameInventoryModel(name, have) {
-			return n, true
+	n, found := 0, false
+	for have, v := range serving {
+		if v <= 0 || !sameInventoryModel(name, have) {
+			continue
 		}
+		if found && v != n {
+			return 0, false
+		}
+		n, found = v, true
 	}
-	return 0, false
+	return n, found
 }
 
 func applyNote(measured, serving int, known bool) string {

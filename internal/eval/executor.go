@@ -18,7 +18,10 @@ import (
 )
 
 const (
-	interpreterVersionTimeout = 5 * time.Second
+	// Windows race builds and antivirus scanning can spend several seconds in
+	// process startup before the interpreter writes a single line. Keep the
+	// preflight bounded without making valid local interpreters fail randomly.
+	interpreterVersionTimeout = 15 * time.Second
 	interpreterVersionMax     = 4 << 10
 	interpreterHashMax        = 512 << 20
 )
@@ -275,7 +278,7 @@ func resolvePythonExecutablePath(ctx context.Context, name string) (string, erro
 	}
 	reported := strings.TrimSpace(string(raw))
 	if reported == "" || strings.ContainsAny(reported, "\r\n") || !filepath.IsAbs(reported) {
-		return "", errors.New("Python reported a malformed executable path")
+		return "", errors.New("python reported a malformed executable path")
 	}
 	canonical, err := canonicalRunnerPath(reported)
 	if err != nil {

@@ -68,6 +68,21 @@ func TestContextFitLlamaTable(t *testing.T) {
 	}
 }
 
+func TestCompactCtxPairIsMeasuredThenServing(t *testing.T) {
+	if got := compactCtxPair(0, 8192, true); got != "" {
+		t.Fatalf("unmeasured = %q", got)
+	}
+	if got := compactCtxPair(16384, 16384, true); got != "16k" {
+		t.Fatalf("matching = %q", got)
+	}
+	if got := compactCtxPair(16384, 8192, true); got != "16k/8k" {
+		t.Fatalf("differ = %q", got)
+	}
+	if got := compactCtxPair(16384, 0, false); got != "16k" {
+		t.Fatalf("unknown serving = %q", got)
+	}
+}
+
 func suggestedAt(tble *FitTable, ctx int) bool {
 	for _, p := range tble.Points {
 		if p.Ctx == ctx && p.Suggested {

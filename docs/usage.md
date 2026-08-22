@@ -14,9 +14,9 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
-That puts one static binary on your PATH. The default evidence path needs no Go,
-Python, or venv. Pin a release with `FITR_VERSION=v0.9.0`; relocate with
-`FITR_BIN`.
+That installs one static binary and reports if its destination is not already
+on your PATH. The default evidence path needs no Go, Python, or venv. Pin a
+release with `FITR_VERSION=v0.9.1`; relocate with `FITR_BIN`.
 
 From source (Go 1.25+):
 
@@ -45,6 +45,13 @@ PATH. Generated code in that mode has the current user's ordinary filesystem,
 environment, credential, and network access. Run it only on a disposable,
 credential-free machine. Its observations are always INCONCLUSIVE and never
 enter a PASS or FAIL denominator.
+
+Terminal views of the loop, regenerated from the real printers:
+
+<img src="assets/advise.svg" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg" alt="fitr top (demo data)" width="820">
 
 ## Commands
 
@@ -228,6 +235,9 @@ pick from - advise answers "does THIS fit", not "what exists".
 
 `fitr apply [model] [--ctx N]` prints the command to persist a measured
 context on whatever is serving. It never restarts or mutates the process.
+When a live process reports `context_length`, apply names that serving
+window. Matching the measured ctx is not "already persisted for next
+launch" - llama-server and Ollama derived tags still need the printout.
 
 Ollama can take `num_ctx` per request (`fitr run --ctx` already does) or
 persist it in a derived tag via a Modelfile. llama-server allocates KV at

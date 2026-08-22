@@ -5,14 +5,14 @@ in `go.mod` and `go.sum`.
 
 | Module | Version | License |
 |---|---:|---|
-| `github.com/gdamore/tcell/v3` | 3.4.1 | Apache License 2.0 |
+| `github.com/gdamore/tcell/v3` | 3.4.2 | Apache License 2.0 |
 | `github.com/gdamore/encoding` | 1.0.1 | Apache License 2.0 |
-| `github.com/lucasb-eyer/go-colorful` | 1.4.0 | MIT |
+| `github.com/lucasb-eyer/go-colorful` | 1.4.1 | MIT |
 | `github.com/clipperhouse/displaywidth` | 0.11.0 | MIT, Copyright 2025 Matt Sherman |
 | `github.com/clipperhouse/uax29/v2` | 2.7.0 | MIT, Copyright 2020 Matt Sherman |
 | `golang.org/x/sys` | 0.47.0 | BSD-3-Clause, Copyright The Go Authors |
 | `golang.org/x/term` | 0.45.0 | BSD-3-Clause, Copyright The Go Authors |
-| `golang.org/x/text` | 0.40.0 | BSD-3-Clause, Copyright The Go Authors |
+| `golang.org/x/text` | 0.41.0 | BSD-3-Clause, Copyright The Go Authors |
 
 The complete license texts ship in source distributions with each module and
 are available from their pinned source repositories:

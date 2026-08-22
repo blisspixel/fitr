@@ -476,7 +476,6 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 			} else {
 				r.Ended = "stopped_without_done"
 			}
-			msgs = append(msgs, msg)
 			break
 		}
 		msgs = append(msgs, msg)

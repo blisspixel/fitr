@@ -11,6 +11,7 @@ stale, each with one next command. Architecture, when known, adds a compact
 context-fit graph. A measured non-default ctx asks `apply` until the server
 is already serving that window. `fitr <model>` is named advise. Unmeasured
 is a candidate, never a recommendation.
+
 The interior is strict so that surface can be trusted. You should not need
 the vocabulary below to get through Thursday night. You should be able to
 see it when you look.
