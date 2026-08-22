@@ -185,7 +185,8 @@ func TestHistoryKeepsMultipleRunsAndSortsNewestFirst(t *testing.T) {
 func TestReadRecognizesCanonicalDirectoryThroughSymlink(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
-	saved, err := store.Save(testRecord("same", "2026-08-20T12:00:00Z"))
+	r := completedEvidenceRecord(t, nil, []eval.CheckOutcome{{TaskID: "check", Outcome: eval.OutcomeSkipped}})
+	saved, err := store.Save(r)
 	if err != nil {
 		t.Fatal(err)
 	}
