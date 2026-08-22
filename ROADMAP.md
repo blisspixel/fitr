@@ -22,7 +22,7 @@ flags live in [usage](docs/usage.md). Statistical methods live in
 
 | Horizon | Release | Outcome |
 |---|---|---|
-| Shipped | 0.9.1 | Stable inventory, serving-context, resident-fit, and apply behavior across the closed loop |
+| Shipped | 0.9.2 | Exact saved-model selection, timezone-safe history, and verified cross-platform installers |
 | Now | 1.0 | A new user can install fitr and close the loop on a clean machine without reading source code |
 | Next | Trust C | Isolated executable evidence, stronger release provenance, and calibrated profile provenance |
 | Later | Loop extensions | Replaceable discovery, research receipts, recurring reevaluation, vision, and native clients |
@@ -159,6 +159,7 @@ never be mistaken for measured local quality.
 | 0.8.0 | Inventory fit tiers, Inventory TUI view, and one next-command grammar |
 | 0.9.0 | Serving versus measured context, compact inventory windows, and named advise through `fitr <model>` |
 | 0.9.1 | Bug fixes for loaded resident fit, serving-context identity, backend selection, and inventory filtering |
+| 0.9.2 | Exact saved-model identity, timezone-correct history selection, and fail-closed installer verification |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).
