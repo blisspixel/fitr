@@ -35,7 +35,7 @@ fitr top --snapshot
 fitr top history [path|clear --yes]
 ```
 
-It has four views:
+It has five views:
 
 1. Live run: current phase, elapsed time, device placement, decode/prefill
    samples, memory, and warnings.
@@ -44,6 +44,8 @@ It has four views:
 3. Board: filter and sort within one comparable device/config block, with an
    explicit boundary between blocks.
 4. History: inspect configuration changes and open a valid pairwise compare.
+5. Inventory: installed models with measured/unproven/incompatible/stale
+   state, optional fit tier, and one next command. Not a ranking.
 
 The TUI must restore the terminal after interrupts and panics, remain fully
 keyboard-driven, work on macOS, Linux, and Windows terminals, and degrade at

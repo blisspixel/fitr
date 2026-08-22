@@ -23,6 +23,8 @@ type InstalledModel struct {
 	Name  string
 	Size  int64
 	Quant string
+	Path  string // GGUF path when the runtime exposed one; never crawled
+	Arch  Arch   // zero unless the caller already has architecture
 }
 
 // InventoryEvidence is the saved-run facts inventory needs. Callers map
@@ -33,6 +35,9 @@ type InventoryEvidence struct {
 	Level          string
 	IntegrityIssue string
 	Contaminated   bool
+	Arch           Arch
+	WeightsB       int64
+	NumCtx         int
 }
 
 // InventoryQuery is everything Join needs. Tags are the runtime's list, not
@@ -53,6 +58,7 @@ type InventoryRow struct {
 	SizeB  int64
 	Quant  string
 	Loaded bool
+	Fit    string // compatible / low_memory / incompatible / skip; empty if unknown
 	Next   string
 	Note   string
 }
@@ -139,7 +145,42 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 		row.State = StateUnproven
 		row.Next = "fitr advise " + shellModel(tag.Name)
 	}
+	attachFit(&row, tag, ev, q)
 	return row
+}
+
+func attachFit(row *InventoryRow, tag InstalledModel, ev *InventoryEvidence, q InventoryQuery) {
+	arch := tag.Arch
+	weights := tag.Size
+	ctx := defaultRunCtx
+	if ev != nil {
+		if ev.Arch.KVReady() {
+			arch = ev.Arch
+		}
+		if ev.WeightsB > 0 {
+			weights = ev.WeightsB
+		}
+		if ev.NumCtx > 0 {
+			ctx = ev.NumCtx
+		}
+	}
+	if weights <= 0 || !memoryBudgetTrusted(q.HaveSrc) || q.HaveGB <= 0 {
+		return
+	}
+	if !arch.KVReady() && !arch.Hybrid {
+		return
+	}
+	r := evaluateCore(Input{
+		WeightsB: weights, HaveGB: q.HaveGB, HaveSrc: q.HaveSrc,
+		Ctx: ctx, Arch: arch,
+	})
+	row.Fit = r.Tier
+	if row.State != StateUnproven {
+		return
+	}
+	if next := AdviseNext(row.Model, r.Tier, r.FlagValue); next != "" {
+		row.Next = next
+	}
 }
 
 func evidenceUsable(ev InventoryEvidence, currentKey string) bool {

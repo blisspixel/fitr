@@ -32,6 +32,7 @@ type InventoryRow struct {
 	State  string
 	SizeB  int64
 	Loaded bool
+	Fit    string
 	Next   string
 	Note   string
 }
@@ -61,6 +62,7 @@ type inventoryRuntime struct {
 type inventoryJSONRow struct {
 	Model  string `json:"model"`
 	State  string `json:"state"`
+	Fit    string `json:"fit,omitempty"`
 	SizeB  int64  `json:"size_bytes,omitempty"`
 	Loaded bool   `json:"loaded,omitempty"`
 	Next   string `json:"next"`
@@ -132,21 +134,29 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "  %-28s %-14s %8s  %s\n", "MODEL", "STATE", "SIZE", "NEXT")
+	fmt.Fprintf(w, "  %-24s %-12s %-12s %8s  %s\n", "MODEL", "STATE", "FIT", "SIZE", "NEXT")
 	for _, row := range inv.Rows {
 		name := row.Model
 		if row.Loaded {
 			name = "* " + name
 		}
-		state := p.wrap(stateColor(p, row.State), fmt.Sprintf("%-14s", row.State))
+		state := p.wrap(stateColor(p, row.State), fmt.Sprintf("%-12s", row.State))
+		fitLabel := row.Fit
+		if fitLabel == "" {
+			fitLabel = "-"
+		}
+		if fitLabel == "low_memory" {
+			fitLabel = "low mem"
+		}
+		fitCol := p.wrap(fitTierColor(p, row.Fit), fmt.Sprintf("%-12s", fitLabel))
 		size := "-"
 		if row.SizeB > 0 {
 			size = fmt.Sprintf("%.1f GB", float64(row.SizeB)/(1024*1024*1024))
 		}
-		fmt.Fprintf(w, "  %-28s %s %8s  %s\n",
-			fit(name, 28, g.Ell), state, size, SingleLine(row.Next))
+		fmt.Fprintf(w, "  %-24s %s %s %8s  %s\n",
+			fit(name, 24, g.Ell), state, fitCol, size, SingleLine(row.Next))
 		if row.Note != "" {
-			fmt.Fprintf(w, "  %-28s %s\n", "", p.wrap(p.Muted, SingleLine(row.Note)))
+			fmt.Fprintf(w, "  %-24s %s\n", "", p.wrap(p.Muted, SingleLine(row.Note)))
 		}
 	}
 	fmt.Fprintln(w)
@@ -192,7 +202,7 @@ func writeInventoryJSON(w io.Writer, inv Inventory) {
 	}
 	for _, row := range inv.Rows {
 		payload.Rows = append(payload.Rows, inventoryJSONRow{
-			Model: row.Model, State: row.State, SizeB: row.SizeB,
+			Model: row.Model, State: row.State, Fit: row.Fit, SizeB: row.SizeB,
 			Loaded: row.Loaded, Next: row.Next, Note: row.Note,
 		})
 	}

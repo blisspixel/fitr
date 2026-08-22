@@ -26,6 +26,7 @@ type Artifact struct {
 	Profile       string
 	Scorecard     score.Scorecard
 	Meta          Meta
+	NextCommand   string
 	Contamination []string
 }
 
@@ -67,6 +68,7 @@ type htmlData struct {
 	Schema        int
 	Version       string
 	Wall          string
+	Next          string
 }
 
 const artifactCSS = `:root{--bg:#0f1419;--fg:#e6edf3;--muted:#8b949e;--pass:#3fb950;--fail:#f85149;--skip:#8b949e;--blkd:#d29922;--line:#30363d;--card:#161b22}
@@ -154,6 +156,9 @@ Do not rank this result against a different fingerprint. Change the GPU, driver,
 <p class="warn">Timings may be contaminated; still resident: {{range $i, $m := .Contamination}}{{if $i}}, {{end}}{{$m}}{{end}}</p>
 {{end}}
 
+{{if .Next}}
+<p class="sub">next <span class="use">{{.Next}}</span></p>
+{{end}}
 <footer>
 fitr {{.Version}} · schema {{.Schema}} · {{.Level}} · {{.StartedAt}}<br>
 Written only because you asked (fitr export / fitr run --html). Never uploaded. Contains a hardware fingerprint.
@@ -194,6 +199,7 @@ func htmlDataFrom(a Artifact) htmlData {
 		Schema:        a.SchemaVersion,
 		Version:       a.FitrVersion,
 		RepeatsWarn:   a.Meta.Repeats > 0 && a.Meta.Repeats < 3,
+		Next:          a.NextCommand,
 	}
 	if a.Meta.NumCtx > 0 {
 		switch {

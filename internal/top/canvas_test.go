@@ -27,6 +27,18 @@ func TestRenderResponsiveAndClipped(t *testing.T) {
 	}
 }
 
+func TestRenderInventoryListsStateInText(t *testing.T) {
+	state := NewState(testSnapshot())
+	state.View = ViewInventory
+	state.Width, state.Height = 100, 24
+	got := Render(state, DefaultGlyphs(false)).Plain()
+	for _, want := range []string{"INVENTORY", "measured", "unproven", "not a ranking"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("inventory canvas missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestASCIIHasNoUnicodeGraphGlyphs(t *testing.T) {
 	state := NewState(testSnapshot())
 	state.View = ViewBoard

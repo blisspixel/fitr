@@ -22,7 +22,7 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"fitr 0.6.0", "cpu", "gpu", "ollama", "UNCALIBRATED",
-		"measured", "unproven", "incompatible",
+		"measured", "unproven", "incompatible", "FIT",
 		"fitr view qwen3:8b", "fitr advise gemma4:12b", "try a smaller quant",
 		"* gemma4:12b", "never a recommendation",
 	} {

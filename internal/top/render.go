@@ -30,6 +30,8 @@ func Render(state State, glyphs Glyphs) Canvas {
 			renderBoard(&canvas, state, glyphs)
 		case ViewHistory:
 			renderHistory(&canvas, state, glyphs)
+		case ViewInventory:
+			renderInventory(&canvas, state, glyphs)
 		}
 	}
 	renderFooter(&canvas, state)
@@ -46,7 +48,7 @@ func renderTiny(canvas *Canvas, state State) {
 		return
 	}
 	if state.Help {
-		canvas.SetLine(1, Span{Text: "1-4 views | j/k move | ? close | q quit", Role: RoleDefault})
+		canvas.SetLine(1, Span{Text: "1-5 views | j/k move | ? close | q quit", Role: RoleDefault})
 	} else {
 		switch state.View {
 		case ViewLive:
@@ -72,12 +74,14 @@ func renderTiny(canvas *Canvas, state State) {
 			canvas.SetLine(1, Span{Text: fmt.Sprintf("%d comparable group(s)", len(VisibleBoard(state))), Role: RoleDefault})
 		case ViewHistory:
 			canvas.SetLine(1, Span{Text: fmt.Sprintf("%d saved run(s)", len(VisibleHistory(state))), Role: RoleDefault})
+		case ViewInventory:
+			canvas.SetLine(1, Span{Text: fmt.Sprintf("%d installed", len(VisibleInventory(state))), Role: RoleDefault})
 		}
 	}
 	if canvas.Height >= 3 && state.Error != "" {
 		canvas.SetLine(2, Span{Text: "error: " + state.Error, Role: RoleFail})
 	}
-	canvas.SetLine(canvas.Height-1, Span{Text: "1-4 views | ? help | q quit", Role: RoleMuted})
+	canvas.SetLine(canvas.Height-1, Span{Text: "1-5 views | ? help | q quit", Role: RoleMuted})
 }
 
 func renderHeader(canvas *Canvas, state State, glyphs Glyphs) {
@@ -415,6 +419,54 @@ func renderHistory(canvas *Canvas, state State, glyphs Glyphs) {
 	}
 }
 
+func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
+	w := contentWriter(canvas)
+	items := VisibleInventory(state)
+	w.line(Span{Text: "INVENTORY  installed models, not a ranking", Role: RoleHeader})
+	if len(items) == 0 {
+		msg := "no models listed; start a runtime or pull a model"
+		if strings.TrimSpace(state.Filter) != "" {
+			msg = emptyFilterMessage(state)
+		}
+		w.line(Span{Text: msg, Role: RoleMuted})
+		w.line(Span{Text: "unmeasured is a candidate, never a recommendation", Role: RoleMuted})
+		return
+	}
+	w.line(Span{Text: "MODEL                    STATE        FIT          NEXT", Role: RoleMuted})
+	offset := min(state.Offset[ViewInventory], max(len(items)-1, 0))
+	for _, item := range items[offset:] {
+		selected := item.ID == state.Selected[ViewInventory]
+		role, prefix := RoleDefault, "  "
+		if selected {
+			role, prefix = RoleSelected, glyphs.Selected+" "
+		}
+		name := item.Model
+		if item.Loaded {
+			name = "* " + name
+		}
+		fitLabel := item.Fit
+		if fitLabel == "" {
+			fitLabel = "-"
+		}
+		if fitLabel == "low_memory" {
+			fitLabel = "low mem"
+		}
+		line := prefix + padCells(clipCells(name, 22, glyphs.Ellipsis), 22)
+		line += "  " + padCells(item.State, 12)
+		line += padCells(fitLabel, 12)
+		line += clipCells(item.Next, max(canvas.Width-54, 10), glyphs.Ellipsis)
+		if !w.line(Span{Text: line, Role: role}) {
+			break
+		}
+		if selected && item.Note != "" {
+			if !w.line(Span{Text: "    " + clipCells(item.Note, max(canvas.Width-6, 8), glyphs.Ellipsis), Role: RoleMuted}) {
+				break
+			}
+		}
+	}
+	w.line(Span{Text: "* loaded   Enter opens a measured result   board still ranks only comparable runs", Role: RoleMuted})
+}
+
 func renderComparison(canvas *Canvas, state State) {
 	w := contentWriter(canvas)
 	comparison := state.Comparison
@@ -451,7 +503,7 @@ func renderHelp(canvas *Canvas, _ State, _ Glyphs) {
 	w := contentWriter(canvas)
 	w.line(Span{Text: "KEYS", Role: RoleHeader})
 	items := []string{
-		"1-4 / Tab       switch view",
+		"1-5 / Tab       switch view",
 		"arrows / j k    move selection",
 		"h l             previous or next view",
 		"PgUp PgDn       move one page",
@@ -489,7 +541,7 @@ func renderFooter(canvas *Canvas, state State) {
 		} else if state.View == ViewHistory {
 			spans = []Span{{Text: " Space baseline  c compare  Enter open  / filter  s sort  ? help  q quit", Role: RoleMuted}}
 		} else {
-			spans = []Span{{Text: " 1-4 views  j/k move  Enter open  / filter  s sort  ? help  q quit", Role: RoleMuted}}
+			spans = []Span{{Text: " 1-5 views  j/k move  Enter open  / filter  s sort  ? help  q quit", Role: RoleMuted}}
 		}
 	}
 	canvas.SetLine(canvas.Height-1, spans...)

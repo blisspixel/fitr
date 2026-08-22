@@ -234,6 +234,8 @@ func mapTCellEvent(event tcell.Event, state State) (Event, bool) { //nolint:gocy
 			return InputEvent{Action: ActionViewBoard}, true
 		case "4":
 			return InputEvent{Action: ActionViewHistory}, true
+		case "5":
+			return InputEvent{Action: ActionViewInventory}, true
 		case "j", "J":
 			return InputEvent{Action: ActionDown}, true
 		case "k", "K":

@@ -14,7 +14,7 @@ fitr top run <model> [run flags]
 fitr top history [path|clear --yes]
 ```
 
-- `fitr top` opens saved evidence on Board.
+- `fitr top` opens Inventory when the runtime listed models, otherwise Board.
 - `fitr top view` opens the newest or selected saved result.
 - `fitr top run` starts the same measurement as `fitr run` and opens Live.
 - `fitr top history` opens History; `path` locates its private archive and
@@ -28,7 +28,16 @@ fitr top history [path|clear --yes]
 Normal `run`, `view`, and `board` output remains the complete scriptable
 interface. The TUI is not required for automation.
 
-## Four questions, four views
+## Five questions, five views
+
+### Inventory
+
+Inventory answers: what is already serving, and what is the cheapest next command?
+
+Installed models only. Each row is measured, unproven, incompatible, or stale.
+Fit (compatible / low mem / skip) appears when architecture is already known
+from a saved result or a GGUF path the runtime exposed. Unmeasured is never
+ranked. Enter opens a measured result; it does not pull or run.
 
 ### Live
 
@@ -84,7 +93,7 @@ rules accept the pair. The UI states the exact mismatch when they do not.
 
 | Key | Action |
 |---|---|
-| `1` to `4` | Open Live, Result, Board, or History |
+| `1` to `5` | Open Live, Result, Board, History, or Inventory |
 | `Tab`, `Shift+Tab` | Move to the next or previous view |
 | `j`, `k`, arrows | Move the selection |
 | `h`, `l`, left, right | Move to the previous or next view |

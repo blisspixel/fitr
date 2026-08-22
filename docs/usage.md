@@ -15,7 +15,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
 That puts one static binary on your PATH. The default evidence path needs no Go,
-Python, or venv. Pin a release with `FITR_VERSION=v0.7.0`; relocate with
+Python, or venv. Pin a release with `FITR_VERSION=v0.8.0`; relocate with
 `FITR_BIN`.
 
 From source (Go 1.25+):
@@ -58,7 +58,7 @@ enter a PASS or FAIL denominator.
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
 | `fitr view [model\|result.json]` | reopen the newest or selected saved result as a terminal data view |
 | `fitr board [--current]` | compare everything, grouped by device |
-| `fitr top [--view VIEW]` | open the keyboard-first Live, Result, Board, and History monitor |
+| `fitr top [--view VIEW]` | open the keyboard-first Live, Result, Board, History, and Inventory monitor |
 | `fitr top view [model\|result.json]` | open a selected saved result in the monitor |
 | `fitr top run <model> [run flags]` | run the same evaluator with structured live progress |
 | `fitr top --snapshot` | emit the versioned privacy-safe presentation snapshot as JSON |

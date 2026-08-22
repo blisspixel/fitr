@@ -18,7 +18,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
+	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/score"
@@ -88,7 +91,7 @@ func cmdTopHistory(ctx context.Context, args []string) int {
 func cmdTopBrowse(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("top", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	viewName := fs.String("view", "board", "live|result|board|history")
+	viewName := fs.String("view", "inventory", "live|result|board|history|inventory")
 	snapshotOnly := fs.Bool("snapshot", false, "write a privacy-safe presentation snapshot as JSON")
 	if err := fs.Parse(permute(args)); err != nil {
 		return exitUsage
@@ -99,7 +102,7 @@ func cmdTopBrowse(ctx context.Context, args []string) int {
 	}
 	view, ok := parseTopView(*viewName)
 	if !ok {
-		errPrint("invalid top view", *viewName, "use live, result, board, or history")
+		errPrint("invalid top view", *viewName, "use live, result, board, history, or inventory")
 		return exitUsage
 	}
 	data, warnings, err := loadTopSnapshot(nil)
@@ -107,6 +110,7 @@ func cmdTopBrowse(ctx context.Context, args []string) int {
 		errPrint("could not load result history: "+err.Error(), "", "")
 		return exitError
 	}
+	attachTopInventory(ctx, &data)
 	data.Generation = 1
 	if *snapshotOnly {
 		return writeTopSnapshot(data, warnings, "")
@@ -116,6 +120,9 @@ func cmdTopBrowse(ctx context.Context, args []string) int {
 		return exitUsage
 	}
 	state := top.NewState(data)
+	if view == top.ViewInventory && len(data.Inventory) == 0 && len(data.Board) > 0 {
+		view = top.ViewBoard
+	}
 	state.View = view
 	state.Error = warningSummary(warnings)
 	return runTopBrowser(ctx, state, nil, nil, nil)
@@ -142,6 +149,7 @@ func cmdTopView(ctx context.Context, args []string) int {
 		errPrint("could not open result: "+err.Error(), "", "fitr top")
 		return exitError
 	}
+	attachTopInventory(ctx, &data)
 	if len(data.History) == 0 {
 		errPrint("no results yet", "", "run one first: fitr top run <model>")
 		return exitError
@@ -193,6 +201,7 @@ func cmdTopRun(ctx context.Context, args []string) int {
 		errPrint("could not load result history: "+err.Error(), "", "")
 		return exitError
 	}
+	attachTopInventory(ctx, &initial)
 	sink, err := session.NewSink(session.Options{})
 	if err != nil {
 		errPrint("could not create live session: "+err.Error(), "", "")
@@ -324,6 +333,7 @@ func reloadTopSnapshot(ctx context.Context, events chan top.Event, generation ui
 		emitTopEvent(ctx, events, top.ErrorEvent{Err: err, Generation: generation})
 		return
 	}
+	attachTopInventory(ctx, &data)
 	data.Generation = generation
 	emitTopEvent(ctx, events, top.SnapshotEvent{Snapshot: data})
 	if warning := warningSummary(warnings); warning != "" {
@@ -450,6 +460,7 @@ func (d *topDisplay) Result(sc score.Scorecard, _ render.Meta) {
 			emitTopEvent(d.ctx, d.events, top.ErrorEvent{Err: err})
 			return
 		}
+		attachTopInventory(d.ctx, &data)
 		generation := d.sequence.Add(1)
 		data.Generation = generation
 		data.Live = liveFromSession(d.sink.Snapshot())
@@ -630,6 +641,29 @@ func liveFromSession(snapshot session.Snapshot) top.Live {
 		live.Error = snapshot.Cancellation.Message
 	}
 	return live
+}
+
+func attachTopInventory(ctx context.Context, snapshot *top.Snapshot) {
+	if snapshot == nil {
+		return
+	}
+	found := llm.Discover(ctx)
+	if len(found) == 0 {
+		return
+	}
+	b, _ := backendAt(found[0].Kind, found[0].URL)
+	fp := device.Detect(ctx, b)
+	table, err := joinInstalled(ctx, b, fp)
+	if err != nil {
+		return
+	}
+	snapshot.Inventory = snapshot.Inventory[:0]
+	for _, row := range table.Rows {
+		snapshot.Inventory = append(snapshot.Inventory, top.InventoryItem{
+			ID: row.Model, Model: row.Model, State: row.State, Fit: row.Fit,
+			SizeB: row.SizeB, Loaded: row.Loaded, Next: row.Next, Note: row.Note,
+		})
+	}
 }
 
 func loadTopSnapshot(candidate *string) (top.Snapshot, []record.FileWarning, error) {
@@ -814,12 +848,14 @@ func presentTopRun(result *Result) top.Run {
 	}
 	meta := resultMeta(result, result.Profile)
 	modelLabel := presentationModelLabel(result.Model)
-	nextCommand := "fitr export " + modelLabel
-	if result.Repeats < 3 {
-		nextCommand = "fitr run " + modelLabel + " -k 3"
-	} else if result.ContextSize() != eval.NumCtx {
-		nextCommand = "fitr apply " + modelLabel
+	toolsBlocked := false
+	for need, verdict := range scorecard.Needs {
+		if strings.Contains(need, "tool") && verdict.State == score.Blocked {
+			toolsBlocked = true
+			break
+		}
 	}
+	nextCommand := advise.ResultNext(modelLabel, result.Repeats, result.ContextSize(), result.Level, toolsBlocked)
 	deviceID, hardwareID := "", ""
 	if comparableKey, err := result.ComparableDeviceKey(); err == nil {
 		deviceID = privacyID(comparableKey)
@@ -873,6 +909,8 @@ func parseTopView(value string) (top.View, bool) {
 		return top.ViewBoard, true
 	case "history":
 		return top.ViewHistory, true
+	case "inventory":
+		return top.ViewInventory, true
 	default:
 		return top.ViewLive, false
 	}

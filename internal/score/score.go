@@ -781,7 +781,7 @@ func useFor(m Measured, n map[string]Verdict, serves []string) string {
 		}
 		if unproven > 0 {
 			return fmt.Sprintf("no need passed yet, but %d were unmeasured/blocked "+
-				"- this is not a verdict, run --full", unproven)
+				"- this is not a verdict; coding stays unproven until an isolated worker exists", unproven)
 		}
 		return "none of the measured needs on this device"
 	}

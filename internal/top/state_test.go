@@ -26,6 +26,27 @@ func testSnapshot() Snapshot {
 			{ID: "g2", Title: "GPU two | another config", Note: "not comparable", Runs: []Run{b}},
 		},
 		History: []Run{a, b, c},
+		Inventory: []InventoryItem{
+			{ID: "alpha:8b", Model: "alpha:8b", State: "measured", Fit: "compatible", Next: "fitr view alpha:8b"},
+			{ID: "new:7b", Model: "new:7b", State: "unproven", Next: "fitr advise new:7b"},
+		},
+	}
+}
+
+func TestInventoryViewListsInstalledWithoutRanking(t *testing.T) {
+	state := NewState(testSnapshot())
+	state.View = ViewInventory
+	items := VisibleInventory(state)
+	if len(items) != 2 {
+		t.Fatalf("inventory = %+v", items)
+	}
+	next, _ := apply(t, state, InputEvent{Action: ActionViewInventory})
+	if next.View != ViewInventory {
+		t.Fatalf("view = %s", next.View)
+	}
+	next, _ = apply(t, next, InputEvent{Action: ActionOpen})
+	if next.View != ViewResult || next.Selected[ViewResult] != "a" {
+		t.Fatalf("enter on measured inventory should open result, got view=%s sel=%q", next.View, next.Selected[ViewResult])
 	}
 }
 

@@ -80,7 +80,7 @@ usage:
   fitr export <model> [--out PATH] [--retonr]
   fitr view [model|result.json] [--display MODE]
   fitr board [--current]
-  fitr top [--view live|result|board|history]
+  fitr top [--view live|result|board|history|inventory]
   fitr top view [model|result.json]
   fitr top run <model> [run flags]
   fitr top history [path|clear --yes]
@@ -900,11 +900,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		// machine channel is the exit code
 	default:
 		advise.Write(os.Stdout, rep)
-		if rep.Tier == advise.Compatible || rep.Tier == advise.LowMemory {
-			next := fmt.Sprintf("fitr run %s", in.Model)
-			if rep.FlagValue > 0 {
-				next = fmt.Sprintf("fitr run %s --ctx %d", in.Model, rep.FlagValue)
-			}
+		if next := advise.AdviseNext(in.Model, rep.Tier, rep.FlagValue); next != "" {
 			fmt.Fprintf(os.Stderr, "\n  next   %s\n", terminalText(next))
 			if rep.FlagValue > 0 {
 				fmt.Fprintf(os.Stderr, "         fitr apply %s   after a passing run, to persist num_ctx=%d\n",
@@ -2301,6 +2297,13 @@ func artifactFrom(r *Result) (render.Artifact, error) {
 		sc = score.ExcludeEvidence(sc, issue)
 	}
 	meta := resultMeta(r, prof.Name)
+	toolsBlocked := false
+	for need, verdict := range sc.Needs {
+		if strings.Contains(need, "tool") && verdict.State == score.Blocked {
+			toolsBlocked = true
+			break
+		}
+	}
 	return render.Artifact{
 		FitrVersion:   version,
 		SchemaVersion: r.SchemaVersion,
@@ -2314,6 +2317,7 @@ func artifactFrom(r *Result) (render.Artifact, error) {
 		Profile:       prof.Name,
 		Scorecard:     sc,
 		Meta:          meta,
+		NextCommand:   advise.ResultNext(r.Model, r.Repeats, r.ContextSize(), r.Level, toolsBlocked),
 		Contamination: r.Contamination,
 	}, nil
 }
@@ -2834,20 +2838,51 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 	}
 	inv.RuntimeKind = b.Name()
 	inv.RuntimeURL = b.URL()
-
-	listCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	tags, err := b.Tags(listCtx)
+	table, err := joinInstalled(ctx, b, fp)
 	if err != nil {
 		errPrint("could not list installed models: "+err.Error(), "",
 			"is the runtime still up?")
 		return exitError
 	}
+	inv.Rows = make([]render.InventoryRow, 0, len(table.Rows))
+	for _, row := range table.Rows {
+		inv.Rows = append(inv.Rows, render.InventoryRow{
+			Model: row.Model, State: row.State, Fit: row.Fit, SizeB: row.SizeB,
+			Loaded: row.Loaded, Next: row.Next, Note: row.Note,
+		})
+	}
+	inv.Hidden = table.Hidden
+	if len(inv.Rows) == 0 {
+		inv.Empty = "reachable, no models"
+	}
+	render.WriteInventory(os.Stdout, inv, mode)
+	return exitOK
+}
+
+func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (advise.InventoryTable, error) {
+	if b == nil {
+		return advise.InventoryTable{}, nil
+	}
+	listCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	tags, err := b.Tags(listCtx)
+	if err != nil {
+		return advise.InventoryTable{}, err
+	}
 	installed := make([]advise.InstalledModel, 0, len(tags))
 	for _, tag := range tags {
-		installed = append(installed, advise.InstalledModel{
-			Name: tag.Name, Size: tag.Size, Quant: tag.Details.QuantizationLevel,
-		})
+		item := advise.InstalledModel{
+			Name: tag.Name, Size: tag.Size, Quant: tag.Details.QuantizationLevel, Path: tag.Path,
+		}
+		if tag.Path != "" {
+			if kvs, size, err := advise.OpenGGUF(tag.Path); err == nil {
+				item.Arch = advise.ArchFromKVs(kvs)
+				if item.Size == 0 {
+					item.Size = size
+				}
+			}
+		}
+		installed = append(installed, item)
 	}
 	var loaded []string
 	if running, err := b.PS(listCtx); err == nil {
@@ -2859,27 +2894,10 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 	if stored, err := record.NewStore(resultsDir()).LoadCurrent(); err == nil {
 		evidence = evidenceFromRecords(stored.Records)
 	}
-	table := advise.Join(advise.InventoryQuery{
-		Tags:       installed,
-		Loaded:     loaded,
-		Evidence:   evidence,
-		CurrentKey: fp.Key(),
-		HaveGB:     fp.VRAMGb,
-		HaveSrc:    fp.VRAMSource,
-	})
-	inv.Rows = make([]render.InventoryRow, 0, len(table.Rows))
-	for _, row := range table.Rows {
-		inv.Rows = append(inv.Rows, render.InventoryRow{
-			Model: row.Model, State: row.State, SizeB: row.SizeB,
-			Loaded: row.Loaded, Next: row.Next, Note: row.Note,
-		})
-	}
-	inv.Hidden = table.Hidden
-	if len(inv.Rows) == 0 {
-		inv.Empty = "reachable, no models"
-	}
-	render.WriteInventory(os.Stdout, inv, mode)
-	return exitOK
+	return advise.Join(advise.InventoryQuery{
+		Tags: installed, Loaded: loaded, Evidence: evidence,
+		CurrentKey: fp.Key(), HaveGB: fp.VRAMGb, HaveSrc: fp.VRAMSource,
+	}), nil
 }
 
 func evidenceFromRecords(recs []*record.Record) []advise.InventoryEvidence {
@@ -2894,6 +2912,9 @@ func evidenceFromRecords(recs []*record.Record) []advise.InventoryEvidence {
 			Level:          rec.Level,
 			IntegrityIssue: rec.EvidenceIntegrityIssue(),
 			Contaminated:   len(rec.Contamination) > 0,
+			Arch:           advise.ArchFromKVs(rec.ModelMeta.Info),
+			WeightsB:       rec.ModelMeta.Size,
+			NumCtx:         rec.ContextSize(),
 		})
 	}
 	return out

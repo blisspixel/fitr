@@ -33,8 +33,8 @@ You should be able to see it when you look.
 | **Shipped** | 0.4.0 | TUI, history, advise, apply, backends | Tagged. |
 | **Shipped** | **0.5.0** | Evidence contract (A/B), lineage, family-stratified aggregation | Tagged. |
 | **Shipped** | **0.6.0** | Installed inventory | Bare `fitr` lists what's serving. |
-| **Now** | **0.7.0** | Context-fit table on advise | Weights / KV / buffers / headroom at 2k–32k. Buffers n/a until measured. |
-| **Next** | 0.7.x | Loop cohesion | Inventory fit tier, TUI inventory view, one next-command grammar. |
+| **Shipped** | **0.7.0** | Context-fit table on advise | Weights / KV / buffers / headroom at 2k–32k. |
+| **Now** | **0.8.0** | Loop cohesion | Inventory fit tier, TUI inventory view, one next-command grammar. |
 | **1.0** | 1.0 | A stranger closes advise → run → apply from inventory, on their machine | Still no public leaderboard, no LLM-as-judge, no invented SKU gates. |
 | **Later** | Trust C and loop extras | Isolation, signing, catalog, vision, community profiles | Real work. None of it is the next product week. |
 
@@ -93,10 +93,10 @@ complete shard set are verified.
 
 ### One story
 
-- [ ] Inventory rows that already have architecture show fit tier
-- [ ] `fitr top` Inventory view (or idle default); do not start native desktop
-- [ ] One next-command grammar on CLI, TUI, and HTML: inventory → advise/run → view → apply
-- [ ] `board` stays the measured comparable surface; inventory stays installed including unproven
+- [x] Inventory rows that already have architecture show fit tier
+- [x] `fitr top` Inventory view (or idle default); do not start native desktop
+- [x] One next-command grammar on CLI, TUI, and HTML: inventory → advise/run → view → apply
+- [x] `board` stays the measured comparable surface; inventory stays installed including unproven
 - [x] Stop advertising `--full` as the first measurement; `--full` remains the optional 40-turn loop, coding still SKIP
 
 The terminal views for this loop are an Inventory table, a Context fit graph,

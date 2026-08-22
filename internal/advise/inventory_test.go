@@ -220,6 +220,51 @@ func TestJoinLoadedFirstWithinState(t *testing.T) {
 	}
 }
 
+func TestJoinFitTierFromSavedArchitecture(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:       []InstalledModel{{Name: "llama3.1:8b", Size: 5 * GiB}},
+		CurrentKey: "k",
+		HaveGB:     8, HaveSrc: "nvidia-smi",
+		Evidence: []InventoryEvidence{{
+			Model: "llama3.1:8b", DeviceKey: "k", Level: "default",
+			Arch: llama8B(), WeightsB: 5 * GiB, NumCtx: 8192,
+		}},
+	})
+	row := table.Rows[0]
+	if row.State != StateMeasured || row.Fit != Compatible {
+		t.Fatalf("measured fit = %+v", row)
+	}
+	if row.Next != "fitr view llama3.1:8b" {
+		t.Fatalf("measured next stays view: %q", row.Next)
+	}
+}
+
+func TestJoinUnprovenWithArchSkipsAdviseWhenItFits(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:   []InstalledModel{{Name: "llama3.1:8b", Size: 5 * GiB, Arch: llama8B()}},
+		HaveGB: 8, HaveSrc: "nvidia-smi",
+	})
+	row := table.Rows[0]
+	if row.State != StateUnproven || row.Fit != Compatible {
+		t.Fatalf("unproven fit = %+v", row)
+	}
+	if row.Next != "fitr run llama3.1:8b" {
+		t.Fatalf("known-fit unproven should run, not advise: %q", row.Next)
+	}
+}
+
+func TestJoinLowMemoryUnprovenUsesCtxRemedy(t *testing.T) {
+	// 5 GiB weights + 1 GiB KV at 8k needs 6; 5.5 GB leaves a shorter window.
+	table := Join(InventoryQuery{
+		Tags:   []InstalledModel{{Name: "llama3.1:8b", Size: 5 * GiB, Arch: llama8B()}},
+		HaveGB: 5.5, HaveSrc: "nvidia-smi",
+	})
+	row := table.Rows[0]
+	if row.State != StateUnproven || row.Fit != LowMemory || !strings.Contains(row.Next, "--ctx") {
+		t.Fatalf("low-memory unproven = %+v", row)
+	}
+}
+
 func TestJoinCapsAtOneHundred(t *testing.T) {
 	tags := make([]InstalledModel, 120)
 	for i := range tags {

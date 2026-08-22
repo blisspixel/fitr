@@ -219,6 +219,8 @@ func applyInput(s State, event InputEvent) (State, []Effect, bool) { //nolint:go
 		return switchView(s, ViewBoard), nil, s.View != ViewBoard
 	case ActionViewHistory:
 		return switchView(s, ViewHistory), nil, s.View != ViewHistory
+	case ActionViewInventory:
+		return switchView(s, ViewInventory), nil, s.View != ViewInventory
 	case ActionNextView:
 		next := View((int(s.View) + 1) % int(viewCount))
 		return switchView(s, next), nil, true
@@ -251,6 +253,14 @@ func applyInput(s State, event InputEvent) (State, []Effect, bool) { //nolint:go
 				return s, nil, true
 			}
 		}
+		if s.View == ViewInventory {
+			id := s.Selected[ViewInventory]
+			if run, ok := inventoryRun(s, id); ok {
+				s.Selected[ViewResult] = run.ID
+				s.View = ViewResult
+				return s, nil, true
+			}
+		}
 	case ActionBack:
 		if s.Filter != "" {
 			s.Filter = ""
@@ -262,7 +272,7 @@ func applyInput(s State, event InputEvent) (State, []Effect, bool) { //nolint:go
 			return s, nil, true
 		}
 	case ActionFilter:
-		if s.View == ViewBoard || s.View == ViewHistory {
+		if s.View == ViewBoard || s.View == ViewHistory || s.View == ViewInventory {
 			s.FilterBeforeEdit = s.Filter
 			s.EditingFilter = true
 			return s, nil, true
@@ -505,6 +515,13 @@ func orderedIDs(s State, view View) []string {
 			ids = append(ids, run.ID)
 		}
 		return ids
+	case ViewInventory:
+		items := VisibleInventory(s)
+		ids := make([]string, 0, len(items))
+		for _, item := range items {
+			ids = append(ids, item.ID)
+		}
+		return ids
 	case ViewResult:
 		runs := VisibleHistory(s)
 		ids := make([]string, 0, len(runs))
@@ -621,6 +638,30 @@ func FindRun(snapshot Snapshot, id string) (Run, bool) {
 	return Run{}, false
 }
 
+func VisibleInventory(s State) []InventoryItem {
+	items := make([]InventoryItem, 0, len(s.Snapshot.Inventory))
+	filter := strings.ToLower(strings.TrimSpace(s.Filter))
+	for _, item := range s.Snapshot.Inventory {
+		if filter != "" && !strings.Contains(strings.ToLower(item.Model+" "+item.State+" "+item.Fit), filter) {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func inventoryRun(s State, model string) (Run, bool) {
+	if model == "" {
+		return Run{}, false
+	}
+	for _, run := range s.Snapshot.History {
+		if run.Model == model || strings.Contains(run.Model, model) {
+			return run, true
+		}
+	}
+	return Run{}, false
+}
+
 func cloneSnapshot(in Snapshot) Snapshot {
 	out := in
 	out.Live = cloneLive(in.Live)
@@ -630,6 +671,7 @@ func cloneSnapshot(in Snapshot) Snapshot {
 		out.Board[i].Runs = cloneRuns(group.Runs)
 	}
 	out.History = cloneRuns(in.History)
+	out.Inventory = slices.Clone(in.Inventory)
 	return out
 }
 

@@ -229,11 +229,11 @@ func shotInventory(context.Context) (string, error) {
 		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
 		Profile: "lappy", Uncalibrated: false,
 		Rows: []render.InventoryRow{
-			{Model: "qwen3:8b", State: "measured", SizeB: 5 << 30, Loaded: true, Next: "fitr view qwen3:8b"},
-			{Model: "gemma4:12b", State: "unproven", SizeB: 8 << 30, Next: "fitr advise gemma4:12b"},
+			{Model: "qwen3:8b", State: "measured", Fit: "compatible", SizeB: 5 << 30, Loaded: true, Next: "fitr view qwen3:8b"},
+			{Model: "gemma4:12b", State: "unproven", Fit: "compatible", SizeB: 8 << 30, Next: "fitr run gemma4:12b"},
 			{Model: "qwen3:32b", State: "stale", SizeB: 20 << 30, Next: "fitr run qwen3:32b",
 				Note: "device or runtime changed since the last measurement"},
-			{Model: "llama3.1:70b", State: "incompatible", SizeB: 40 << 30, Next: "try a smaller quant",
+			{Model: "llama3.1:70b", State: "incompatible", Fit: "incompatible", SizeB: 40 << 30, Next: "try a smaller quant",
 				Note: "weights 40.0 GB exceed 32.0 GB (unified memory (system RAM))"},
 		},
 	}, "rich")

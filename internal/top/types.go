@@ -12,6 +12,7 @@ const (
 	ViewResult
 	ViewBoard
 	ViewHistory
+	ViewInventory
 	viewCount
 )
 
@@ -25,6 +26,8 @@ func (v View) String() string {
 		return "board"
 	case ViewHistory:
 		return "history"
+	case ViewInventory:
+		return "inventory"
 	default:
 		return "unknown"
 	}
@@ -138,13 +141,27 @@ type Live struct {
 	Repeats        int         `json:"repeats"`
 }
 
+// InventoryItem is one installed model on the TUI inventory view.
+// State and Fit are plain text. Color never carries them alone.
+type InventoryItem struct {
+	ID     string `json:"id"`
+	Model  string `json:"model"`
+	State  string `json:"state"`
+	Fit    string `json:"fit,omitempty"`
+	SizeB  int64  `json:"size_bytes,omitempty"`
+	Loaded bool   `json:"loaded,omitempty"`
+	Next   string `json:"next"`
+	Note   string `json:"note,omitempty"`
+}
+
 // Snapshot is a complete point-in-time presentation snapshot.
 type Snapshot struct {
-	Generation uint64       `json:"generation"`
-	UpdatedAt  time.Time    `json:"updated_at"`
-	Live       Live         `json:"live"`
-	Board      []BoardGroup `json:"board"`
-	History    []Run        `json:"history"`
+	Generation uint64          `json:"generation"`
+	UpdatedAt  time.Time       `json:"updated_at"`
+	Live       Live            `json:"live"`
+	Board      []BoardGroup    `json:"board"`
+	History    []Run           `json:"history"`
+	Inventory  []InventoryItem `json:"inventory,omitempty"`
 }
 
 // Sort selects the ordering used inside each board group and in history.
@@ -189,6 +206,7 @@ const (
 	ActionViewResult
 	ActionViewBoard
 	ActionViewHistory
+	ActionViewInventory
 	ActionNextView
 	ActionPrevView
 	ActionUp
