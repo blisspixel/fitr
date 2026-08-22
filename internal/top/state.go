@@ -4,6 +4,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/blisspixel/fitr/internal/modelref"
 )
 
 // Update applies one event and returns the next state plus boundary effects.
@@ -655,7 +657,7 @@ func inventoryRun(s State, model string) (Run, bool) {
 		return Run{}, false
 	}
 	for _, run := range s.Snapshot.History {
-		if run.Model == model || strings.Contains(run.Model, model) {
+		if modelref.SameServed(model, run.Model) {
 			return run, true
 		}
 	}

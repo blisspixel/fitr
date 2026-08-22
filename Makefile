@@ -33,6 +33,7 @@ fmt:
 ## dist cross-compiles every supported target. No runtime, no interpreter,
 ## no package manager on the user's machine -- that is the whole argument.
 dist:
+	@rm -rf dist
 	@mkdir -p dist
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; ext=""; \

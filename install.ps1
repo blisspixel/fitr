@@ -4,7 +4,7 @@
 #
 # Downloads one static .exe. No interpreter, no package manager, no venv.
 # Set FITR_VERSION to pin, FITR_BIN to relocate. FITR_NO_VERIFY=1 skips the
-# checksum check.
+# checksum check explicitly.
 $ErrorActionPreference = "Stop"
 
 $Repo = "blisspixel/fitr"
@@ -50,7 +50,7 @@ Write-Host "  installing fitr (windows/$archName) -> $BinDir"
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 $dest = Join-Path $BinDir "fitr.exe"
-$tmp = Join-Path $env:TEMP ("fitr-" + [Guid]::NewGuid().ToString() + ".exe")
+$tmp = Join-Path $BinDir (".fitr-install-" + [Guid]::NewGuid().ToString("N") + ".exe")
 $gotBinary = $false
 
 try {
@@ -63,15 +63,42 @@ if ($gotBinary) {
     if ($env:FITR_NO_VERIFY -ne "1") {
         $got = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
         try {
-            $sums = (Invoke-WebRequest -Uri $sumUrl -UseBasicParsing).Content
-            if ($sums -notmatch [regex]::Escape($got)) {
-                Remove-Item -Force $tmp -ErrorAction SilentlyContinue
-                Write-FitrError "checksum mismatch" "got $got" "the download may be corrupt; re-run the installer"
-                exit 1
+            $sumContent = (Invoke-WebRequest -Uri $sumUrl -UseBasicParsing).Content
+        } catch {
+            Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+            Write-FitrError "cannot verify the download" "could not fetch $sumUrl" "check the release, or set FITR_NO_VERIFY=1 to accept the risk explicitly"
+            exit 1
+        }
+        try {
+            if ($sumContent -is [byte[]]) {
+                $utf8 = [Text.UTF8Encoding]::new($false, $true)
+                $sums = $utf8.GetString($sumContent)
+            } else {
+                $sums = [string]$sumContent
             }
         } catch {
-            Write-Host " note: no SHA256SUMS at this release; skipping verify"
+            Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+            Write-FitrError "invalid checksum manifest" "SHA256SUMS is not valid UTF-8 text" "verify the release assets and re-run the installer"
+            exit 1
         }
+        $entries = @([regex]::Matches(
+            [string]$sums,
+            '(?im)^(?<digest>[0-9a-f]{64})\s+[*]?(?<file>[^\r\n]+?)\s*$'
+        ) | Where-Object { $_.Groups['file'].Value.Trim() -eq $asset })
+        if ($entries.Count -ne 1) {
+            Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+            Write-FitrError "invalid checksum manifest" "need exactly one entry for $asset" "verify the release assets and re-run the installer"
+            exit 1
+        }
+        $expected = $entries[0].Groups['digest'].Value.ToLower()
+        if ($got -cne $expected) {
+            Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+            Write-FitrError "checksum mismatch for $asset" "expected $expected; got $got" "the download may be corrupt; re-run the installer"
+            exit 1
+        }
+        Write-Host "  verified: sha256 $got"
+    } else {
+        Write-Host " note: checksum verification disabled by FITR_NO_VERIFY=1"
     }
     Move-Item -Force $tmp $dest
 } else {

@@ -62,6 +62,19 @@ func TestInventoryFilterIncludesNextCommand(t *testing.T) {
 	}
 }
 
+func TestInventoryRunNeverGuessesAcrossModelNames(t *testing.T) {
+	state := NewState(Snapshot{History: []Run{
+		{ID: "coder", Model: "qwen-coder:latest"},
+		{ID: "base", Model: "qwen:latest"},
+	}})
+	if got, ok := inventoryRun(state, "qwen"); !ok || got.ID != "base" {
+		t.Fatalf("exact :latest alias resolved to %+v, %v", got, ok)
+	}
+	if got, ok := inventoryRun(state, "qwe"); ok {
+		t.Fatalf("partial inventory model selected %+v", got)
+	}
+}
+
 func apply(t *testing.T, state State, event Event) (State, []Effect) {
 	t.Helper()
 	next, effects := Update(state, event)

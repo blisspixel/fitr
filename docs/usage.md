@@ -14,9 +14,15 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
-That installs one static binary and reports if its destination is not already
-on your PATH. The default evidence path needs no Go, Python, or venv. Pin a
+That installs one static binary. The shell installer reports when its
+destination is not on `PATH`; the PowerShell installer adds its destination to
+the user `PATH`. The default evidence path needs no Go, Python, or venv. Pin a
 release with `FITR_VERSION=v0.9.1`; relocate with `FITR_BIN`.
+
+Both installers bind the downloaded binary to the exact asset entry in the
+release's `SHA256SUMS` file. A missing checksum tool, manifest, or asset entry
+is an error. `FITR_NO_VERIFY=1` is an explicit unsafe opt-out for environments
+where verification is impossible.
 
 From source (Go 1.25+):
 

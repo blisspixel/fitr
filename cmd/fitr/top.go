@@ -22,6 +22,7 @@ import (
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/llm"
+	"github.com/blisspixel/fitr/internal/modelref"
 	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/score"
@@ -907,7 +908,7 @@ func selectTopRun(snapshot top.Snapshot, candidate string) (top.Run, error) {
 	}
 	normalized := normalizeModelRef(candidate)
 	for _, run := range snapshot.History {
-		if run.Model == normalized || strings.Contains(run.Model, normalized) {
+		if modelref.SameServed(normalized, run.Model) {
 			return run, nil
 		}
 	}

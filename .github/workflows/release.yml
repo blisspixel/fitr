@@ -58,9 +58,32 @@ jobs:
           test "$status" -eq 2
           grep -F "hint: fitr device" <<<"$diagnostic"
       - name: checksums
+        shell: bash
         run: |
           cd dist
           sha256sum fitr-* LICENSE THIRD_PARTY_NOTICES.md > SHA256SUMS
+          assets=(
+            fitr-linux-amd64
+            fitr-linux-arm64
+            fitr-darwin-amd64
+            fitr-darwin-arm64
+            fitr-windows-amd64.exe
+            fitr-windows-arm64.exe
+            LICENSE
+            THIRD_PARTY_NOTICES.md
+          )
+          test "$(wc -l < SHA256SUMS | tr -d ' ')" -eq "${#assets[@]}"
+          for asset in "${assets[@]}"; do
+            count="$(awk -v asset="$asset" '
+              {
+                file = $2
+                sub(/^\*/, "", file)
+                if (file == asset) count++
+              }
+              END { print count + 0 }
+            ' SHA256SUMS)"
+            test "$count" -eq 1
+          done
           cat SHA256SUMS
       - name: publish
         env:

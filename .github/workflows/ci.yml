@@ -43,6 +43,25 @@ jobs:
             (Resolve-Path install.ps1), [ref]$tokens, [ref]$errors
           ) | Out-Null
           if ($errors.Count -gt 0) { throw ($errors | Out-String) }
+      - name: installer smoke
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          FITR_BIN: ${{ runner.temp }}/fitr-install
+        run: |
+          sh install.sh
+          "$FITR_BIN/fitr" version | grep -Eq '^fitr [0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$'
+      - name: installer smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          FITR_BIN: ${{ runner.temp }}\fitr-install
+        run: |
+          & .\install.ps1
+          $installedVersion = & "$env:FITR_BIN\fitr.exe" version
+          if ($installedVersion -notmatch '^fitr [0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$') {
+            throw "installed binary version is invalid: $installedVersion"
+          }
 
   dist:
     runs-on: ubuntu-latest

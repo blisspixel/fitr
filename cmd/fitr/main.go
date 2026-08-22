@@ -36,6 +36,7 @@ import (
 	"github.com/blisspixel/fitr/internal/llamaserver"
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/lock"
+	"github.com/blisspixel/fitr/internal/modelref"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/openaicompat"
 	"github.com/blisspixel/fitr/internal/record"
@@ -449,19 +450,6 @@ func isLocalGGUF(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
-// sameServedModel treats "qwen3:30b" and "qwen3:30b:latest" as one tag.
-// It does not guess across different names.
-func sameServedModel(want, have string) bool {
-	if want == have {
-		return true
-	}
-	trim := func(s string) string {
-		s = strings.TrimSuffix(s, ":latest")
-		return strings.TrimSuffix(s, ":LATEST")
-	}
-	return trim(want) == trim(have)
-}
-
 type resolvedRunModel struct {
 	Name     string
 	Info     ollama.ModelInfo
@@ -475,7 +463,7 @@ type resolvedRunModel struct {
 func selectResolvedModel(backend, requested string, models []ollama.ModelInfo) (ollama.ModelInfo, error) {
 	var matches []ollama.ModelInfo
 	for _, candidate := range models {
-		if strings.TrimSpace(candidate.Name) != "" && sameServedModel(requested, candidate.Name) {
+		if strings.TrimSpace(candidate.Name) != "" && modelref.SameServed(requested, candidate.Name) {
 			matches = append(matches, candidate)
 		}
 	}
@@ -580,7 +568,7 @@ func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pul
 	var near []string
 	base := strings.SplitN(model, ":", 2)[0]
 	for _, t := range tags {
-		if sameServedModel(model, t.Name) {
+		if modelref.SameServed(model, t.Name) {
 			found = true
 		}
 		if strings.Contains(t.Name, base) {
@@ -867,7 +855,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 		if running, err := c.PS(ctx); err == nil {
 			for _, m := range running {
-				if !sameServedModel(model, m.Name) || m.Size <= 0 {
+				if !modelref.SameServed(model, m.Name) || m.Size <= 0 {
 					continue
 				}
 				in.ResidentB = m.Size
@@ -917,7 +905,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 					in.LoadErr = err.Error()
 				} else if running, err := c.PS(ctx); err == nil {
 					for _, m := range running {
-						if !sameServedModel(model, m.Name) || m.Size <= 0 {
+						if !modelref.SameServed(model, m.Name) || m.Size <= 0 {
 							continue
 						}
 						in.ResidentB = m.Size
@@ -968,7 +956,7 @@ func adviseTimings(model, deviceKey string) []advise.SavedTiming {
 	}
 	var out []advise.SavedTiming
 	for _, rec := range stored.Records {
-		if rec == nil || !sameServedModel(model, rec.Model) {
+		if rec == nil || !modelref.SameServed(model, rec.Model) {
 			continue
 		}
 		if rec.EvidenceIntegrityIssue() != "" || len(rec.Contamination) > 0 {
@@ -1141,13 +1129,22 @@ func emptyDash(s string) string {
 func latestNamed(all []*Result, name string) *Result {
 	var hit *Result
 	for _, r := range all {
-		if r.Model == name || strings.Contains(r.Model, name) {
-			if hit == nil || r.StartedAt > hit.StartedAt {
+		if modelref.SameServed(name, r.Model) {
+			if hit == nil || startedAfter(r.StartedAt, hit.StartedAt) {
 				hit = r
 			}
 		}
 	}
 	return hit
+}
+
+func startedAfter(candidate, current string) bool {
+	candidateTime, candidateErr := time.Parse(time.RFC3339Nano, candidate)
+	currentTime, currentErr := time.Parse(time.RFC3339Nano, current)
+	if candidateErr == nil && currentErr == nil {
+		return candidateTime.After(currentTime)
+	}
+	return candidateErr == nil && currentErr != nil
 }
 
 // ---------------------------------------------------------------- run
@@ -2318,12 +2315,7 @@ func cmdExport(ctx context.Context, args []string) int {
 		errPrint("no results yet", "", "fitr run "+model)
 		return exitError
 	}
-	var r *Result
-	for i := range results {
-		if results[i].Model == model {
-			r = results[i]
-		}
-	}
+	r := latestNamed(results, model)
 	if r == nil {
 		errPrint(fmt.Sprintf("no stored result for %q", model), "",
 			"fitr run "+model)
@@ -2543,7 +2535,7 @@ func cmdView(_ context.Context, args []string) int {
 			return exitError
 		}
 		for _, result := range results {
-			if selected == nil || result.StartedAt > selected.StartedAt {
+			if selected == nil || startedAfter(result.StartedAt, selected.StartedAt) {
 				selected = result
 			}
 		}
@@ -3671,11 +3663,7 @@ func cmdCompare(ctx context.Context, args []string) int {
 		errPrint("no results", "", "fitr run <model>")
 		return exitError
 	}
-	byName := map[string]*Result{}
-	for _, r := range results {
-		byName[r.Model] = r
-	}
-	a, b := byName[args[0]], byName[args[1]]
+	a, b := latestNamed(results, args[0]), latestNamed(results, args[1])
 	for i, r := range []*Result{a, b} {
 		if r == nil {
 			errPrint(fmt.Sprintf("no stored result for %q", args[i]), "",

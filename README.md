@@ -49,8 +49,9 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
-Pin a release with `FITR_VERSION=v0.9.1`. Relocate with `FITR_BIN`. From
-source (Go 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
+Pin a release with `FITR_VERSION=v0.9.1`. Relocate with `FITR_BIN`. Installers
+bind the downloaded asset to its exact `SHA256SUMS` entry. From source (Go
+1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
 
 `--quick` is speed, memory, and plumbing. The default run adds generated
 checks, refusal, and tool withdrawal. `--full` is the optional long agent
@@ -83,7 +84,7 @@ Flags, exit codes, doctor, compare, calibrate, and export live in
 | [Backends](docs/backends.md) | Ollama, llama-server, OpenAI-compatible |
 | [Calibration](docs/calibration.md) | paired quant protocol and multi-device aggregation |
 | [Interface](docs/interface.md) / [TUI](docs/tui.md) | CLI-first data UX and the opt-in monitor |
-| [Roadmap](ROADMAP.md) | what is next and why |
+| [Roadmap](ROADMAP.md) / [release acceptance](docs/release-acceptance.md) | what is next and the native evidence still required |
 | [retonr](docs/retonr.md) | optional sister project; fitr works without it |
 
 Screenshots use demo data and regenerate from the real printers via

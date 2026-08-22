@@ -299,8 +299,8 @@ func TestViewDefaultsToNewestSavedResult(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FITR_RESULTS", dir)
 	older, newer := golden(t), golden(t)
-	older.Model, older.Scorecard.Model, older.StartedAt = "older", "older", "2026-01-01T00:00:00Z"
-	newer.Model, newer.Scorecard.Model, newer.StartedAt = "newer", "newer", "2026-01-02T00:00:00Z"
+	older.Model, older.Scorecard.Model, older.StartedAt = "older", "older", "2026-01-01T17:30:00Z"
+	newer.Model, newer.Scorecard.Model, newer.StartedAt = "newer", "newer", "2026-01-01T10:00:00-08:00"
 	newer.Profile = "deleted-local-profile"
 	for _, result := range []*Result{older, newer} {
 		if _, err := save(result); err != nil {
@@ -1071,15 +1071,6 @@ func writeGGUFString(buf *bytes.Buffer, s string) {
 	buf.WriteString(s)
 }
 
-func TestSameServedModelDoesNotGuess(t *testing.T) {
-	if !sameServedModel("qwen3:30b", "qwen3:30b") || !sameServedModel("qwen3:30b", "qwen3:30b:latest") {
-		t.Fatal("tag and :latest must match")
-	}
-	if sameServedModel("qwen3:30b", "qwen3:8b") || sameServedModel("qwen3:30b", "llama3:8b") {
-		t.Fatal("different tags must not match")
-	}
-}
-
 func TestSelectResolvedModelUsesCanonicalRuntimeIdentity(t *testing.T) {
 	models := []ollama.ModelInfo{{Name: "qwen:latest"}}
 	got, err := selectResolvedModel("ollama", "qwen", models)
@@ -1099,6 +1090,29 @@ func TestSelectResolvedModelRejectsMissingAndAmbiguousIdentity(t *testing.T) {
 	duplicate := []ollama.ModelInfo{{Name: "qwen"}, {Name: "qwen:latest"}}
 	if _, err := selectResolvedModel("ollama", "qwen", duplicate); err == nil {
 		t.Fatal("an ambiguous alias was accepted")
+	}
+}
+
+func TestLatestNamedNeverGuessesAcrossSavedModelNames(t *testing.T) {
+	results := []*Result{
+		{Model: "qwen:latest", StartedAt: "2026-08-20T12:00:00Z"},
+		{Model: "qwen-coder:latest", StartedAt: "2026-08-21T12:00:00Z"},
+	}
+	if got := latestNamed(results, "qwen"); got == nil || got.Model != "qwen:latest" {
+		t.Fatalf("exact :latest alias resolved to %+v", got)
+	}
+	if got := latestNamed(results, "qwe"); got != nil {
+		t.Fatalf("partial saved-model name selected %+v", got)
+	}
+}
+
+func TestLatestNamedOrdersRFC3339InstantsNotText(t *testing.T) {
+	results := []*Result{
+		{Model: "qwen:latest", StartedAt: "2026-01-01T17:30:00Z"},
+		{Model: "qwen", StartedAt: "2026-01-01T10:00:00-08:00"},
+	}
+	if got := latestNamed(results, "qwen"); got != results[1] {
+		t.Fatalf("latest result = %+v, want timezone-offset instant %+v", got, results[1])
 	}
 }
 

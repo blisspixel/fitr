@@ -5,7 +5,7 @@
 #
 # Downloads one static binary for your platform. No interpreter, no package
 # manager, no virtualenv. Set FITR_VERSION to pin, FITR_BIN to relocate.
-# FITR_NO_VERIFY=1 skips the checksum check.
+# FITR_NO_VERIFY=1 explicitly skips the checksum check.
 set -eu
 
 REPO="blisspixel/fitr"
@@ -91,7 +91,7 @@ fi
 
 echo "  installing fitr ($os/$arch) -> $BIN_DIR"
 mkdir -p "$BIN_DIR"
-tmp=$(mktemp)
+tmp=$(mktemp "$BIN_DIR/.fitr-install.XXXXXX")
 trap 'rm -f "$tmp" "$tmp.sums"' EXIT
 
 got_binary=0
@@ -109,22 +109,47 @@ fi
 
 if [ "$got_binary" -eq 1 ]; then
   if [ "${FITR_NO_VERIFY:-}" != "1" ]; then
-    got=$(checksum "$tmp")
+    got=$(checksum "$tmp" | tr '[:upper:]' '[:lower:]')
     if [ -z "$got" ]; then
-      echo " note: no sha256sum/shasum on PATH; skipping verify" >&2
-    else
-      set +e
-      download "$sum_url" "$tmp.sums"
-      sums_ok=$?
-      set -e
-      if [ "$sums_ok" -eq 0 ]; then
-        if ! grep -qi "$got" "$tmp.sums"; then
-          err "checksum mismatch" "got $got" "the download may be corrupt; re-run the installer"
-        fi
-      else
-        echo " note: no SHA256SUMS at this release; skipping verify" >&2
-      fi
+      err "cannot verify the download" "no sha256sum or shasum on PATH" \
+        "install a SHA-256 tool, or set FITR_NO_VERIFY=1 to accept the risk explicitly"
     fi
+    set +e
+    download "$sum_url" "$tmp.sums"
+    sums_ok=$?
+    set -e
+    if [ "$sums_ok" -ne 0 ]; then
+      err "cannot verify the download" "could not fetch $sum_url" \
+        "check the release, or set FITR_NO_VERIFY=1 to accept the risk explicitly"
+    fi
+    expected=$(
+      awk -v asset="$asset" '
+        {
+          file = $2
+          sub(/^\*/, "", file)
+          if (file == asset) {
+            count++
+            digest = tolower($1)
+          }
+        }
+        END {
+          if (count != 1) exit 1
+          print digest
+        }
+      ' "$tmp.sums"
+    ) || err "invalid checksum manifest" "need exactly one entry for $asset" \
+      "verify the release assets and re-run the installer"
+    if ! printf '%s\n' "$expected" | grep -Eq '^[0-9a-f]{64}$'; then
+      err "invalid checksum manifest" "the $asset digest is not SHA-256" \
+        "verify the release assets and re-run the installer"
+    fi
+    if [ "$got" != "$expected" ]; then
+      err "checksum mismatch for $asset" "expected $expected; got $got" \
+        "the download may be corrupt; re-run the installer"
+    fi
+    echo "  verified: sha256 $got"
+  else
+    echo " note: checksum verification disabled by FITR_NO_VERIFY=1" >&2
   fi
   chmod +x "$tmp"
   mv "$tmp" "$BIN_DIR/$bin"

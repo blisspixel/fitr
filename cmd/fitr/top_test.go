@@ -85,6 +85,20 @@ func TestPreviewTopRunMatchesTrustCriticalValidation(t *testing.T) {
 	}
 }
 
+func TestSelectTopRunNeverGuessesAcrossSavedModelNames(t *testing.T) {
+	snapshot := top.Snapshot{History: []top.Run{
+		{ID: "coder", Model: "qwen-coder:latest"},
+		{ID: "base", Model: "qwen:latest"},
+	}}
+	got, err := selectTopRun(snapshot, "qwen")
+	if err != nil || got.ID != "base" {
+		t.Fatalf("exact :latest alias resolved to %+v, %v", got, err)
+	}
+	if got, err := selectTopRun(snapshot, "qwe"); err == nil {
+		t.Fatalf("partial saved-model name selected %+v", got)
+	}
+}
+
 func TestTopSnapshotIsVersionedAndPrivacySafe(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FITR_RESULTS", dir)

@@ -14,6 +14,7 @@ Last updated: 2026-08-22.
 | Backend wire contract | Mock HTTP servers cover discovery, generation, chat and tool calls, timing receipts, artifact identity, effective context, authentication, redirects, bounded responses, and error redaction. |
 | Evidence contract | Tests cover runtime-bound model identity, context verification, device fingerprints, immutable history, signed completion records, contamination, and comparison refusal. |
 | Release binary smoke | The built Linux binary must pass global and subcommand help, then reject a malformed command with exit 2 and a useful hint. |
+| Installer smoke | Windows, macOS, and Linux runners download the latest public release, bind the native asset to its exact checksum entry, and validate its version command. |
 | Release quality | Formatting, vet, unit tests, race detection, cross-compilation, size limits, vulnerability scanning, fuzz smoke tests, and installer syntax checks must all pass. |
 
 ## Native operating-system matrix
