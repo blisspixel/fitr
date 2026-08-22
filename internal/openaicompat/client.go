@@ -330,6 +330,9 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 			finish = fr
 		}
 		if ch.Usage != nil {
+			if ch.Usage.PromptTokens < 0 || ch.Usage.CompletionTokens < 0 {
+				return false, fmt.Errorf("openai-compat: response contains negative token usage")
+			}
 			seenUsage = true
 			usagePrompt, usageCompletion = ch.Usage.PromptTokens, ch.Usage.CompletionTokens
 		}
@@ -445,6 +448,10 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 	if r.Choices[0].Message.Role != "assistant" {
 		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(
 			"openai-compat: first choice has role %q, want assistant", r.Choices[0].Message.Role)
+	}
+	if r.Usage.PromptTokens < 0 || r.Usage.CompletionTokens < 0 {
+		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(
+			"openai-compat: response contains negative token usage")
 	}
 	m := ollama.Metrics{
 		WallSeconds:   round(time.Since(start).Seconds(), 2),

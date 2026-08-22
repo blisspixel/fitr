@@ -10,6 +10,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -29,6 +30,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/atomicfile"
 	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/calibration"
 	"github.com/blisspixel/fitr/internal/device"
@@ -357,9 +359,6 @@ func newBackendWithDisplay(ctx context.Context, model, kind string, pull bool, d
 // an HF link" just works. Blob/resolve URLs keep the quant from the filename.
 func normalizeModelRef(model string) string {
 	m := strings.TrimSpace(model)
-	m = strings.SplitN(m, "?", 2)[0]
-	m = strings.SplitN(m, "#", 2)[0]
-	m = strings.TrimRight(m, "/")
 	lower := strings.ToLower(m)
 	for _, prefix := range []string{
 		"https://www.huggingface.co/",
@@ -373,7 +372,9 @@ func normalizeModelRef(model string) string {
 		"hf.co/",
 	} {
 		if strings.HasPrefix(lower, prefix) {
-			return "hf.co/" + parseHFPath(m[len(prefix):])
+			path := strings.SplitN(m[len(prefix):], "?", 2)[0]
+			path = strings.SplitN(path, "#", 2)[0]
+			return "hf.co/" + parseHFPath(strings.TrimRight(path, "/"))
 		}
 	}
 	return m
@@ -413,13 +414,16 @@ func quantFromFilename(file string) string {
 	// '.' separate the quant from the rest of the filename.
 	i := strings.LastIndexAny(base, "-.")
 	if i < 0 {
-		return base
+		if isQuantTag(base) {
+			return strings.ToUpper(base)
+		}
+		return ""
 	}
 	cand := base[i+1:]
 	if isQuantTag(cand) {
 		return strings.ToUpper(cand)
 	}
-	return filepath.Base(base)
+	return ""
 }
 
 func isQuantTag(s string) bool {
@@ -2362,7 +2366,7 @@ func writeRetonrEvidence(r *Result, dest, jsonPath string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dest, append(b, '\n'), 0o644)
+	return atomicfile.Write(dest, append(b, '\n'), 0o644)
 }
 
 func artifactFrom(r *Result) (render.Artifact, error) {
@@ -2475,12 +2479,11 @@ func writeHTMLArtifact(r *Result, dest, jsonPath string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return "", err
 	}
-	f, err := os.Create(dest)
-	if err != nil {
+	var html bytes.Buffer
+	if err := render.WriteHTML(&html, a); err != nil {
 		return "", err
 	}
-	defer f.Close()
-	if err := render.WriteHTML(f, a); err != nil {
+	if err := atomicfile.Write(dest, html.Bytes(), 0o600); err != nil {
 		return "", err
 	}
 	return dest, nil
@@ -2951,7 +2954,12 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 		}
 	}
 	fp := device.Detect(ctx, b)
-	prof, _ := device.SelectProfile("", fp)
+	prof, err := device.SelectProfile("", fp)
+	if err != nil {
+		errPrint("could not select device profile", err.Error(),
+			"repair or remove invalid files in "+device.UserProfilesDir())
+		return exitError
+	}
 	inv := render.Inventory{
 		Fitr:         version,
 		CPU:          device.FormatCPU(fp.CPU),
@@ -2970,12 +2978,13 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 	}
 	inv.RuntimeKind = b.Name()
 	inv.RuntimeURL = b.URL()
-	table, err := joinInstalled(ctx, b, fp)
+	table, warnings, err := joinInstalled(ctx, b, fp)
 	if err != nil {
 		errPrint("could not list installed models: "+err.Error(), "",
 			"is the runtime still up?")
 		return exitError
 	}
+	inv.Warnings = warnings
 	inv.Rows = make([]render.InventoryRow, 0, len(table.Rows))
 	for _, row := range table.Rows {
 		inv.Rows = append(inv.Rows, render.InventoryRow{
@@ -2993,15 +3002,15 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 	return exitOK
 }
 
-func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (advise.InventoryTable, error) {
+func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (advise.InventoryTable, []string, error) {
 	if b == nil {
-		return advise.InventoryTable{}, nil
+		return advise.InventoryTable{}, nil, nil
 	}
 	listCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	tags, err := b.Tags(listCtx)
 	if err != nil {
-		return advise.InventoryTable{}, err
+		return advise.InventoryTable{}, nil, err
 	}
 	installed := make([]advise.InstalledModel, 0, len(tags))
 	for _, tag := range tags {
@@ -3038,14 +3047,22 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 		}
 	}
 	var evidence []advise.InventoryEvidence
-	if stored, err := record.NewStore(resultsDir()).LoadCurrent(); err == nil {
-		evidence = evidenceFromRecords(stored.Records)
+	warnings := []string{}
+	stored, err := record.NewStore(resultsDir()).LoadCurrent()
+	if err != nil {
+		return advise.InventoryTable{}, nil, fmt.Errorf("load saved evidence: %w", err)
+	}
+	evidence = evidenceFromRecords(stored.Records)
+	if len(stored.Warnings) > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"%d saved result file(s) could not be trusted; run fitr top history for details",
+			len(stored.Warnings)))
 	}
 	return advise.Join(advise.InventoryQuery{
 		Tags: installed, Loaded: loaded, Evidence: evidence,
 		CurrentKey: fp.Key(), HaveGB: fp.VRAMGb, HaveSrc: fp.VRAMSource,
 		Serving: serving,
-	}), nil
+	}), warnings, nil
 }
 
 func evidenceFromRecords(recs []*record.Record) []advise.InventoryEvidence {
@@ -3174,7 +3191,12 @@ func cmdDevice(ctx context.Context, args []string) int {
 		return exitUsage
 	}
 	fp := device.Detect(ctx, probeBackend(ctx))
-	prof, _ := device.SelectProfile("", fp)
+	prof, err := device.SelectProfile("", fp)
+	if err != nil {
+		errPrint("could not select device profile", err.Error(),
+			"repair or remove invalid files in "+device.UserProfilesDir())
+		return exitError
+	}
 	switch render.Resolve(*mode) {
 	case "json":
 		encoder := json.NewEncoder(os.Stdout)

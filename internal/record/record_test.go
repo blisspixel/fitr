@@ -182,6 +182,26 @@ func TestHistoryKeepsMultipleRunsAndSortsNewestFirst(t *testing.T) {
 	}
 }
 
+func TestReadRecognizesCanonicalDirectoryThroughSymlink(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	saved, err := store.Save(testRecord("same", "2026-08-20T12:00:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "results-alias")
+	if err := os.Symlink(dir, alias); err != nil {
+		t.Skipf("directory symlinks unavailable: %v", err)
+	}
+	loaded, err := store.Read(filepath.Join(alias, filepath.Base(saved.CanonicalPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue := loaded.EvidenceIntegrityIssue(); issue != "" {
+		t.Fatalf("equivalent canonical path lost evidence integrity: %s", issue)
+	}
+}
+
 func TestLoadLegacyCurrentAndHistoryDeduplicatesStably(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)

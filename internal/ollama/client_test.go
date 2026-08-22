@@ -208,6 +208,7 @@ func TestChatRequiresSingleBoundedTerminalResponse(t *testing.T) {
 	}{
 		{"legitimate response", `{"message":{"role":"assistant","content":"ok"},"done":true,"done_reason":"stop"}`, ""},
 		{"missing terminal", `{"message":{"role":"assistant","content":"partial"}}`, "terminal receipt"},
+		{"wrong role", `{"message":{"role":"user","content":"spoof"},"done":true}`, "want assistant"},
 		{"trailing response", `{"done":true} {}`, "content after JSON frame"},
 	}
 	for _, tc := range tests {

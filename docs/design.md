@@ -176,7 +176,8 @@ startup, and trivial cross-compilation for every platform the runtimes serve.
 
 Go still uses every logical CPU it can schedule (`GOMAXPROCS`). Runtime
 discovery probes ports concurrently. Hardware fingerprint probes overlap
-(on Windows each is a PowerShell round-trip). Split GGUF shard stats overlap.
+(on Windows each is a PowerShell round-trip), share a five-second deadline,
+and honor cancellation. Split GGUF shard stats overlap.
 None of that is the wall clock of `fitr run`.
 
 ## Cores, GPUs, and honesty

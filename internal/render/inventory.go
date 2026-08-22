@@ -22,6 +22,7 @@ type Inventory struct {
 	Also         []string
 	Profile      string
 	Uncalibrated bool
+	Warnings     []string
 	Rows         []InventoryRow
 	Hidden       int
 	Empty        string // "none reachable" or "reachable, no models"
@@ -54,6 +55,7 @@ type inventoryJSON struct {
 	Also         []string           `json:"also,omitempty"`
 	Profile      string             `json:"profile,omitempty"`
 	Uncalibrated bool               `json:"uncalibrated"`
+	Warnings     []string           `json:"warnings,omitempty"`
 	Empty        string             `json:"empty,omitempty"`
 	Hidden       int                `json:"hidden,omitempty"`
 	Rows         []inventoryJSONRow `json:"rows"`
@@ -128,6 +130,9 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 			style = p.Warn
 		}
 		fmt.Fprintf(w, "  profile   %s\n", p.wrap(style, label))
+	}
+	for _, warning := range inv.Warnings {
+		fmt.Fprintf(w, "  warning   %s\n", p.wrap(p.Warn, SingleLine(warning)))
 	}
 
 	switch inv.Empty {
@@ -211,6 +216,7 @@ func writeInventoryJSON(w io.Writer, inv Inventory) {
 		MemorySource: inv.MemorySource,
 		Profile:      inv.Profile,
 		Uncalibrated: inv.Uncalibrated,
+		Warnings:     inv.Warnings,
 		Empty:        inv.Empty,
 		Hidden:       inv.Hidden,
 		Also:         inv.Also,

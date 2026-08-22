@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/atomicfile"
 	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
@@ -71,7 +72,7 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 			return exitError
 		}
 		path := filepath.Join(dir, s.name+".svg")
-		if err := os.WriteFile(path, []byte(ansiToSVG(text)), 0o644); err != nil {
+		if err := atomicfile.Write(path, []byte(ansiToSVG(text)), 0o644); err != nil {
 			errPrint(err.Error(), "", "")
 			return exitError
 		}
@@ -232,7 +233,7 @@ func shotInventory(context.Context) (string, error) {
 	fmt.Println("$ fitr")
 	fmt.Println()
 	render.WriteInventory(os.Stdout, render.Inventory{
-		Fitr: "0.9.2", CPU: "AMD Ryzen 7 7840U  (16 logical)", GPU: "AMD Radeon 780M",
+		Fitr: "0.9.3", CPU: "AMD Ryzen 7 7840U  (16 logical)", GPU: "AMD Radeon 780M",
 		GPUBackend: "rocm", MemoryGB: 32, MemorySource: "unified memory (system RAM)",
 		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
 		Profile: "lappy", Uncalibrated: false,

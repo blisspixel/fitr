@@ -49,7 +49,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
-Pin a release with `FITR_VERSION=v0.9.2`. Relocate with `FITR_BIN`. Installers
+Pin a release with `FITR_VERSION=v0.9.3`. Relocate with `FITR_BIN`. Installers
 bind the downloaded asset to its exact `SHA256SUMS` entry. From source (Go
 1.25+): `git clone https://github.com/blisspixel/fitr && cd fitr && make install`.
 
@@ -63,7 +63,7 @@ loop; coding stays SKIP until an isolated worker exists. A default run tells
 | Command | Does |
 |---|---|
 | `fitr` | installed models joined to evidence, fit windows, one next command per row |
-| `fitr [model]` | named advise: fit verdict plus a context-fit table at 2k–32k |
+| `fitr [model]` | named advise: fit verdict plus a context-fit table at 2k-32k |
 | `fitr run <model>` | measure it here (`--quick` / default / `--full`) |
 | `fitr apply [model]` | print how to persist the measured context |
 | `fitr board` / `fitr top` | compare measured runs, or open the full-screen monitor |

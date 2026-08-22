@@ -3,6 +3,7 @@
 package device
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,41 +11,44 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
-func run(name string, args ...string) string {
+func run(ctx context.Context, name string, args ...string) string {
 	if _, err := exec.LookPath(name); err != nil {
 		return ""
 	}
-	out, err := exec.Command(name, args...).Output()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = 250 * time.Millisecond
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
 }
 
-func gpuInfo() (name, driver, date string) {
+func gpuInfo(ctx context.Context) (name, driver, date string) {
 	if runtime.GOOS == "darwin" {
-		raw := run("system_profiler", "SPDisplaysDataType")
+		raw := run(ctx, "system_profiler", "SPDisplaysDataType")
 		if m := regexp.MustCompile(`Chipset Model:\s*(.+)`).FindStringSubmatch(raw); len(m) > 1 {
 			return strings.TrimSpace(m[1]), "", ""
 		}
 		return runtime.GOARCH, "", ""
 	}
 	// NVIDIA first: nvidia-smi is the most precise source when present.
-	if nv := run("nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"); nv != "" {
+	if nv := run(ctx, "nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"); nv != "" {
 		parts := strings.SplitN(strings.SplitN(nv, "\n", 2)[0], ",", 2)
 		if len(parts) == 2 {
 			return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), ""
 		}
 	}
-	if ro := run("rocm-smi", "--showproductname"); ro != "" {
+	if ro := run(ctx, "rocm-smi", "--showproductname"); ro != "" {
 		if m := regexp.MustCompile(`Card series:\s*(.+)`).FindStringSubmatch(ro); len(m) > 1 {
 			return strings.TrimSpace(m[1]), "", ""
 		}
 		return "AMD ROCm GPU", "", ""
 	}
-	if l := run("sh", "-c", "lspci | grep -iE -m1 'vga|3d|display'"); l != "" {
+	if l := run(ctx, "sh", "-c", "lspci | grep -iE -m1 'vga|3d|display'"); l != "" {
 		if i := strings.LastIndex(l, ":"); i >= 0 {
 			return strings.TrimSpace(l[i+1:]), "", ""
 		}
@@ -52,9 +56,9 @@ func gpuInfo() (name, driver, date string) {
 	return "unknown", "", ""
 }
 
-func cpuName() string {
+func cpuName(ctx context.Context) string {
 	if runtime.GOOS == "darwin" {
-		return run("sysctl", "-n", "machdep.cpu.brand_string")
+		return run(ctx, "sysctl", "-n", "machdep.cpu.brand_string")
 	}
 	b, err := os.ReadFile("/proc/cpuinfo")
 	if err != nil {
@@ -66,12 +70,12 @@ func cpuName() string {
 	return runtime.GOARCH
 }
 
-func vramInfo() (float64, string) {
-	if gb := nvidiaSMIMemory(); gb > 0 {
+func vramInfo(ctx context.Context) (float64, string) {
+	if gb := nvidiaSMIMemory(ctx); gb > 0 {
 		return gb, "nvidia-smi"
 	}
 	if runtime.GOOS == "darwin" {
-		if r := ramGB(); r > 0 {
+		if r := ramGB(ctx); r > 0 {
 			return r, "unified memory (system RAM)"
 		}
 	}
@@ -104,9 +108,9 @@ func drmVRAM() float64 {
 	return best
 }
 
-func ramGB() float64 {
+func ramGB(ctx context.Context) float64 {
 	if runtime.GOOS == "darwin" {
-		n, err := strconv.ParseInt(run("sysctl", "-n", "hw.memsize"), 10, 64)
+		n, err := strconv.ParseInt(run(ctx, "sysctl", "-n", "hw.memsize"), 10, 64)
 		if err != nil {
 			return 0
 		}

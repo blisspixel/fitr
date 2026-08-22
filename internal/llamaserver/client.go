@@ -382,6 +382,14 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 	if len(r.Choices) == 0 {
 		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf("llama-server: no choices in response")
 	}
+	if r.Choices[0].Message.Role != "assistant" {
+		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(
+			"llama-server: first choice has role %q, want assistant", r.Choices[0].Message.Role)
+	}
+	if r.Usage.PromptTokens < 0 || r.Usage.CompletionTokens < 0 {
+		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(
+			"llama-server: response contains negative token usage")
+	}
 	m := ollama.Metrics{
 		WallSeconds:  round(time.Since(start).Seconds(), 2),
 		EvalCount:    r.Usage.CompletionTokens,

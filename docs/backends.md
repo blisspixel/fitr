@@ -105,3 +105,7 @@ malformed ones survive as malformed so the tool loop counts them instead of
 laundering them into empty objects. Reasoning content round-trips across
 agentic turns on every backend - a harness that silently drops it records
 its own loss as the model's failure.
+
+Terminal chat receipts must identify an assistant response. Negative prompt or
+completion token counts are protocol errors, not measurements; fitr rejects
+them before they can enter task outcomes or derived rates.

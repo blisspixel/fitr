@@ -1489,8 +1489,16 @@ func TestNormalizeModelRefAcceptsPastedHFLinks(t *testing.T) {
 			"hf.co/bartowski/Foo-GGUF:Q4_K_M"},
 		{"https://huggingface.co/bartowski/Foo-GGUF/resolve/main/Foo.Q8_0.gguf?download=true",
 			"hf.co/bartowski/Foo-GGUF:Q8_0"},
+		{"https://huggingface.co/bartowski/Foo-GGUF/blob/main/model.gguf",
+			"hf.co/bartowski/Foo-GGUF"},
+		{"https://huggingface.co/bartowski/Foo-GGUF/blob/main/Foo-Instruct.gguf",
+			"hf.co/bartowski/Foo-GGUF"},
+		{"https://huggingface.co/bartowski/Foo-GGUF/blob/main/Q4_K_M.gguf",
+			"hf.co/bartowski/Foo-GGUF:Q4_K_M"},
 		{"http://hf.co/org/model", "hf.co/org/model"},
 		{"huggingface.co/org/model", "hf.co/org/model"},
+		{`C:\models\foo#bar.gguf`, `C:\models\foo#bar.gguf`},
+		{"/models/foo?bar.gguf", "/models/foo?bar.gguf"},
 	}
 	for _, tc := range cases {
 		if got := normalizeModelRef(tc.in); got != tc.want {
@@ -1502,6 +1510,40 @@ func TestNormalizeModelRefAcceptsPastedHFLinks(t *testing.T) {
 	}
 	if isHFRef("qwen3-coder:30b") {
 		t.Fatal("an Ollama tag is not an HF ref")
+	}
+}
+
+func TestInventoryDisclosesUnreadableSavedEvidence(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	if err := os.WriteFile(filepath.Join(dir, "damaged.json"), []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	table, warnings, err := joinInstalled(context.Background(), &runIntegrationBackend{}, device.Fingerprint{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(table.Rows) != 1 {
+		t.Fatalf("healthy inventory disappeared after damaged evidence: %+v", table)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "could not be trusted") {
+		t.Fatalf("evidence warnings = %v", warnings)
+	}
+}
+
+func TestDeviceRejectsMalformedUserProfiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_PROFILES", dir)
+	if err := os.WriteFile(filepath.Join(dir, "damaged.json"), []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	stderr, code := captureTopStderr(t, func() int {
+		return cmdDevice(ctx, []string{"--display=none"})
+	})
+	if code != exitError || !strings.Contains(stderr, "could not select device profile") {
+		t.Fatalf("device exit=%d stderr=%q", code, stderr)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/blisspixel/fitr/internal/atomicfile"
 	"github.com/blisspixel/fitr/internal/eval"
 )
 
@@ -370,7 +371,7 @@ func WriteJSON(path string, value any) error {
 		return err
 	}
 	b = append(b, '\n')
-	return os.WriteFile(path, b, 0o644)
+	return atomicfile.Write(path, b, 0o644)
 }
 
 // ReadPair loads one pair report and rejects unrelated JSON.

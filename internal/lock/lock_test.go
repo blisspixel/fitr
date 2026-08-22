@@ -94,6 +94,17 @@ func TestFreshLockIsNotTakenOver(t *testing.T) {
 	}
 }
 
+func TestOversizedHolderMetadataIsIgnored(t *testing.T) {
+	path := filepath.Join(os.TempDir(), "fitr-"+name(t)+".lock")
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", maxHolderBytes+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	if got := readHolder(path); got != (Holder{}) {
+		t.Fatalf("oversized holder metadata was accepted: %+v", got)
+	}
+}
+
 func TestReleaseIsIdempotent(t *testing.T) {
 	l, err := Acquire(name(t), "unit test")
 	if err != nil {
@@ -104,6 +115,35 @@ func TestReleaseIsIdempotent(t *testing.T) {
 	}
 	if err := l.Release(); err != nil {
 		t.Fatalf("second release must be a no-op, got: %v", err)
+	}
+}
+
+func TestStaleHolderCannotRefreshOrRemoveReplacement(t *testing.T) {
+	l, err := Acquire(name(t), "old run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := l.path
+	replacement := Holder{PID: 42, Host: "new-host", What: "new run", Token: "replacement-token"}
+	encoded, err := json.Marshal(replacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if l.refreshOnce(time.Now()) {
+		t.Fatal("stale holder refreshed a replacement lock")
+	}
+	if err := l.Release(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stale holder removed replacement lock: %v", err)
+	}
+	if got := readHolder(path); got.Token != replacement.Token || got.What != replacement.What {
+		t.Fatalf("replacement lock changed: %+v", got)
 	}
 }
 

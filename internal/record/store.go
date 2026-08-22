@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -236,8 +237,9 @@ func (s Store) LoadAll() (LoadResult, error) {
 	}
 	files = append(files, history...)
 	loaded := loadCandidateFiles(files, warnings)
+	currentIndex := indexRecordFiles(current)
 	for _, record := range loaded.Records {
-		s.reconcileWithCurrent(record)
+		reconcileWithCurrentIndex(record, currentIndex)
 	}
 	return loaded, nil
 }
@@ -254,8 +256,13 @@ func (s Store) LoadCurrent() (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	loaded := loadCandidateFiles(files, nil)
+	history, historyErr := listJSON(s.HistoryDir(), true)
+	historyIndex := recordIndex{}
+	if historyErr == nil {
+		historyIndex = indexRecordFiles(history)
+	}
 	for _, record := range loaded.Records {
-		s.reconcileWithHistory(record)
+		reconcileWithHistoryIndex(record, historyIndex)
 	}
 	seen := map[string]bool{}
 	latest := make([]*Record, 0, len(loaded.Records))
@@ -271,9 +278,20 @@ func (s Store) LoadCurrent() (LoadResult, error) {
 }
 
 func sameDirectory(a, b string) bool {
-	a, errA := filepath.Abs(filepath.Clean(a))
-	b, errB := filepath.Abs(filepath.Clean(b))
-	return errA == nil && errB == nil && a == b
+	infoA, statErrA := os.Stat(a)
+	infoB, statErrB := os.Stat(b)
+	if statErrA == nil && statErrB == nil {
+		return os.SameFile(infoA, infoB)
+	}
+	absA, errA := filepath.Abs(filepath.Clean(a))
+	absB, errB := filepath.Abs(filepath.Clean(b))
+	if errA != nil || errB != nil {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(absA, absB)
+	}
+	return absA == absB
 }
 
 // reconcileWithHistory keeps a valid but altered canonical file visible while
@@ -288,24 +306,17 @@ func (s Store) reconcileWithHistory(r *Record) {
 		r.storageIntegrityIssue = "canonical result has no matching immutable history entry"
 		return
 	}
-	wantID, wantContent := r.EnsureRunID(), recordContentHash(r)
-	foundID := false
-	for _, file := range files {
-		b, readErr := os.ReadFile(file.path)
-		if readErr != nil {
-			continue
-		}
-		history, decodeErr := decodeRecord(b)
-		if decodeErr != nil || history.EnsureRunID() != wantID {
-			continue
-		}
-		foundID = true
-		if recordContentHash(history) == wantContent {
-			r.storageIntegrityIssue = ""
-			return
-		}
+	reconcileWithHistoryIndex(r, indexRecordFiles(files))
+}
+
+func reconcileWithHistoryIndex(r *Record, index recordIndex) {
+	if r == nil || r.SchemaVersion < EvidenceSchemaVersion {
+		return
 	}
-	if foundID {
+	foundID, exact := index.match(r)
+	if exact {
+		r.storageIntegrityIssue = ""
+	} else if foundID {
 		r.storageIntegrityIssue = "canonical result differs from its immutable history entry"
 	} else {
 		r.storageIntegrityIssue = "canonical result has no matching immutable history entry"
@@ -325,24 +336,51 @@ func (s Store) reconcileWithCurrent(r *Record) {
 		r.storageIntegrityIssue = "external or archived result is display-only without an exact canonical current twin"
 		return
 	}
-	wantID, wantContent := r.EnsureRunID(), recordContentHash(r)
-	for _, file := range files {
-		b, readErr := os.ReadFile(file.path)
-		if readErr != nil {
-			continue
-		}
-		current, decodeErr := decodeRecord(b)
-		if decodeErr != nil || current.EnsureRunID() != wantID {
-			continue
-		}
-		if recordContentHash(current) == wantContent {
-			r.storageIntegrityIssue = ""
-			return
-		}
-		r.storageIntegrityIssue = "archived result differs from its canonical current twin"
+	reconcileWithCurrentIndex(r, indexRecordFiles(files))
+}
+
+func reconcileWithCurrentIndex(r *Record, index recordIndex) {
+	if r == nil || r.SchemaVersion < EvidenceSchemaVersion {
 		return
 	}
-	r.storageIntegrityIssue = "external or archived result is display-only without an exact canonical current twin"
+	foundID, exact := index.match(r)
+	if exact {
+		r.storageIntegrityIssue = ""
+	} else if foundID {
+		r.storageIntegrityIssue = "archived result differs from its canonical current twin"
+	} else {
+		r.storageIntegrityIssue = "external or archived result is display-only without an exact canonical current twin"
+	}
+}
+
+type recordIndex map[string]map[string]bool
+
+func indexRecordFiles(files []candidateFile) recordIndex {
+	index := recordIndex{}
+	for _, file := range files {
+		b, err := os.ReadFile(file.path)
+		if err != nil {
+			continue
+		}
+		r, err := decodeRecord(b)
+		if err != nil {
+			continue
+		}
+		id := r.EnsureRunID()
+		if index[id] == nil {
+			index[id] = map[string]bool{}
+		}
+		index[id][recordContentHash(r)] = true
+	}
+	return index
+}
+
+func (index recordIndex) match(r *Record) (foundID, exact bool) {
+	if r == nil {
+		return false, false
+	}
+	contents, foundID := index[r.EnsureRunID()]
+	return foundID, contents[recordContentHash(r)]
 }
 
 func loadCandidateFiles(files []candidateFile, warnings []FileWarning) LoadResult {

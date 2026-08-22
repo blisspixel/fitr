@@ -17,7 +17,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 That installs one static binary. The shell installer reports when its
 destination is not on `PATH`; the PowerShell installer adds its destination to
 the user `PATH`. The default evidence path needs no Go, Python, or venv. Pin a
-release with `FITR_VERSION=v0.9.2`; relocate with `FITR_BIN`.
+release with `FITR_VERSION=v0.9.3`; relocate with `FITR_BIN`.
 
 Both installers bind the downloaded binary to the exact asset entry in the
 release's `SHA256SUMS` file. A missing checksum tool, manifest, or asset entry
@@ -197,6 +197,11 @@ already serving that window. Unmeasured is a candidate, never a
 recommendation. Color does not carry the state. `fitr <model>` is named
 advise; inventory does not `Show()` every blob or pull anything.
 
+If a saved result cannot be decoded or trusted, inventory keeps every healthy
+row visible and prints an evidence warning. The damaged file never contributes
+to a `measured` state. `fitr top history` shows the file-level details needed
+to repair or remove it.
+
 A named `fitr advise` prints a context-fit table at 2k / 4k / 8k / 16k / 32k
 and the architecture max: weights, KV, buffers, need, and headroom.
 Buffers are `n/a` until `--load` or `--fit` measured that exact window.
@@ -207,8 +212,9 @@ row is the largest window that still fits when the requested one does not.
 ## Cores
 
 fitr already schedules on every logical CPU Go can see. Runtime discovery
-probes ports at once; hardware probes overlap; split GGUF shards are sized
-in parallel. `fitr` and `fitr device` print that CPU count as display-only.
+probes ports at once; hardware probes overlap, share a five-second deadline,
+and honor cancellation; split GGUF shards are sized in parallel. `fitr` and
+`fitr device` print that CPU count as display-only.
 It is not part of the fingerprint key.
 
 A scored `fitr run` is still one request at a time. Concurrent prompts on
@@ -278,6 +284,11 @@ uncalibrated and says so at runtime.
 
 Every threshold carries a `why`. **Copy `default.json`, tune it, set
 `match`.** Do not reuse another machine's numbers.
+
+`fitr profiles new [name]` creates a private file without overwriting an
+existing profile. User profile JSON is strict: malformed files, trailing JSON,
+and unknown fields are hard errors so a damaged calibration cannot silently
+fall back to unrelated gates.
 
 Results are stored as JSON under `~/.fitr/results` (override with
 `$FITR_RESULTS`). Canonical files use a readable model prefix plus a short

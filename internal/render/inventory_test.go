@@ -13,6 +13,7 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 		MemoryGB: 16, MemorySource: "nvidia-smi",
 		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
 		Profile: "default", Uncalibrated: true,
+		Warnings: []string{"1 saved result file could not be trusted"},
 		Rows: []InventoryRow{
 			{Model: "qwen3:8b", State: "measured", SizeB: 5 << 30, Ctx: "16k/8k", Next: "fitr apply qwen3:8b",
 				Note: "measured ctx=16384; serving ctx=8192", Windows: "2k ok | 4k ok | 8k ok | *16k ok | 32k no"},
@@ -26,6 +27,7 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 		"measured", "unproven", "incompatible", "FIT", "CTX", "16k/8k", "*16k ok",
 		"fitr apply qwen3:8b", "fitr advise gemma4:12b", "try a smaller quant",
 		"* gemma4:12b", "never a recommendation",
+		"warning", "could not be trusted",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("plain inventory missing %q:\n%s", want, got)
@@ -58,8 +60,9 @@ func TestWriteInventoryJSONSchema(t *testing.T) {
 		Rows: []InventoryRow{{Model: "only", State: "unproven", Next: "fitr advise only"}},
 	}, "json")
 	var payload struct {
-		Schema  string `json:"schema"`
-		Runtime struct {
+		Schema   string   `json:"schema"`
+		Warnings []string `json:"warnings"`
+		Runtime  struct {
 			Kind string `json:"kind"`
 		} `json:"runtime"`
 		Rows []struct {
@@ -76,5 +79,19 @@ func TestWriteInventoryJSONSchema(t *testing.T) {
 	}
 	if len(payload.Rows) != 1 || payload.Rows[0].State != "unproven" {
 		t.Fatalf("json rows = %+v", payload.Rows)
+	}
+}
+
+func TestWriteInventoryJSONIncludesEvidenceWarnings(t *testing.T) {
+	var out strings.Builder
+	WriteInventory(&out, Inventory{Warnings: []string{"damaged evidence"}}, "json")
+	var payload struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal([]byte(out.String()), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Warnings) != 1 || payload.Warnings[0] != "damaged evidence" {
+		t.Fatalf("warnings = %v", payload.Warnings)
 	}
 }

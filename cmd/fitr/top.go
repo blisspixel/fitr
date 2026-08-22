@@ -668,7 +668,7 @@ func attachTopInventory(ctx context.Context, snapshot *top.Snapshot) {
 	}
 	b, _ := backendAt(found[0].Kind, found[0].URL)
 	fp := device.Detect(ctx, b)
-	table, err := joinInstalled(ctx, b, fp)
+	table, _, err := joinInstalled(ctx, b, fp)
 	if err != nil {
 		return
 	}

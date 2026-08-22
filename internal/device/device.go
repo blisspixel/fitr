@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/blisspixel/fitr/internal/llm"
 )
@@ -240,6 +241,8 @@ var configKeys = []string{
 }
 
 func Detect(ctx context.Context, b llm.Backend) Fingerprint {
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	host, _ := os.Hostname()
 	// GPU/CPU/RAM/VRAM probes are independent process or sysfs reads.
 	// On Windows each is a PowerShell round-trip; paying them in series
@@ -249,10 +252,10 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	var vsrc string
 	var wg sync.WaitGroup
 	wg.Add(4)
-	go func() { defer wg.Done(); gpu, drv, date = gpuInfo() }()
-	go func() { defer wg.Done(); cpu = cpuName() }()
-	go func() { defer wg.Done(); ram = ramGB() }()
-	go func() { defer wg.Done(); vram, vsrc = vramInfo() }()
+	go func() { defer wg.Done(); gpu, drv, date = gpuInfo(probeCtx) }()
+	go func() { defer wg.Done(); cpu = cpuName(probeCtx) }()
+	go func() { defer wg.Done(); ram = ramGB(probeCtx) }()
+	go func() { defer wg.Done(); vram, vsrc = vramInfo(probeCtx) }()
 
 	cfg := map[string]string{}
 	version := ""
@@ -266,13 +269,13 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 		mergeServerLogConfig(cfg)
 	}
 	if b != nil {
-		version = b.Version(ctx)
+		version = b.Version(probeCtx)
 	}
 	accel := ""
 	if a, ok := b.(interface{ Accel(context.Context) string }); ok {
-		accel = NormalizeAccel(a.Accel(ctx))
+		accel = NormalizeAccel(a.Accel(probeCtx))
 	}
-	placement := inferenceDevice(ctx, b, "")
+	placement := inferenceDevice(probeCtx, b, "")
 	wg.Wait()
 	vram, vsrc = preferUnifiedMemory(gpu, ram, vram, vsrc)
 	return Fingerprint{
@@ -288,7 +291,7 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 // means. The serving runtime, not fitr, owns inference threads.
 // preferUnifiedMemory replaces a discrete-carve VRAM reading on APUs with
 // system RAM. Windows registry qwMemorySize often reports ~2 GB of shared
-// graphics memory on a 32–128 GB 780M / Strix Halo box; treating that as the
+// graphics memory on a 32-128 GB 780M / Strix Halo box; treating that as the
 // model budget marks everything incompatible. NVIDIA remains nvidia-smi.
 func preferUnifiedMemory(gpu string, ram, vram float64, src string) (float64, string) {
 	if ram <= 0 || !unifiedMemoryGPU(gpu) {
@@ -347,12 +350,14 @@ func FormatVRAM(gb float64, source string) string {
 	return fmt.Sprintf("%.1f (%s)", gb, source)
 }
 
-func nvidiaSMIMemory() float64 {
+func nvidiaSMIMemory(ctx context.Context) float64 {
 	if _, err := exec.LookPath("nvidia-smi"); err != nil {
 		return 0
 	}
-	out, err := exec.Command("nvidia-smi",
-		"--query-gpu=memory.total", "--format=csv,noheader,nounits").Output()
+	cmd := exec.CommandContext(ctx, "nvidia-smi",
+		"--query-gpu=memory.total", "--format=csv,noheader,nounits")
+	cmd.WaitDelay = 250 * time.Millisecond
+	out, err := cmd.Output()
 	if err != nil {
 		return 0
 	}

@@ -33,6 +33,11 @@ jobs:
       - name: result decoder fuzz smoke
         run: go test ./internal/record -run='^$' -fuzz=FuzzDecodeRecord -fuzztime=10s
       - run: make dist
+      - name: reproducible Linux binary
+        shell: bash
+        run: |
+          go build -trimpath -ldflags="-s -w" -o "${RUNNER_TEMP}/fitr-linux-amd64" ./cmd/fitr
+          cmp dist/fitr-linux-amd64 "${RUNNER_TEMP}/fitr-linux-amd64"
       - name: binary size gate
         shell: bash
         run: |

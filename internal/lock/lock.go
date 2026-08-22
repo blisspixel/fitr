@@ -14,9 +14,12 @@
 package lock
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -32,12 +35,15 @@ const StaleAfter = 2 * time.Minute
 // pause -- a slow model load, a swapping machine -- is never mistaken for death.
 const refreshEvery = 20 * time.Second
 
+const maxHolderBytes = 4 << 10
+
 // Holder describes the process that owns a lock, so the error can name it.
 type Holder struct {
 	PID   int    `json:"pid"`
 	Host  string `json:"host"`
 	What  string `json:"what"`
 	Since string `json:"since"`
+	Token string `json:"token,omitempty"`
 }
 
 // BusyError reports that another process holds the lock.
@@ -58,16 +64,22 @@ func (e *BusyError) Error() string {
 
 // Lock is a held single-instance lock. Release it exactly once, ideally by defer.
 type Lock struct {
-	path string
-	stop chan struct{}
-	done chan struct{}
-	once sync.Once
+	path  string
+	token string
+	stop  chan struct{}
+	done  chan struct{}
+	once  sync.Once
 }
 
 // Acquire takes the named lock, or returns *BusyError if another live process
 // holds it. `what` is a human description used in that error.
 func Acquire(name, what string) (*Lock, error) {
 	path := filepath.Join(os.TempDir(), "fitr-"+name+".lock")
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, fmt.Errorf("create lock ownership token: %w", err)
+	}
+	token := hex.EncodeToString(tokenBytes)
 
 	// Two attempts: the second only happens after clearing a stale lock, so
 	// this cannot spin.
@@ -76,7 +88,7 @@ func Acquire(name, what string) (*Lock, error) {
 		if err == nil {
 			host, _ := os.Hostname()
 			h := Holder{PID: os.Getpid(), Host: host, What: what,
-				Since: time.Now().Format(time.RFC3339)}
+				Since: time.Now().Format(time.RFC3339), Token: token}
 			enc, _ := json.Marshal(h)
 			_, werr := f.Write(enc)
 			cerr := f.Close()
@@ -84,7 +96,7 @@ func Acquire(name, what string) (*Lock, error) {
 				os.Remove(path) //nolint:errcheck // best effort on a failed acquire
 				return nil, errors.Join(werr, cerr)
 			}
-			l := &Lock{path: path, stop: make(chan struct{}), done: make(chan struct{})}
+			l := &Lock{path: path, token: token, stop: make(chan struct{}), done: make(chan struct{})}
 			go l.refresh()
 			return l, nil
 		}
@@ -102,6 +114,16 @@ func Acquire(name, what string) (*Lock, error) {
 			return nil, &BusyError{Holder: readHolder(path), Path: path, Age: age}
 		}
 		// Stale: the holder stopped refreshing. Take it over.
+		current, currentErr := os.Stat(path)
+		if currentErr != nil {
+			if os.IsNotExist(currentErr) {
+				continue
+			}
+			return nil, currentErr
+		}
+		if !os.SameFile(st, current) {
+			continue
+		}
 		if rerr := os.Remove(path); rerr != nil && !os.IsNotExist(rerr) {
 			return nil, rerr
 		}
@@ -111,7 +133,13 @@ func Acquire(name, what string) (*Lock, error) {
 
 func readHolder(path string) Holder {
 	var h Holder
-	if b, err := os.ReadFile(path); err == nil {
+	f, err := os.Open(path)
+	if err != nil {
+		return h
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxHolderBytes+1))
+	if err == nil && len(b) <= maxHolderBytes {
 		_ = json.Unmarshal(b, &h) // a corrupt lock still reports as busy, just unnamed
 	}
 	return h
@@ -127,12 +155,25 @@ func (l *Lock) refresh() {
 		case <-l.stop:
 			return
 		case now := <-t.C:
-			// Failure here is not fatal: the worst case is that a live lock
-			// looks stale and a second run takes over, which is the behaviour
-			// we would have had without a lock at all.
-			_ = os.Chtimes(l.path, now, now)
+			if !l.refreshOnce(now) {
+				return
+			}
 		}
 	}
+}
+
+// refreshOnce updates only the file this Lock created. A delayed stale holder
+// must never refresh a replacement lock owned by a newer process.
+func (l *Lock) refreshOnce(now time.Time) bool {
+	if !l.ownsPath() {
+		return false
+	}
+	_ = os.Chtimes(l.path, now, now)
+	return true
+}
+
+func (l *Lock) ownsPath() bool {
+	return l.token != "" && readHolder(l.path).Token == l.token
 }
 
 // Release drops the lock. Safe to call more than once.
@@ -141,6 +182,9 @@ func (l *Lock) Release() error {
 	l.once.Do(func() {
 		close(l.stop)
 		<-l.done
+		if !l.ownsPath() {
+			return
+		}
 		if rerr := os.Remove(l.path); rerr != nil && !os.IsNotExist(rerr) {
 			err = rerr
 		}

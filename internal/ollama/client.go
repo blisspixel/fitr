@@ -361,6 +361,10 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools [
 	if !r.Done {
 		return Message{}, Metrics{}, fmt.Errorf("ollama chat response is missing the terminal receipt")
 	}
+	if r.Message.Role != "assistant" {
+		return Message{}, Metrics{}, fmt.Errorf(
+			"ollama chat response has role %q, want assistant", r.Message.Role)
+	}
 	if r.EvalCount < 0 || r.EvalDuration < 0 || r.PromptEvalCount < 0 || r.PromptEvalDuration < 0 {
 		return Message{}, Metrics{}, fmt.Errorf("ollama chat response contains a negative metric")
 	}

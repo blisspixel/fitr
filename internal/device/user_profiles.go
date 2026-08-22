@@ -3,6 +3,7 @@ package device
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -119,18 +120,29 @@ func ScaffoldProfile(name string, fp Fingerprint) (Profile, error) {
 }
 
 func WriteProfile(dir string, p Profile) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	path := filepath.Join(dir, slugProfile(p.Name)+".json")
-	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("already exists: %s", path)
-	}
 	b, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return "", err
 	}
-	return path, os.WriteFile(path, append(b, '\n'), 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if os.IsExist(err) {
+		return "", fmt.Errorf("already exists: %s", path)
+	}
+	if err != nil {
+		return "", err
+	}
+	_, writeErr := f.Write(append(b, '\n'))
+	syncErr := f.Sync()
+	closeErr := f.Close()
+	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
 }
 
 func slugProfile(s string) string {

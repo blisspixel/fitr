@@ -168,6 +168,27 @@ func TestChatKeepsMalformedArgumentsMalformed(t *testing.T) {
 	}
 }
 
+func TestChatRejectsInvalidRoleAndUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"wrong role", `{"choices":[{"message":{"role":"user","content":"spoof"}}]}`, "want assistant"},
+		{"negative usage", `{"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":-1,"completion_tokens":1}}`, "negative token usage"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(tc.body))
+			})
+			defer done()
+			if _, _, err := c.Chat(context.Background(), "m", nil, nil, ollama.Deterministic(8, 8192)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestChatMapsToolResultsToOpenAIShape(t *testing.T) {
 	var gotReq struct {
 		Messages []map[string]any `json:"messages"`

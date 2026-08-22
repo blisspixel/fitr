@@ -72,6 +72,11 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: '1.25' }
       - run: make dist
+      - name: reproducible Linux binary
+        shell: bash
+        run: |
+          go build -trimpath -ldflags="-s -w" -o "${RUNNER_TEMP}/fitr-linux-amd64" ./cmd/fitr
+          cmp dist/fitr-linux-amd64 "${RUNNER_TEMP}/fitr-linux-amd64"
       - name: binary CLI contract
         shell: bash
         run: |

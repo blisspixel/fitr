@@ -1,12 +1,14 @@
 package device
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -32,6 +34,16 @@ func TestPreferUnifiedMemoryOnAPU(t *testing.T) {
 	gb, src = preferUnifiedMemory("Radeon RX 7900 XTX", 32, 20, "registry qwMemorySize")
 	if src == "unified memory (system RAM)" {
 		t.Fatalf("discrete RX must not be treated as unified: %v %q", gb, src)
+	}
+}
+
+func TestDetectHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	started := time.Now()
+	_ = Detect(ctx, nil)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("cancelled hardware detection took %v", elapsed)
 	}
 }
 
@@ -142,6 +154,42 @@ func TestScaffoldProfileIsUncalibratedCopyOfDefault(t *testing.T) {
 	}
 	if _, ok := p.Gates["fast_chat"]["why"]; !ok {
 		t.Fatal("copied gates must keep why")
+	}
+}
+
+func TestWriteProfileCreatesPrivateFileWithoutOverwriting(t *testing.T) {
+	dir := t.TempDir()
+	p, err := ScaffoldProfile("Local", Fingerprint{Host: "workstation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := WriteProfile(dir, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Description = "must not replace the existing profile"
+	if _, err := WriteProfile(dir, p); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("second write error = %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(original) {
+		t.Fatal("existing profile was overwritten")
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("profile mode = %o, want 600", got)
+		}
 	}
 }
 

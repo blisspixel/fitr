@@ -90,6 +90,30 @@ func TestGenerateLengthFinishIsTruncation(t *testing.T) {
 	}
 }
 
+func TestRejectsNegativeTokenUsage(t *testing.T) {
+	t.Run("stream", func(t *testing.T) {
+		c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("data: {\"choices\":[{\"text\":\"x\",\"finish_reason\":\"stop\"}]}\n\n"))
+			w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":-1,\"completion_tokens\":1}}\n\n"))
+			w.Write([]byte("data: [DONE]\n\n"))
+		})
+		defer done()
+		if _, _, err := c.Generate(context.Background(), "m", "hi", ollama.Deterministic(8, 8192)); err == nil || !strings.Contains(err.Error(), "negative token usage") {
+			t.Fatalf("negative stream usage error = %v", err)
+		}
+	})
+	t.Run("chat", func(t *testing.T) {
+		c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}],` +
+				`"usage":{"prompt_tokens":1,"completion_tokens":-1}}`))
+		})
+		defer done()
+		if _, _, err := c.Chat(context.Background(), "m", nil, nil, ollama.Deterministic(8, 8192)); err == nil || !strings.Contains(err.Error(), "negative token usage") {
+			t.Fatalf("negative chat usage error = %v", err)
+		}
+	})
+}
+
 func TestGenerateFallsBackToChatOn404(t *testing.T) {
 	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/completions" {
@@ -654,13 +678,13 @@ func TestStreamingConformanceMatrix(t *testing.T) {
 func TestVersionTriesVLLMEndpoint(t *testing.T) {
 	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/version" {
-			w.Write([]byte(`{"version":"0.9.2"}`))
+			w.Write([]byte(`{"version":"0.9.3"}`))
 			return
 		}
 		http.Error(w, "no", 404)
 	})
 	defer done()
-	if v := c.Version(context.Background()); v != "openai-compat 0.9.2" {
+	if v := c.Version(context.Background()); v != "openai-compat 0.9.3" {
 		t.Fatalf("version = %q", v)
 	}
 }
