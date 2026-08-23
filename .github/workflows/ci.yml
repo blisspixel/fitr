@@ -121,6 +121,8 @@ jobs:
       - name: reachable Go vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
       - name: terminal renderer fuzz smoke
-        run: go test ./internal/top -run='^$' -fuzz=FuzzRenderBounds -fuzztime=10s
+        run: go test ./internal/top -run='^$' -fuzz=FuzzRenderBounds -fuzztime=20000x -parallel=4
       - name: result decoder fuzz smoke
-        run: go test ./internal/record -run='^$' -fuzz=FuzzDecodeRecord -fuzztime=10s
+        run: go test ./internal/record -run='^$' -fuzz=FuzzDecodeRecord -fuzztime=20000x -parallel=4
+      - name: strict JSON fuzz smoke
+        run: go test ./internal/strictjson -run='^$' -fuzz=FuzzValidate -fuzztime=20000x -parallel=4
