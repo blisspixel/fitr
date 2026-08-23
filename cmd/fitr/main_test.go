@@ -1212,6 +1212,18 @@ type digestVerifyingBackend struct {
 	called   bool
 }
 
+type inventoryBackend struct {
+	*runIntegrationBackend
+	name string
+	tags []ollama.ModelInfo
+	err  error
+}
+
+func (b *inventoryBackend) Name() string { return b.name }
+func (b *inventoryBackend) Tags(context.Context) ([]ollama.ModelInfo, error) {
+	return b.tags, b.err
+}
+
 func (b *digestVerifyingBackend) Tags(context.Context) ([]ollama.ModelInfo, error) {
 	return []ollama.ModelInfo{{Name: "model", ReportedDigest: b.reported, Size: 1024}}, nil
 }
@@ -1310,6 +1322,42 @@ func TestBackendAtUsesConfiguredOpenAIURLWhenExplicit(t *testing.T) {
 	}
 	if got := b.URL(); got != "http://127.0.0.1:32123" {
 		t.Fatalf("OpenAI-compatible URL = %q", got)
+	}
+}
+
+func TestCheckModelRejectsFailedAndEmptyInventory(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		backend *inventoryBackend
+		want    int
+	}{
+		{
+			name: "inventory error",
+			backend: &inventoryBackend{runIntegrationBackend: &runIntegrationBackend{}, name: "openai",
+				err: errors.New("malformed models response")},
+			want: exitError,
+		},
+		{
+			name: "empty single-model inventory",
+			backend: &inventoryBackend{runIntegrationBackend: &runIntegrationBackend{}, name: "llama-server",
+				tags: []ollama.ModelInfo{}},
+			want: exitError,
+		},
+		{
+			name: "empty ollama inventory",
+			backend: &inventoryBackend{runIntegrationBackend: &runIntegrationBackend{}, name: "ollama",
+				tags: []ollama.ModelInfo{}},
+			want: exitUsage,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			display := render.New("none")
+			defer display.Close()
+			got, code := checkModelWithDisplay(context.Background(), tc.backend, "model", false, display)
+			if code != tc.want || got != nil {
+				t.Fatalf("backend=%T code=%d, want nil, %d", got, code, tc.want)
+			}
+		})
 	}
 }
 

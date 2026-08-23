@@ -3,15 +3,35 @@ package ollama
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/blisspixel/fitr/internal/boundedio"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestControlPlaneRequestsCarryDeadline(t *testing.T) {
+	c := &Client{BaseURL: "http://127.0.0.1:11434", HTTP: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > controlPlaneTimeout {
+			t.Errorf("control-plane deadline = %v, %v", deadline, ok)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{"models":[]}`)), Request: req}, nil
+	})}}
+	if _, err := c.Tags(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestReadFileTailIsBoundedAndKeepsLatestAccelerationReceipt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.log")
@@ -243,6 +263,7 @@ func TestGenerateRequiresStrictFramesAndTerminalReceipt(t *testing.T) {
 			wantText: "ok",
 		},
 		{name: "malformed frame", body: "{\n", wantError: "generate frame"},
+		{name: "duplicate field", body: `{"done":false,"done":true}` + "\n", wantError: "duplicate JSON object name"},
 		{name: "trailing JSON in frame", body: `{"done":true} {}` + "\n", wantError: "content after JSON frame"},
 		{name: "early EOF", body: `{"response":"partial","done":false}` + "\n", wantText: "partial", wantError: "before a terminal frame"},
 		{name: "data after terminal", body: `{"done":true}` + "\n" + `{"response":"spoof"}` + "\n", wantError: "after the terminal frame"},

@@ -26,6 +26,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 // Instance is one generated occurrence of a check task. Canon is a known
@@ -106,6 +108,9 @@ func stripFence(s string) string {
 // strictJSON decodes exactly one JSON value with nothing but whitespace after
 // it. "Mostly JSON" is a parse failure in every real pipeline, so it is one here.
 func strictJSON(s string) (any, error) {
+	if err := strictjson.Validate([]byte(s)); err != nil {
+		return nil, err
+	}
 	r := strings.NewReader(s)
 	dec := json.NewDecoder(r)
 	dec.UseNumber()

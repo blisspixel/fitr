@@ -26,8 +26,10 @@ Auto-detect identifies the *runtime* by response shape, not by port:
 so the `/props` hit wins on the same URL. Extra ports (vLLM 8000, Jan 1337,
 SGLang 30000, koboldcpp 5001, ...) are probed only as fallbacks; a forgotten
 vLLM does not steal the measurement from a running Ollama. Add more with
-`$FITR_DISCOVER_URLS` (comma-separated). If more than one runtime answers,
-fitr uses the first and prints the others.
+`$FITR_DISCOVER_URLS` (comma-separated, up to 128 unique base URLs). If more
+than one runtime answers, fitr uses the first and prints the others. A sweep
+uses at most 16 concurrent probes and has a three-second overall deadline, so
+an unavailable endpoint or a long custom list cannot stall the first command.
 
 ## Hugging Face GGUF links
 
@@ -111,4 +113,10 @@ receipts must contain exactly one choice. Negative prompt or completion token
 counts are protocol errors, not measurements. An OpenAI-compatible generation
 stream must end with `[DONE]` after a finish reason and the requested usage
 receipt. Conflicting receipts, multiple choices, or data after `[DONE]` are
-rejected before they can enter task outcomes or derived rates.
+rejected before they can enter task outcomes or derived rates. Duplicate JSON
+object names are rejected across native frames, OpenAI streams, inventories,
+and metadata rather than interpreted with last-value-wins semantics.
+
+Inventory, model metadata, resident-state, and unload calls have a 15-second
+control-plane deadline. Generation and model pulls keep their longer runtime
+budget and remain interruptible with Ctrl-C.

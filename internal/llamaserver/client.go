@@ -28,17 +28,19 @@ import (
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/oai"
 	"github.com/blisspixel/fitr/internal/ollama"
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 const DefaultURL = "http://127.0.0.1:8080"
 
 const (
-	maxNativeBody      = 16 << 20
-	maxNativeError     = 64 << 10
-	maxNativeLine      = 1 << 20
-	maxNativeStream    = 64 << 20
-	maxNativeFrames    = 1_000_000
-	maxGeneratedOutput = 8 << 20
+	maxNativeBody       = 16 << 20
+	maxNativeError      = 64 << 10
+	maxNativeLine       = 1 << 20
+	maxNativeStream     = 64 << 20
+	maxNativeFrames     = 1_000_000
+	maxGeneratedOutput  = 8 << 20
+	controlPlaneTimeout = 15 * time.Second
 )
 
 type Client struct {
@@ -128,7 +130,9 @@ type props struct {
 
 func (c *Client) props(ctx context.Context) (props, error) {
 	var p props
-	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/props", nil)
+	cctx, cancel := context.WithTimeout(ctx, controlPlaneTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/props", nil)
 	if err != nil {
 		return p, err
 	}
@@ -467,7 +471,7 @@ func decodeJSONFrame(frame []byte, into any) error {
 		}
 		return err
 	}
-	return nil
+	return strictjson.Validate(frame)
 }
 
 func round(v float64, places int) float64 {

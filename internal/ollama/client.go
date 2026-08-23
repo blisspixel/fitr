@@ -23,18 +23,20 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/boundedio"
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 const DefaultURL = "http://127.0.0.1:11434"
 
 const (
-	maxNativeBody      = 16 << 20
-	maxNativeError     = 64 << 10
-	maxNativeLine      = 1 << 20
-	maxNativeStream    = 64 << 20
-	maxNativeFrames    = 1_000_000
-	maxGeneratedOutput = 8 << 20
-	maxServerLogTail   = 1 << 20
+	maxNativeBody       = 16 << 20
+	maxNativeError      = 64 << 10
+	maxNativeLine       = 1 << 20
+	maxNativeStream     = 64 << 20
+	maxNativeFrames     = 1_000_000
+	maxGeneratedOutput  = 8 << 20
+	maxServerLogTail    = 1 << 20
+	controlPlaneTimeout = 15 * time.Second
 )
 
 var serverLibraryPattern = regexp.MustCompile(`library=([A-Za-z0-9_]+)`)
@@ -174,7 +176,7 @@ func decodeJSONFrame(frame []byte, into any) error {
 		}
 		return err
 	}
-	return nil
+	return strictjson.Validate(frame)
 }
 
 func nativeHTTPError(resp *http.Response) error {
@@ -413,7 +415,9 @@ type ModelInfo struct {
 }
 
 func (c *Client) Tags(ctx context.Context) ([]ModelInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/api/tags", nil)
+	cctx, cancel := context.WithTimeout(ctx, controlPlaneTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/tags", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +461,9 @@ func (c *Client) Tags(ctx context.Context) ([]ModelInfo, error) {
 // whether a model supports thinking/tools/vision -- far better than matching on
 // name prefixes, which mistakes qwen3-coder (instruct) for a thinking model.
 func (c *Client) Show(ctx context.Context, model string) (ModelInfo, error) {
-	resp, err := c.post(ctx, "/api/show", map[string]string{"model": model})
+	cctx, cancel := context.WithTimeout(ctx, controlPlaneTimeout)
+	defer cancel()
+	resp, err := c.post(cctx, "/api/show", map[string]string{"model": model})
 	if err != nil {
 		return ModelInfo{}, err
 	}
@@ -483,7 +489,9 @@ type RunningModel struct {
 }
 
 func (c *Client) PS(ctx context.Context) ([]RunningModel, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/api/ps", nil)
+	cctx, cancel := context.WithTimeout(ctx, controlPlaneTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/ps", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -584,8 +592,10 @@ func (c *Client) Resident(ctx context.Context) ([]RunningModel, error) {
 // Callers should WARN and record leftovers rather than abort -- data marked as
 // possibly contaminated beats data silently trusted, and beats no data at all.
 func (c *Client) StopAll(ctx context.Context) ([]string, error) {
+	cctx, cancel := context.WithTimeout(ctx, controlPlaneTimeout)
+	defer cancel()
 	for range 8 {
-		live, err := c.Resident(ctx)
+		live, err := c.Resident(cctx)
 		if err != nil {
 			return nil, err
 		}
@@ -593,7 +603,7 @@ func (c *Client) StopAll(ctx context.Context) ([]string, error) {
 			return nil, nil
 		}
 		for _, m := range live {
-			resp, err := c.post(ctx, "/api/generate", map[string]any{
+			resp, err := c.post(cctx, "/api/generate", map[string]any{
 				"model": m.Name, "prompt": "", "keep_alive": 0,
 			})
 			if err == nil {
@@ -601,12 +611,12 @@ func (c *Client) StopAll(ctx context.Context) ([]string, error) {
 			}
 		}
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-cctx.Done():
+			return nil, cctx.Err()
 		case <-time.After(1500 * time.Millisecond):
 		}
 	}
-	live, err := c.Resident(ctx)
+	live, err := c.Resident(cctx)
 	if err != nil {
 		return nil, err
 	}

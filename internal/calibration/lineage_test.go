@@ -80,6 +80,13 @@ func TestReadConversionManifestRejectsUnknownFieldsAndTrailingJSON(t *testing.T)
 	if _, err := ReadConversionManifest(path); err == nil || !strings.Contains(strings.ToLower(err.Error()), "after") {
 		t.Fatalf("trailing JSON = %v", err)
 	}
+	duplicate := strings.Replace(valid, `"schema":`, `"schema":"shadow","schema":`, 1)
+	if err := os.WriteFile(path, []byte(duplicate), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadConversionManifest(path); err == nil || !strings.Contains(err.Error(), "duplicate JSON object name") {
+		t.Fatalf("duplicate JSON name = %v", err)
+	}
 }
 
 func TestGGUFNameIsNotALineageDigest(t *testing.T) {

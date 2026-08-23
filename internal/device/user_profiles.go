@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/boundedio"
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 const maxProfileBytes = 1 << 20
@@ -60,6 +61,9 @@ func loadUserProfiles() ([]Profile, error) {
 func decodeProfile(source string, b []byte) (Profile, error) {
 	if len(b) > maxProfileBytes {
 		return Profile{}, fmt.Errorf("profile %s exceeds %d bytes", source, maxProfileBytes)
+	}
+	if err := strictjson.Validate(b); err != nil {
+		return Profile{}, fmt.Errorf("profile %s: %w", source, err)
 	}
 	var p Profile
 	dec := json.NewDecoder(bytes.NewReader(b))

@@ -249,8 +249,9 @@ func TestLoadLegacyCurrentAndHistoryDeduplicatesStably(t *testing.T) {
 func TestReadRejectsUnknownFieldsAndTrailingJSON(t *testing.T) {
 	store := NewStore(t.TempDir())
 	for name, raw := range map[string]string{
-		"unknown.json":  `{"schema_version":4,"model":"m","unexpected":true}`,
-		"trailing.json": `{"schema_version":4,"model":"m"} {"model":"second"}`,
+		"unknown.json":   `{"schema_version":4,"model":"m","unexpected":true}`,
+		"duplicate.json": `{"schema_version":4,"model":"m","model":"second"}`,
+		"trailing.json":  `{"schema_version":4,"model":"m"} {"model":"second"}`,
 	} {
 		path := filepath.Join(store.Dir, name)
 		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {

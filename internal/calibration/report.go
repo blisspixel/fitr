@@ -21,6 +21,7 @@ import (
 	"github.com/blisspixel/fitr/internal/atomicfile"
 	"github.com/blisspixel/fitr/internal/boundedio"
 	"github.com/blisspixel/fitr/internal/eval"
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 const (
@@ -383,6 +384,9 @@ func WriteJSON(path string, value any) error {
 func ReadPair(path string) (PairReport, error) {
 	b, err := boundedio.ReadFile(path, maxCalibrationJSONBytes)
 	if err != nil {
+		return PairReport{}, err
+	}
+	if err := strictjson.Validate(b); err != nil {
 		return PairReport{}, err
 	}
 	var r PairReport

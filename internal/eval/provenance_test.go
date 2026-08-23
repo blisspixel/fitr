@@ -99,6 +99,7 @@ func TestBuiltinJSONDecoderRejectsUnknownFieldsAndTrailingData(t *testing.T) {
 		data string
 	}{
 		{"unknown", `{"id":"a","idd":"typo"}`},
+		{"duplicate", `{"id":"shadow","id":"a"}`},
 		{"trailing object", `{"id":"a"} {"id":"b"}`},
 		{"trailing scalar", `{"id":"a"} true`},
 	} {

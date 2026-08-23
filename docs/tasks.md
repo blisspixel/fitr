@@ -20,7 +20,8 @@ For that reason:
 3. INCONCLUSIVE and executor errors never enter a scoring or comparison
    numerator or denominator.
 4. User task files remain declarative. Executable kinds, executable fields,
-   unknown fields, and trailing JSON are hard errors.
+   unknown fields, duplicate JSON object names, and trailing JSON are hard
+   errors.
 
 Verified executable PASS and FAIL evidence requires the isolated worker in the
 benchmark-quality release. Until then, no generated model code is allowed to
@@ -53,8 +54,10 @@ the sin this repo exists to avoid.
 
 Grading is strict where strictness is the point - a reply that wraps JSON in
 commentary fails `structured_output`, because no pipeline can consume it -
-and lenient where it is not: reasoning tasks only require a final `Answer:`
-line, so a chatty-but-correct model is not punished for chattiness there.
+and duplicate object names fail because different consumers can choose
+different values. Grading is lenient where strictness is not the point:
+reasoning tasks only require a final `Answer:` line, so a chatty-but-correct
+model is not punished for chattiness there.
 
 The battery is deliberately weighted toward structured output, because that
 is what quantization breaks first: JSON validity and tool-argument fidelity
@@ -69,6 +72,12 @@ drops it from the `tools` parameter mid-loop. The model is told what exists
 every turn; calling a tool that is no longer listed is a hallucinated
 capability. One grace call is tolerated (discovering the removal); persisting
 past the error fails `tool_restraint`.
+
+File tools accept one ordinary portable filename, not a path. Windows device
+names, NTFS alternate-stream syntax, separators, control characters, and other
+non-portable names are rejected on every operating system. Model-created files
+and file reads are limited to 1 MiB so a malformed tool call cannot turn a run
+into unbounded disk or transcript growth.
 
 ## Your own tasks, without forking
 

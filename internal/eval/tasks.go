@@ -2,7 +2,6 @@ package eval
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,10 +11,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
+	"github.com/blisspixel/fitr/internal/boundedio"
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/ollama"
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
+
+const maxTaskToolFileBytes = 1 << 20
 
 // ---------------------------------------------------------------- speed
 type SpeedResult struct {
@@ -485,11 +489,11 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 			name := tc.Function.Name
 			args := map[string]any{}
 			if len(tc.Function.Arguments) > 0 {
-				if err := json.Unmarshal(tc.Function.Arguments, &args); err != nil {
+				if err := strictjson.Unmarshal(tc.Function.Arguments, &args); err != nil {
 					// Some models emit arguments as a JSON *string*; try once more.
 					var asStr string
-					if json.Unmarshal(tc.Function.Arguments, &asStr) == nil {
-						if json.Unmarshal([]byte(asStr), &args) != nil {
+					if strictjson.Unmarshal(tc.Function.Arguments, &asStr) == nil {
+						if strictjson.Unmarshal([]byte(asStr), &args) != nil {
 							r.Malformed++
 						}
 					} else {
@@ -580,28 +584,29 @@ func doTool(ctx context.Context, dir, name, p, content string, args map[string]a
 		sort.Strings(names)
 		return strings.Join(names, "\n"), nil
 	case "read_file":
-		base := filepath.Base(p)
-		if p == "" || base != p || base == "." {
+		if !safeTaskFileName(p) {
 			return "ERROR: invalid task-local path", nil
 		}
-		b, err := os.ReadFile(filepath.Join(dir, base))
+		b, err := boundedio.ReadFile(filepath.Join(dir, p), maxTaskToolFileBytes)
 		if err != nil {
-			if _, fixture := spec.Files[base]; fixture || written[base] {
+			if _, fixture := spec.Files[p]; fixture || written[p] {
 				return "", failure(FailureFixtureIO, "read_file", err)
 			}
 			return "ERROR: " + err.Error(), nil
 		}
 		return string(b), nil
 	case "write_file":
-		base := filepath.Base(p)
-		if p == "" || base != p || base == "." {
+		if !safeTaskFileName(p) {
 			return "ERROR: invalid task-local path", nil
 		}
-		if err := os.WriteFile(filepath.Join(dir, base), []byte(content), 0o644); err != nil {
+		if len(content) > maxTaskToolFileBytes {
+			return fmt.Sprintf("ERROR: content exceeds %d bytes", maxTaskToolFileBytes), nil
+		}
+		if err := os.WriteFile(filepath.Join(dir, p), []byte(content), 0o644); err != nil {
 			return "", failure(FailureFixtureIO, "write_file", err)
 		}
-		written[base] = true
-		return fmt.Sprintf("wrote %d bytes to %s", len(content), base), nil
+		written[p] = true
+		return fmt.Sprintf("wrote %d bytes to %s", len(content), p), nil
 	case "run_tests":
 		receipt := verifyIn(ctx, dir, runner, spec.Verify.PassIfStdoutContains)
 		*observations = append(*observations, receipt)
@@ -620,7 +625,7 @@ func doTool(ctx context.Context, dir, name, p, content string, args map[string]a
 		// Prices ship in the task's own parts.txt (NAME=PRICE per line), so
 		// the data stays in the spec, not in Go.
 		part, _ := args["part"].(string)
-		b, err := os.ReadFile(filepath.Join(dir, "parts.txt"))
+		b, err := boundedio.ReadFile(filepath.Join(dir, "parts.txt"), maxTaskToolFileBytes)
 		if err != nil {
 			return "", failure(FailureFixtureIO, "lookup_part", err)
 		}
@@ -632,6 +637,31 @@ func doTool(ctx context.Context, dir, name, p, content string, args map[string]a
 		return "ERROR: unknown part " + part, nil
 	}
 	return "ERROR: unknown tool " + name, nil
+}
+
+// safeTaskFileName recognizes one ordinary portable filename. The tool loop
+// must behave the same on every release target, including Windows where names
+// such as NUL and CON are devices and a colon opens an NTFS alternate stream.
+func safeTaskFileName(name string) bool {
+	if name == "" || name == "." || name == ".." || len(name) > 255 ||
+		filepath.Base(name) != name || strings.TrimSpace(name) != name ||
+		strings.ContainsAny(name, `/\:<>"|?*`) || strings.HasSuffix(name, ".") {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	stem := strings.ToUpper(strings.SplitN(name, ".", 2)[0])
+	switch stem {
+	case "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+		"COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³":
+		return false
+	}
+	return true
 }
 
 func exactDone(content string) bool {

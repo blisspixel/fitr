@@ -292,10 +292,16 @@ func newBackendWithDisplay(ctx context.Context, model, kind string, pull bool, d
 	}
 	switch kind {
 	case "", "auto":
-		found := llm.Discover(ctx)
+		found, err := llm.Discover(ctx)
+		if err != nil {
+			backendError(disp, "invalid runtime discovery configuration", err.Error(),
+				"fix FITR_DISCOVER_URLS or the configured backend URL, then re-run")
+			return nil, exitUsage
+		}
 		if len(found) == 0 {
+			candidates, _ := llm.Candidates()
 			backendError(disp, "no serving runtime reachable",
-				"tried "+strings.Join(llm.Candidates(), ", "),
+				"tried "+strings.Join(candidates, ", "),
 				"start one, or point fitr at it: OLLAMA_BASE_URL, LLAMA_SERVER_URL, FITR_OPENAI_URL, FITR_DISCOVER_URLS, or --backend")
 			return nil, exitError
 		}
@@ -565,8 +571,10 @@ func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pul
 		return b, exitOK
 	}
 	tags, err := b.Tags(ctx)
-	if err != nil || len(tags) == 0 {
-		return b, exitOK
+	if err != nil {
+		backendError(disp, "could not list models from "+b.Name(), err.Error(),
+			"check the runtime logs and its model inventory endpoint")
+		return nil, exitError
 	}
 	found := false
 	var near []string
@@ -583,6 +591,11 @@ func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pul
 		return b, exitOK
 	}
 	if b.Name() != "ollama" {
+		if len(tags) == 0 {
+			backendError(disp, b.Name()+" is serving no models", "the runtime returned an empty model inventory",
+				"load a model in the runtime, then re-run fitr")
+			return nil, exitError
+		}
 		if isHFRef(model) {
 			backendError(disp, "Hugging Face refs need Ollama to pull",
 				b.Name()+" is serving its own model, not fetching from Hugging Face",
@@ -677,7 +690,7 @@ func backendError(disp render.Display, message, note, hint string) {
 
 // probeBackend is the no-error variant for commands that merely display state.
 func probeBackend(ctx context.Context) llm.Backend {
-	found := llm.Discover(ctx)
+	found, _ := llm.Discover(ctx)
 	if len(found) == 0 {
 		return ollama.New()
 	}
@@ -1027,7 +1040,13 @@ func cmdApply(ctx context.Context, args []string) int {
 		}
 	}
 	if kind == "" || kind == "auto" {
-		if found := llm.Discover(ctx); len(found) > 0 {
+		found, err := llm.Discover(ctx)
+		if err != nil {
+			errPrint("invalid runtime discovery configuration", err.Error(),
+				"fix FITR_DISCOVER_URLS or the configured backend URL, then re-run")
+			return exitUsage
+		}
+		if len(found) > 0 {
 			kind = found[0].Kind
 		} else {
 			kind = ""
@@ -2925,7 +2944,12 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 		errPrint("invalid backend", rawBackendKind, "use auto, ollama, llama-server, or openai")
 		return exitUsage
 	}
-	found := llm.Discover(ctx)
+	found, err := llm.Discover(ctx)
+	if err != nil {
+		errPrint("invalid runtime discovery configuration", err.Error(),
+			"fix FITR_DISCOVER_URLS or the configured backend URL, then re-run")
+		return exitUsage
+	}
 	var b llm.Backend
 	also := []string{}
 	if backendKind != "" && backendKind != "auto" {
@@ -3099,7 +3123,7 @@ func observeServingCtx(ctx context.Context, model, kind string) (int, bool) {
 	if model == "" {
 		return 0, false
 	}
-	found := llm.Discover(ctx)
+	found, _ := llm.Discover(ctx)
 	var b llm.Backend
 	switch {
 	case kind != "":

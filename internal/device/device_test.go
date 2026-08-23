@@ -122,8 +122,9 @@ func TestUserProfileOverridesEmbeddedAndMalformedIsFatal(t *testing.T) {
 
 func TestUserProfileRejectsUnknownFieldsAndTrailingJSON(t *testing.T) {
 	for name, raw := range map[string]string{
-		"unknown":  `{"name":"local","gates":{},"typo":true}`,
-		"trailing": `{"name":"local","gates":{}} {}`,
+		"unknown":   `{"name":"local","gates":{},"typo":true}`,
+		"duplicate": `{"name":"local","name":"other","gates":{}}`,
+		"trailing":  `{"name":"local","gates":{}} {}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()

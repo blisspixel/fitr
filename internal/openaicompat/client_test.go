@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,28 @@ import (
 
 	"github.com/blisspixel/fitr/internal/ollama"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestControlPlaneRequestsCarryDeadline(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > controlPlaneTimeout {
+			t.Errorf("control-plane deadline = %v, %v", deadline, ok)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{"data":[]}`)), Request: req}, nil
+	})}
+	c, err := newAtWithHTTP("http://127.0.0.1:1234", CredentialsDisabled, httpClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Tags(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func testClient(h http.HandlerFunc) (*Client, func()) {
 	srv := httptest.NewServer(h)
@@ -347,6 +370,7 @@ func TestModelListIdentityMatrix(t *testing.T) {
 		{"digest whitespace", `{"data":[{"id":"m","digest":" ` + hexDigest + `"}]}`, "", "invalid digest"},
 		{"blank id", `{"data":[{"id":""}]}`, "", "invalid model id"},
 		{"duplicate id", `{"data":[{"id":"m"},{"id":"m"}]}`, "", "duplicate model id"},
+		{"duplicate field", `{"data":[],"data":[]}`, "", "duplicate JSON object name"},
 		{"missing data", `{"object":"list"}`, "", "missing the data array"},
 		{"trailing JSON", `{"data":[]} {}`, "", "content after"},
 	}
@@ -655,6 +679,7 @@ func TestStreamingConformanceMatrix(t *testing.T) {
 			chat: true, wantText: "cannot comply",
 		},
 		{name: "malformed chunk", body: "data: {nope}\n\n", wantError: "decode SSE chunk"},
+		{name: "duplicate chunk field", body: "data: {\"choices\":[],\"choices\":[]}\n\n", wantError: "duplicate JSON object name"},
 		{
 			name: "interrupted before done",
 			body: "data: {\"choices\":[{\"text\":\"partial\",\"finish_reason\":\"\"}]}\n\n" +

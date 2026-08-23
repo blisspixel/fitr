@@ -22,6 +22,7 @@ import (
 	"github.com/blisspixel/fitr/internal/boundedio"
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/ollama"
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 const maxUserCheckBytes = 1 << 20
@@ -205,7 +206,7 @@ func UserTasksDir() string {
 
 func decodeUserCheck(b []byte, into *CheckSpec) error {
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(b, &raw); err != nil {
+	if err := strictjson.Unmarshal(b, &raw); err != nil {
 		return failure(FailureInvalidSpec, "load_user_task", err)
 	}
 	if raw == nil {

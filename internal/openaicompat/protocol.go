@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 const (
@@ -258,6 +260,9 @@ func decodeOneJSON(r io.Reader, into any) error {
 	}
 	if truncated {
 		return fmt.Errorf("successful JSON response exceeds %d bytes", maxSuccessBody)
+	}
+	if err := strictjson.Validate(body); err != nil {
+		return err
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
 	if err := dec.Decode(into); err != nil {

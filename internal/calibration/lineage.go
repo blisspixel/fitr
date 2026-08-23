@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/boundedio"
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 var lineageDigest = regexp.MustCompile(`(?i)^sha256:[0-9a-f]{64}$`)
@@ -173,6 +174,9 @@ func (m ConversionManifest) binds(digest string) bool {
 func ReadConversionManifest(path string) (ConversionManifest, error) {
 	b, err := boundedio.ReadFile(path, maxCalibrationJSONBytes)
 	if err != nil {
+		return ConversionManifest{}, err
+	}
+	if err := strictjson.Validate(b); err != nil {
 		return ConversionManifest{}, err
 	}
 	var m ConversionManifest

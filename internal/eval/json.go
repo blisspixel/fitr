@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 // decodeBuiltinJSON rejects both schema drift and concatenated JSON. Embedded
@@ -12,6 +14,9 @@ import (
 // field or silently ignoring a second value would create a different test than
 // the file appears to define.
 func decodeBuiltinJSON(b []byte, into any) error {
+	if err := strictjson.Validate(b); err != nil {
+		return err
+	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(into); err != nil {

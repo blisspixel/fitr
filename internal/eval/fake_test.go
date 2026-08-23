@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/blisspixel/fitr/internal/llm"
@@ -480,5 +482,29 @@ func TestToolFilesystemFailureCannotBecomeModelPassOrFail(t *testing.T) {
 	}
 	if r.Outcome != OutcomeError || r.Pass {
 		t.Fatalf("filesystem failure became model evidence: %+v", r)
+	}
+}
+
+func TestToolFilesRejectNonPortableNamesAndOversizedContent(t *testing.T) {
+	dir := t.TempDir()
+	written := map[string]bool{}
+	for _, name := range []string{
+		"../outside.txt", `folder\outside.txt`, "NUL", "con.txt", "COM¹", "fixture.txt:stream",
+		"trailing.", "trailing ", "question?.txt", strings.Repeat("a", 256),
+	} {
+		got, err := doTool(context.Background(), dir, "write_file", name, "data", nil,
+			ToolLoopSpec{}, written, resolvedTaskRunner{}, nil)
+		if err != nil || got != "ERROR: invalid task-local path" {
+			t.Errorf("write_file(%q) = %q, %v", name, got, err)
+		}
+	}
+
+	got, err := doTool(context.Background(), dir, "write_file", "valid-name.txt",
+		strings.Repeat("x", maxTaskToolFileBytes+1), nil, ToolLoopSpec{}, written, resolvedTaskRunner{}, nil)
+	if err != nil || !strings.Contains(got, "exceeds") {
+		t.Fatalf("oversized write = %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "valid-name.txt")); !os.IsNotExist(err) {
+		t.Fatalf("oversized write created a file: %v", err)
 	}
 }

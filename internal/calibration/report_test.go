@@ -109,6 +109,14 @@ func TestReadPairRejectsUnknownFieldsAndTrailingJSON(t *testing.T) {
 	if _, err := ReadPair(trailingPath); err == nil || !strings.Contains(strings.ToLower(err.Error()), "after") {
 		t.Fatalf("trailing JSON = %v", err)
 	}
+	duplicate := strings.Replace(string(b), `"schema":`, `"schema":"shadow","schema":`, 1)
+	duplicatePath := filepath.Join(t.TempDir(), "duplicate.json")
+	if err := os.WriteFile(duplicatePath, []byte(duplicate), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadPair(duplicatePath); err == nil || !strings.Contains(err.Error(), "duplicate JSON object name") {
+		t.Fatalf("duplicate JSON name = %v", err)
+	}
 }
 
 func TestReadPairNormalizesLegacySensitiveIdentifiers(t *testing.T) {

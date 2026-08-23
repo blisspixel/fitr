@@ -663,7 +663,7 @@ func attachTopInventory(ctx context.Context, snapshot *top.Snapshot) {
 	if snapshot == nil {
 		return
 	}
-	found := llm.Discover(ctx)
+	found, _ := llm.Discover(ctx)
 	if len(found) == 0 {
 		return
 	}

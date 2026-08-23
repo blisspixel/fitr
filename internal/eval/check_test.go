@@ -178,7 +178,7 @@ func TestStaticFamilyGraders(t *testing.T) {
 			[]string{"2026-08-18"}, []string{"18 Aug 2026"}},
 		{"json", map[string]any{"type": "json_object", "expected_object": map[string]any{"a": float64(1), "b": "x"}},
 			[]string{`{"a":1,"b":"x"}`, "```json\n{\"b\":\"x\",\"a\":1}\n```"},
-			[]string{`{"a":1}`, `{"a":1,"b":"x","c":2}`, `not json`}},
+			[]string{`{"a":1}`, `{"a":0,"a":1,"b":"x"}`, `{"a":1,"b":"x","c":2}`, `not json`}},
 		{"number", map[string]any{"type": "number", "expected_number": float64(12.5), "tolerance": float64(0.01)},
 			[]string{"Answer: 12.5", "12.50"}, []string{"Answer: 13", "no digits"}},
 	}

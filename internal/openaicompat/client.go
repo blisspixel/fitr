@@ -31,11 +31,14 @@ import (
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/oai"
 	"github.com/blisspixel/fitr/internal/ollama"
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 // DefaultURL is LM Studio's default port - the most common OpenAI-compatible
 // local server that is neither Ollama nor llama-server.
 const DefaultURL = "http://127.0.0.1:1234"
+
+const controlPlaneTimeout = 15 * time.Second
 
 type Client struct {
 	baseURL     string
@@ -145,7 +148,9 @@ func (c *Client) Version(ctx context.Context) string {
 }
 
 func (c *Client) Tags(ctx context.Context) ([]ollama.ModelInfo, error) {
-	req, err := c.newRequest(ctx, http.MethodGet, "/v1/models", nil)
+	cctx, cancel := context.WithTimeout(ctx, controlPlaneTimeout)
+	defer cancel()
+	req, err := c.newRequest(cctx, http.MethodGet, "/v1/models", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +323,7 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 			return apiErr
 		}
 		var ch completionsChunk
-		if err := json.Unmarshal(data, &ch); err != nil {
+		if err := strictjson.Unmarshal(data, &ch); err != nil {
 			return fmt.Errorf("openai-compat: decode SSE chunk: %w", err)
 		}
 		if len(ch.Choices) > 1 {

@@ -3,15 +3,23 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
-const maxDiscoveryBody = 1 << 20
+const (
+	maxDiscoveryBody       = 1 << 20
+	maxConcurrentDiscovery = 16
+	maxDiscoveryCandidates = 128
+	discoverySweepTimeout  = 3 * time.Second
+)
 
 // Found is one reachable serving runtime. Kind is "ollama", "llama-server",
 // or "openai" - identified by the response shape, never by the port.
@@ -54,60 +62,86 @@ func envOr(key, fallback string) string {
 // that are not already in that set, then anything in $FITR_DISCOVER_URLS
 // (comma-separated). Used for error messages so the user can see what we
 // actually tried.
-func Candidates() []string {
+func Candidates() ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
-	add := func(u string) {
+	add := func(u string) error {
 		u = strings.TrimRight(u, "/")
 		if u == "" || seen[u] {
-			return
+			return nil
+		}
+		if len(u) > 2048 {
+			return fmt.Errorf("discovery URL exceeds 2048 bytes")
+		}
+		if len(out) >= maxDiscoveryCandidates {
+			return fmt.Errorf("discovery is limited to %d unique URLs", maxDiscoveryCandidates)
 		}
 		seen[u] = true
 		out = append(out, u)
+		return nil
 	}
 	for _, c := range wellKnown() {
-		add(c.URL)
+		if err := add(c.URL); err != nil {
+			return nil, err
+		}
 	}
 	for _, extra := range extraOpenAI {
-		add(extra)
+		if err := add(extra); err != nil {
+			return nil, err
+		}
 	}
 	for _, extra := range strings.Split(os.Getenv("FITR_DISCOVER_URLS"), ",") {
-		add(strings.TrimSpace(extra))
+		if err := add(strings.TrimSpace(extra)); err != nil {
+			return nil, err
+		}
 	}
-	return out
+	return out, nil
 }
 
 // Discover probes the candidate list and returns every runtime that answered
 // as a known kind. Identification is by response shape: llama-server speaks
 // /v1/models too, so a /props hit wins over an OpenAI-shaped one on the
 // same URL. Timeouts are short; a down port must not stall a run.
-func Discover(ctx context.Context) []Found {
-	return discover(ctx, Candidates())
+func Discover(ctx context.Context) ([]Found, error) {
+	urls, err := Candidates()
+	if err != nil {
+		return nil, err
+	}
+	cctx, cancel := context.WithTimeout(ctx, discoverySweepTimeout)
+	defer cancel()
+	return discover(cctx, urls), nil
 }
 
 func discover(ctx context.Context, urls []string) []Found {
-	type hit struct{ url, kind string }
-	ch := make(chan hit, len(urls))
+	if len(urls) == 0 {
+		return nil
+	}
+	kinds := make([]string, len(urls))
+	jobs := make(chan int)
+	workers := min(len(urls), maxConcurrentDiscovery)
 	var wg sync.WaitGroup
-	for _, u := range urls {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if kind, ok := Identify(ctx, u); ok {
-				ch <- hit{url: u, kind: kind}
+			for i := range jobs {
+				if kind, ok := Identify(ctx, urls[i]); ok {
+					kinds[i] = kind
+				}
 			}
 		}()
 	}
-	go func() { wg.Wait(); close(ch) }()
-	found := map[string]string{}
-	for h := range ch {
-		found[h.url] = h.kind
+	for i := range urls {
+		jobs <- i
 	}
+	close(jobs)
+	wg.Wait()
+
 	// Stable: candidate order, not whichever goroutine finished first.
 	var out []Found
-	for _, u := range urls {
-		if kind, ok := found[u]; ok {
-			out = append(out, Found{Kind: kind, URL: u})
+	for i, u := range urls {
+		if kinds[i] != "" {
+			out = append(out, Found{Kind: kinds[i], URL: u})
 		}
 	}
 	return out
@@ -125,7 +159,7 @@ func Identify(ctx context.Context, base string) (string, bool) {
 		var r struct {
 			Models []json.RawMessage `json:"models"`
 		}
-		if json.Unmarshal(body, &r) == nil && r.Models != nil {
+		if strictjson.Unmarshal(body, &r) == nil && r.Models != nil {
 			return "ollama", true
 		}
 	}
@@ -136,7 +170,7 @@ func Identify(ctx context.Context, base string) (string, bool) {
 			BuildInfo string `json:"build_info"`
 			ModelPath string `json:"model_path"`
 		}
-		if json.Unmarshal(body, &r) == nil && (r.BuildInfo != "" || r.ModelPath != "") {
+		if strictjson.Unmarshal(body, &r) == nil && (r.BuildInfo != "" || r.ModelPath != "") {
 			return "llama-server", true
 		}
 	}
@@ -144,7 +178,7 @@ func Identify(ctx context.Context, base string) (string, bool) {
 		var r struct {
 			Data []json.RawMessage `json:"data"`
 		}
-		if json.Unmarshal(body, &r) == nil && r.Data != nil {
+		if strictjson.Unmarshal(body, &r) == nil && r.Data != nil {
 			return "openai", true
 		}
 	}

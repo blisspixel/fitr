@@ -4,8 +4,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestIdentifyByResponseShapeNotPort(t *testing.T) {
@@ -70,6 +73,7 @@ func TestIdentifyRejectsLookalikeAndOversizedResponses(t *testing.T) {
 		{"ollama object models", "/api/tags", `{"models":{}}`},
 		{"openai null data", "/v1/models", `{"data":null}`},
 		{"openai object data", "/v1/models", `{"data":{}}`},
+		{"duplicate ollama models", "/api/tags", `{"models":[],"models":[]}`},
 		{"oversized ollama", "/api/tags", `{"models":[]}` + strings.Repeat(" ", maxDiscoveryBody)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,12 +116,62 @@ func TestDiscoverPreservesPreferredOrder(t *testing.T) {
 	}
 }
 
+func TestDiscoverBoundsConcurrentProbes(t *testing.T) {
+	var active atomic.Int32
+	var peak atomic.Int32
+	reachedLimit := make(chan struct{}, 1)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := active.Add(1)
+		defer active.Add(-1)
+		for {
+			old := peak.Load()
+			if n <= old || peak.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		if n == maxConcurrentDiscovery {
+			select {
+			case reachedLimit <- struct{}{}:
+			default:
+			}
+		}
+		<-release
+		_, _ = w.Write([]byte(`{"models":[]}`))
+	}))
+	defer srv.Close()
+
+	urls := make([]string, maxConcurrentDiscovery*4)
+	for i := range urls {
+		urls[i] = srv.URL + "/" + strconv.Itoa(i)
+	}
+	done := make(chan []Found, 1)
+	go func() { done <- discover(context.Background(), urls) }()
+	select {
+	case <-reachedLimit:
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("discovery workers did not reach the configured concurrency")
+	}
+	if got := peak.Load(); got != maxConcurrentDiscovery {
+		close(release)
+		t.Fatalf("peak concurrent probes = %d, want %d", got, maxConcurrentDiscovery)
+	}
+	close(release)
+	if got := <-done; len(got) != len(urls) {
+		t.Fatalf("found %d runtimes, want %d", len(got), len(urls))
+	}
+}
+
 func TestCandidatesDedupAndEnv(t *testing.T) {
 	t.Setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 	t.Setenv("LLAMA_SERVER_URL", "http://127.0.0.1:8080")
 	t.Setenv("FITR_OPENAI_URL", "http://127.0.0.1:1234")
 	t.Setenv("FITR_DISCOVER_URLS", "http://127.0.0.1:8000, http://127.0.0.1:9999")
-	c := Candidates()
+	c, err := Candidates()
+	if err != nil {
+		t.Fatal(err)
+	}
 	seen := map[string]int{}
 	for _, u := range c {
 		seen[u]++
@@ -130,5 +184,21 @@ func TestCandidatesDedupAndEnv(t *testing.T) {
 	}
 	if seen["http://127.0.0.1:8000"] != 1 {
 		t.Fatalf("vLLM default port missing: %v", c)
+	}
+}
+
+func TestCandidatesRejectsExcessiveOrOversizedConfiguration(t *testing.T) {
+	tooMany := make([]string, maxDiscoveryCandidates)
+	for i := range tooMany {
+		tooMany[i] = "http://127.0.0.1:" + strconv.Itoa(20000+i)
+	}
+	t.Setenv("FITR_DISCOVER_URLS", strings.Join(tooMany, ","))
+	if _, err := Candidates(); err == nil || !strings.Contains(err.Error(), "limited") {
+		t.Fatalf("excess candidate error = %v", err)
+	}
+
+	t.Setenv("FITR_DISCOVER_URLS", "http://127.0.0.1/"+strings.Repeat("x", 2048))
+	if _, err := Candidates(); err == nil || !strings.Contains(err.Error(), "2048 bytes") {
+		t.Fatalf("oversized URL error = %v", err)
 	}
 }

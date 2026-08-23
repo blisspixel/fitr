@@ -3,6 +3,7 @@ package llamaserver
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,24 @@ import (
 
 	"github.com/blisspixel/fitr/internal/ollama"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestControlPlaneRequestsCarryDeadline(t *testing.T) {
+	c := &Client{BaseURL: "http://127.0.0.1:8080", HTTP: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > controlPlaneTimeout {
+			t.Errorf("control-plane deadline = %v, %v", deadline, ok)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{"model_path":"m.gguf"}`)), Request: req}, nil
+	})}}
+	if _, err := c.Tags(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func testClient(h http.HandlerFunc) (*Client, func()) {
 	srv := httptest.NewServer(h)
@@ -419,6 +438,7 @@ func TestGenerateRejectsMalformedAndIncompleteNativeFrames(t *testing.T) {
 		},
 		{name: "malformed SSE data", body: "data: {\n", wantError: "completion frame"},
 		{name: "invalid prefix", body: "event: completion\n", wantError: "invalid frame prefix"},
+		{name: "duplicate field", body: `data: {"stop":false,"stop":true}` + "\n", wantError: "duplicate JSON object name"},
 		{name: "trailing JSON", body: `data: {"stop":true} {}` + "\n", wantError: "content after JSON frame"},
 		{name: "early EOF", body: `data: {"content":"partial","stop":false}` + "\n", wantText: "partial", wantError: "before a terminal receipt"},
 		{name: "done before receipt", body: "data: [DONE]\n", wantError: "before a terminal receipt"},
@@ -451,6 +471,7 @@ func TestSuccessfulJSONResponsesAreBoundedAndSingular(t *testing.T) {
 		wantError string
 	}{
 		{"legitimate", `{"model_path":"m.gguf"}`, ""},
+		{"duplicate field", `{"model_path":"a.gguf","model_path":"b.gguf"}`, "duplicate JSON object name"},
 		{"trailing JSON", `{"model_path":"m.gguf"} {}`, "content after JSON frame"},
 		{"oversized", `{"model_path":"m.gguf"}` + strings.Repeat(" ", maxNativeBody), "exceeds"},
 	} {

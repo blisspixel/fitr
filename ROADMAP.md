@@ -22,7 +22,7 @@ flags live in [usage](docs/usage.md). Statistical methods live in
 
 | Horizon | Release | Outcome |
 |---|---|---|
-| Shipped | 0.9.5 | Strict backend receipts, bounded local inputs, deterministic profiles, and Apache License 2.0 |
+| Shipped | 0.9.6 | Unambiguous JSON, bounded discovery and control calls, and portable task files |
 | Now | 1.0 | A new user can install fitr and close the loop on a clean machine without reading source code |
 | Next | Trust C | Isolated executable evidence, stronger release provenance, and calibrated profile provenance |
 | Later | Loop extensions | Replaceable discovery, research receipts, recurring reevaluation, vision, and native clients |
@@ -163,6 +163,7 @@ never be mistaken for measured local quality.
 | 0.9.3 | Hardening source release; superseded because its Linux artifacts linked to glibc |
 | 0.9.4 | Static Linux correction plus lock, probe, evidence recovery, atomic output, receipt, and reproducibility hardening |
 | 0.9.5 | Backend and GGUF boundary hardening, bounded local inputs, deterministic profiles, cancellation fixes, and Apache License 2.0 |
+| 0.9.6 | Duplicate-key JSON rejection, fail-closed model inventory, bounded discovery and control calls, and portable task-file boundaries |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/boundedio"
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 const (
@@ -449,6 +450,9 @@ func listJSON(dir string, history bool) ([]candidateFile, error) {
 }
 
 func decodeRecord(b []byte) (*Record, error) {
+	if err := strictjson.Validate(b); err != nil {
+		return nil, fmt.Errorf("invalid result JSON: %w", err)
+	}
 	var r Record
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -479,7 +483,7 @@ func decodeRecord(b []byte) (*Record, error) {
 // in the root rather than mislabeled as corruption.
 func validNonRecordJSON(b []byte) bool {
 	var v any
-	return json.Unmarshal(b, &v) == nil
+	return strictjson.Unmarshal(b, &v) == nil
 }
 
 func recordContentHash(r *Record) string {

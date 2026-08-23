@@ -2,7 +2,6 @@ package eval
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/ollama"
+	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 // ---------------------------------------------------------------- refusal
@@ -193,8 +193,9 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 	}
 
 	args := map[string]any{}
-	json.Unmarshal(msg.ToolCalls[0].Function.Arguments, &args)
+	argsErr := strictjson.Unmarshal(msg.ToolCalls[0].Function.Arguments, &args)
 	_, hasCity := args["city"]
+	hasCity = hasCity && argsErr == nil
 	add("3_valid_args", hasCity, fmt.Sprintf("%v", args))
 
 	result := "-3 degrees Celsius"
