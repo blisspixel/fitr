@@ -179,6 +179,9 @@ func (c *Client) Tags(ctx context.Context) ([]ollama.ModelInfo, error) {
 			return nil, fmt.Errorf("openai-compat models response contains duplicate model id %q", m.ID)
 		}
 		seen[m.ID] = true
+		if m.Digest != strings.TrimSpace(m.Digest) {
+			return nil, fmt.Errorf("openai-compat model %q has an invalid digest", m.ID)
+		}
 		digest, err := normalizeModelDigest(m.Digest)
 		if err != nil {
 			return nil, fmt.Errorf("openai-compat model %q: %w", m.ID, err)
@@ -293,32 +296,38 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 	var eventData []string
 	var eventBytes, eventCount, totalBytes int
 
-	dispatch := func() (bool, error) {
+	dispatch := func() error {
 		if len(eventData) == 0 {
-			return false, nil
+			return nil
 		}
 		eventCount++
 		if eventCount > maxSSEEvents {
-			return false, fmt.Errorf("openai-compat: SSE event count exceeds %d", maxSSEEvents)
+			return fmt.Errorf("openai-compat: SSE event count exceeds %d", maxSSEEvents)
 		}
 		data := []byte(strings.Join(eventData, "\n"))
 		eventData = eventData[:0]
 		eventBytes = 0
+		if seenDone {
+			return fmt.Errorf("openai-compat: SSE stream contains data after [DONE]")
+		}
 		if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
 			seenDone = true
-			return true, nil
+			return nil
 		}
 		if apiErr := c.payloadError(data, resp.Header); apiErr != nil {
-			return false, apiErr
+			return apiErr
 		}
 		var ch completionsChunk
 		if err := json.Unmarshal(data, &ch); err != nil {
-			return false, fmt.Errorf("openai-compat: decode SSE chunk: %w", err)
+			return fmt.Errorf("openai-compat: decode SSE chunk: %w", err)
+		}
+		if len(ch.Choices) > 1 {
+			return fmt.Errorf("openai-compat: SSE chunk contains %d choices, want at most one", len(ch.Choices))
 		}
 		text, fr := pick(ch)
 		if text != "" {
 			if len(text) > maxGeneratedOutput-sb.Len() {
-				return false, fmt.Errorf("openai-compat: generated output exceeds %d bytes", maxGeneratedOutput)
+				return fmt.Errorf("openai-compat: generated output exceeds %d bytes", maxGeneratedOutput)
 			}
 			if ttft == 0 {
 				ttft = time.Since(start).Seconds()
@@ -327,16 +336,22 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 			sb.WriteString(text)
 		}
 		if fr != "" {
+			if finish != "" && finish != fr {
+				return fmt.Errorf("openai-compat: conflicting finish reasons %q and %q", finish, fr)
+			}
 			finish = fr
 		}
 		if ch.Usage != nil {
 			if ch.Usage.PromptTokens < 0 || ch.Usage.CompletionTokens < 0 {
-				return false, fmt.Errorf("openai-compat: response contains negative token usage")
+				return fmt.Errorf("openai-compat: response contains negative token usage")
+			}
+			if seenUsage && (usagePrompt != ch.Usage.PromptTokens || usageCompletion != ch.Usage.CompletionTokens) {
+				return fmt.Errorf("openai-compat: conflicting usage receipts")
 			}
 			seenUsage = true
 			usagePrompt, usageCompletion = ch.Usage.PromptTokens, ch.Usage.CompletionTokens
 		}
-		return false, nil
+		return nil
 	}
 
 	sc := bufio.NewScanner(resp.Body)
@@ -348,12 +363,8 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 			return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: SSE stream exceeds %d bytes", maxSSETotal)
 		}
 		if line == "" {
-			stop, err := dispatch()
-			if err != nil {
+			if err := dispatch(); err != nil {
 				return sb.String(), ollama.Metrics{}, err
-			}
-			if stop {
-				break
 			}
 			continue
 		}
@@ -378,13 +389,9 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 	if err := sc.Err(); err != nil {
 		return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: read SSE stream: %w", err)
 	}
-	if !seenDone {
-		stop, err := dispatch()
-		if err != nil {
+	if len(eventData) > 0 {
+		if err := dispatch(); err != nil {
 			return sb.String(), ollama.Metrics{}, err
-		}
-		if stop {
-			seenDone = true
 		}
 	}
 	if !seenDone {
@@ -392,6 +399,9 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 	}
 	if !seenUsage {
 		return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: stream ended without requested usage")
+	}
+	if finish == "" {
+		return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: stream ended without a finish reason")
 	}
 
 	m := ollama.Metrics{
@@ -442,8 +452,9 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 		body = append(body, '}')
 		return ollama.Message{}, ollama.Metrics{}, c.apiError(http.StatusOK, resp.Header, body, false)
 	}
-	if len(r.Choices) == 0 {
-		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf("openai-compat: no choices in response")
+	if len(r.Choices) != 1 {
+		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(
+			"openai-compat: response contains %d choices, want exactly one", len(r.Choices))
 	}
 	if r.Choices[0].Message.Role != "assistant" {
 		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(

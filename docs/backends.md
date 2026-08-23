@@ -106,6 +106,9 @@ laundering them into empty objects. Reasoning content round-trips across
 agentic turns on every backend - a harness that silently drops it records
 its own loss as the model's failure.
 
-Terminal chat receipts must identify an assistant response. Negative prompt or
-completion token counts are protocol errors, not measurements; fitr rejects
-them before they can enter task outcomes or derived rates.
+Terminal chat receipts must identify an assistant response. OpenAI-shaped chat
+receipts must contain exactly one choice. Negative prompt or completion token
+counts are protocol errors, not measurements. An OpenAI-compatible generation
+stream must end with `[DONE]` after a finish reason and the requested usage
+receipt. Conflicting receipts, multiple choices, or data after `[DONE]` are
+rejected before they can enter task outcomes or derived rates.

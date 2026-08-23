@@ -33,6 +33,8 @@ const (
 
 const maxKVs = 4096
 const maxStr = 16 << 20
+const maxSplitGGUFShards = 4096
+const maxSplitGGUFStatWorkers = 32
 
 const (
 	maxMetadataBytes      uint64 = 256 << 20
@@ -77,34 +79,44 @@ func completeGGUFSize(path string, selected os.FileInfo) (int64, error) {
 	if shardErr != nil || totalErr != nil || total < 1 || shard < 1 || shard > total {
 		return 0, fmt.Errorf("invalid split GGUF filename %q", filepath.Base(path))
 	}
+	if total > maxSplitGGUFShards {
+		return 0, fmt.Errorf("split GGUF declares %d shards; limit is %d", total, maxSplitGGUFShards)
+	}
 	type shardStat struct {
 		size int64
 		err  error
 	}
 	results := make([]shardStat, total)
 	dir := filepath.Dir(path)
+	jobs := make(chan int)
 	var wg sync.WaitGroup
-	for index := 1; index <= total; index++ {
+	for range min(total, maxSplitGGUFStatWorkers) {
 		wg.Add(1)
-		go func(index int) {
+		go func() {
 			defer wg.Done()
-			name := fmt.Sprintf("%s-%05d-of-%05d%s", match[1], index, total, match[4])
-			info, err := os.Stat(filepath.Join(dir, name))
-			if err != nil {
-				results[index-1].err = fmt.Errorf("incomplete split GGUF, shard %d of %d: %w", index, total, err)
-				return
+			for index := range jobs {
+				name := fmt.Sprintf("%s-%05d-of-%05d%s", match[1], index, total, match[4])
+				info, err := os.Stat(filepath.Join(dir, name))
+				if err != nil {
+					results[index-1].err = fmt.Errorf("incomplete split GGUF, shard %d of %d: %w", index, total, err)
+					continue
+				}
+				if !info.Mode().IsRegular() {
+					results[index-1].err = fmt.Errorf("split GGUF shard %d of %d is not a regular file", index, total)
+					continue
+				}
+				if info.Size() < 0 {
+					results[index-1].err = fmt.Errorf("split GGUF size overflows int64")
+					continue
+				}
+				results[index-1].size = info.Size()
 			}
-			if !info.Mode().IsRegular() {
-				results[index-1].err = fmt.Errorf("split GGUF shard %d of %d is not a regular file", index, total)
-				return
-			}
-			if info.Size() < 0 {
-				results[index-1].err = fmt.Errorf("split GGUF size overflows int64")
-				return
-			}
-			results[index-1].size = info.Size()
-		}(index)
+		}()
 	}
+	for index := 1; index <= total; index++ {
+		jobs <- index
+	}
+	close(jobs)
 	wg.Wait()
 	var size int64
 	for _, result := range results {
@@ -162,6 +174,9 @@ func readMetadata(r io.Reader, budget uint64) (map[string]any, error) {
 		key, err := d.readString()
 		if err != nil {
 			return nil, fmt.Errorf("kv %d key: %w", i, err)
+		}
+		if _, exists := kvs[key]; exists {
+			return nil, fmt.Errorf("duplicate GGUF metadata key %q", key)
 		}
 		v, err := d.readValue()
 		if err != nil {
@@ -246,8 +261,13 @@ func (d *metadataDecoder) readTyped(typ uint32) (any, error) {
 		return float64(v), err
 	case ggufBool:
 		var v uint8
-		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return v != 0, err
+		if err := binary.Read(d.r, binary.LittleEndian, &v); err != nil {
+			return nil, err
+		}
+		if v > 1 {
+			return nil, fmt.Errorf("invalid GGUF boolean value %d", v)
+		}
+		return v == 1, nil
 	case ggufString:
 		return d.readString()
 	case ggufUint64:

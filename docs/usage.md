@@ -17,7 +17,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 That installs one static binary. The shell installer reports when its
 destination is not on `PATH`; the PowerShell installer adds its destination to
 the user `PATH`. The default evidence path needs no Go, Python, or venv. Pin a
-release with `FITR_VERSION=v0.9.4`; relocate with `FITR_BIN`.
+release with `FITR_VERSION=v0.9.5`; relocate with `FITR_BIN`.
 
 Both installers bind the downloaded binary to the exact asset entry in the
 release's `SHA256SUMS` file. A missing checksum tool, manifest, or asset entry
@@ -287,8 +287,9 @@ Every threshold carries a `why`. **Copy `default.json`, tune it, set
 
 `fitr profiles new [name]` creates a private file without overwriting an
 existing profile. User profile JSON is strict: malformed files, trailing JSON,
-and unknown fields are hard errors so a damaged calibration cannot silently
-fall back to unrelated gates.
+unknown fields, unsupported match keys, surrounding match whitespace, and
+files over 1 MiB are hard errors so a damaged calibration cannot silently fall
+back to unrelated gates. `match` accepts only `gpu_contains` and `host`.
 
 Results are stored as JSON under `~/.fitr/results` (override with
 `$FITR_RESULTS`). Canonical files use a readable model prefix plus a short
@@ -304,7 +305,9 @@ ranking or comparison claim only when it exactly matches its private history
 twin. History entries and explicit external result paths remain available for
 inspection, but are display-only unless they reconcile with the canonical
 current record. Local completion receipts bind the sealed run manifest and
-measured outcome; they do not replace external attestation.
+measured outcome; they do not replace external attestation. Reads are capped
+at 64 MiB per result and 16 MiB per calibration report or conversion manifest;
+oversized local inputs are reported instead of loaded into memory.
 
 Use `fitr top history path` to locate the archive and
 `fitr top history clear --yes` to delete archived copies while keeping the

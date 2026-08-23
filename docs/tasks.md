@@ -93,7 +93,8 @@ can prompt and grade; it **cannot execute anything** - exec-style user tasks
 stay out until they can be sandboxed honestly. They score into their own
 `your tasks` row (all-must-pass by default), or pool into a built-in need via
 `"need"`. Malformed files are hard errors with the filename in them: silently
-dropping your own task would defeat the point of having one.
+dropping your own task would defeat the point of having one. Each task is
+limited to 1 MiB and a directory may contain at most 1024 JSON task files.
 
 User tasks may also use any generated family (`json_object`, `math_chain`,
 ...) with custom `params` - the same contamination-resistant machinery the

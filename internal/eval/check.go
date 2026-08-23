@@ -19,9 +19,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/boundedio"
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/ollama"
 )
+
+const maxUserCheckBytes = 1 << 20
+const maxUserChecks = 1024
 
 // Needs a check may feed. A user task defaults to the user_tasks pool but may
 // opt into a built-in pool - the built-ins are defaults, the user's work is
@@ -265,8 +269,11 @@ func LoadUserChecks(dir string) ([]CheckSpec, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
+		if len(out) >= maxUserChecks {
+			return nil, fmt.Errorf("user task directory exceeds %d JSON files", maxUserChecks)
+		}
 		p := filepath.Join(dir, e.Name())
-		b, err := os.ReadFile(p)
+		b, err := boundedio.ReadFile(p, maxUserCheckBytes)
 		if err != nil {
 			return nil, fmt.Errorf("user task %s: %w", p, err)
 		}

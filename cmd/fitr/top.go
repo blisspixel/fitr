@@ -374,7 +374,8 @@ func previewTopRun(args []string) (topRunPreview, error) {
 	html := fs.Bool("html", false, "")
 	unsafeExec := fs.Bool("allow-unsafe-exec", false, "")
 	numCtx := fs.Int("ctx", 0, "")
-	_ = fs.Int("q", 0, "")
+	var quiet countFlag
+	fs.Var(&quiet, "q", "")
 	_ = fs.Bool("v", false, "")
 	if err := fs.Parse(permute(args)); err != nil {
 		return topRunPreview{}, err
@@ -666,7 +667,10 @@ func attachTopInventory(ctx context.Context, snapshot *top.Snapshot) {
 	if len(found) == 0 {
 		return
 	}
-	b, _ := backendAt(found[0].Kind, found[0].URL)
+	b, err := backendAt(found[0].Kind, found[0].URL)
+	if err != nil {
+		return
+	}
 	fp := device.Detect(ctx, b)
 	table, _, err := joinInstalled(ctx, b, fp)
 	if err != nil {

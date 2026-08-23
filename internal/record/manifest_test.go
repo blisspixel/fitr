@@ -260,6 +260,13 @@ func TestSplitGGUFIdentityCoversEveryShardAndRejectsIncompleteSets(t *testing.T)
 	}
 }
 
+func TestSplitGGUFIdentityRejectsUnreasonableShardCountBeforeAllocation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "model-00001-of-99999.gguf")
+	if _, _, err := modelArtifactPaths(path); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("unreasonable shard count error = %v", err)
+	}
+}
+
 func TestSchemaFiveContractRejectsMissingAndScoreableExecutableEvidence(t *testing.T) {
 	r := completedEvidenceRecord(t, []eval.ExecResult{{Pass: true, Outcome: eval.OutcomePass}},
 		[]eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}})

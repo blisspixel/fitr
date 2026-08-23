@@ -8,9 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"regexp"
 	"strings"
+
+	"github.com/blisspixel/fitr/internal/boundedio"
 )
 
 var lineageDigest = regexp.MustCompile(`(?i)^sha256:[0-9a-f]{64}$`)
@@ -170,7 +171,7 @@ func (m ConversionManifest) binds(digest string) bool {
 // ReadConversionManifest loads a publisher conversion document and rejects
 // unknown fields or trailing JSON.
 func ReadConversionManifest(path string) (ConversionManifest, error) {
-	b, err := os.ReadFile(path)
+	b, err := boundedio.ReadFile(path, maxCalibrationJSONBytes)
 	if err != nil {
 		return ConversionManifest{}, err
 	}

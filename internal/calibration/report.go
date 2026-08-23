@@ -13,13 +13,13 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/blisspixel/fitr/internal/atomicfile"
+	"github.com/blisspixel/fitr/internal/boundedio"
 	"github.com/blisspixel/fitr/internal/eval"
 )
 
@@ -36,6 +36,8 @@ const (
 	ConversionSchema  = "fitr.lineage.conversion.v1"
 	LineageConversion = "publisher_conversion_manifest"
 	LineageGGUFDigest = "gguf_base_digest"
+
+	maxCalibrationJSONBytes = 16 << 20
 )
 
 // Device contains the measurement-relevant hardware fields but deliberately
@@ -371,12 +373,15 @@ func WriteJSON(path string, value any) error {
 		return err
 	}
 	b = append(b, '\n')
+	if len(b) > maxCalibrationJSONBytes {
+		return fmt.Errorf("calibration output exceeds %d bytes", maxCalibrationJSONBytes)
+	}
 	return atomicfile.Write(path, b, 0o644)
 }
 
 // ReadPair loads one pair report and rejects unrelated JSON.
 func ReadPair(path string) (PairReport, error) {
-	b, err := os.ReadFile(path)
+	b, err := boundedio.ReadFile(path, maxCalibrationJSONBytes)
 	if err != nil {
 		return PairReport{}, err
 	}

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -42,6 +43,8 @@ var (
 	sha256Digest = regexp.MustCompile(`(?i)^sha256:[0-9a-f]{64}$`)
 	splitGGUF    = regexp.MustCompile(`(?i)^(.*)-([0-9]{5})-of-([0-9]{5})(\.gguf)$`)
 )
+
+const maxSplitGGUFShards = 4096
 
 // ModelIdentity records what the serving runtime actually resolved. Requested
 // is kept for auditability, but Resolved is authoritative for the result.
@@ -269,6 +272,9 @@ func localFileDigest(path string) (string, int64, error) {
 		if !info.Mode().IsRegular() {
 			return "", 0, fmt.Errorf("artifact shard %d of %d is not a regular file", i+1, len(paths))
 		}
+		if info.Size() < 0 || total > math.MaxInt64-info.Size() {
+			return "", 0, errors.New("model artifact size overflows int64")
+		}
 		before[i] = info
 		total += info.Size()
 	}
@@ -324,6 +330,9 @@ func modelArtifactPaths(path string) ([]string, bool, error) {
 	total, err := strconv.Atoi(match[3])
 	if err != nil || total < 1 || part > total {
 		return nil, false, errors.New("split GGUF has an invalid shard count")
+	}
+	if total > maxSplitGGUFShards {
+		return nil, false, fmt.Errorf("split GGUF declares %d shards; limit is %d", total, maxSplitGGUFShards)
 	}
 	dir := filepath.Dir(clean)
 	paths := make([]string, total)

@@ -69,6 +69,8 @@ func TestPreviewTopRunMatchesTrustCriticalValidation(t *testing.T) {
 	}{
 		{"default", []string{"model"}, true},
 		{"quick", []string{"model", "--quick", "-k", "1"}, true},
+		{"quiet repeated", []string{"model", "-q", "-q"}, true},
+		{"quiet explicit", []string{"model", "-q=2"}, true},
 		{"missing model", nil, false},
 		{"levels", []string{"model", "--quick", "--full"}, false},
 		{"checks seed", []string{"model", "--checks-only"}, false},

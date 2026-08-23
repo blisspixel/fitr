@@ -138,6 +138,35 @@ func TestUserProfileRejectsUnknownFieldsAndTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestUserProfileRejectsOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_PROFILES", dir)
+	raw := `{"name":"local","gates":{}}` + strings.Repeat(" ", maxProfileBytes)
+	if err := os.WriteFile(dir+"/oversized.json", []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadProfiles(); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized profile error = %v", err)
+	}
+}
+
+func TestUserProfileValidatesNameAndMatchRules(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, want string
+	}{
+		{"whitespace name", `{"name":" local","gates":{}}`, "surrounding whitespace"},
+		{"unknown match", `{"name":"local","match":{"gpu":"x"},"gates":{}}`, "unsupported match key"},
+		{"empty match", `{"name":"local","match":{"host":" "},"gates":{}}`, "is empty"},
+		{"whitespace match", `{"name":"local","match":{"host":" box "},"gates":{}}`, "surrounding whitespace"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := decodeProfile("test", []byte(tc.raw)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestScaffoldProfileIsUncalibratedCopyOfDefault(t *testing.T) {
 	p, err := ScaffoldProfile("My Box", Fingerprint{GPU: "NVIDIA GeForce RTX 4090", Host: "work"})
 	if err != nil {
@@ -193,6 +222,32 @@ func TestWriteProfileCreatesPrivateFileWithoutOverwriting(t *testing.T) {
 	}
 }
 
+func TestWriteProfileSecuresDirectoryAndRejectsEmptySlug(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := Profile{Name: "private", Gates: map[string]Gate{}}
+	if _, err := WriteProfile(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("profile directory mode = %o, want 700", got)
+		}
+	}
+	if _, err := WriteProfile(dir, Profile{Name: "!!!"}); err == nil {
+		t.Fatal("profile name with an empty slug was accepted")
+	}
+	if _, err := os.Stat(dir + "/.json"); !os.IsNotExist(err) {
+		t.Fatalf("invalid profile created .json: %v", err)
+	}
+}
+
 func TestSelectProfileMatchesOnGPU(t *testing.T) {
 	fp := Fingerprint{GPU: "AMD Radeon(TM) 780M", Host: "somebox"}
 	p, err := SelectProfile("", fp)
@@ -223,6 +278,13 @@ func TestSelectProfileExplicitNameWins(t *testing.T) {
 	}
 	if _, err := SelectProfile("nope", fp); err == nil {
 		t.Fatal("an unknown profile name must be an error, not a silent default")
+	}
+}
+
+func TestSelectProfileListsAvailableNamesDeterministically(t *testing.T) {
+	_, err := SelectProfile("nope", Fingerprint{})
+	if err == nil || !strings.Contains(err.Error(), "available: default, lappy") {
+		t.Fatalf("error = %v, want sorted available names", err)
 	}
 }
 

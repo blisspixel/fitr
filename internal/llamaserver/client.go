@@ -91,7 +91,10 @@ func (c *Client) Accel(ctx context.Context) string {
 func (c *Client) Reachable(ctx context.Context) bool {
 	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/health", nil)
+	req, err := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/health", nil)
+	if err != nil {
+		return false
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return false
@@ -167,6 +170,9 @@ func (c *Client) Tags(ctx context.Context) ([]ollama.ModelInfo, error) {
 		return nil, err
 	}
 	mi := c.infoFromProps(p)
+	if strings.TrimSpace(mi.Name) == "" {
+		return nil, fmt.Errorf("llama-server props response is missing model_path")
+	}
 	return []ollama.ModelInfo{mi}, nil
 }
 
@@ -208,7 +214,14 @@ func (c *Client) PS(ctx context.Context) ([]ollama.RunningModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []ollama.RunningModel{{Name: modelName(p), ContextLength: p.DefaultSettings.NCtx}}, nil
+	name := modelName(p)
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("llama-server props response is missing model_path")
+	}
+	if p.DefaultSettings.NCtx < 0 {
+		return nil, fmt.Errorf("llama-server reported a negative effective context")
+	}
+	return []ollama.RunningModel{{Name: name, ContextLength: p.DefaultSettings.NCtx}}, nil
 }
 
 // EffectiveContext reads the per-slot n_ctx resolved by llama-server. Builds
@@ -379,8 +392,9 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 	if err := decodeBoundedJSON(resp.Body, &r); err != nil {
 		return ollama.Message{}, ollama.Metrics{}, err
 	}
-	if len(r.Choices) == 0 {
-		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf("llama-server: no choices in response")
+	if len(r.Choices) != 1 {
+		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(
+			"llama-server: response contains %d choices, want exactly one", len(r.Choices))
 	}
 	if r.Choices[0].Message.Role != "assistant" {
 		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(

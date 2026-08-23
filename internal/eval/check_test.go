@@ -291,3 +291,14 @@ func TestMissingUserDirIsNotAnError(t *testing.T) {
 		t.Fatalf("missing dir: got %v, %v", got, err)
 	}
 }
+
+func TestUserChecksRejectOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"id":"large"}` + strings.Repeat(" ", maxUserCheckBytes)
+	if err := writeFile(dir, "large.json", body); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := LoadUserChecks(dir); err == nil || got != nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized task = %v, %v", got, err)
+	}
+}

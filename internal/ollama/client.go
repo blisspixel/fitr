@@ -21,6 +21,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/blisspixel/fitr/internal/boundedio"
 )
 
 const DefaultURL = "http://127.0.0.1:11434"
@@ -32,7 +34,10 @@ const (
 	maxNativeStream    = 64 << 20
 	maxNativeFrames    = 1_000_000
 	maxGeneratedOutput = 8 << 20
+	maxServerLogTail   = 1 << 20
 )
+
+var serverLibraryPattern = regexp.MustCompile(`library=([A-Za-z0-9_]+)`)
 
 type Client struct {
 	BaseURL string
@@ -408,7 +413,10 @@ type ModelInfo struct {
 }
 
 func (c *Client) Tags(ctx context.Context) ([]ModelInfo, error) {
-	req, _ := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/api/tags", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/api/tags", nil)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
@@ -422,6 +430,25 @@ func (c *Client) Tags(ctx context.Context) ([]ModelInfo, error) {
 	}
 	if err := decodeBoundedJSON(resp.Body, &r); err != nil {
 		return nil, err
+	}
+	if r.Models == nil {
+		return nil, fmt.Errorf("ollama tags response is missing the models array")
+	}
+	seen := make(map[string]bool, len(r.Models))
+	for _, model := range r.Models {
+		if model.Name == "" || strings.TrimSpace(model.Name) != model.Name {
+			return nil, fmt.Errorf("ollama tags response contains an invalid model name %q", model.Name)
+		}
+		if seen[model.Name] {
+			return nil, fmt.Errorf("ollama tags response contains duplicate model name %q", model.Name)
+		}
+		seen[model.Name] = true
+		if model.Size < 0 {
+			return nil, fmt.Errorf("ollama model %q has a negative size", model.Name)
+		}
+		if model.Digest != strings.TrimSpace(model.Digest) {
+			return nil, fmt.Errorf("ollama model %q has an invalid digest", model.Name)
+		}
 	}
 	return r.Models, nil
 }
@@ -440,6 +467,9 @@ func (c *Client) Show(ctx context.Context, model string) (ModelInfo, error) {
 	}
 	var mi ModelInfo
 	err = decodeBoundedJSON(resp.Body, &mi)
+	if err == nil && mi.Size < 0 {
+		err = fmt.Errorf("ollama model %q has a negative size", model)
+	}
 	mi.Name = model
 	return mi, err
 }
@@ -453,7 +483,10 @@ type RunningModel struct {
 }
 
 func (c *Client) PS(ctx context.Context) ([]RunningModel, error) {
-	req, _ := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/api/ps", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/api/ps", nil)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
@@ -467,6 +500,25 @@ func (c *Client) PS(ctx context.Context) ([]RunningModel, error) {
 	}
 	if err := decodeBoundedJSON(resp.Body, &r); err != nil {
 		return nil, err
+	}
+	if r.Models == nil {
+		return nil, fmt.Errorf("ollama ps response is missing the models array")
+	}
+	seen := make(map[string]bool, len(r.Models))
+	for _, model := range r.Models {
+		if model.Name == "" || strings.TrimSpace(model.Name) != model.Name {
+			return nil, fmt.Errorf("ollama ps response contains an invalid model name %q", model.Name)
+		}
+		if seen[model.Name] {
+			return nil, fmt.Errorf("ollama ps response contains duplicate, ambiguous model name %q", model.Name)
+		}
+		seen[model.Name] = true
+		if model.Size < 0 || model.SizeVRAM < 0 || model.ContextLength < 0 {
+			return nil, fmt.Errorf("ollama resident model %q contains a negative size or context", model.Name)
+		}
+		if model.SizeVRAM > model.Size {
+			return nil, fmt.Errorf("ollama resident model %q reports GPU bytes larger than total bytes", model.Name)
+		}
 	}
 	return r.Models, nil
 }
@@ -554,7 +606,10 @@ func (c *Client) StopAll(ctx context.Context) ([]string, error) {
 		case <-time.After(1500 * time.Millisecond):
 		}
 	}
-	live, _ := c.Resident(ctx)
+	live, err := c.Resident(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var names []string
 	for _, m := range live {
 		names = append(names, m.Name)
@@ -568,11 +623,14 @@ func (c *Client) URL() string  { return c.BaseURL }
 // Accel reads the last `library=` from Ollama's server log. There is no HTTP
 // field for it; the log is how the runtime names CUDA vs Vulkan vs Metal.
 func (c *Client) Accel(ctx context.Context) string {
-	b, err := os.ReadFile(serverLogPath())
+	if err := ctx.Err(); err != nil {
+		return ""
+	}
+	b, err := boundedio.ReadTail(serverLogPath(), maxServerLogTail)
 	if err != nil {
 		return ""
 	}
-	all := regexp.MustCompile(`library=([A-Za-z0-9_]+)`).FindAllStringSubmatch(string(b), -1)
+	all := serverLibraryPattern.FindAllStringSubmatch(string(b), -1)
 	if len(all) == 0 {
 		return ""
 	}
@@ -581,9 +639,16 @@ func (c *Client) Accel(ctx context.Context) string {
 
 func serverLogPath() string {
 	if runtime.GOOS == "windows" {
-		return filepath.Join(os.Getenv("LOCALAPPDATA"), "Ollama", "server.log")
+		base := os.Getenv("LOCALAPPDATA")
+		if base == "" {
+			return ""
+		}
+		return filepath.Join(base, "Ollama", "server.log")
 	}
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
 	return filepath.Join(home, ".ollama", "logs", "server.log")
 }
 
@@ -637,7 +702,7 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 		if progress != nil && p.Status != "" {
 			pct := -1
 			if p.Total > 0 {
-				pct = int(100 * p.Completed / p.Total)
+				pct = int(100 * (float64(p.Completed) / float64(p.Total)))
 			}
 			progress(p.Status, pct)
 		}
@@ -657,17 +722,19 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 func (c *Client) Version(ctx context.Context) string {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/version", nil)
-	if resp, err := c.HTTP.Do(req); err == nil {
-		defer resp.Body.Close()
-		var v struct {
-			Version string `json:"version"`
-		}
-		if resp.StatusCode == http.StatusOK && decodeBoundedJSON(resp.Body, &v) == nil && v.Version != "" {
-			return v.Version
+	req, reqErr := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/version", nil)
+	if reqErr == nil {
+		if resp, err := c.HTTP.Do(req); err == nil {
+			defer resp.Body.Close()
+			var v struct {
+				Version string `json:"version"`
+			}
+			if resp.StatusCode == http.StatusOK && decodeBoundedJSON(resp.Body, &v) == nil && v.Version != "" {
+				return v.Version
+			}
 		}
 	}
-	out, err := exec.Command("ollama", "--version").Output()
+	out, err := exec.CommandContext(cctx, "ollama", "--version").Output()
 	if err != nil {
 		return ""
 	}
@@ -677,7 +744,10 @@ func (c *Client) Version(ctx context.Context) string {
 func (c *Client) Reachable(ctx context.Context) bool {
 	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/tags", nil)
+	req, err := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/tags", nil)
+	if err != nil {
+		return false
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return false

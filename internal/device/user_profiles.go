@@ -10,7 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/blisspixel/fitr/internal/boundedio"
 )
+
+const maxProfileBytes = 1 << 20
 
 // UserProfilesDir is ~/.fitr/profiles, or $FITR_PROFILES. User files override
 // embedded profiles of the same name and are tried first for GPU/host match.
@@ -40,7 +44,7 @@ func loadUserProfiles() ([]Profile, error) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
-		b, err := os.ReadFile(path)
+		b, err := boundedio.ReadFile(path, maxProfileBytes)
 		if err != nil {
 			return nil, fmt.Errorf("profile %s: %w", path, err)
 		}
@@ -54,6 +58,9 @@ func loadUserProfiles() ([]Profile, error) {
 }
 
 func decodeProfile(source string, b []byte) (Profile, error) {
+	if len(b) > maxProfileBytes {
+		return Profile{}, fmt.Errorf("profile %s exceeds %d bytes", source, maxProfileBytes)
+	}
 	var p Profile
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -69,6 +76,20 @@ func decodeProfile(source string, b []byte) (Profile, error) {
 	}
 	if p.Name == "" {
 		return Profile{}, fmt.Errorf("profile %s: missing name", source)
+	}
+	if strings.TrimSpace(p.Name) != p.Name {
+		return Profile{}, fmt.Errorf("profile %s: name has surrounding whitespace", source)
+	}
+	for key, value := range p.Match {
+		if key != "gpu_contains" && key != "host" {
+			return Profile{}, fmt.Errorf("profile %s: unsupported match key %q", source, key)
+		}
+		if strings.TrimSpace(value) == "" {
+			return Profile{}, fmt.Errorf("profile %s: match %q is empty", source, key)
+		}
+		if strings.TrimSpace(value) != value {
+			return Profile{}, fmt.Errorf("profile %s: match %q has surrounding whitespace", source, key)
+		}
 	}
 	for gateName, gate := range p.Gates {
 		if _, ok := gate["why"]; !ok {
@@ -120,14 +141,24 @@ func ScaffoldProfile(name string, fp Fingerprint) (Profile, error) {
 }
 
 func WriteProfile(dir string, p Profile) (string, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+	name := slugProfile(p.Name)
+	if name == "" {
+		return "", fmt.Errorf("profile name %q does not contain a usable filename", p.Name)
 	}
-	path := filepath.Join(dir, slugProfile(p.Name)+".json")
 	b, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return "", err
 	}
+	if _, err := decodeProfile("generated profile", b); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, name+".json")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if os.IsExist(err) {
 		return "", fmt.Errorf("already exists: %s", path)

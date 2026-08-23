@@ -262,6 +262,25 @@ func TestReadRejectsUnknownFieldsAndTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestReadRejectsOversizedRecord(t *testing.T) {
+	store := NewStore(t.TempDir())
+	path := filepath.Join(store.Dir, "oversized.json")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(maxRecordBytes + 1); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Read(path); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized record error = %v", err)
+	}
+}
+
 func FuzzDecodeRecord(f *testing.F) {
 	f.Add([]byte(`{"schema_version":4,"model":"legacy"}`))
 	f.Add([]byte(`{"schema_version":5,"model":"current","unexpected":true}`))

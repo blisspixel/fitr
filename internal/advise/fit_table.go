@@ -1,6 +1,7 @@
 package advise
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -154,6 +155,7 @@ func fitCtxPoints(maxCtx, requested int) []int {
 	}
 	add(maxCtx)
 	add(requested)
+	sort.Ints(out)
 	return out
 }
 

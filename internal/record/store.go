@@ -16,9 +16,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/blisspixel/fitr/internal/boundedio"
 )
 
-const historyDirName = ".history"
+const (
+	historyDirName = ".history"
+	maxRecordBytes = 64 << 20
+)
 
 var saveMu sync.Mutex
 
@@ -153,6 +158,9 @@ func (s Store) Save(r *Record) (SavedPaths, error) {
 		return SavedPaths{}, err
 	}
 	b = append(b, '\n')
+	if len(b) > maxRecordBytes {
+		return SavedPaths{}, fmt.Errorf("record exceeds %d bytes", maxRecordBytes)
+	}
 
 	dir := s.dir()
 	historyDir := filepath.Join(dir, historyDirName)
@@ -203,7 +211,7 @@ func rejectDivergentRunID(historyDir, targetName, runID string) error {
 // Read loads one result file. Unlike directory loading, a valid JSON document
 // without a model is an error because the caller explicitly selected it.
 func (s Store) Read(path string) (*Record, error) {
-	b, err := os.ReadFile(path)
+	b, err := boundedio.ReadFile(path, maxRecordBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -323,22 +331,6 @@ func reconcileWithHistoryIndex(r *Record, index recordIndex) {
 	}
 }
 
-// reconcileWithCurrent makes full-history records presentation-only unless an
-// exact canonical current twin proves they came through Store.Save. Older
-// archives remain inspectable, but cannot enter a ranking surface. Without a
-// separate local trust root, a JSON file copied into .history is an import.
-func (s Store) reconcileWithCurrent(r *Record) {
-	if r == nil || r.SchemaVersion < EvidenceSchemaVersion {
-		return
-	}
-	files, err := listJSON(s.dir(), false)
-	if err != nil {
-		r.storageIntegrityIssue = "external or archived result is display-only without an exact canonical current twin"
-		return
-	}
-	reconcileWithCurrentIndex(r, indexRecordFiles(files))
-}
-
 func reconcileWithCurrentIndex(r *Record, index recordIndex) {
 	if r == nil || r.SchemaVersion < EvidenceSchemaVersion {
 		return
@@ -358,7 +350,7 @@ type recordIndex map[string]map[string]bool
 func indexRecordFiles(files []candidateFile) recordIndex {
 	index := recordIndex{}
 	for _, file := range files {
-		b, err := os.ReadFile(file.path)
+		b, err := boundedio.ReadFile(file.path, maxRecordBytes)
 		if err != nil {
 			continue
 		}
@@ -386,7 +378,7 @@ func (index recordIndex) match(r *Record) (foundID, exact bool) {
 func loadCandidateFiles(files []candidateFile, warnings []FileWarning) LoadResult {
 	loaded := make([]loadedRecord, 0, len(files))
 	for _, file := range files {
-		b, err := os.ReadFile(file.path)
+		b, err := boundedio.ReadFile(file.path, maxRecordBytes)
 		if err != nil {
 			warnings = append(warnings, FileWarning{Path: file.path, Err: err})
 			continue
@@ -561,7 +553,7 @@ func storeDir(path string) error {
 }
 
 func writeImmutable(path string, b []byte) error {
-	if existing, err := os.ReadFile(path); err == nil {
+	if existing, err := boundedio.ReadFile(path, maxRecordBytes); err == nil {
 		if bytes.Equal(existing, b) {
 			return nil
 		}

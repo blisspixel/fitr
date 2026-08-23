@@ -114,6 +114,22 @@ func TestRejectsNegativeTokenUsage(t *testing.T) {
 	})
 }
 
+func TestChatRequiresExactlyOneChoice(t *testing.T) {
+	for _, body := range []string{
+		`{"choices":[]}`,
+		`{"choices":[{"message":{"role":"assistant"}},{"message":{"role":"assistant"}}]}`,
+	} {
+		c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(body))
+		})
+		_, _, err := c.Chat(context.Background(), "m", nil, nil, ollama.Deterministic(8, 8192))
+		done()
+		if err == nil || !strings.Contains(err.Error(), "exactly one") {
+			t.Fatalf("error = %v, want exact-choice rejection", err)
+		}
+	}
+}
+
 func TestGenerateFallsBackToChatOn404(t *testing.T) {
 	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/completions" {
@@ -328,6 +344,7 @@ func TestModelListIdentityMatrix(t *testing.T) {
 		{"digest remains optional", `{"data":[{"id":"m"}]}`, "", ""},
 		{"wrong digest length", `{"data":[{"id":"m","digest":"abc"}]}`, "", "64 SHA-256"},
 		{"wrong digest algorithm", `{"data":[{"id":"m","digest":"md5:` + hexDigest + `"}]}`, "", "unsupported model digest"},
+		{"digest whitespace", `{"data":[{"id":"m","digest":" ` + hexDigest + `"}]}`, "", "invalid digest"},
 		{"blank id", `{"data":[{"id":""}]}`, "", "invalid model id"},
 		{"duplicate id", `{"data":[{"id":"m"},{"id":"m"}]}`, "", "duplicate model id"},
 		{"missing data", `{"object":"list"}`, "", "missing the data array"},
@@ -649,6 +666,33 @@ func TestStreamingConformanceMatrix(t *testing.T) {
 			body:     "data: {\"choices\":[{\"text\":\"partial\",\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
 			wantText: "partial", wantError: "without requested usage",
 		},
+		{
+			name: "data after done",
+			body: "data: {\"choices\":[{\"text\":\"ok\",\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n" +
+				"data: [DONE]\n\ndata: {\"choices\":[{\"text\":\"spoof\"}]}\n\n",
+			wantText: "ok", wantError: "after [DONE]",
+		},
+		{
+			name: "done without finish reason",
+			body: "data: {\"choices\":[{\"text\":\"partial\"}]}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n" +
+				"data: [DONE]\n\n",
+			wantText: "partial", wantError: "without a finish reason",
+		},
+		{
+			name: "conflicting usage receipts",
+			body: "data: {\"choices\":[{\"text\":\"ok\",\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1}}\n\n" +
+				"data: [DONE]\n\n",
+			wantText: "ok", wantError: "conflicting usage",
+		},
+		{
+			name:      "multiple choices",
+			body:      "data: {\"choices\":[{\"text\":\"a\"},{\"text\":\"b\"}]}\n\n",
+			wantError: "at most one",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -678,13 +722,13 @@ func TestStreamingConformanceMatrix(t *testing.T) {
 func TestVersionTriesVLLMEndpoint(t *testing.T) {
 	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/version" {
-			w.Write([]byte(`{"version":"0.9.4"}`))
+			w.Write([]byte(`{"version":"9.9.9"}`))
 			return
 		}
 		http.Error(w, "no", 404)
 	})
 	defer done()
-	if v := c.Version(context.Background()); v != "openai-compat 0.9.4" {
+	if v := c.Version(context.Background()); v != "openai-compat 9.9.9" {
 		t.Fatalf("version = %q", v)
 	}
 }

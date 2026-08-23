@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const maxDiscoveryBody = 1 << 20
+
 // Found is one reachable serving runtime. Kind is "ollama", "llama-server",
 // or "openai" - identified by the response shape, never by the port.
 type Found struct {
@@ -121,7 +123,7 @@ func Identify(ctx context.Context, base string) (string, bool) {
 	// Ollama first: /api/tags is unique to it.
 	if body, ok := getJSON(ctx, base+"/api/tags"); ok {
 		var r struct {
-			Models json.RawMessage `json:"models"`
+			Models []json.RawMessage `json:"models"`
 		}
 		if json.Unmarshal(body, &r) == nil && r.Models != nil {
 			return "ollama", true
@@ -140,7 +142,7 @@ func Identify(ctx context.Context, base string) (string, bool) {
 	}
 	if body, ok := getJSON(ctx, base+"/v1/models"); ok {
 		var r struct {
-			Data json.RawMessage `json:"data"`
+			Data []json.RawMessage `json:"data"`
 		}
 		if json.Unmarshal(body, &r) == nil && r.Data != nil {
 			return "openai", true
@@ -164,8 +166,8 @@ func getJSON(ctx context.Context, url string) ([]byte, bool) {
 	if resp.StatusCode != 200 {
 		return nil, false
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	return body, err == nil
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDiscoveryBody+1))
+	return body, err == nil && len(body) <= maxDiscoveryBody
 }
 
 // Short-timeout client: discovery must fail fast on a closed port.

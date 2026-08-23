@@ -5,9 +5,78 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/blisspixel/fitr/internal/boundedio"
 )
+
+func TestReadFileTailIsBoundedAndKeepsLatestAccelerationReceipt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.log")
+	body := "library=cpu\n" + strings.Repeat("x", maxServerLogTail) + "\nlibrary=cuda\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b, err := boundedio.ReadTail(path, maxServerLogTail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) > maxServerLogTail {
+		t.Fatalf("read %d bytes, limit is %d", len(b), maxServerLogTail)
+	}
+	matches := serverLibraryPattern.FindAllStringSubmatch(string(b), -1)
+	if len(matches) != 1 || matches[0][1] != "cuda" {
+		t.Fatalf("tail acceleration receipts = %v", matches)
+	}
+}
+
+func TestInspectionRejectsInvalidRequestsAndInventory(t *testing.T) {
+	bad := &Client{BaseURL: "http://\n", HTTP: http.DefaultClient}
+	if bad.Reachable(context.Background()) {
+		t.Fatal("malformed base URL must not be reachable")
+	}
+	if _, err := bad.Tags(context.Background()); err == nil {
+		t.Fatal("Tags accepted a malformed base URL")
+	}
+	if _, err := bad.PS(context.Background()); err == nil {
+		t.Fatal("PS accepted a malformed base URL")
+	}
+
+	for _, tc := range []struct {
+		name, path, body, want string
+	}{
+		{"tags missing array", "/api/tags", `{}`, "missing the models array"},
+		{"tags negative size", "/api/tags", `{"models":[{"name":"m","size":-1}]}`, "negative size"},
+		{"tags duplicate", "/api/tags", `{"models":[{"name":"m"},{"name":"m"}]}`, "duplicate"},
+		{"ps missing array", "/api/ps", `{}`, "missing the models array"},
+		{"ps negative size", "/api/ps", `{"models":[{"name":"m","size":-1}]}`, "negative"},
+		{"ps impossible vram", "/api/ps", `{"models":[{"name":"m","size":1,"size_vram":2}]}`, "larger than total"},
+		{"ps duplicate", "/api/ps", `{"models":[{"name":"m"},{"name":"m"}]}`, "duplicate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.path {
+					http.NotFound(w, r)
+					return
+				}
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			client := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+			var err error
+			if tc.path == "/api/tags" {
+				_, err = client.Tags(context.Background())
+			} else {
+				_, err = client.PS(context.Background())
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
 
 func TestPullStreamsProgressAndSurfacesErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

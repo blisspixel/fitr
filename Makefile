@@ -44,7 +44,7 @@ dist:
 		CGO_ENABLED=$(CGO) GOOS=$$os GOARCH=$$arch go build $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" \
 			-o dist/$(BINARY)-$$os-$$arch$$ext ./cmd/fitr; \
 	done
-	@cp LICENSE THIRD_PARTY_NOTICES.md dist/
+	@cp LICENSE NOTICE THIRD_PARTY_NOTICES.md dist/
 	@ls -lh dist/
 
 install: build

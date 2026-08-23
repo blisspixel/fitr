@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +59,33 @@ func TestIdentifyByResponseShapeNotPort(t *testing.T) {
 		if ok != tc.ok || got != tc.want {
 			t.Errorf("Identify(%s) = %q %v, want %q %v", tc.url, got, ok, tc.want, tc.ok)
 		}
+	}
+}
+
+func TestIdentifyRejectsLookalikeAndOversizedResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, body string
+	}{
+		{"ollama null models", "/api/tags", `{"models":null}`},
+		{"ollama object models", "/api/tags", `{"models":{}}`},
+		{"openai null data", "/v1/models", `{"data":null}`},
+		{"openai object data", "/v1/models", `{"data":{}}`},
+		{"oversized ollama", "/api/tags", `{"models":[]}` + strings.Repeat(" ", maxDiscoveryBody)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == tc.path {
+					_, _ = w.Write([]byte(tc.body))
+					return
+				}
+				http.NotFound(w, r)
+			}))
+			defer srv.Close()
+
+			if kind, ok := Identify(context.Background(), srv.URL); ok {
+				t.Fatalf("Identify accepted malformed lookalike as %q", kind)
+			}
+		})
 	}
 }
 

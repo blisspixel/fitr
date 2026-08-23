@@ -13,10 +13,12 @@ package device
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -25,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blisspixel/fitr/internal/boundedio"
 	"github.com/blisspixel/fitr/internal/llm"
 )
 
@@ -32,6 +35,7 @@ import (
 var profilesFS embed.FS
 
 const GB = 1024 * 1024 * 1024
+const maxServerLogSample = 1 << 20
 
 // Gate is one threshold set, with the reasoning attached. Every number in a
 // profile carries a `why` so it can be argued with rather than cargo-culted.
@@ -144,6 +148,7 @@ func SelectProfile(name string, fp Fingerprint) (Profile, error) {
 			for n := range byName {
 				names = append(names, n)
 			}
+			sort.Strings(names)
 			return Profile{}, fmt.Errorf("profile %q not found; available: %s",
 				name, strings.Join(names, ", "))
 		}
@@ -161,7 +166,11 @@ func SelectProfile(name string, fp Fingerprint) (Profile, error) {
 			return p, nil
 		}
 	}
-	return byName["default"], nil
+	p, ok := byName["default"]
+	if !ok {
+		return Profile{}, errors.New("default profile is missing")
+	}
+	return p, nil
 }
 
 // ---------------------------------------------------------------- fingerprint
@@ -449,7 +458,7 @@ func inferenceDevice(ctx context.Context, b llm.Backend, model string) string {
 					if m.SizeVRAM == 0 {
 						return "CPU"
 					}
-					return fmt.Sprintf("GPU %d%%", int(100*m.SizeVRAM/m.Size))
+					return fmt.Sprintf("GPU %d%%", int(100*(float64(m.SizeVRAM)/float64(m.Size))))
 				}
 			}
 		}
@@ -474,14 +483,21 @@ func InferenceDeviceFor(ctx context.Context, b llm.Backend, model string) string
 
 func serverLogPath() string {
 	if runtime.GOOS == "windows" {
-		return path.Join(os.Getenv("LOCALAPPDATA"), "Ollama", "server.log")
+		base := os.Getenv("LOCALAPPDATA")
+		if base == "" {
+			return ""
+		}
+		return filepath.Join(base, "Ollama", "server.log")
 	}
-	home, _ := os.UserHomeDir()
-	return path.Join(home, ".ollama", "logs", "server.log")
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".ollama", "logs", "server.log")
 }
 
 func readLog() string {
-	b, err := os.ReadFile(serverLogPath())
+	b, err := boundedio.ReadEdges(serverLogPath(), maxServerLogSample)
 	if err != nil {
 		return ""
 	}

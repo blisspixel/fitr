@@ -273,7 +273,13 @@ func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (Me
 	if _, err := c.StopAll(ctx); err != nil {
 		return r, err
 	}
-	time.Sleep(1 * time.Second)
+	timer := time.NewTimer(1 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return r, ctx.Err()
+	case <-timer.C:
+	}
 
 	if tags, err := c.Tags(ctx); err == nil {
 		for _, t := range tags {
@@ -299,7 +305,7 @@ func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (Me
 		}
 		r.ResidentGB = round2(float64(m.Size) / (1024 * 1024 * 1024))
 		if m.Size > 0 {
-			r.PctOnGPU = int(100 * m.SizeVRAM / m.Size)
+			r.PctOnGPU = int(100 * (float64(m.SizeVRAM) / float64(m.Size)))
 		}
 	}
 	return r, nil

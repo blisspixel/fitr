@@ -79,6 +79,18 @@ func TestOpenGGUFSumsCompleteShardSetAndRejectsMissingShard(t *testing.T) {
 	}
 }
 
+func TestOpenGGUFRejectsUnreasonableShardCountBeforeProbing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "model-00001-of-99999.gguf")
+	raw := encodeGGUF(t, map[string]any{"general.architecture": "llama"})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := OpenGGUF(path); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("unreasonable shard count error = %v", err)
+	}
+}
+
 func TestReadMetadataRejectsNotGGUF(t *testing.T) {
 	if _, err := ReadMetadata(bytes.NewReader([]byte("PK\x03\x04notgguf"))); err == nil {
 		t.Fatal("non-GGUF must error")
@@ -104,6 +116,34 @@ func TestReadMetadataRejectsNestedArrays(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "nested GGUF arrays") {
 		t.Fatalf("nested array error = %v", err)
 	}
+}
+
+func TestReadMetadataRejectsDuplicateKeysAndInvalidBoolean(t *testing.T) {
+	t.Run("duplicate key", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		buf.WriteString("GGUF")
+		binary.Write(buf, binary.LittleEndian, uint32(3))
+		binary.Write(buf, binary.LittleEndian, uint64(0))
+		binary.Write(buf, binary.LittleEndian, uint64(2))
+		for _, value := range []uint64{1, 2} {
+			writeString(buf, "general.parameter_count")
+			binary.Write(buf, binary.LittleEndian, ggufUint64)
+			binary.Write(buf, binary.LittleEndian, value)
+		}
+		if _, err := ReadMetadata(bytes.NewReader(buf.Bytes())); err == nil || !strings.Contains(err.Error(), "duplicate") {
+			t.Fatalf("duplicate metadata error = %v", err)
+		}
+	})
+
+	t.Run("invalid boolean", func(t *testing.T) {
+		raw := encodeGGUFValue(t, "general.test", func(buf *bytes.Buffer) {
+			binary.Write(buf, binary.LittleEndian, ggufBool)
+			binary.Write(buf, binary.LittleEndian, uint8(2))
+		})
+		if _, err := ReadMetadata(bytes.NewReader(raw)); err == nil || !strings.Contains(err.Error(), "boolean") {
+			t.Fatalf("invalid boolean error = %v", err)
+		}
+	})
 }
 
 func TestReadMetadataRejectsHugeArrayBeforeAllocation(t *testing.T) {

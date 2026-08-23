@@ -7,7 +7,7 @@ import (
 
 func TestContextFitPointsStopAtMaxAndIncludeRequested(t *testing.T) {
 	got := fitCtxPoints(10000, 6144)
-	want := []int{2048, 4096, 8192, 10000, 6144}
+	want := []int{2048, 4096, 6144, 8192, 10000}
 	if len(got) != len(want) {
 		t.Fatalf("points = %v, want %v", got, want)
 	}

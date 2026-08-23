@@ -176,6 +176,8 @@ func TestChatRejectsInvalidRoleAndUsage(t *testing.T) {
 	}{
 		{"wrong role", `{"choices":[{"message":{"role":"user","content":"spoof"}}]}`, "want assistant"},
 		{"negative usage", `{"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":-1,"completion_tokens":1}}`, "negative token usage"},
+		{"no choices", `{"choices":[]}`, "exactly one"},
+		{"multiple choices", `{"choices":[{"message":{"role":"assistant"}},{"message":{"role":"assistant"}}]}`, "exactly one"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
@@ -298,6 +300,25 @@ func TestReachableUsesHealth(t *testing.T) {
 	}
 	if path != "/health" {
 		t.Fatalf("probed %s, want /health", path)
+	}
+}
+
+func TestInspectionRejectsInvalidRequestAndMissingModelPath(t *testing.T) {
+	bad := New()
+	bad.BaseURL = "http://\n"
+	if bad.Reachable(context.Background()) {
+		t.Fatal("malformed base URL must not be reachable")
+	}
+
+	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"build_info":"b1"}`))
+	})
+	defer done()
+	if _, err := c.Tags(context.Background()); err == nil || !strings.Contains(err.Error(), "missing model_path") {
+		t.Fatalf("Tags error = %v", err)
+	}
+	if _, err := c.PS(context.Background()); err == nil || !strings.Contains(err.Error(), "missing model_path") {
+		t.Fatalf("PS error = %v", err)
 	}
 }
 
