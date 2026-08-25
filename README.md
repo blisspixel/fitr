@@ -2,24 +2,23 @@
 
 [![CI](https://github.com/blisspixel/fitr/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/fitr/actions/workflows/ci.yml)
 
-**Get the most out of the hardware you already have.**
+**fitr tells you which local models actually run well on your machine, and what
+settings to use.**
 
-New local models land constantly and open weights keep getting better, so this
-is not a question you answer once. Most of the noise is not even aimed at you:
-the model everyone is posting about wants more VRAM than your card has, and its
-numbers came from someone else's GPU anyway.
+You have a GPU with a fixed amount of VRAM. New open models come out every
+week, and it is never obvious which ones will fit, how much context you can
+give them, or whether any of them beat what you are already running. Published
+benchmarks do not answer that — they were run on someone else's hardware, often
+at a quant nobody mentions.
 
-The question that actually matters is narrower, and it comes back every few
-weeks. *Given this machine, what is worth running right now, and at what
-settings?*
+So you either spend an evening testing by hand every time something drops, or
+you keep running whatever you set up months ago and hope it is still a good
+choice.
 
-Without a way to answer it you get two bad options: burn an evening re-testing
-things by hand every time something drops, or quietly keep running something
-worse than your card is capable of.
-
-fitr answers it here. It reads what your runtime is already serving, tells you
-which models fit and at what context length, measures what they actually do on
-your hardware, and hands you the exact flag to change when the answer is no.
+fitr does that testing for you. Point it at Ollama or llama.cpp and it lists
+the models you already have, works out which ones fit in your VRAM and at what
+context length, measures how each actually performs here, and tells you the
+exact setting to change when one does not fit.
 
 > `llmfit` tells you what fits. Leaderboards tell you what is smart on someone
 > else's machine. **`fitr` tells you what is true on yours**, and what is
