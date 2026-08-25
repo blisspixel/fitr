@@ -8,7 +8,7 @@ settings to use.**
 You have a GPU with a fixed amount of VRAM. New open models come out every
 week, and it is never obvious which ones will fit, how much context you can
 give them, or whether any of them beat what you are already running. Published
-benchmarks do not answer that — they were run on someone else's hardware, often
+benchmarks do not answer that: they were run on someone else's hardware, often
 at a quant nobody mentions.
 
 So you either spend an evening testing by hand every time something drops, or
@@ -66,7 +66,7 @@ verdict.
 <img src="docs/assets/advise.svg" alt="fitr advise (demo data)" width="820">
 
 **What it actually does here.** Speed, memory, structured output, instruction
-following, refusal, tool use — graded in Go against computed answers, never by
+following, refusal, tool use, all graded in Go against computed answers, never by
 another model's opinion.
 
 <img src="docs/assets/run.svg" alt="fitr run scorecard (demo data)" width="820">
@@ -97,24 +97,24 @@ the artifact it writes leaves out the raw model output.
 It also has no opinion about which models you should run. Whatever your runtime
 serves is what fitr measures, and how often a model refuses is a first-class
 need in the battery (`no filtering / low refusal`) rather than an awkward
-footnote — because whether a model will actually answer you is a property of
+footnote, because whether a model will actually answer you is a property of
 that model on your hardware, and worth knowing before you commit to it.
 
 Apache 2.0, and the evidence stays where it was produced.
 
 ## Documentation
 
-**Start here** — [design](docs/design.md) for what a result means and why, then
+**Start here.** [design](docs/design.md) for what a result means and why, then
 [usage](docs/usage.md) for every command, flag and output mode.
 
-**Going deeper** — [statistics](docs/statistics.md) (methods and rejected
+**Going deeper.** [statistics](docs/statistics.md) (methods and rejected
 alternatives), [tasks](docs/tasks.md) (the battery, and adding your own without
 forking), [backends](docs/backends.md) (Ollama, llama-server,
 OpenAI-compatible), [doctor](docs/doctor.md) (can this box be measured fairly
 at all), [calibration](docs/calibration.md) (paired-quant protocol),
 [TUI](docs/tui.md) (the opt-in monitor and its privacy contract).
 
-**Project** — [roadmap](ROADMAP.md), [release
+**Project.** [roadmap](ROADMAP.md), [release
 acceptance](docs/release-acceptance.md), [retonr](docs/retonr.md) (optional
 sister project; fitr works without it).
 
