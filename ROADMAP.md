@@ -22,8 +22,8 @@ flags live in [usage](docs/usage.md). Statistical methods live in
 
 | Horizon | Release | Outcome |
 |---|---|---|
-| Shipped | 0.9.6 | Unambiguous JSON, bounded discovery and control calls, and portable task files |
-| Now | 0.9.7 - 0.9.9 | Earn the 1.0 claim: every documented command proven on machines that are not the development box |
+| Shipped | 0.9.7 | Second-machine correctness, hardened untrusted input, and a static analysis gate |
+| Now | 0.9.8 | Decompose the run pipeline far enough to turn on the complexity gates, and finish the native matrix |
 | Then | 1.0 | A new user can install fitr and close the loop on a clean machine without reading source code |
 | Next | Trust C | Isolated executable evidence, stronger release provenance, and calibrated profile provenance |
 | Later | Candidate discovery | Find models worth measuring, then measure them; plus loop extensions |
@@ -63,7 +63,13 @@ completed measurement. It reproduced once and not on retry. See 0.9.9.
 
 ## Pre-1.0 releases
 
-### 0.9.7 - second-machine correctness
+The three milestones below were planned as separate releases. They were cut as
+one, 0.9.7, because the work turned out to be a single thread: taking the
+product to a machine that was not the development box, and fixing everything
+that fell out of it. The headings are kept because the exit criteria are still
+what the work has to be judged against.
+
+### 0.9.7 - second-machine correctness [shipped]
 
 - [x] Source advise weight size from the runtime model list, the same reading
       inventory already uses. Fit verdict and the context-fit table work on
@@ -109,7 +115,7 @@ completed measurement. It reproduced once and not on retry. See 0.9.9.
 Exit criterion: met. The three defects have regression tests, and the live
 smoke fails if any documented command stops working against a real runtime.
 
-### 0.9.8 - the acceptance path covers the product
+### The acceptance path covers the product [shipped in 0.9.7]
 
 The Windows acceptance row recorded a passing live loop while advise was
 broken, because the recorded path never invoked advise. An acceptance path
@@ -144,7 +150,7 @@ and see which commands ran and what each is required to produce. The native
 matrix rows in [release acceptance](docs/release-acceptance.md) still need a
 clean install on each operating system.
 
-### 0.9.9 - run resilience and backend breadth
+### Run resilience and backend breadth [shipped in 0.9.7, except the native matrix]
 
 - [x] Decide and document the partial-evidence contract. **Resolved as
       fail-closed, stated out loud.** A fault mid-battery still abandons the
@@ -189,6 +195,21 @@ clean install on each operating system.
 
 Exit criterion: an interrupted or degraded run produces an interpretable
 result, and all three backends have a native positive run.
+
+### 0.9.8 - decomposition and the native matrix
+
+- [ ] Decompose the run pipeline far enough to turn on the complexity gates.
+      `execute` went from 571 lines to 463 by extracting the measurement
+      phases, and `main.go` from 4,074 to 1,199, but `funlen`, `gocognit`,
+      `gocyclo`, `nestif` and `dupl` are still off in `.golangci.yml` with the
+      reason recorded there. Turning them on is the exit criterion, not the
+      line count.
+- [ ] Complete a positive native run for llama-server, the one backend row
+      still resting on automated tests alone.
+- [ ] Run the acceptance path on clean macOS and Linux installs.
+
+Exit criterion: the complexity linters are enabled with no suppressions in the
+run pipeline, and every backend row rests on a native run.
 
 ### 1.0 - clean-machine confidence
 
@@ -502,6 +523,7 @@ These features must preserve the evidence contract.
 | 0.9.4 | Static Linux correction plus lock, probe, evidence recovery, atomic output, receipt, and reproducibility hardening |
 | 0.9.5 | Backend and GGUF boundary hardening, bounded local inputs, deterministic profiles, cancellation fixes, and Apache License 2.0 |
 | 0.9.6 | Duplicate-key JSON rejection, fail-closed model inventory, bounded discovery and control calls, and portable task-file boundaries |
+| 0.9.7 | Second-machine correctness: the fit verdict restored on Ollama, device identity sealed and gated, untrusted GGUF and task-file input hardened and fuzzed, the KV dtype remedy, whole-loop live coverage, and a static analysis gate |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).
