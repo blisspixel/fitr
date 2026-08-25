@@ -73,24 +73,28 @@ func TestWilsonEdges(t *testing.T) {
 	}
 }
 
-func TestOverlappingIntervalsAreIndistinguishable(t *testing.T) {
-	a, b := Wilson(3, 3), Wilson(2, 3)
-	if !Overlap(a, b) {
-		t.Fatal("3/3 and 2/3 must overlap at this sample size")
+// Separation between two rates is decided by the Newcombe difference interval,
+// never by whether their per-arm intervals overlap. Requiring non-overlap of
+// two 95% intervals is roughly an alpha of 0.006, so it silently misses real
+// differences; statistics.md says so, and an exported Overlap/Compare pair
+// that implemented exactly that rule used to sit here contradicting it.
+func TestSeparatedRatesAreRankedByTheDifferenceInterval(t *testing.T) {
+	lo, hi, ok := NewcombeDiff(20, 20, 2, 20)
+	if !ok {
+		t.Fatal("20/20 against 2/20 produced no difference interval")
 	}
-	if got := Compare("A", a, "B", b); got == "" ||
-		!contains(got, "INDISTINGUISHABLE") {
-		t.Fatalf("got %q, want an INDISTINGUISHABLE verdict", got)
+	if lo <= 0 {
+		t.Fatalf("difference interval [%v, %v] includes zero for an obvious gap", lo, hi)
 	}
-}
 
-func TestSeparatedIntervalsAreRanked(t *testing.T) {
-	a, b := Wilson(20, 20), Wilson(2, 20)
-	if Overlap(a, b) {
-		t.Fatal("20/20 and 2/20 must not overlap")
+	// And a genuinely close pair must not be ranked, even though a reader
+	// eyeballing two overlapping intervals might call it either way.
+	lo, hi, ok = NewcombeDiff(11, 20, 10, 20)
+	if !ok {
+		t.Fatal("a close pair produced no difference interval")
 	}
-	if got := Compare("A", a, "B", b); !contains(got, "A > B") {
-		t.Fatalf("got %q, want A > B", got)
+	if lo > 0 || hi < 0 {
+		t.Fatalf("difference interval [%v, %v] separates 11/20 from 10/20", lo, hi)
 	}
 }
 
@@ -153,17 +157,6 @@ func TestMinDetectableEffectShrinksWithRepeats(t *testing.T) {
 	if k1 < 0.4 {
 		t.Fatalf("a 6-task battery cannot resolve small effects; got %v", k1)
 	}
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (func() bool {
-		for i := 0; i+len(sub) <= len(s); i++ {
-			if s[i:i+len(sub)] == sub {
-				return true
-			}
-		}
-		return false
-	})()
 }
 
 func TestFirstRunSlowDetectsColdStart(t *testing.T) {

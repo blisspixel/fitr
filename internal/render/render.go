@@ -99,9 +99,8 @@ func (p palette) wrap(style, s string) string {
 
 // Model output is UNTRUSTED input to the terminal: it can spoof a prompt,
 // rewrite the screen, or hide text with ANSI.
-// (0x20-0x2F) from ECMA-48, not a typo for a shorter set.
 //
-//nolint:gocritic // [ -/] is the CSI parameter/intermediate byte range
+//nolint:gocritic // [ -/] is the CSI parameter/intermediate byte range (0x20-0x2F) from ECMA-48, not a typo
 var ansiRe = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`)
 
 func Sanitize(s string) string { return ansiRe.ReplaceAllString(s, "") }
@@ -261,6 +260,7 @@ type Meta struct {
 	FirstRunRatio            float64
 	Trials                   int
 	MDEpp                    float64
+	MDEDiffpp                float64
 	SavedPath                string
 	Calibration              bool
 }
@@ -426,9 +426,18 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	}
 	// Say what this sample CANNOT resolve. An honest gap beats implied precision.
 	if m.MDEpp > 0 {
-		fmt.Fprintf(w, "%s\n", d.pal.wrap(d.pal.Muted, fmt.Sprintf(
-			"%d binary trials %s min detectable effect ~%.0fpp - separates broken from working, "+
-				"not good from slightly better", m.Trials, d.g.Dash, m.MDEpp)))
+		// Two figures, because fitr makes two kinds of claim. The gate figure
+		// is a one-sample calculation and was printed on its own beside the
+		// words "not good from slightly better", which is a model-versus-model
+		// sentence quoting a number that cannot support it. A difference of
+		// two rates carries both variances, so it resolves worse by sqrt(2).
+		line := fmt.Sprintf("%d binary trials %s resolves ~%s against a gate",
+			m.Trials, d.g.Dash, resolutionText(m.MDEpp))
+		if m.MDEDiffpp > 0 {
+			line += ", " + resolutionText(m.MDEDiffpp) + " between two models"
+		}
+		line += ". Separates broken from working, not good from slightly better"
+		fmt.Fprintf(w, "%s\n", d.pal.wrap(d.pal.Muted, line))
 	}
 	if m.Repeats < 3 {
 		warning := "! single-sample run - identical configs vary 10-20pp between runs; " +
@@ -519,3 +528,14 @@ func (noneDisplay) Done(string, float64)         {}
 func (noneDisplay) Result(score.Scorecard, Meta) {}
 func (noneDisplay) Emit(any)                     {}
 func (noneDisplay) Close()                       {}
+
+// resolutionText renders a minimum detectable effect. Percentage points cannot
+// exceed 100, so a calculation that lands above it has not found a wide
+// threshold; it has found that this sample resolves nothing. Printing "~114pp"
+// states an impossible quantity where the honest answer is a sentence.
+func resolutionText(pp float64) string {
+	if pp >= 100 {
+		return "nothing"
+	}
+	return fmt.Sprintf("%.0fpp", pp)
+}

@@ -448,24 +448,6 @@ func Flakiness(results []bool) Flake {
 	}
 }
 
-// Overlap reports whether two intervals overlap. If they do, you must NOT
-// claim one is better than the other.
-func Overlap(a, b Interval) bool {
-	return !(a.Hi < b.Lo || b.Hi < a.Lo)
-}
-
-// Compare gives an honest pairwise verdict for two binary rates.
-func Compare(aName string, a Interval, bName string, b Interval) string {
-	if Overlap(a, b) {
-		return fmt.Sprintf("%s and %s are INDISTINGUISHABLE on this sample size", aName, bName)
-	}
-	hi, lo := aName, bName
-	if b.Point > a.Point {
-		hi, lo = bName, aName
-	}
-	return fmt.Sprintf("%s > %s (intervals do not overlap)", hi, lo)
-}
-
 // RatioWithError propagates relative error in quadrature, as hyperfine does:
 //
 //	sigma_ratio = ratio * sqrt((sd_a/mean_a)^2 + (sd_b/mean_b)^2)
@@ -516,6 +498,20 @@ func FirstRunSlow(xs []float64) (slow bool, ratio float64) {
 func MinDetectableEffect(items, repeats int) float64 {
 	n := max(items*max(1, repeats), 1)
 	return round(2.8*math.Sqrt(0.25/float64(n)), 3)
+}
+
+// MinDetectableDifference is the same rough calculation for comparing two
+// measured rates against each other rather than one rate against a gate. The
+// variance of a difference is the sum of two variances, so the resolution is
+// worse by a factor of sqrt(2): at 23 trials per arm this is about 41 points,
+// not the 29 that MinDetectableEffect reports for a gate test.
+//
+// Both numbers exist because fitr makes both kinds of claim, and a scorecard
+// that prints the gate figure next to the words "not good from slightly
+// better" is quoting the wrong one.
+func MinDetectableDifference(items, repeats int) float64 {
+	n := max(items*max(1, repeats), 1)
+	return round(2.8*math.Sqrt(0.5/float64(n)), 3)
 }
 
 // tCrit975 holds two-sided 95% Student-t critical values (t_{0.975,df}) for

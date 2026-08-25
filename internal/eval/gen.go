@@ -775,7 +775,7 @@ func genStatic(params map[string]any, rng *rand.Rand) Instance {
 			if !found {
 				ans = strings.TrimSpace(text)
 			}
-			f, err := strconv.ParseFloat(strings.Trim(ans, " $%"), 64)
+			f, err := parseAnswerNumber(ans)
 			if err != nil {
 				return false, fmt.Sprintf("no parseable number (looked after `Answer:`, then at the whole reply): %q", firstLine(ans))
 			}
@@ -885,4 +885,21 @@ func familyDrawLimit(family string) (int, bool) {
 		return len(poolProducts), true
 	}
 	return 0, false
+}
+
+// parseAnswerNumber reads the number a model gave. Trimming only strips the
+// ends, so "1,234" failed to parse and a correct answer was graded wrong:
+// parseCents in this same file already stripped separators, and the two
+// disagreed. A grader that fails on a correctly formatted answer measures
+// formatting, not capability.
+func parseAnswerNumber(ans string) (float64, error) {
+	cleaned := strings.TrimSpace(ans)
+	cleaned = strings.Trim(cleaned, " $%")
+	// Separators only, not decimal points: a European decimal comma cannot be
+	// told apart from a thousands separator without knowing the locale, and
+	// guessing would turn a wrong answer into a right one.
+	cleaned = strings.ReplaceAll(cleaned, ",", "")
+	cleaned = strings.ReplaceAll(cleaned, "_", "")
+	cleaned = strings.TrimSpace(strings.Trim(cleaned, " $%"))
+	return strconv.ParseFloat(cleaned, 64)
 }

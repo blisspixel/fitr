@@ -276,8 +276,11 @@ func htmlDataFrom(a Artifact) htmlData {
 		d.Prefill = stat(a.Meta.PrefillMean, a.Meta.PrefillSD, a.Meta.PrefillN, 0, 0, g)
 	}
 	if a.Meta.MDEpp > 0 {
-		d.MDE = fmt.Sprintf("%d binary trials - min detectable effect ~%.0fpp - separates broken from working, not good from slightly better",
-			a.Meta.Trials, a.Meta.MDEpp)
+		d.MDE = fmt.Sprintf("%d binary trials - resolves ~%s against a gate", a.Meta.Trials, resolutionText(a.Meta.MDEpp))
+		if a.Meta.MDEDiffpp > 0 {
+			d.MDE += ", " + resolutionText(a.Meta.MDEDiffpp) + " between two models"
+		}
+		d.MDE += ". Separates broken from working, not good from slightly better"
 	}
 	return d
 }

@@ -67,7 +67,12 @@ func TestHTMLContainsFingerprintAndMDE(t *testing.T) {
 		"4096",
 		"OLLAMA_KV_CACHE_TYPE",
 		"request context",
-		"min detectable effect",
+		// The resolution line names which claim each figure supports: the
+		// gate figure is a one-sample calculation and was previously printed
+		// beside a model-versus-model sentence, which quotes it for a claim
+		// it cannot back.
+		"resolves ~",
+		"against a gate",
 		"PASS",
 		"n/a",
 		"Not measured",

@@ -154,8 +154,11 @@ func TestGoldenResultRendersCleanly(t *testing.T) {
 		"ctx      8192",
 		"emits valid structured output",
 		"follows exact instructions",
-		"min detectable effect",
-		"separates broken from working",
+		// The resolution line reports two figures, because a gate test and a
+		// model-versus-model comparison do not resolve the same difference.
+		"resolves ~",
+		"against a gate",
+		"Separates broken from working",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered scorecard missing %q\n%s", want, got)
@@ -917,7 +920,8 @@ func TestExportGoldenHTMLCarriesFingerprintAndEscapes(t *testing.T) {
 		"8192",
 		"PASS",
 		"n/a",
-		"min detectable effect",
+		"resolves ~",
+		"against a gate",
 		"Written only because you asked",
 	} {
 		if !strings.Contains(got, want) {

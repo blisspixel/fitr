@@ -672,6 +672,7 @@ func resultMeta(r *Result, profile string) render.Meta {
 	if trials > 0 {
 		meta.Trials = trials
 		meta.MDEpp = 100 * stats.MinDetectableEffect(trials, 1)
+		meta.MDEDiffpp = 100 * stats.MinDetectableDifference(trials, 1)
 	}
 	return meta
 }

@@ -218,6 +218,7 @@ func shotRun(ctx context.Context) (string, error) {
 		TTFTMean: res.TTFTSum.Mean, TTFTSD: res.TTFTSum.SD, TTFTN: res.TTFTSum.N,
 		ResidentGB: res.Memory.ResidentGB,
 		Trials:     trials, MDEpp: 100 * stats.MinDetectableEffect(trials, 1),
+		MDEDiffpp: 100 * stats.MinDetectableDifference(trials, 1),
 	}
 	for _, sample := range res.Speed {
 		meta.DecodeSeries = append(meta.DecodeSeries, sample.DecodeTPS)
