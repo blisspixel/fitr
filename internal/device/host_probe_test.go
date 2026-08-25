@@ -39,32 +39,38 @@ func TestHostProbesAreReadOncePerProcess(t *testing.T) {
 	}
 }
 
-// A probe that failed under load must be allowed to succeed later. Pinning an
-// empty reading for the life of the process would turn one slow moment into a
-// command that can never work.
-func TestFailedHostProbesAreNotCached(t *testing.T) {
+// Only a successful reading may be cached: one slow moment must not pin an
+// empty value for the life of the process. Inducing a real probe failure is
+// not portable -- a cancelled context kills a subprocess on Windows but does
+// not stop a /proc read on Linux -- so the policy is asserted on the cache
+// itself rather than by trying to break a probe.
+func TestEmptyReadingsAreNotPinned(t *testing.T) {
 	resetHostProbes()
 	t.Cleanup(resetHostProbes)
+	ctx := context.Background()
 
-	// A cancelled context makes every probe fail the way a timeout does.
-	dead, cancel := context.WithCancel(context.Background())
-	cancel()
-	_ = cachedCPUName(dead)
-	_, _, _ = cachedGPUInfo(dead)
-
+	// An empty cached CPU must not satisfy a later read.
 	hostProbes.Lock()
-	cpuCached, gpuCached := hostProbes.cpu, hostProbes.gpuOK
+	hostProbes.cpu = ""
 	hostProbes.Unlock()
-	if cpuCached != "" {
-		t.Fatalf("a failed CPU probe was cached as %q", cpuCached)
-	}
-	if gpuCached {
-		t.Fatal("a failed GPU probe was cached")
+	if got := cachedCPUName(ctx); got != cpuName(ctx) {
+		t.Fatalf("an empty cache entry was served instead of re-probing: %q", got)
 	}
 
-	// With a live context the reading is available again.
-	if got := cachedCPUName(context.Background()); got == "" && cpuName(context.Background()) != "" {
-		t.Fatal("CPU probe stayed empty after the failure cleared")
+	// An unsuccessful GPU probe leaves the cache disarmed, so the next call
+	// tries again rather than returning nothing forever.
+	hostProbes.Lock()
+	hostProbes.gpu, hostProbes.gpuOK = "", false
+	hostProbes.Unlock()
+	name, _, _ := cachedGPUInfo(ctx)
+	hostProbes.Lock()
+	armed := hostProbes.gpuOK
+	hostProbes.Unlock()
+	if name == "" && armed {
+		t.Fatal("an empty GPU reading armed the cache")
+	}
+	if name != "" && !armed {
+		t.Fatal("a successful GPU reading did not arm the cache")
 	}
 }
 
