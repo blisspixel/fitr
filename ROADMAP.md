@@ -115,19 +115,34 @@ The Windows acceptance row recorded a passing live loop while advise was
 broken, because the recorded path never invoked advise. An acceptance path
 that skips the command the README calls the fit verdict is not acceptance.
 
-- [ ] Redefine the acceptance path as every command in the README's everyday
-      loop table, with the observed output recorded per row.
-- [ ] Record environment depth, not just operating system: shell and probe
+- [x] Redefine the acceptance path as every command in the README's everyday
+      loop table, with the observed output recorded per row. The live smoke
+      now walks inventory, advise, run, apply, board, doctor, diag, device,
+      view, export, `top --snapshot` and compare, and asserts each produced
+      its documented artifact rather than merely exiting zero. Export is held
+      to being self-contained; compare skips loudly when no second model is
+      named, because a skipped row that reads as green is the failure this
+      test exists to prevent.
+- [x] Record environment depth, not just operating system: shell and probe
       tooling version, serving-runtime version, GPU vendor, and driver. The
       PowerShell 5.1 defect is invisible in a matrix whose finest grain is
-      "Windows".
-- [ ] Add a device-identity gate. Fingerprint errors are the worst failure
+      "Windows", so `fitr device` now prints the interpreter its probes run
+      through. It is display-only: Detect is on the path of every command and
+      does not need another round-trip, and the sealed fingerprint does not
+      need a field that cannot change a measurement.
+- [x] Add a device-identity gate. Fingerprint errors are the worst failure
       class this product has, because they corrupt comparison silently and
-      produce no error text. Assert the detected device against an independent
-      reading before evidence is sealed.
+      produce no error text. `IdentityConflicts` cross-checks the parts of a
+      fingerprint that were derived independently -- the vendor tool that
+      sized memory, the compute API the runtime reports, and the name of the
+      card -- and says so before a run is sealed, and in `fitr device`. It
+      fires only on contradiction, never on absence: unmeasured is a
+      legitimate state and must not be dressed up as a fault.
 
-Exit criterion: a reviewer can read the acceptance matrix and see which
-commands ran, on what, and what they printed.
+Exit criterion: met for the automated path. A reviewer can read the live smoke
+and see which commands ran and what each is required to produce. The native
+matrix rows in [release acceptance](docs/release-acceptance.md) still need a
+clean install on each operating system.
 
 ### 0.9.9 - run resilience and backend breadth
 

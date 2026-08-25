@@ -200,6 +200,79 @@ type Fingerprint struct {
 	Config     map[string]string `json:"config"`
 }
 
+// vendorForAccel maps a compute API onto the vendor whose name must appear on
+// the card serving it. Only APIs with a single possible vendor are listed:
+// vulkan and opencl run on anyone's hardware and prove nothing about a name.
+var vendorForAccel = map[string]string{
+	"cuda":  "nvidia",
+	"rocm":  "amd",
+	"metal": "apple",
+}
+
+// IdentityConflicts reports parts of the fingerprint that were derived
+// independently and disagree about what this machine is.
+//
+// Device identity is the worst failure class fitr has, because it is silent.
+// A wrong GPU name produces no error: it produces a run that is sealed to a
+// device that does not exist, and evidence that stops comparing the moment the
+// misdetection changes. 0.9.6 named a headset's virtual display while sizing
+// VRAM from a GeForce card in the same fingerprint, and nothing objected.
+//
+// Each check fires only on a genuine contradiction between two sources, never
+// on a value that is merely missing: unmeasured is a legitimate state, and
+// this must not turn one into a scary warning.
+func (f Fingerprint) IdentityConflicts() []string {
+	var out []string
+	name := strings.ToLower(f.GPU)
+
+	// A budget read from a vendor tool describes that vendor's card. If the
+	// name came from somewhere else and names a different device, the
+	// fingerprint is a composite of two machines.
+	if f.VRAMSource == "nvidia-smi" && f.VRAMGb > 0 && name != "" &&
+		!strings.Contains(name, "nvidia") && !strings.Contains(name, "geforce") &&
+		!strings.Contains(name, "quadro") && !strings.Contains(name, "tesla") {
+		out = append(out, fmt.Sprintf(
+			"memory was measured with nvidia-smi but the GPU is named %q; "+
+				"the name and the budget describe different devices", f.GPU))
+	}
+
+	// The compute API the server reports is a second, independent opinion
+	// about the vendor.
+	if vendor, single := vendorForAccel[strings.ToLower(f.GPUBackend)]; single && name != "" {
+		if !strings.Contains(name, vendor) && !accelNameException(vendor, name) {
+			out = append(out, fmt.Sprintf(
+				"the runtime is using %s but the GPU is named %q; "+
+					"one of the two is not this machine's inference device", f.GPUBackend, f.GPU))
+		}
+	}
+
+	// A sized device with no name cannot be told apart from another sized
+	// device with no name, and Key would join them.
+	if f.VRAMGb > 0 && f.VRAMSource != "" && strings.TrimSpace(f.GPU) == "" {
+		out = append(out, "GPU memory was measured but the device has no name; "+
+			"results cannot be told apart from another unnamed device")
+	}
+	return out
+}
+
+// accelNameException covers vendors whose cards are not spelled with the
+// vendor's own name.
+func accelNameException(vendor, name string) bool {
+	switch vendor {
+	case "nvidia":
+		return strings.Contains(name, "geforce") || strings.Contains(name, "quadro") ||
+			strings.Contains(name, "tesla") || strings.Contains(name, "rtx") ||
+			strings.Contains(name, "gtx")
+	case "amd":
+		return strings.Contains(name, "radeon") || strings.Contains(name, "instinct")
+	case "apple":
+		return strings.Contains(name, "m1") || strings.Contains(name, "m2") ||
+			strings.Contains(name, "m3") || strings.Contains(name, "m4") ||
+			strings.Contains(name, "m5")
+	}
+	return false
+}
+
 // Key is what decides comparability. Two results may only be ranked against
 // each other if this matches exactly.
 // Diff lists fields that disagree. Used by `fitr tune` so a knob change is

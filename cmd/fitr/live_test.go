@@ -11,8 +11,11 @@ package main
 // a check is a correct result, not a test failure.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -144,6 +147,109 @@ func TestLiveLoopSmoke(t *testing.T) {
 		if !strings.Contains(out, "does not restart") {
 			t.Fatalf("apply dropped its non-mutation promise:\n%s", out)
 		}
+	})
+
+	// The loop above is the README's everyday table. The commands below are the
+	// rest of the documented surface. An acceptance path that walks only the
+	// happy five is how a broken advise shipped behind a green row.
+	//
+	// Doctor and diag report whether this box can be measured at all, so a
+	// refusal is a real answer; only a crash or a rejected invocation fails.
+	runsAtAll := func(t *testing.T, name string, fn func() int) (string, string) {
+		t.Helper()
+		stdout := ""
+		stderr, code := captureTopStderr(t, func() int {
+			var inner int
+			stdout, inner = captureTopStdout(t, fn)
+			return inner
+		})
+		if code == exitUsage {
+			t.Fatalf("%s rejected its own documented invocation: %s", name, stderr)
+		}
+		if strings.TrimSpace(stdout+stderr) == "" {
+			t.Fatalf("%s produced no output", name)
+		}
+		return stdout, stderr
+	}
+
+	t.Run("doctor", func(t *testing.T) {
+		runsAtAll(t, "doctor", func() int { return cmdDoctor(ctx, []string{model}) })
+	})
+
+	t.Run("diag", func(t *testing.T) {
+		runsAtAll(t, "diag", func() int { return cmdDiag(ctx, []string{model}) })
+	})
+
+	t.Run("device", func(t *testing.T) {
+		out, code := captureTopStdout(t, func() int { return cmdDevice(ctx, nil) })
+		ranLoop(t, "device", code, out, "")
+		// The fingerprint decides comparability, so it has to name the machine
+		// rather than print blanks.
+		for _, field := range []string{"host", "os"} {
+			if !strings.Contains(out, field) {
+				t.Fatalf("device output omits %q:\n%s", field, out)
+			}
+		}
+	})
+
+	t.Run("view", func(t *testing.T) {
+		out, code := captureTopStdout(t, func() int { return cmdView(ctx, []string{model}) })
+		ranLoop(t, "view", code, out, "")
+		if !strings.Contains(out, baseTag(model)) {
+			t.Fatalf("view did not reopen the measured model:\n%s", out)
+		}
+	})
+
+	t.Run("export", func(t *testing.T) {
+		dest := filepath.Join(t.TempDir(), "scorecard.html")
+		stderr, code := captureTopStderr(t, func() int {
+			return cmdExport(ctx, []string{model, "--out", dest})
+		})
+		if code != exitOK {
+			t.Fatalf("export exit = %d; stderr=%s", code, stderr)
+		}
+		body, err := os.ReadFile(dest)
+		if err != nil {
+			t.Fatalf("export wrote no artifact at %s: %v", dest, err)
+		}
+		if !bytes.Contains(body, []byte("<html")) {
+			t.Fatalf("exported artifact is not HTML (%d bytes)", len(body))
+		}
+		// Self-contained is part of the export contract: a shared scorecard
+		// must not fetch anything when it is opened.
+		for _, remote := range []string{`src="http`, `href="http`, `src="//`, `href="//`} {
+			if bytes.Contains(body, []byte(remote)) {
+				t.Fatalf("exported artifact references remote content (%s)", remote)
+			}
+		}
+	})
+
+	t.Run("top_snapshot", func(t *testing.T) {
+		out, code := captureTopStdout(t, func() int { return cmdTop(ctx, []string{"--snapshot"}) })
+		ranLoop(t, "top --snapshot", code, out, "")
+		var snap map[string]any
+		if err := json.Unmarshal([]byte(out), &snap); err != nil {
+			t.Fatalf("top --snapshot is not JSON: %v\n%s", err, out)
+		}
+		if snap["schema"] == nil {
+			t.Fatalf("presentation snapshot carries no schema: %s", out)
+		}
+	})
+
+	// compare needs two measured models, so it runs only when the operator
+	// names a second one. A skipped row that reads as green is the failure
+	// this whole test exists to prevent, so the skip is explicit.
+	t.Run("compare", func(t *testing.T) {
+		other := os.Getenv("FITR_LIVE_SECOND")
+		if other == "" {
+			t.Skip("set FITR_LIVE_SECOND=<model> to cover compare")
+		}
+		if _, code := captureTopStdout(t, func() int {
+			return cmdRun(ctx, []string{other, "--quick"})
+		}); code != exitOK && code != exitGates {
+			t.Fatalf("measuring the second model failed: exit %d", code)
+		}
+		runsAtAll(t, "compare", func() int { return cmdCompare(ctx, []string{model, other}) })
 	})
 }
 

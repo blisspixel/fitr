@@ -145,3 +145,18 @@ func ramGB(ctx context.Context) float64 {
 	}
 	return float64(n) / GB
 }
+
+// ProbeTooling reports the interpreter the Windows probes run through. It is
+// display-only and deliberately not part of the sealed fingerprint: it costs
+// another PowerShell round-trip, and Detect is on the path of every command.
+//
+// It exists because an acceptance matrix whose finest grain is "Windows"
+// cannot see a defect that only appears on Windows PowerShell 5.1, which is
+// how one shipped in 0.9.6. An operator recording a matrix row can copy this.
+func ProbeTooling(ctx context.Context) string {
+	v := ps(ctx, `$PSVersionTable.PSVersion.ToString()`)
+	if v == "" {
+		return ""
+	}
+	return "PowerShell " + v
+}

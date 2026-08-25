@@ -1662,6 +1662,13 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	if err != nil {
 		return nil, fmt.Errorf("seal run manifest: %w", err)
 	}
+	// Device identity is sealed into this run's fingerprint and its
+	// comparability key. A fingerprint assembled from sources that disagree
+	// about the machine produces no error on its own, so say it here, before
+	// the measurement is attributed to a device that may not exist.
+	for _, conflict := range res.Device.IdentityConflicts() {
+		disp.Note("device identity: "+conflict, "warn")
+	}
 	if prof.Name == "default" {
 		disp.Note("using the UNCALIBRATED default profile - verdicts are rough; "+
 			"copy profiles/default.json and tune it for this box", "warn")
@@ -3276,6 +3283,15 @@ func cmdDevice(ctx context.Context, args []string) int {
 	fmt.Printf("  gpu_driver         %s  (%s)\n", terminalText(fp.GPUDriver), terminalText(fp.GPUDriverDate))
 	fmt.Printf("  runtime            %s\n", terminalText(fp.Runtime))
 	fmt.Printf("  inference_device   %s\n", terminalText(fp.InferenceDevice))
+	// Not part of the sealed fingerprint, but an acceptance row needs it: a
+	// matrix whose finest grain is the operating system cannot see a defect
+	// that only appears on one interpreter version.
+	if tooling := device.ProbeTooling(ctx); tooling != "" {
+		fmt.Printf("  probe_tooling      %s\n", terminalText(tooling))
+	}
+	for _, conflict := range fp.IdentityConflicts() {
+		fmt.Printf("  ! identity         %s\n", terminalText(conflict))
+	}
 	fmt.Println("  config")
 	keys := make([]string, 0, len(fp.Config))
 	for k := range fp.Config {

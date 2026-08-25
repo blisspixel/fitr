@@ -126,3 +126,8 @@ func ramGB(ctx context.Context) float64 {
 	}
 	return 0
 }
+
+// ProbeTooling reports the interpreter the platform probes run through. The
+// unix probes read sysfs and run vendor binaries directly, with no shell in
+// between, so there is no interpreter version to record.
+func ProbeTooling(context.Context) string { return "" }
