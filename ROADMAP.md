@@ -204,6 +204,15 @@ result, and all three backends have a native positive run.
       `gocyclo`, `nestif` and `dupl` are still off in `.golangci.yml` with the
       reason recorded there. Turning them on is the exit criterion, not the
       line count.
+- [x] Say what is free, not only what the card holds. A fit verdict computed
+      against total memory answers a question nobody has: nobody uses a machine
+      only for inference. This box reports 24.0 GB total with 0.7 GB free,
+      because a compositor and six unrelated processes hold the rest, and
+      advise was cheerfully certifying a 17.3 GB model at a 73216 window.
+      The verdict is unchanged, because the card is still capable, and a
+      caveat now names the gap. Free memory is display-only and never enters
+      the comparability key: it moves minute to minute, and a volatile value
+      in the key would put every run in a block of its own.
 - [ ] Complete a positive native run for llama-server, the one backend row
       still resting on automated tests alone.
 - [ ] Run the acceptance path on clean macOS and Linux installs.

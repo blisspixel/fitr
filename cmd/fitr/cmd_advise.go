@@ -110,6 +110,9 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 		in.Backend = c.Name()
 		fp := device.Detect(ctx, c)
+		if free, ok := device.AvailableVRAM(ctx); ok {
+			in.FreeGB = free
+		}
 		fpKey = fp.Key()
 		if *vram < 0 {
 			in.HaveGB = fp.VRAMGb

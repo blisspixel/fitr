@@ -759,3 +759,33 @@ func resetHostProbes() {
 	hostProbes.ram = 0
 	hostProbes.vram, hostProbes.vramSource, hostProbes.vramOK = 0, "", false
 }
+
+// AvailableVRAM reports GPU memory not currently committed to something else,
+// in GiB, and whether the reading was obtained at all.
+//
+// This is deliberately NOT part of the fingerprint. It changes minute to
+// minute as a compositor, a browser or somebody's notebook takes and releases
+// memory, and putting a volatile number in the comparability key would put
+// every run in its own block and make nothing comparable to anything.
+//
+// It exists because a fit verdict computed against total memory answers a
+// question nobody has. Nobody uses a machine only for inference. The useful
+// question is what will run alongside the work already on the card, and a box
+// reporting 24 GB total with 0.7 GB free will not load a 17 GB model no matter
+// what the arithmetic says.
+func AvailableVRAM(ctx context.Context) (float64, bool) {
+	if _, err := exec.LookPath("nvidia-smi"); err != nil {
+		return 0, false
+	}
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, "nvidia-smi",
+		"--query-gpu=memory.free", "--format=csv,noheader,nounits")
+	cmd.WaitDelay = 250 * time.Millisecond
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, false
+	}
+	gb := ParseNvidiaSMIMemory(string(out))
+	return gb, gb > 0
+}

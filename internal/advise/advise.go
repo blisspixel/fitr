@@ -40,7 +40,10 @@ type Input struct {
 	WeightsB int64   // on-disk size; 0 unknown
 	HaveGB   float64 // available GPU / unified memory; 0 unknown
 	HaveSrc  string  // where HaveGB came from; empty if unmeasured
-	Ctx      int     // requested context; 0 → architecture max
+	// FreeGB is GPU memory not currently committed elsewhere. Display only:
+	// it moves minute to minute and must never reach a comparability key.
+	FreeGB float64
+	Ctx    int // requested context; 0 → architecture max
 	// KVBytes is bytes per KV element. 0 means f16 (2) was assumed.
 	KVBytes float64
 	KVSrc   string // "f16 (assumed)" / "OLLAMA_KV_CACHE_TYPE=q8_0"
@@ -266,6 +269,7 @@ type Report struct {
 	Gaps          []string  `json:"gaps,omitempty"`
 	Source        string    `json:"source,omitempty"`
 	HaveSource    string    `json:"have_source,omitempty"`
+	FreeGB        float64   `json:"free_gb,omitempty"`
 	Fit           *FitTable `json:"context_fit,omitempty"`
 }
 
@@ -396,6 +400,7 @@ func kvElemBytes(in Input) (float64, string, bool) {
 func Evaluate(in Input) Report {
 	r := evaluateCore(in)
 	r.Schema = ReportSchema
+	r.FreeGB = in.FreeGB
 	r.Fit = ContextFit(in)
 	return r
 }
@@ -713,6 +718,15 @@ func Write(w io.Writer, r Report) {
 	}
 	if r.HaveSource != "" && r.Tier != Skip {
 		fmt.Fprintf(w, "  memory         %s GB (%s)\n", trim1(r.HaveGB), render.SingleLine(r.HaveSource))
+		// The verdict above is computed against the whole card, which is the
+		// right question only on a machine doing nothing else. Say what is
+		// actually free when that is a materially different number, because
+		// "compatible" is cold comfort if the model cannot load right now.
+		if r.FreeGB > 0 && r.WeightsGB > 0 && r.FreeGB < r.WeightsGB {
+			fmt.Fprintf(w, "  ! free now     %s GB, less than this model's %s GB of weights. The verdict "+
+				"above assumes the card is yours; right now it is not\n",
+				trim1(r.FreeGB), trim1(r.WeightsGB))
+		}
 	}
 	if r.Fit != nil && len(r.Fit.Points) > 0 {
 		render.WriteContextFit(w, fitPresentation(*r.Fit), "auto")
