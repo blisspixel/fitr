@@ -261,6 +261,7 @@ type Meta struct {
 	Trials                   int
 	MDEpp                    float64
 	MDEDiffpp                float64
+	ShowsIntervals           bool
 	SavedPath                string
 	Calibration              bool
 }
@@ -396,7 +397,7 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 			continue
 		}
 		fmt.Fprintf(w, "[%s] %-34s %s\n",
-			d.pal.wrap(d.stateStyle(v.State), fmt.Sprintf("%-4s", v.State)),
+			d.pal.wrap(d.stateStyle(v.State), fmt.Sprintf("%-4s", stateTag(v.State))),
 			SingleLine(score.NeedLabel[k]), SingleLine(v.Why))
 	}
 
@@ -440,13 +441,23 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 		// words "not good from slightly better", which is a model-versus-model
 		// sentence quoting a number that cannot support it. A difference of
 		// two rates carries both variances, so it resolves worse by sqrt(2).
-		line := fmt.Sprintf("%d binary trials %s resolves ~%s against a gate",
-			m.Trials, d.g.Dash, resolutionText(m.MDEpp))
+		line := fmt.Sprintf("evidence  %s %s %d trials, resolves ~%s against a gate",
+			resolutionBand(m.MDEpp), d.g.Dash, m.Trials, resolutionText(m.MDEpp))
 		if m.MDEDiffpp > 0 {
 			line += ", " + resolutionText(m.MDEDiffpp) + " between two models"
 		}
+		// The plain-English version of the same fact, for the reader who is
+		// not going to convert percentage points into a decision.
 		line += ". Separates broken from working, not good from slightly better"
 		fmt.Fprintf(w, "%s\n", d.pal.wrap(d.pal.Muted, line))
+		// Name what the ranges are, and both things they are not. Readers
+		// reliably take an interval for the spread of scores they will see, or
+		// for the tool's confidence in the model, and neither is what it says.
+		if m.ShowsIntervals {
+			fmt.Fprintf(w, "%s\n", d.pal.wrap(d.pal.Muted,
+				"ranges are what this run pins the true rate to. They are not the spread of "+
+					"scores you will see, and not how sure fitr is that the model is good"))
+		}
 	}
 	if m.Repeats < 3 {
 		warning := "! single-sample run - identical configs vary 10-20pp between runs; " +
@@ -565,4 +576,33 @@ func stateTag(s score.State) string {
 		return "????"
 	}
 	return string(s)
+}
+
+// resolutionBand names how much this run can resolve, so the reader gets an
+// at-a-glance signal without having to interpret a percentage.
+//
+// The word never appears without its number on the same line, which is the
+// whole design constraint: a verbal probability alone transmits its intended
+// meaning to about 40% of readers, a word beside its number to about 72%, and
+// the number alone to about 75%. The word is the convenience; the number is
+// the message. If one of them has to go, the word goes.
+//
+// The scale is GRADE's certainty ladder rather than an invented one, and it
+// describes the RUN, not the model. That distinction is load-bearing: a
+// qualitative low-confidence label attached to a subject gets absorbed as bad
+// news about that subject, which is precisely how "we could not tell" ends up
+// reading as "it failed".
+func resolutionBand(mdePP float64) string {
+	switch {
+	case mdePP <= 0:
+		return "unknown"
+	case mdePP <= 10:
+		return "high"
+	case mdePP <= 20:
+		return "moderate"
+	case mdePP <= 40:
+		return "low"
+	default:
+		return "very low"
+	}
 }

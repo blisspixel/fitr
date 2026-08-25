@@ -445,7 +445,7 @@ func Score(m Measured, p device.Profile) Scorecard {
 			verdictState := state(m.User.rate() >= minRate)
 			if gateInsideInterval(wi.Lo, wi.Hi, minRate) {
 				verdictState = Inconclusive
-				why += " - INCONCLUSIVE: gate inside the 95% interval"
+				why += undecidedWhy(wi.Lo, wi.Hi, minRate)
 			}
 			n["user_tasks"] = Verdict{verdictState, why}
 		} else {
@@ -663,7 +663,7 @@ func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
 	verdictState := state(pool.rate() >= minRate)
 	if gateInsideInterval(wi.Lo, wi.Hi, minRate) {
 		verdictState = Inconclusive
-		why += " - INCONCLUSIVE: gate inside the 95% interval"
+		why += undecidedWhy(wi.Lo, wi.Hi, minRate)
 	}
 	if dead := establishedFamilyBelowGate(pool.Families, minRate); dead != "" && verdictState == Pass {
 		verdictState = Inconclusive
@@ -832,4 +832,19 @@ func SortedNeeds(n map[string]Verdict) []string {
 	}
 	sort.Strings(extra)
 	return append(out, extra...)
+}
+
+// undecidedWhy explains a rate the run could not place against its bar.
+//
+// Three things are deliberate. The subject is the RUN, not the model: readers
+// absorb a qualitative low-confidence label as bad news about whatever it is
+// attached to, so "this run fits both" says the sample is thin without saying
+// the model is weak. The wrong reading is negated outright, because "no
+// evidence of an effect" is read as "evidence of no effect" even by people
+// trained to know better. And the phrase "95% confidence interval" is avoided:
+// researchers asked six true/false questions about one endorse three and a
+// half false statements on average, no better than untrained undergraduates.
+func undecidedWhy(lo, hi, gate float64) string {
+	return fmt.Sprintf(" - undecided: %.0f%% sits inside %.0f-%.0f%%, so this run fits both "+
+		"clearing and missing the bar. Not a fail", 100*gate, 100*lo, 100*hi)
 }

@@ -215,8 +215,16 @@ func TestPooledGateInsideWilsonIntervalIsInconclusive(t *testing.T) {
 	if verdict.State != Inconclusive {
 		t.Fatalf("structured_output = %s, want INCONCLUSIVE: %s", verdict.State, verdict.Why)
 	}
-	if !strings.Contains(verdict.Why, "gate inside the 95% interval") {
-		t.Fatalf("inconclusive verdict does not explain the uncertainty: %q", verdict.Why)
+	// The explanation must name the bar, the range, and that this is not a
+	// failure. "No evidence of an effect" is read as "evidence of no effect"
+	// even by trained readers, so the wrong reading is negated outright.
+	for _, want := range []string{"undecided", "sits inside", "Not a fail"} {
+		if !strings.Contains(verdict.Why, want) {
+			t.Fatalf("inconclusive verdict is missing %q: %q", want, verdict.Why)
+		}
+	}
+	if strings.Contains(verdict.Why, "confidence interval") {
+		t.Fatalf("verdict leans on a phrase readers misread: %q", verdict.Why)
 	}
 	if slices.Contains(sc.Serves, "structured_output") || sc.Fails != 0 {
 		t.Fatalf("inconclusive pool became a product claim: %+v", sc)
@@ -260,7 +268,8 @@ func TestConfiguredUserTaskRateUsesWilsonInconclusive(t *testing.T) {
 	}}
 	sc := Score(m, profile)
 	if verdict := sc.Needs["user_tasks"]; verdict.State != Inconclusive ||
-		!strings.Contains(verdict.Why, "gate inside the 95% interval") {
+		!strings.Contains(verdict.Why, "undecided") ||
+		!strings.Contains(verdict.Why, "Not a fail") {
 		t.Fatalf("user_tasks = %+v, want explicit Wilson INCONCLUSIVE", verdict)
 	}
 	if !strings.Contains(sc.UseFor, "unmeasured/blocked") {

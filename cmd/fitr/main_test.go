@@ -156,6 +156,7 @@ func TestGoldenResultRendersCleanly(t *testing.T) {
 		"follows exact instructions",
 		// The resolution line reports two figures, because a gate test and a
 		// model-versus-model comparison do not resolve the same difference.
+		"evidence  ",
 		"resolves ~",
 		"against a gate",
 		"Separates broken from working",

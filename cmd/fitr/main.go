@@ -674,6 +674,14 @@ func resultMeta(r *Result, profile string) render.Meta {
 		meta.MDEpp = 100 * stats.MinDetectableEffect(trials, 1)
 		meta.MDEDiffpp = 100 * stats.MinDetectableDifference(trials, 1)
 	}
+	// The caption explaining what a range is only earns its line when a range
+	// is actually on screen.
+	for _, v := range r.Scorecard.Needs {
+		if strings.Contains(v.Why, "[") && strings.Contains(v.Why, "-") {
+			meta.ShowsIntervals = true
+			break
+		}
+	}
 	return meta
 }
 
