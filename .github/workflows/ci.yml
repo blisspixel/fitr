@@ -130,3 +130,5 @@ jobs:
         run: go test ./internal/advise -run='^$' -fuzz=FuzzReadMetadata -fuzztime=20000x -parallel=4
       - name: user task file fuzz smoke
         run: go test ./internal/eval -run='^$' -fuzz=FuzzUserCheck -fuzztime=20000x -parallel=4
+      - name: conversion lineage fuzz smoke
+        run: go test ./internal/calibration -run='^$' -fuzz=FuzzConversionManifest -fuzztime=20000x -parallel=4

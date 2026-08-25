@@ -176,6 +176,16 @@ func ReadConversionManifest(path string) (ConversionManifest, error) {
 	if err != nil {
 		return ConversionManifest{}, err
 	}
+	return decodeConversionManifest(b)
+}
+
+// decodeConversionManifest holds the parse and validation rules for a
+// publisher document, separate from reading the file, so the boundary can be
+// exercised on bytes rather than through a temporary file per case.
+func decodeConversionManifest(b []byte) (ConversionManifest, error) {
+	if len(b) > maxCalibrationJSONBytes {
+		return ConversionManifest{}, fmt.Errorf("conversion manifest exceeds %d bytes", maxCalibrationJSONBytes)
+	}
 	if err := strictjson.Validate(b); err != nil {
 		return ConversionManifest{}, err
 	}
