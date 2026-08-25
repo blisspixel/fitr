@@ -146,11 +146,19 @@ clean install on each operating system.
 
 ### 0.9.9 - run resilience and backend breadth
 
-- [ ] Decide and document the partial-evidence contract. A transport error in
-      the last battery step currently discards completed measurements.
-      Fail-closed is defensible; discarding good measurements with no partial
-      record and no retry is a separate question. Whichever way it resolves,
-      the behaviour becomes explicit rather than incidental.
+- [x] Decide and document the partial-evidence contract. **Resolved as
+      fail-closed, stated out loud.** A fault mid-battery still abandons the
+      whole run and saves nothing: the steps that already ran were measured
+      under conditions that stopped holding, so keeping them would keep
+      evidence collected on a machine that changed underneath. What was wrong
+      was the silence. A late failure discarded a minute of completed work
+      with nothing said about it, which is indistinguishable from the tool
+      losing the result. The run now names the step that failed, says nothing
+      was saved, and lists what was completed and thrown away.
+- [ ] Reconsider retry only if the intermittent transport fault recurs. Ten
+      direct reproductions of the withdrawal loop did not trigger it, so there
+      is no failure model to design a retry around, and a retry that hides a
+      real fault is worse than a run that stops.
 - [x] Offer KV cache dtype as a remedy. The contract says every negative fit
       verdict carries a remedy, and `q8_0` halves KV bytes per element, which
       buys back context that `f16` spends. `advise` now prints it as a second

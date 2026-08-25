@@ -106,8 +106,12 @@ contract already says.
 0. Every command in the README's everyday loop table appears in the recorded
    path for each row, with its observed output.
 1. Finish the clean-install rows on all supported operating systems.
-2. Complete positive native runs for llama-server and a generic
-   OpenAI-compatible endpoint that can supply the documented receipts.
+2. Complete a positive native run for llama-server. A generic
+   OpenAI-compatible endpoint cannot supply the documented receipts through
+   the standard schema, so that row closes as "usable for inventory,
+   unrankable for evidence" unless a conforming endpoint appears; it does not
+   block 1.0, because refusing to rank what cannot be identified is the
+   contract working.
 3. Resolve every blocker without weakening an identity, context, contamination,
    or comparison gate.
 4. Run the full release workflow on a release-candidate tag.

@@ -1684,12 +1684,32 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	}
 	defer os.RemoveAll(work)
 	start := time.Now()
+	// A run is single-flight and fail-closed: a step that errors abandons the
+	// whole battery rather than saving what came before it. That is the right
+	// default -- a transport fault means the measurement environment stopped
+	// behaving, and the steps that already ran were measured under conditions
+	// that no longer hold, so keeping them would be keeping evidence collected
+	// on a machine that changed underneath.
+	//
+	// What was wrong was doing it silently. A late failure could discard a
+	// minute of completed work with nothing said about what was lost, so the
+	// operator could not tell a broken model from a broken box. The cost is
+	// now stated.
+	var completed []string
 	step := func(name, detail string, fn func() error) error {
 		disp.Phase(name, detail)
 		t := time.Now()
 		if err := fn(); err != nil {
+			if len(completed) > 0 {
+				disp.Note(fmt.Sprintf(
+					"%s failed, so this run is abandoned and nothing is saved; "+
+						"already completed and now discarded: %s. Measurements taken before a "+
+						"fault are not kept, because the conditions they were taken under no "+
+						"longer hold", name, strings.Join(completed, ", ")), "warn")
+			}
 			return fmt.Errorf("%s: %w", name, err)
 		}
+		completed = append(completed, name)
 		disp.Done(name, time.Since(t).Seconds())
 		return nil
 	}
