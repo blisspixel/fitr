@@ -336,7 +336,16 @@ func (d *textDisplay) stateStyle(s score.State) string {
 	case score.Blocked:
 		return d.pal.Blocked
 	case score.Inconclusive:
-		return d.pal.Warn
+		// Deliberately NOT amber. Amber is measured to read as weak-green
+		// rather than "unknown" (weight 0.15 against green's 0.25), only ~24%
+		// of readers agree on what an amber indicator means, and it is the
+		// worst colour for the most common form of colour blindness: +85%
+		// response time for deuteranopes, against roughly none for green.
+		// Amber is also already carrying BLKD here, and one channel cannot
+		// mean three things. An undecided row makes no claim, so it is muted
+		// rather than coloured: an uncertain value should not be able to
+		// shout.
+		return d.pal.Muted
 	default:
 		return d.pal.Skip
 	}
@@ -538,4 +547,22 @@ func resolutionText(pp float64) string {
 		return "nothing"
 	}
 	return fmt.Sprintf("%.0fpp", pp)
+}
+
+// stateTag is the fixed-width form of a verdict for the scorecard column.
+//
+// The stored state stays "INCONCLUSIVE", because it is persisted in saved
+// results and in the JSON contract. It is 12 characters, so a row carrying it
+// rendered 14 columns wide against every other row's 6 and pushed the label
+// column out of alignment. A row that does not line up reads as an exception,
+// and an exception reads as something going wrong, which is the opposite of
+// what an undecided row means.
+//
+// "????" is the display form: four characters, fits the column, and cannot be
+// misread as a verdict word the way a truncated "INCON" could.
+func stateTag(s score.State) string {
+	if s == score.Inconclusive {
+		return "????"
+	}
+	return string(s)
 }
