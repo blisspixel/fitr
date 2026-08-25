@@ -19,11 +19,22 @@ Last updated: 2026-08-22.
 
 ## Native operating-system matrix
 
-| Operating system | Clean install | Bare inventory | Isolated live loop | Reopen and apply | Status |
-|---|---:|---:|---:|---:|---|
-| Windows amd64 | Pending final clean VM | Pass | Pass with Ollama | Pass | Partial |
-| macOS arm64 | Pending | Pending | Pending | Pending | Pending |
-| Linux amd64 | Pending | Pending | Pending | Pending | Pending |
+A row may only claim a passing live loop if every command in the README's
+everyday loop table was invoked and its output recorded. The 0.9.6 Windows row
+below claimed a passing loop while `advise` returned SKIP for every Ollama
+model, because the recorded path never called `advise`. A partial path is
+recorded as partial.
+
+| Operating system | Clean install | Bare inventory | Advise | Isolated live loop | Reopen and apply | Status |
+|---|---:|---:|---:|---:|---:|---|
+| Windows amd64 | Pending final clean VM | Pass | Regression fixed in 0.9.7; native rerun pending | Pass with Ollama, advise not exercised | Pass | Partial |
+| macOS arm64 | Pending | Pending | Pending | Pending | Pending | Pending |
+| Linux amd64 | Pending | Pending | Pending | Pending | Pending | Pending |
+
+Rows must also record environment depth, not only the operating system: shell
+and probe tooling version, serving-runtime version, GPU vendor, and driver. A
+matrix whose finest grain is "Windows" cannot see a defect that only appears
+on Windows PowerShell 5.1, which is how one shipped in 0.9.6.
 
 The Windows live loop used an isolated `FITR_RESULTS` directory, Ollama
 0.32.15, and `qwen3:0.6b-q4_K_M` at a requested 2048-token context. The run:
@@ -52,6 +63,8 @@ required to continue.
 
 ## Completion rule
 
+0. Every command in the README's everyday loop table appears in the recorded
+   path for each row, with its observed output.
 1. Finish the clean-install rows on all supported operating systems.
 2. Complete positive native runs for llama-server and a generic
    OpenAI-compatible endpoint that can supply the documented receipts.
