@@ -17,6 +17,8 @@ type Inventory struct {
 	GPUBackend   string
 	MemoryGB     float64
 	MemorySource string
+	// FreeGB is GPU memory not committed elsewhere right now. Display only.
+	FreeGB       float64
 	RuntimeKind  string
 	RuntimeURL   string
 	Also         []string
@@ -51,6 +53,7 @@ type inventoryJSON struct {
 	GPUBackend   string             `json:"gpu_backend,omitempty"`
 	MemoryGB     float64            `json:"memory_gb,omitempty"`
 	MemorySource string             `json:"memory_source,omitempty"`
+	FreeGB       float64            `json:"free_gb,omitempty"`
 	Runtime      *inventoryRuntime  `json:"runtime,omitempty"`
 	Also         []string           `json:"also,omitempty"`
 	Profile      string             `json:"profile,omitempty"`
@@ -112,7 +115,15 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 		fmt.Fprintf(w, "  gpu       %s\n", gpu)
 	}
 	if inv.MemoryGB > 0 && inv.MemorySource != "" {
-		fmt.Fprintf(w, "  memory    %s\n", SingleLine(fmt.Sprintf("%.1f (%s)", inv.MemoryGB, inv.MemorySource)))
+		mem := fmt.Sprintf("%.1f (%s)", inv.MemoryGB, inv.MemorySource)
+		// The FIT column is computed against the whole card. On a machine that
+		// is also doing other work, what is free is the number that decides
+		// whether anything actually loads, so it belongs beside the total
+		// rather than behind a separate command.
+		if inv.FreeGB > 0 && inv.FreeGB < inv.MemoryGB*0.9 {
+			mem += fmt.Sprintf(", %.1f free now", inv.FreeGB)
+		}
+		fmt.Fprintf(w, "  memory    %s\n", SingleLine(mem))
 	}
 	if inv.RuntimeKind == "" {
 		fmt.Fprintln(w, "  runtime   none reachable")
@@ -214,6 +225,7 @@ func writeInventoryJSON(w io.Writer, inv Inventory) {
 		GPUBackend:   inv.GPUBackend,
 		MemoryGB:     inv.MemoryGB,
 		MemorySource: inv.MemorySource,
+		FreeGB:       inv.FreeGB,
 		Profile:      inv.Profile,
 		Uncalibrated: inv.Uncalibrated,
 		Warnings:     inv.Warnings,

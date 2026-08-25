@@ -789,6 +789,7 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 			"repair or remove invalid files in "+device.UserProfilesDir())
 		return exitError
 	}
+	freeVRAM, _ := device.AvailableVRAM(ctx)
 	inv := render.Inventory{
 		Fitr:         version,
 		CPU:          device.FormatCPU(fp.CPU),
@@ -796,6 +797,7 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 		GPUBackend:   fp.GPUBackend,
 		MemoryGB:     fp.VRAMGb,
 		MemorySource: fp.VRAMSource,
+		FreeGB:       freeVRAM,
 		Profile:      prof.Name,
 		Uncalibrated: profileUncalibrated(prof),
 		Also:         also,
