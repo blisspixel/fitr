@@ -4,7 +4,7 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-08-22.
+Last updated: 2026-08-24.
 
 ## Automated gates
 
@@ -27,39 +27,79 @@ recorded as partial.
 
 | Operating system | Clean install | Bare inventory | Advise | Isolated live loop | Reopen and apply | Status |
 |---|---:|---:|---:|---:|---:|---|
-| Windows amd64 | Pending final clean VM | Pass | Regression fixed in 0.9.7; native rerun pending | Pass with Ollama, advise not exercised | Pass | Partial |
+| Windows amd64 (host A) | Pending final clean VM | Pass | Pass | Pass with Ollama, all documented commands | Pass | Pass on a used host |
+| Windows amd64 (host B, 0.9.6) | Pending final clean VM | Pass | Failed: SKIP for every model | Recorded pass, advise not exercised | Pass | Superseded |
 | macOS arm64 | Pending | Pending | Pending | Pending | Pending | Pending |
 | Linux amd64 | Pending | Pending | Pending | Pending | Pending | Pending |
 
 Rows must also record environment depth, not only the operating system: shell
 and probe tooling version, serving-runtime version, GPU vendor, and driver. A
 matrix whose finest grain is "Windows" cannot see a defect that only appears
-on Windows PowerShell 5.1, which is how one shipped in 0.9.6.
+on Windows PowerShell 5.1, which is how one shipped in 0.9.6. `fitr device`
+prints the interpreter its probes run through so a row can record it.
 
-The Windows live loop used an isolated `FITR_RESULTS` directory, Ollama
-0.32.15, and `qwen3:0.6b-q4_K_M` at a requested 2048-token context. The run:
+### Windows amd64, host A
 
-- resolved the exact served tag to a runtime-bound SHA-256 digest;
-- verified 2048 effective tokens from the runtime receipt;
-- completed speed, resident-memory, and tool-plumbing checks;
-- saved and reopened a schema 5 result; and
-- produced a non-mutating Ollama apply recipe from the saved context.
+Environment: Windows 11, **Windows PowerShell 5.1.26100.9168**, Go 1.26.4,
+Ollama 0.24.0, NVIDIA GeForce RTX 4090, driver 32.0.16.1047, 24.0 GB reported
+by nvidia-smi, `OLLAMA_MODELS` on a separate volume.
 
-The temporary run left no model resident. Existing user evidence was not read
-or modified.
+Run through `TestLiveLoopSmoke` with an isolated `FITR_RESULTS` directory. All
+documented commands were invoked and each was required to produce its
+artifact, not merely exit zero: inventory, advise, run, apply, board, doctor,
+diag, device, view, export, `top --snapshot`, and compare across two measured
+models. Advise produced a fit verdict and a context-fit table; export produced
+self-contained HTML with no remote references; board and view reopened the run
+just measured.
+
+This host is the reason three defects are fixed in 0.9.7. It was not a clean
+install, which is what made it useful: a used machine carries the virtual
+display adapter, the older interpreter, and the mixed model store that a clean
+VM does not.
+
+### Windows amd64, host B (0.9.6, superseded)
+
+The earlier row used Ollama 0.32.15 and `qwen3:0.6b-q4_K_M` at a requested
+2048-token context, and recorded a passing live loop. The recorded path never
+invoked `advise`, which was returning SKIP for every Ollama model at the time.
+The run did resolve the served tag to a runtime-bound digest, verify 2048
+effective tokens, complete speed, resident-memory and tool-plumbing checks,
+save and reopen a schema 5 result, and produce a non-mutating apply recipe. It
+left no model resident and did not read or modify existing user evidence.
 
 ## Live backend matrix
 
 | Backend | Discovery and inventory | Positive measured run | Identity gate | Context gate | Status |
 |---|---:|---:|---:|---:|---|
-| Ollama | Pass on Windows | Pass | Runtime digest pass | `/api/ps.context_length` pass | Pass on one native host |
+| Ollama | Pass on two Windows hosts | Pass | Runtime digest pass | `/api/ps.context_length` pass | Pass on native hosts |
 | llama-server | Automated only | Pending native run | Observed file hash remains unrankable | Automated `/props` receipt | Pending |
-| Generic OpenAI-compatible | Pass against Ollama's compatibility route | Pending a conforming endpoint | Live missing-pin refusal pass; positive receipt pending | Unknown remains unrankable by design | Partial |
+| Generic OpenAI-compatible | Pass against Ollama's compatibility route, 14 of 14 models listed | Blocked, not pending: see below | Both refusal modes pass live | Unknown remains unrankable by design | Partial by design |
 
-The live OpenAI-compatible negative test confirmed that evaluation stops before
-generation or result creation when `FITR_OPENAI_MODEL_SHA256` is absent. The
-diagnostic names the independent digest pin and the matching endpoint assertion
-required to continue.
+Against Ollama's compatibility route the generic backend listed every served
+model and produced correct inventory rows. Size and architecture are absent
+from `/v1/models`, so `advise` returns SKIP rather than a fit verdict. That is
+the documented contract, not a defect: the protocol does not carry the facts
+the verdict needs.
+
+Both identity refusals were exercised live on host A, and they are distinct:
+
+- with no pin, evaluation stops at the identity step with *"openai-compat
+  model identity requires FITR_OPENAI_MODEL_SHA256"*;
+- with a pin set against an endpoint that reports no digest, it stops with
+  *"endpoint did not report a model digest to match against
+  FITR_OPENAI_MODEL_SHA256"*.
+
+Neither refusal generated a token or wrote a result file. The isolated results
+directory was empty afterwards.
+
+A positive OpenAI-compatible run is **blocked rather than pending**. The gate
+requires the endpoint to report an artifact digest, and the OpenAI model
+schema has no field for one, so Ollama's compatibility route cannot satisfy
+it and neither can any endpoint that speaks only the standard schema. Closing
+this row needs an endpoint that publishes artifact identity as an extension.
+Until then the honest status is that a generic OpenAI-compatible endpoint is
+usable for inventory and unrankable for evidence, which is what the backend
+contract already says.
 
 ## Completion rule
 
