@@ -1642,7 +1642,13 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	}
 	fingerprintV2, err := device.NewFingerprintV2(res.Device, contextReceipt)
 	if err != nil {
-		return nil, fmt.Errorf("build device fingerprint v2: %w", err)
+		// This is reached when a device probe came back empty, which on a
+		// loaded machine means a probe was too slow rather than a device being
+		// absent. Say which, because the bare validation message reads like a
+		// broken machine and the remedy is simply to try again.
+		return nil, fmt.Errorf("build device fingerprint v2: %w "+
+			"(a device probe returned nothing; on a busy machine this is usually a slow probe, "+
+			"so re-run, and check `fitr device` if it repeats)", err)
 	}
 	res.DeviceV2 = &fingerprintV2
 	if comparableKey, err := fingerprintV2.ComparabilityKey(); err == nil {
@@ -1700,14 +1706,10 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		disp.Phase(name, detail)
 		t := time.Now()
 		if err := fn(); err != nil {
-			lost := "no step had completed yet"
-			if len(completed) > 0 {
-				lost = "already completed and now discarded: " + strings.Join(completed, ", ")
-			}
 			disp.Note(fmt.Sprintf(
 				"%s failed, so this run is abandoned and nothing is saved; %s. "+
 					"Measurements taken before a fault are not kept, because the conditions "+
-					"they were taken under no longer hold", name, lost), "warn")
+					"they were taken under no longer hold", name, abandonedStepSummary(completed)), "warn")
 			return fmt.Errorf("%s: %w", name, err)
 		}
 		completed = append(completed, name)
@@ -4031,4 +4033,13 @@ func appendUnique(dst []string, items ...string) []string {
 		}
 	}
 	return dst
+}
+
+// abandonedStepSummary describes what a fail-closed run threw away, so the
+// operator can weigh the cost instead of guessing at it.
+func abandonedStepSummary(completed []string) string {
+	if len(completed) == 0 {
+		return "no step had completed yet"
+	}
+	return "already completed and now discarded: " + strings.Join(completed, ", ")
 }

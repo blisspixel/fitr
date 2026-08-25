@@ -359,6 +359,17 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	}
 	placement := inferenceDevice(probeCtx, b, "")
 	wg.Wait()
+	// An empty CPU name is fatal further on: fingerprint v2 refuses to seal
+	// without it, so the whole run dies with "fingerprint is missing CPU". The
+	// probe is a process round-trip sharing one budget with three others, and
+	// a loaded machine is exactly when someone measures -- this was first seen
+	// on a busy CI runner. Retry once on its own budget before a slow probe
+	// gets to cancel a measurement.
+	if strings.TrimSpace(cpu) == "" {
+		retryCtx, cancelRetry := context.WithTimeout(ctx, 5*time.Second)
+		cpu = cpuName(retryCtx)
+		cancelRetry()
+	}
 	vram, vsrc = preferUnifiedMemory(gpu, ram, vram, vsrc)
 	return Fingerprint{
 		Host: host, OS: runtime.GOOS, CPU: cpu, RAMGb: ram,
