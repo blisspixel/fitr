@@ -160,3 +160,20 @@ func ProbeTooling(ctx context.Context) string {
 	}
 	return "PowerShell " + v
 }
+
+// nvidiaSMIName asks the vendor tool which card it is. It lives here rather
+// than beside the memory probe because only the Windows adapter selection
+// needs it: the unix probes read the device name directly.
+func nvidiaSMIName(ctx context.Context) string {
+	if _, err := exec.LookPath("nvidia-smi"); err != nil {
+		return ""
+	}
+	cmd := exec.CommandContext(ctx, "nvidia-smi",
+		"--query-gpu=name,memory.total", "--format=csv,noheader,nounits")
+	cmd.WaitDelay = 250 * time.Millisecond
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return ParseNvidiaSMIName(string(out))
+}
