@@ -32,12 +32,24 @@ func TestAbandonedRunSaysWhatItDiscarded(t *testing.T) {
 	defer base.Close()
 	disp := &recordingDisplay{Display: base}
 
-	// Fail a later generation so speed completes first and there is something
-	// to report as discarded.
+	// Learn how many generations a clean run makes, then fault the last one.
+	// Guessing an index is environment-dependent: the same literal landed
+	// before any step completed on a CI runner and after one locally, which
+	// is a flaky test rather than a finding.
+	probe := &runIntegrationBackend{digest: integrationDigest(), effectiveCtx: eval.NumCtx}
+	if _, err := execute(context.Background(), probe, "model", runOpts{
+		level: "quick", profile: "default", reps: 1, checksReps: 1,
+	}, base); err != nil {
+		t.Fatalf("clean run failed, so the fault index cannot be derived: %v", err)
+	}
+	if probe.generateCalls < 2 {
+		t.Fatalf("a quick run made %d generations; too few to fault a late one", probe.generateCalls)
+	}
+
 	backend := &runIntegrationBackend{
 		digest:        integrationDigest(),
 		effectiveCtx:  eval.NumCtx,
-		generateErrAt: map[int]error{4: errors.New("injected transport fault")},
+		generateErrAt: map[int]error{probe.generateCalls: errors.New("injected transport fault")},
 	}
 	_, err := execute(context.Background(), backend, "model", runOpts{
 		level: "quick", profile: "default", reps: 1, checksReps: 1,

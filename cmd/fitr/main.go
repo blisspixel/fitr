@@ -1700,13 +1700,14 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		disp.Phase(name, detail)
 		t := time.Now()
 		if err := fn(); err != nil {
+			lost := "no step had completed yet"
 			if len(completed) > 0 {
-				disp.Note(fmt.Sprintf(
-					"%s failed, so this run is abandoned and nothing is saved; "+
-						"already completed and now discarded: %s. Measurements taken before a "+
-						"fault are not kept, because the conditions they were taken under no "+
-						"longer hold", name, strings.Join(completed, ", ")), "warn")
+				lost = "already completed and now discarded: " + strings.Join(completed, ", ")
 			}
+			disp.Note(fmt.Sprintf(
+				"%s failed, so this run is abandoned and nothing is saved; %s. "+
+					"Measurements taken before a fault are not kept, because the conditions "+
+					"they were taken under no longer hold", name, lost), "warn")
 			return fmt.Errorf("%s: %w", name, err)
 		}
 		completed = append(completed, name)
