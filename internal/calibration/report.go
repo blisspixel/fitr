@@ -436,7 +436,10 @@ func SignPair(r *PairReport, privateKey ed25519.PrivateKey) error {
 		return err
 	}
 	sum := sha256.Sum256(append([]byte("fitr.calibration.trust.v1\x00"), payload...))
-	publicKey := privateKey.Public().(ed25519.PublicKey)
+	publicKey, ok := privateKey.Public().(ed25519.PublicKey)
+	if !ok {
+		return errors.New("signing key does not carry an ed25519 public key")
+	}
 	r.Trust = &TrustReceipt{
 		Schema:        TrustReceiptSchema,
 		PublicKey:     base64.RawStdEncoding.EncodeToString(publicKey),

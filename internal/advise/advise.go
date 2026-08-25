@@ -944,7 +944,9 @@ func asInt64(v any) int64 {
 		return asInt64(n[0])
 	case string:
 		var x int64
-		fmt.Sscanf(n, "%d", &x)
+		if _, err := fmt.Sscanf(n, "%d", &x); err != nil {
+			return 0
+		}
 		return x
 	}
 	return 0

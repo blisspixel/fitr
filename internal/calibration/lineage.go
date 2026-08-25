@@ -228,15 +228,15 @@ func LineageFromConversion(manifest ConversionManifest, referenceDigest, candida
 	if !manifest.binds(ref) || !manifest.binds(cand) {
 		return LineageReceipt{}, errors.New("conversion manifest does not name both pair artifacts")
 	}
-	copy := manifest
-	sum, err := evidenceSHA256(copy)
+	snapshot := manifest
+	sum, err := evidenceSHA256(snapshot)
 	if err != nil {
 		return LineageReceipt{}, err
 	}
 	return LineageReceipt{
 		Schema: LineageSchema, Method: LineageConversion,
 		BaseRevision: manifest.BaseRevision, ReferenceDigest: ref, CandidateDigest: cand,
-		EvidenceSHA256: sum, Conversion: &copy,
+		EvidenceSHA256: sum, Conversion: &snapshot,
 	}, nil
 }
 
@@ -461,7 +461,7 @@ func (r *PairReport) AttachLineage(l LineageReceipt) error {
 	if err := l.Bind(r.Reference.ArtifactDigest, r.Candidate.ArtifactDigest); err != nil {
 		return err
 	}
-	copy := l
-	r.Lineage = &copy
+	snapshot := l
+	r.Lineage = &snapshot
 	return nil
 }

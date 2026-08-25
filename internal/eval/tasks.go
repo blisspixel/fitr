@@ -441,7 +441,7 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 	deadline := time.Now().Add(time.Duration(spec.Budget) * time.Second)
 	var seq strings.Builder
 
-	for turn := 0; turn < spec.MaxTurns; turn++ {
+	for turn := range spec.MaxTurns {
 		r.Turns = turn + 1
 		if time.Now().After(deadline) {
 			r.Ended = "time_budget"
@@ -673,7 +673,7 @@ func shortHash(s string) string {
 		s = s[:200]
 	}
 	var h uint32 = 2166136261
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		h ^= uint32(s[i])
 		h *= 16777619
 	}

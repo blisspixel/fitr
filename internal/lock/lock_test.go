@@ -2,6 +2,7 @@ package lock
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,7 +157,8 @@ func TestRefreshKeepsLockFresh(t *testing.T) {
 }
 
 func asBusy(err error, target **BusyError) bool {
-	b, ok := err.(*BusyError)
+	var b *BusyError
+	ok := errors.As(err, &b)
 	if ok {
 		*target = b
 	}

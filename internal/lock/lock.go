@@ -93,7 +93,7 @@ func Acquire(name, what string) (*Lock, error) {
 			_, werr := f.Write(enc)
 			cerr := f.Close()
 			if werr != nil || cerr != nil {
-				os.Remove(path) //nolint:errcheck // best effort on a failed acquire
+				os.Remove(path)
 				return nil, errors.Join(werr, cerr)
 			}
 			l := &Lock{path: path, token: token, stop: make(chan struct{}), done: make(chan struct{})}

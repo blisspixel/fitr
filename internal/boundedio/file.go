@@ -4,6 +4,7 @@
 package boundedio
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +13,7 @@ import (
 // ReadFile reads one regular file and rejects content larger than limit.
 func ReadFile(path string, limit int64) ([]byte, error) {
 	if path == "" || limit <= 0 {
-		return nil, fmt.Errorf("invalid bounded file read")
+		return nil, errors.New("invalid bounded file read")
 	}
 	if err := requireRegular(path, limit, true); err != nil {
 		return nil, err
@@ -38,7 +39,7 @@ func ReadFile(path string, limit int64) ([]byte, error) {
 // ReadTail reads at most the final limit bytes of one regular file.
 func ReadTail(path string, limit int64) ([]byte, error) {
 	if path == "" || limit <= 0 {
-		return nil, fmt.Errorf("invalid bounded file read")
+		return nil, errors.New("invalid bounded file read")
 	}
 	if err := requireRegular(path, limit, false); err != nil {
 		return nil, err
@@ -53,7 +54,7 @@ func ReadTail(path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("path is not a regular file")
+		return nil, errors.New("path is not a regular file")
 	}
 	if info.Size() > limit {
 		if _, err := f.Seek(-limit, io.SeekEnd); err != nil {
@@ -67,7 +68,7 @@ func ReadTail(path string, limit int64) ([]byte, error) {
 // returns bounded samples from the beginning and end, separated by a newline.
 func ReadEdges(path string, limit int64) ([]byte, error) {
 	if path == "" || limit <= 0 {
-		return nil, fmt.Errorf("invalid bounded file read")
+		return nil, errors.New("invalid bounded file read")
 	}
 	if limit < 3 {
 		return ReadTail(path, limit)
@@ -85,7 +86,7 @@ func ReadEdges(path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("path is not a regular file")
+		return nil, errors.New("path is not a regular file")
 	}
 	if info.Size() <= limit {
 		return io.ReadAll(io.LimitReader(f, limit))
@@ -116,7 +117,7 @@ func requireRegular(path string, limit int64, rejectOversize bool) error {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("path is not a regular file")
+		return errors.New("path is not a regular file")
 	}
 	if rejectOversize && info.Size() > limit {
 		return fmt.Errorf("file exceeds %d bytes", limit)
@@ -130,7 +131,7 @@ func requireOpenRegular(f *os.File) error {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("path is not a regular file")
+		return errors.New("path is not a regular file")
 	}
 	return nil
 }

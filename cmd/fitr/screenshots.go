@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -381,7 +382,7 @@ func mockResult(model string, dec, decSD, pre, preSD float64, codePass, codeN, c
 		{DecodeTPS: dec, PrefillTPS: pre},
 		{DecodeTPS: dec + decSD, PrefillTPS: pre + preSD},
 	}
-	for i := 0; i < codeN; i++ {
+	for i := range codeN {
 		res := eval.ExecResult{Pass: i < codePass}
 		if i%2 == 0 {
 			r.CodeWrite = append(r.CodeWrite, res)
@@ -393,7 +394,7 @@ func mockResult(model string, dec, decSD, pre, preSD float64, codePass, codeN, c
 		"structured_output", "structured_output", "structured_output", "instruction_precision",
 		"instruction_precision", "instruction_precision", "instruction_precision", "reasoning",
 		"reasoning", "reasoning", "reasoning", "reasoning"}
-	for i := 0; i < checksN; i++ {
+	for i := range checksN {
 		pass := i >= checksN-checksPass
 		r.Checks = append(r.Checks, eval.CheckOutcome{
 			TaskID: fmt.Sprintf("task%02d", i), Need: needs[i%len(needs)], Origin: "builtin",
@@ -411,7 +412,7 @@ func mockResult(model string, dec, decSD, pre, preSD float64, codePass, codeN, c
 // inconclusive because the mock never ran an isolated verifier.
 func prepareMockEvidence(r *Result) error {
 	if r == nil {
-		return fmt.Errorf("nil mock result")
+		return errors.New("nil mock result")
 	}
 	if r.Profile == "" {
 		r.Profile = "default"

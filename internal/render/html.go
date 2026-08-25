@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/device"
@@ -211,7 +212,7 @@ func htmlDataFrom(a Artifact) htmlData {
 		case a.Meta.ContextState != "":
 			d.NumCtx = fmt.Sprintf("%d requested, effective %s", a.Meta.NumCtx, a.Meta.ContextState)
 		default:
-			d.NumCtx = fmt.Sprintf("%d", a.Meta.NumCtx)
+			d.NumCtx = strconv.Itoa(a.Meta.NumCtx)
 		}
 	}
 	if a.Device.RAMGb > 0 {

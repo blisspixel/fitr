@@ -137,7 +137,7 @@ func completedRunID(previous, next Snapshot) string {
 	return ""
 }
 
-func applyInput(s State, event InputEvent) (State, []Effect, bool) { //nolint:gocyclo
+func applyInput(s State, event InputEvent) (State, []Effect, bool) { //nolint:gocyclo // one dispatch over the full key set; splitting it hides the mapping
 	var effects []Effect
 	if s.ConfirmQuit {
 		switch event.Action {

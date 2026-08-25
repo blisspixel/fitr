@@ -8,6 +8,7 @@ package strictjson
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -25,7 +26,7 @@ func Validate(data []byte) error {
 	}
 	if _, err := dec.Token(); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("content after the JSON value")
+			return errors.New("content after the JSON value")
 		}
 		return err
 	}
@@ -70,7 +71,7 @@ func scanValue(dec *json.Decoder, depth int) error {
 			}
 			seen[name] = struct{}{}
 			if err := scanValue(dec, depth+1); err != nil {
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					return io.ErrUnexpectedEOF
 				}
 				return err
@@ -80,7 +81,7 @@ func scanValue(dec *json.Decoder, depth int) error {
 	case '[':
 		for dec.More() {
 			if err := scanValue(dec, depth+1); err != nil {
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					return io.ErrUnexpectedEOF
 				}
 				return err

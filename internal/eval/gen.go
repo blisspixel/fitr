@@ -18,6 +18,7 @@ package eval
 import (
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -109,7 +110,7 @@ func stripFence(s string) string {
 		return t
 	}
 	m := fenceRe.FindStringSubmatchIndex(t)
-	if m == nil || m[0] != 0 || strings.TrimSpace(t[m[1]:]) != "" {
+	if len(m) < 4 || m[0] != 0 || strings.TrimSpace(t[m[1]:]) != "" {
 		return t
 	}
 	return strings.TrimSpace(t[m[2]:m[3]])
@@ -130,7 +131,7 @@ func strictJSON(s string) (any, error) {
 	}
 	rest, _ := io.ReadAll(io.MultiReader(dec.Buffered(), r))
 	if strings.TrimSpace(string(rest)) != "" {
-		return nil, fmt.Errorf("content after the JSON value")
+		return nil, errors.New("content after the JSON value")
 	}
 	return v, nil
 }

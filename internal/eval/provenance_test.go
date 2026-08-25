@@ -75,10 +75,10 @@ func TestEffectiveHashesCoverMergedUserChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	copy := *spec
-	copy.Checks = append([]CheckSpec(nil), spec.Checks...)
-	copy.Checks = append(copy.Checks, CheckSpec{ID: "local-receipt", Need: "user_tasks", Kind: "exact"})
-	changed, err := EffectiveHashes(&copy)
+	dup := *spec
+	dup.Checks = append([]CheckSpec(nil), spec.Checks...)
+	dup.Checks = append(dup.Checks, CheckSpec{ID: "local-receipt", Need: "user_tasks", Kind: "exact"})
+	changed, err := EffectiveHashes(&dup)
 	if err != nil {
 		t.Fatal(err)
 	}

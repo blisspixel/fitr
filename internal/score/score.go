@@ -157,9 +157,13 @@ func RepetitionMetrics(text string) Repetition {
 	// degenerate. Length-sensitive, so a signal rather than a hard gate.
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
-	zw.Write([]byte(text))
-	zw.Close()
-	if buf.Len() > 0 {
+	_, writeErr := zw.Write([]byte(text))
+	closeErr := zw.Close()
+	// Close flushes the final block, so an unchecked failure here yields a
+	// short buffer, an inflated ratio, and a text wrongly called degenerate.
+	// Writing to a bytes.Buffer cannot fail today; leaving the ratio unset is
+	// still the right answer if that ever changes.
+	if writeErr == nil && closeErr == nil && buf.Len() > 0 {
 		r.GzipRatio = round(float64(len(text))/float64(buf.Len()), 3)
 	}
 	return r

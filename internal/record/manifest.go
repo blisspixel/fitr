@@ -445,8 +445,8 @@ func (r *Record) AttachManifest(identity ModelIdentity, provenance ...RunProvena
 // claim that the interpreter or generated code was sandboxed.
 func (r *Record) AttachManifestWithExecutor(identity ModelIdentity, executor eval.ExecutorReceipt,
 	provenance ...RunProvenance) error {
-	copy := executor
-	return r.attachManifest(identity, &copy, provenance...)
+	dup := executor
+	return r.attachManifest(identity, &dup, provenance...)
 }
 
 func (r *Record) attachManifest(identity ModelIdentity, executor *eval.ExecutorReceipt,
@@ -471,8 +471,8 @@ func (r *Record) attachManifest(identity ModelIdentity, executor *eval.ExecutorR
 	var receipt *RunProvenance
 	if len(provenance) == 1 {
 		schema = RunManifestSchema
-		copy := provenance[0]
-		receipt = &copy
+		dup := provenance[0]
+		receipt = &dup
 	}
 	m := &RunManifest{
 		Schema: schema, RunID: r.RunID, StartedAt: r.StartedAt,

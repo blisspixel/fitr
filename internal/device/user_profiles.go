@@ -25,7 +25,7 @@ func UserProfilesDir() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join("profiles")
+		return "profiles"
 	}
 	return filepath.Join(home, ".fitr", "profiles")
 }
@@ -118,7 +118,7 @@ func ScaffoldProfile(name string, fp Fingerprint) (Profile, error) {
 		}
 	}
 	if def.Name == "" {
-		return Profile{}, fmt.Errorf("embedded default profile missing")
+		return Profile{}, errors.New("embedded default profile missing")
 	}
 	name = slugProfile(name)
 	if name == "" {

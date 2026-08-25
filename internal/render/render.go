@@ -99,6 +99,9 @@ func (p palette) wrap(style, s string) string {
 
 // Model output is UNTRUSTED input to the terminal: it can spoof a prompt,
 // rewrite the screen, or hide text with ANSI.
+// (0x20-0x2F) from ECMA-48, not a typo for a shorter set.
+//
+//nolint:gocritic // [ -/] is the CSI parameter/intermediate byte range
 var ansiRe = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`)
 
 func Sanitize(s string) string { return ansiRe.ReplaceAllString(s, "") }

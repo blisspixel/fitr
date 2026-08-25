@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 
@@ -97,16 +98,16 @@ func (r *Record) ContextSize() int {
 // evidence-integrity exclusion.
 func (r *Record) ComparableDeviceKey() (string, error) {
 	if r == nil {
-		return "", fmt.Errorf("result is unavailable")
+		return "", errors.New("result is unavailable")
 	}
 	if r.DeviceV2 != nil {
 		return r.DeviceV2.ComparabilityKey()
 	}
 	if r.SchemaVersion >= EvidenceSchemaVersion {
-		return "", fmt.Errorf("current result is missing fingerprint v2")
+		return "", errors.New("current result is missing fingerprint v2")
 	}
 	if r.DeviceKey == "" {
-		return "", fmt.Errorf("result has no device key")
+		return "", errors.New("result has no device key")
 	}
 	return r.DeviceKey, nil
 }
@@ -121,9 +122,9 @@ func (r *Record) StableRunID() string {
 	if validRunID.MatchString(r.RunID) {
 		return r.RunID
 	}
-	copy := *r
-	copy.RunID = ""
-	b, err := json.Marshal(copy)
+	dup := *r
+	dup.RunID = ""
+	b, err := json.Marshal(dup)
 	if err != nil {
 		return ""
 	}
@@ -147,7 +148,7 @@ func (r *Record) EnsureRunID() string {
 // invariants before a completed result is stored or consumed.
 func (r *Record) ValidateEvidenceContract() error {
 	if r == nil {
-		return fmt.Errorf("nil result")
+		return errors.New("nil result")
 	}
 	if r.SchemaVersion < EvidenceSchemaVersion {
 		return nil
@@ -174,10 +175,10 @@ func (r *Record) ValidateEvidenceContract() error {
 		return err
 	}
 	if r.TaskPlan.AdaptiveChecks && len(r.AdaptiveDecisions) == 0 {
-		return fmt.Errorf("adaptive check plan has no persisted decisions")
+		return errors.New("adaptive check plan has no persisted decisions")
 	}
 	if !r.TaskPlan.AdaptiveChecks && len(r.AdaptiveDecisions) != 0 {
-		return fmt.Errorf("fixed check plan contains adaptive decisions")
+		return errors.New("fixed check plan contains adaptive decisions")
 	}
 	for i, result := range r.Tools {
 		if err := result.ValidateTerminationEvidence(); err != nil {

@@ -47,7 +47,7 @@ func TestReproWithdrawalTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	fails := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		res, failure := RunToolLoop(ctx, c, model, spec.Withdrawal, t.TempDir())
 		if failure != nil {
 			fails++

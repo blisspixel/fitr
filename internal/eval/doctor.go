@@ -75,6 +75,7 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	if err != nil {
 		add("real_token", "FAIL", "generation failed: "+err.Error())
 		r.Verdict = "the server is reachable but did not generate - nothing else is measurable"
+		//nolint:nilerr // doctor reports a failed generation as a FAIL finding; erroring would hide it
 		return r, nil
 	}
 	if strings.TrimSpace(text) == "" {
@@ -119,7 +120,7 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 
 	// 4. Determinism, plain text. Identical request, N times, byte-compared.
 	texts := make([]string, 0, runs)
-	for i := 0; i < runs; i++ {
+	for range runs {
 		t, _, err := c.Generate(ctx, model, doctorTextPrompt, ollama.Deterministic(64, numCtx(ctx)))
 		if err != nil {
 			return r, err
@@ -136,7 +137,7 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	samp := ollama.Deterministic(128, numCtx(ctx))
 	samp.Format = "json"
 	jsonOK := true
-	for i := 0; i < runs; i++ {
+	for range runs {
 		t, _, err := c.Generate(ctx, model, doctorJSONPrompt, samp)
 		if err != nil {
 			add("determinism_json", "SKIP", "JSON-mode generation failed: "+err.Error())
@@ -236,7 +237,7 @@ func Divergence(outputs []string) (identical bool, distinct int, firstDiff int) 
 		}
 		n := min(len(base), len(o))
 		d := n // differ by length only
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if base[i] != o[i] {
 				d = i
 				break

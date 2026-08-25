@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -135,13 +136,13 @@ func parseBaseURL(rawURL string) (*url.URL, string, error) {
 		return nil, "", fmt.Errorf("openai-compat endpoint: %w", err)
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return nil, "", fmt.Errorf("openai-compat endpoint must be an absolute HTTP URL")
+		return nil, "", errors.New("openai-compat endpoint must be an absolute HTTP URL")
 	}
 	if !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https") {
-		return nil, "", fmt.Errorf("openai-compat endpoint scheme must be HTTP or HTTPS")
+		return nil, "", errors.New("openai-compat endpoint scheme must be HTTP or HTTPS")
 	}
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, "", fmt.Errorf("openai-compat endpoint must not contain credentials, a query, or a fragment")
+		return nil, "", errors.New("openai-compat endpoint must not contain credentials, a query, or a fragment")
 	}
 	u.Scheme = strings.ToLower(u.Scheme)
 	u.Host = strings.ToLower(u.Host)
@@ -173,23 +174,25 @@ func cloneHTTPClient(src *http.Client, origin string, hasCredential bool) *http.
 	clone := *src
 	switch transport := src.Transport.(type) {
 	case nil:
-		clone.Transport = http.DefaultTransport.(*http.Transport).Clone()
+		if base, ok := http.DefaultTransport.(*http.Transport); ok {
+			clone.Transport = base.Clone()
+		}
 	case *http.Transport:
 		clone.Transport = transport.Clone()
 	}
 	prior := src.CheckRedirect
 	clone.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if urlOrigin(req.URL) != origin {
-			return fmt.Errorf("openai-compat refuses a redirect to a different origin")
+			return errors.New("openai-compat refuses a redirect to a different origin")
 		}
 		if hasCredential && !bearerTransportSafe(req.URL) {
-			return fmt.Errorf("openai-compat refuses a bearer credential redirect over an unsafe transport")
+			return errors.New("openai-compat refuses a bearer credential redirect over an unsafe transport")
 		}
 		if prior != nil {
 			return prior(req, via)
 		}
 		if len(via) >= 10 {
-			return fmt.Errorf("stopped after 10 redirects")
+			return errors.New("stopped after 10 redirects")
 		}
 		return nil
 	}
@@ -206,10 +209,10 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 	}
 	if c.apiKey != "" {
 		if strings.ContainsAny(c.apiKey, "\r\n") {
-			return nil, fmt.Errorf("openai-compat API key contains a line break")
+			return nil, errors.New("openai-compat API key contains a line break")
 		}
 		if !bearerTransportSafe(req.URL) {
-			return nil, fmt.Errorf("openai-compat refuses to send a bearer credential over a non-loopback, non-HTTPS endpoint")
+			return nil, errors.New("openai-compat refuses to send a bearer credential over a non-loopback, non-HTTPS endpoint")
 		}
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
@@ -218,10 +221,10 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 
 func (c *Client) do(req *http.Request) (*http.Response, error) {
 	if req == nil {
-		return nil, fmt.Errorf("openai-compat request is nil")
+		return nil, errors.New("openai-compat request is nil")
 	}
 	if urlOrigin(req.URL) != c.origin {
-		return nil, fmt.Errorf("openai-compat request origin does not match the configured endpoint")
+		return nil, errors.New("openai-compat request origin does not match the configured endpoint")
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -229,7 +232,7 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	}
 	if resp.Request == nil || urlOrigin(resp.Request.URL) != c.origin {
 		resp.Body.Close()
-		return nil, fmt.Errorf("openai-compat response arrived from a different origin")
+		return nil, errors.New("openai-compat response arrived from a different origin")
 	}
 	return resp, nil
 }
@@ -271,7 +274,7 @@ func decodeOneJSON(r io.Reader, into any) error {
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("content after the JSON value")
+			return errors.New("content after the JSON value")
 		}
 		return err
 	}
@@ -282,20 +285,20 @@ func decodeOneJSON(r io.Reader, into any) error {
 // with the independent operator pin captured at client construction.
 func (c *Client) VerifyModelDigest(model, reported string) (string, error) {
 	if strings.TrimSpace(model) == "" {
-		return "", fmt.Errorf("openai-compat model identity requires a resolved model name")
+		return "", errors.New("openai-compat model identity requires a resolved model name")
 	}
 	if c.modelSHA256 == "" {
-		return "", fmt.Errorf("openai-compat model identity requires FITR_OPENAI_MODEL_SHA256")
+		return "", errors.New("openai-compat model identity requires FITR_OPENAI_MODEL_SHA256")
 	}
 	if strings.TrimSpace(reported) == "" {
-		return "", fmt.Errorf("openai-compat endpoint did not report a model digest to match against FITR_OPENAI_MODEL_SHA256")
+		return "", errors.New("openai-compat endpoint did not report a model digest to match against FITR_OPENAI_MODEL_SHA256")
 	}
 	digest, err := normalizeModelDigest(reported)
 	if err != nil {
 		return "", fmt.Errorf("openai-compat reported model digest: %w", err)
 	}
 	if digest != c.modelSHA256 {
-		return "", fmt.Errorf("openai-compat reported model digest does not match FITR_OPENAI_MODEL_SHA256")
+		return "", errors.New("openai-compat reported model digest does not match FITR_OPENAI_MODEL_SHA256")
 	}
 	return c.modelSHA256, nil
 }
@@ -380,7 +383,7 @@ func normalizeModelDigest(digest string) (string, error) {
 		return "", fmt.Errorf("unsupported model digest %q", digest)
 	}
 	if len(hexDigest) != 64 {
-		return "", fmt.Errorf("model digest must contain 64 SHA-256 hex characters")
+		return "", errors.New("model digest must contain 64 SHA-256 hex characters")
 	}
 	if _, err := hex.DecodeString(hexDigest); err != nil {
 		return "", fmt.Errorf("model digest is not valid SHA-256 hex: %w", err)

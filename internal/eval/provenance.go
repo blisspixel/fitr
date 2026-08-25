@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -32,7 +33,7 @@ func BuiltinHashes() (BuiltinDefinitionHashes, error) {
 // without altering both the task-set and complete-spec hashes.
 func EffectiveHashes(spec *Spec) (BuiltinDefinitionHashes, error) {
 	if spec == nil {
-		return BuiltinDefinitionHashes{}, fmt.Errorf("effective evaluation spec is nil")
+		return BuiltinDefinitionHashes{}, errors.New("effective evaluation spec is nil")
 	}
 	tasks := struct {
 		Speed      SpeedSpec    `json:"speed"`
@@ -90,7 +91,7 @@ func hashBuiltinCorpus(fsys fs.FS) (BuiltinDefinitionHashes, error) {
 		return BuiltinDefinitionHashes{}, fmt.Errorf("enumerate embedded task definitions: %w", err)
 	}
 	if len(taskFiles) == 0 || len(specFiles) == 0 {
-		return BuiltinDefinitionHashes{}, fmt.Errorf("embedded task definition corpus is empty")
+		return BuiltinDefinitionHashes{}, errors.New("embedded task definition corpus is empty")
 	}
 	sort.Strings(taskFiles)
 	sort.Strings(specFiles)

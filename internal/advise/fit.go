@@ -3,7 +3,7 @@ package advise
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -50,7 +50,7 @@ func RunFitParams(ctx context.Context, gguf string, ctxSize int) (usedB int64, c
 		if runErr != nil {
 			return 0, false, runErr
 		}
-		return 0, false, fmt.Errorf("llama-fit-params produced no projection")
+		return 0, false, errors.New("llama-fit-params produced no projection")
 	}
 	return usedB, cannot, nil
 }

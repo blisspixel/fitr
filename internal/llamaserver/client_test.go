@@ -259,9 +259,9 @@ func TestShowReadsCapabilitiesFromProps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	has := func(cap string) bool {
+	has := func(want string) bool {
 		for _, x := range mi.Capabilities {
-			if x == cap {
+			if x == want {
 				return true
 			}
 		}

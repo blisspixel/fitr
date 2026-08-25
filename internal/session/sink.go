@@ -3,6 +3,7 @@ package session
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -65,7 +66,7 @@ func NewSink(options Options) (*Sink, error) {
 		runID = hex.EncodeToString(raw[:])
 	}
 	if !tokenPattern.MatchString(runID) {
-		return nil, fmt.Errorf("invalid session run id")
+		return nil, errors.New("invalid session run id")
 	}
 	clock := options.Clock
 	if clock == nil {
@@ -168,7 +169,7 @@ func (s *Sink) unsubscribe(id uint64) {
 func (s *Sink) publish(draft Event) (Event, error) {
 	now := s.clock.Now().Round(0).UTC()
 	if now.IsZero() {
-		return Event{}, fmt.Errorf("session clock returned zero time")
+		return Event{}, errors.New("session clock returned zero time")
 	}
 
 	s.mu.Lock()

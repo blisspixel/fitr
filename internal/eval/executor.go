@@ -47,8 +47,8 @@ func WithUnsafeExecution(ctx context.Context) context.Context {
 // WithUnsafeExecutor opts in to unisolated diagnostics and pins every launch
 // to the interpreter identified before the run manifest is sealed.
 func WithUnsafeExecutor(ctx context.Context, executor ExecutorReceipt) context.Context {
-	copy := executor
-	return context.WithValue(ctx, unsafeExecutionKey{}, unsafeExecutionConfig{executor: &copy})
+	dup := executor
+	return context.WithValue(ctx, unsafeExecutionKey{}, unsafeExecutionConfig{executor: &dup})
 }
 
 func unsafeExecutionEnabled(ctx context.Context) bool {
@@ -213,7 +213,7 @@ func validateTaskRunner(argv []string, files map[string]string) error {
 		return err
 	}
 	if len(argv) != 2 {
-		return fmt.Errorf("runner must name exactly one task-local Python file")
+		return errors.New("runner must name exactly one task-local Python file")
 	}
 	script := argv[1]
 	if filepath.Base(script) != script || strings.ToLower(filepath.Ext(script)) != ".py" {
@@ -366,7 +366,7 @@ func hashInterpreter(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open interpreter for hashing: %w", err)
 	}
-	defer f.Close() //nolint:errcheck // a read-only close cannot alter the receipt
+	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
 		return "", fmt.Errorf("inspect interpreter for hashing: %w", err)

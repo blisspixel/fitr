@@ -415,9 +415,10 @@ func previewTopRun(args []string) (topRunPreview, error) {
 	repeats := *k
 	if repeats == 0 {
 		repeats = 3
-		if level == "quick" {
+		switch level {
+		case "quick":
 			repeats = 1
-		} else if level == "checks" {
+		case "checks":
 			repeats = 5
 		}
 	}
@@ -612,7 +613,7 @@ func liveFromSession(snapshot session.Snapshot) top.Live {
 	}
 	if snapshot.Run != nil {
 		live.Model = snapshot.Run.Model
-		live.Placement = strings.TrimSpace(strings.Join([]string{snapshot.Run.GPU, snapshot.Run.Backend}, " "))
+		live.Placement = strings.TrimSpace(snapshot.Run.GPU + " " + snapshot.Run.Backend)
 		live.Repeats = snapshot.Run.Repeats
 	}
 	for index, phase := range snapshot.Phases {
@@ -778,14 +779,12 @@ func buildTopSnapshotWithBoard(historyRecords, boardRecords []*Result) top.Snaps
 			title = strings.TrimSpace(title + " | " + representative.Device.Runtime)
 		}
 		note := "same hardware, runtime, and config; rows are comparable"
-		comparable := true
-		if len(runs) < 2 {
-			if comparable {
-				note = "one saved model for this hardware, runtime, and config"
-			}
+		comparableRun := true
+		if len(runs) < 2 && comparableRun {
+			note = "one saved model for this hardware, runtime, and config"
 		}
 		snapshot.Board = append(snapshot.Board, top.BoardGroup{
-			ID: privacyID(key), Title: title, Note: note, Comparable: comparable, Runs: runs,
+			ID: privacyID(key), Title: title, Note: note, Comparable: comparableRun, Runs: runs,
 		})
 	}
 	return snapshot
@@ -861,11 +860,13 @@ func presentTopRun(result *Result) top.Run {
 	if backend := result.Device.GPUBackend; backend != "" {
 		config += " | " + backend
 	}
+	var configSb864 strings.Builder
 	for _, key := range []string{"OLLAMA_KV_CACHE_TYPE", "OLLAMA_FLASH_ATTENTION"} {
 		if value := result.Device.Config[key]; value != "" {
-			config += " | " + strings.ToLower(strings.TrimPrefix(key, "OLLAMA_")) + "=" + value
+			configSb864.WriteString(" | " + strings.ToLower(strings.TrimPrefix(key, "OLLAMA_")) + "=" + value)
 		}
 	}
+	config += configSb864.String()
 	meta := resultMeta(result, result.Profile)
 	modelLabel := presentationModelLabel(result.Model)
 	toolsBlocked := false

@@ -516,8 +516,8 @@ func pairedCompare(a, b *Result) {
 	if line, ok := quantDamageLine(a, b, flips); ok {
 		fmt.Println("  " + terminalText(line))
 	}
-	switch {
-	case flips.AOnly+flips.BOnly == 0:
+	switch flips.AOnly + flips.BOnly {
+	case 0:
 		fmt.Println("  identical outcomes on every shared instance - no evidence of any difference.")
 	default:
 		pExact, pMid, separable := stats.McNemarExact(flips.AOnly, flips.BOnly)

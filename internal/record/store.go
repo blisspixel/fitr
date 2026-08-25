@@ -579,19 +579,19 @@ func writeAtomic(path string, b []byte) (err error) {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
 	}()
-	if err = tmp.Chmod(0o600); err != nil {
+	if err := tmp.Chmod(0o600); err != nil {
 		return err
 	}
 	if _, err = tmp.Write(b); err != nil {
 		return err
 	}
-	if err = tmp.Sync(); err != nil {
+	if err := tmp.Sync(); err != nil {
 		return err
 	}
-	if err = tmp.Close(); err != nil {
+	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(tmpPath, path); err != nil {
+	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
 	return os.Chmod(path, 0o600)

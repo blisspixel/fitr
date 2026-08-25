@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -93,7 +94,7 @@ func (c *Client) Accel(ctx context.Context) string {
 func (c *Client) Reachable(ctx context.Context) bool {
 	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/health", nil)
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, c.BaseURL+"/health", nil)
 	if err != nil {
 		return false
 	}
@@ -102,7 +103,7 @@ func (c *Client) Reachable(ctx context.Context) bool {
 		return false
 	}
 	resp.Body.Close()
-	return resp.StatusCode == 200
+	return resp.StatusCode == http.StatusOK
 }
 
 // props is the subset of /props the harness reads. Fields are optional across
@@ -132,7 +133,7 @@ func (c *Client) props(ctx context.Context) (props, error) {
 	var p props
 	cctx, cancel := context.WithTimeout(ctx, controlPlaneTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/props", nil)
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, c.BaseURL+"/props", nil)
 	if err != nil {
 		return p, err
 	}
@@ -144,7 +145,13 @@ func (c *Client) props(ctx context.Context) (props, error) {
 	if resp.StatusCode != http.StatusOK {
 		return p, httpError("llama-server", resp)
 	}
-	return p, decodeBoundedJSON(resp.Body, &p)
+	// Sequenced deliberately: `return p, decode(&p)` leaves the order of the
+	// value read and the call unspecified, so a compiler is free to return the
+	// struct as it was before decoding filled it.
+	if err := decodeBoundedJSON(resp.Body, &p); err != nil {
+		return p, err
+	}
+	return p, nil
 }
 
 // Version reports the llama.cpp build, prefixed with the runtime name so a
@@ -175,7 +182,7 @@ func (c *Client) Tags(ctx context.Context) ([]ollama.ModelInfo, error) {
 	}
 	mi := c.infoFromProps(p)
 	if strings.TrimSpace(mi.Name) == "" {
-		return nil, fmt.Errorf("llama-server props response is missing model_path")
+		return nil, errors.New("llama-server props response is missing model_path")
 	}
 	return []ollama.ModelInfo{mi}, nil
 }
@@ -220,10 +227,10 @@ func (c *Client) PS(ctx context.Context) ([]ollama.RunningModel, error) {
 	}
 	name := modelName(p)
 	if strings.TrimSpace(name) == "" {
-		return nil, fmt.Errorf("llama-server props response is missing model_path")
+		return nil, errors.New("llama-server props response is missing model_path")
 	}
 	if p.DefaultSettings.NCtx < 0 {
-		return nil, fmt.Errorf("llama-server reported a negative effective context")
+		return nil, errors.New("llama-server reported a negative effective context")
 	}
 	return []ollama.RunningModel{{Name: name, ContextLength: p.DefaultSettings.NCtx}}, nil
 }
@@ -240,7 +247,7 @@ func (c *Client) EffectiveContext(ctx context.Context, _ string) (int, bool, err
 		return 0, false, nil
 	}
 	if p.DefaultSettings.NCtx < 0 {
-		return 0, false, fmt.Errorf("llama-server reported a negative effective context")
+		return 0, false, errors.New("llama-server reported a negative effective context")
 	}
 	return p.DefaultSettings.NCtx, true, nil
 }
@@ -288,7 +295,7 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 		return "", ollama.Metrics{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return "", ollama.Metrics{}, httpError("llama-server", resp)
 	}
 
@@ -307,21 +314,21 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 		totalBytes += len(line) + 1
 		frames++
 		if totalBytes > maxNativeStream || frames > maxNativeFrames {
-			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream exceeds protocol limits")
+			return sb.String(), ollama.Metrics{}, errors.New("llama-server completion stream exceeds protocol limits")
 		}
 		if terminal {
 			if bytes.Equal(bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:"))), []byte("[DONE]")) {
 				continue
 			}
-			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream contains data after the terminal frame")
+			return sb.String(), ollama.Metrics{}, errors.New("llama-server completion stream contains data after the terminal frame")
 		}
 		if bytes.HasPrefix(line, []byte("data:")) {
 			line = bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
 		} else if !bytes.HasPrefix(line, []byte("{")) {
-			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream contains an invalid frame prefix")
+			return sb.String(), ollama.Metrics{}, errors.New("llama-server completion stream contains an invalid frame prefix")
 		}
 		if bytes.Equal(line, []byte("[DONE]")) {
-			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream ended before a terminal receipt")
+			return sb.String(), ollama.Metrics{}, errors.New("llama-server completion stream ended before a terminal receipt")
 		}
 		var g completionResp
 		if err := decodeJSONFrame(line, &g); err != nil {
@@ -329,7 +336,7 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 		}
 		if g.TokensCached < 0 || g.Timings.PromptN < 0 || g.Timings.PromptMS < 0 ||
 			g.Timings.PredictedN < 0 || g.Timings.PredictedMS < 0 {
-			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion frame contains a negative metric")
+			return sb.String(), ollama.Metrics{}, errors.New("llama-server completion frame contains a negative metric")
 		}
 		if g.Content != "" && ttft == 0 {
 			ttft = time.Since(start).Seconds()
@@ -347,7 +354,7 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 		return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream: %w", err)
 	}
 	if !terminal {
-		return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream ended before a terminal receipt")
+		return sb.String(), ollama.Metrics{}, errors.New("llama-server completion stream ended before a terminal receipt")
 	}
 
 	m := ollama.Metrics{
@@ -380,7 +387,7 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 		return ollama.Message{}, ollama.Metrics{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return ollama.Message{}, ollama.Metrics{}, httpError("llama-server", resp)
 	}
 	var r struct {
@@ -405,8 +412,7 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 			"llama-server: first choice has role %q, want assistant", r.Choices[0].Message.Role)
 	}
 	if r.Usage.PromptTokens < 0 || r.Usage.CompletionTokens < 0 {
-		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(
-			"llama-server: response contains negative token usage")
+		return ollama.Message{}, ollama.Metrics{}, errors.New("llama-server: response contains negative token usage")
 	}
 	m := ollama.Metrics{
 		WallSeconds:  round(time.Since(start).Seconds(), 2),
@@ -424,7 +430,7 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+path, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}
@@ -467,7 +473,7 @@ func decodeJSONFrame(frame []byte, into any) error {
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("content after JSON frame")
+			return errors.New("content after JSON frame")
 		}
 		return err
 	}

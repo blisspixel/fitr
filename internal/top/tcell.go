@@ -157,7 +157,7 @@ func (app App) performEffects(effects []Effect) (quit, redraw bool) {
 	return quit, redraw
 }
 
-func mapTCellEvent(event tcell.Event, state State) (Event, bool) { //nolint:gocyclo
+func mapTCellEvent(event tcell.Event, state State) (Event, bool) { //nolint:gocyclo // one dispatch over the full key set; splitting it hides the mapping
 	switch value := event.(type) {
 	case *tcell.EventInterrupt:
 		return InputEvent{Action: ActionInterrupt}, true

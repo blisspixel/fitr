@@ -156,7 +156,7 @@ func TestChatRequiresExactlyOneChoice(t *testing.T) {
 func TestGenerateFallsBackToChatOn404(t *testing.T) {
 	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/completions" {
-			http.Error(w, "not found", 404)
+			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
 		if r.URL.Path != "/v1/chat/completions" {
@@ -750,7 +750,7 @@ func TestVersionTriesVLLMEndpoint(t *testing.T) {
 			w.Write([]byte(`{"version":"9.9.9"}`))
 			return
 		}
-		http.Error(w, "no", 404)
+		http.Error(w, "no", http.StatusNotFound)
 	})
 	defer done()
 	if v := c.Version(context.Background()); v != "openai-compat 9.9.9" {
@@ -760,7 +760,7 @@ func TestVersionTriesVLLMEndpoint(t *testing.T) {
 
 func TestVersionFallsBackToGenericLabel(t *testing.T) {
 	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "no", 404)
+		http.Error(w, "no", http.StatusNotFound)
 	})
 	defer done()
 	if v := c.Version(context.Background()); v != "openai-compat" {

@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -77,16 +78,16 @@ func newAtWithHTTP(baseURL string, credentialMode CredentialMode, httpClient *ht
 		return nil, err
 	}
 	if credentialMode != CredentialsDisabled && credentialMode != CredentialsFromEnvironment {
-		return nil, fmt.Errorf("openai-compat credential mode is invalid")
+		return nil, errors.New("openai-compat credential mode is invalid")
 	}
 	key := ""
 	if credentialMode == CredentialsFromEnvironment {
 		key = envAPIKey(canonical)
 		if strings.ContainsAny(key, "\r\n") {
-			return nil, fmt.Errorf("openai-compat API key contains a line break")
+			return nil, errors.New("openai-compat API key contains a line break")
 		}
 		if key != "" && !bearerTransportSafe(u) {
-			return nil, fmt.Errorf("openai-compat refuses to send a bearer credential over a non-loopback, non-HTTPS endpoint")
+			return nil, errors.New("openai-compat refuses to send a bearer credential over a non-loopback, non-HTTPS endpoint")
 		}
 	}
 	pin := strings.TrimSpace(os.Getenv("FITR_OPENAI_MODEL_SHA256"))
@@ -123,7 +124,7 @@ func (c *Client) Reachable(ctx context.Context) bool {
 		return false
 	}
 	resp.Body.Close()
-	return resp.StatusCode == 200
+	return resp.StatusCode == http.StatusOK
 }
 
 // Version tries vLLM's /version, then falls back to the generic label - the
@@ -140,7 +141,7 @@ func (c *Client) Version(ctx context.Context) string {
 		var v struct {
 			Version string `json:"version"`
 		}
-		if resp.StatusCode == 200 && decodeOneJSON(resp.Body, &v) == nil && v.Version != "" {
+		if resp.StatusCode == http.StatusOK && decodeOneJSON(resp.Body, &v) == nil && v.Version != "" {
 			return "openai-compat " + v.Version
 		}
 	}
@@ -172,7 +173,7 @@ func (c *Client) Tags(ctx context.Context) ([]ollama.ModelInfo, error) {
 		return nil, fmt.Errorf("openai-compat models response: %w", err)
 	}
 	if r.Data == nil {
-		return nil, fmt.Errorf("openai-compat models response is missing the data array")
+		return nil, errors.New("openai-compat models response is missing the data array")
 	}
 	out := make([]ollama.ModelInfo, 0, len(r.Data))
 	seen := make(map[string]bool, len(r.Data))
@@ -249,12 +250,12 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 	if err != nil {
 		return "", ollama.Metrics{}, err
 	}
-	if resp.StatusCode == 404 || resp.StatusCode == 405 {
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
 		resp.Body.Close()
 		return c.generateViaChat(ctx, model, prompt, s, start)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return "", ollama.Metrics{}, c.responseError(resp)
 	}
 	return c.consumeStream(resp, start, func(ch completionsChunk) (string, string) {
@@ -274,7 +275,7 @@ func (c *Client) generateViaChat(ctx context.Context, model, prompt string, s ol
 		return "", ollama.Metrics{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return "", ollama.Metrics{}, c.responseError(resp)
 	}
 	return c.consumeStream(resp, start, func(ch completionsChunk) (string, string) {
@@ -290,7 +291,6 @@ func (c *Client) generateViaChat(ctx context.Context, model, prompt string, s ol
 // and last token, prefill tok/s from prompt tokens over TTFT.
 func (c *Client) consumeStream(resp *http.Response, start time.Time,
 	pick func(completionsChunk) (text, finish string)) (string, ollama.Metrics, error) {
-
 	var sb strings.Builder
 	var ttft float64
 	var lastTok time.Time
@@ -313,7 +313,7 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 		eventData = eventData[:0]
 		eventBytes = 0
 		if seenDone {
-			return fmt.Errorf("openai-compat: SSE stream contains data after [DONE]")
+			return errors.New("openai-compat: SSE stream contains data after [DONE]")
 		}
 		if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
 			seenDone = true
@@ -348,10 +348,10 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 		}
 		if ch.Usage != nil {
 			if ch.Usage.PromptTokens < 0 || ch.Usage.CompletionTokens < 0 {
-				return fmt.Errorf("openai-compat: response contains negative token usage")
+				return errors.New("openai-compat: response contains negative token usage")
 			}
 			if seenUsage && (usagePrompt != ch.Usage.PromptTokens || usageCompletion != ch.Usage.CompletionTokens) {
-				return fmt.Errorf("openai-compat: conflicting usage receipts")
+				return errors.New("openai-compat: conflicting usage receipts")
 			}
 			seenUsage = true
 			usagePrompt, usageCompletion = ch.Usage.PromptTokens, ch.Usage.CompletionTokens
@@ -400,13 +400,13 @@ func (c *Client) consumeStream(resp *http.Response, start time.Time,
 		}
 	}
 	if !seenDone {
-		return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: stream ended before [DONE]")
+		return sb.String(), ollama.Metrics{}, errors.New("openai-compat: stream ended before [DONE]")
 	}
 	if !seenUsage {
-		return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: stream ended without requested usage")
+		return sb.String(), ollama.Metrics{}, errors.New("openai-compat: stream ended without requested usage")
 	}
 	if finish == "" {
-		return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: stream ended without a finish reason")
+		return sb.String(), ollama.Metrics{}, errors.New("openai-compat: stream ended without a finish reason")
 	}
 
 	m := ollama.Metrics{
@@ -435,7 +435,7 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 		return ollama.Message{}, ollama.Metrics{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return ollama.Message{}, ollama.Metrics{}, c.responseError(resp)
 	}
 	var r struct {
@@ -466,8 +466,7 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []ollama.Message, 
 			"openai-compat: first choice has role %q, want assistant", r.Choices[0].Message.Role)
 	}
 	if r.Usage.PromptTokens < 0 || r.Usage.CompletionTokens < 0 {
-		return ollama.Message{}, ollama.Metrics{}, fmt.Errorf(
-			"openai-compat: response contains negative token usage")
+		return ollama.Message{}, ollama.Metrics{}, errors.New("openai-compat: response contains negative token usage")
 	}
 	m := ollama.Metrics{
 		WallSeconds:   round(time.Since(start).Seconds(), 2),

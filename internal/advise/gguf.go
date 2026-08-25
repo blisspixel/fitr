@@ -2,6 +2,7 @@ package advise
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -106,7 +107,7 @@ func completeGGUFSize(path string, selected os.FileInfo) (int64, error) {
 					continue
 				}
 				if info.Size() < 0 {
-					results[index-1].err = fmt.Errorf("split GGUF size overflows int64")
+					results[index-1].err = errors.New("split GGUF size overflows int64")
 					continue
 				}
 				results[index-1].size = info.Size()
@@ -124,7 +125,7 @@ func completeGGUFSize(path string, selected os.FileInfo) (int64, error) {
 			return 0, result.err
 		}
 		if size > math.MaxInt64-result.size {
-			return 0, fmt.Errorf("split GGUF size overflows int64")
+			return 0, errors.New("split GGUF size overflows int64")
 		}
 		size += result.size
 	}
@@ -147,7 +148,7 @@ func readMetadata(r io.Reader, budget uint64) (map[string]any, error) {
 		return nil, err
 	}
 	if string(magic[:]) != ggufMagic {
-		return nil, fmt.Errorf("not a GGUF file")
+		return nil, errors.New("not a GGUF file")
 	}
 	var version uint32
 	if err := binary.Read(d.r, binary.LittleEndian, &version); err != nil {
@@ -170,7 +171,7 @@ func readMetadata(r io.Reader, budget uint64) (map[string]any, error) {
 		return nil, err
 	}
 	kvs := make(map[string]any, kvCount)
-	for i := uint64(0); i < kvCount; i++ {
+	for i := range kvCount {
 		key, err := d.readString()
 		if err != nil {
 			return nil, fmt.Errorf("kv %d key: %w", i, err)
@@ -292,7 +293,7 @@ func (d *metadataDecoder) readTyped(typ uint32) (any, error) {
 			return nil, err
 		}
 		if etype == ggufArray {
-			return nil, fmt.Errorf("nested GGUF arrays are not supported")
+			return nil, errors.New("nested GGUF arrays are not supported")
 		}
 		storageBytes, err := arrayElementStorageBytes(etype)
 		if err != nil {
@@ -309,7 +310,7 @@ func (d *metadataDecoder) readTyped(typ uint32) (any, error) {
 			return nil, err
 		}
 		out := make([]any, 0, n)
-		for i := uint64(0); i < n; i++ {
+		for i := range n {
 			v, err := d.readTyped(etype)
 			if err != nil {
 				return nil, fmt.Errorf("array element %d: %w", i, err)

@@ -170,7 +170,7 @@ func TestSlowSubscriberCannotBlockAndReceivesTerminalSnapshot(t *testing.T) {
 			done <- err
 			return
 		}
-		for i := 0; i < 500; i++ {
+		for i := range 500 {
 			if _, err := sink.Notify(Notice{Level: NoticeInfo, Message: fmt.Sprintf("notice %d", i)}); err != nil {
 				done <- err
 				return
@@ -279,11 +279,11 @@ func TestConcurrentPublishSnapshotAndSubscribe(t *testing.T) {
 	const writers = 8
 	const perWriter = 100
 	var writersWG sync.WaitGroup
-	for writer := 0; writer < writers; writer++ {
+	for writer := range writers {
 		writersWG.Add(1)
 		go func(writer int) {
 			defer writersWG.Done()
-			for i := 0; i < perWriter; i++ {
+			for i := range perWriter {
 				if _, err := sink.Notify(Notice{Level: NoticeInfo, Message: fmt.Sprintf("%d/%d", writer, i)}); err != nil {
 					t.Errorf("notify: %v", err)
 					return
@@ -295,7 +295,7 @@ func TestConcurrentPublishSnapshotAndSubscribe(t *testing.T) {
 
 	const readers = 4
 	var readersWG sync.WaitGroup
-	for i := 0; i < readers; i++ {
+	for range readers {
 		sub, err := sink.Subscribe(2)
 		if err != nil {
 			t.Fatal(err)

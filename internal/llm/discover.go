@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,7 +72,7 @@ func Candidates() ([]string, error) {
 			return nil
 		}
 		if len(u) > 2048 {
-			return fmt.Errorf("discovery URL exceeds 2048 bytes")
+			return errors.New("discovery URL exceeds 2048 bytes")
 		}
 		if len(out) >= maxDiscoveryCandidates {
 			return fmt.Errorf("discovery is limited to %d unique URLs", maxDiscoveryCandidates)
@@ -188,7 +189,7 @@ func Identify(ctx context.Context, base string) (string, bool) {
 func getJSON(ctx context.Context, url string) ([]byte, bool) {
 	cctx, cancel := context.WithTimeout(ctx, 600*time.Millisecond)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, false
 	}
@@ -197,7 +198,7 @@ func getJSON(ctx context.Context, url string) ([]byte, bool) {
 		return nil, false
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return nil, false
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDiscoveryBody+1))

@@ -3,7 +3,7 @@ package eval
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/blisspixel/fitr/internal/strictjson"
@@ -25,7 +25,7 @@ func decodeBuiltinJSON(b []byte, into any) error {
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("content after the JSON value")
+			return errors.New("content after the JSON value")
 		}
 		return err
 	}

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -82,7 +83,7 @@ type CheckSpec struct {
 func ValidateCheck(cs CheckSpec) error {
 	switch {
 	case cs.ID == "":
-		return fmt.Errorf("check has no id")
+		return errors.New("check has no id")
 	case cs.Kind != "check":
 		return fmt.Errorf("check %s: kind must be \"check\", got %q", cs.ID, cs.Kind)
 	case !FamilyKnown(cs.Family):
@@ -96,12 +97,12 @@ func ValidateCheck(cs CheckSpec) error {
 	// Count knobs are drawn from fixed pools, so a task asking for more rows
 	// than exist is not satisfiable. Say so at load: silently clamping would
 	// run a task the file did not describe.
-	if max, ok := familyDrawLimit(cs.Family); ok {
+	if limit, ok := familyDrawLimit(cs.Family); ok {
 		if rows, present := cs.Params["rows"]; present {
 			n := pInt(cs.Params, "rows", 0)
-			if n < 1 || n > max {
+			if n < 1 || n > limit {
 				return fmt.Errorf("check %s: params.rows must be between 1 and %d, got %v",
-					cs.ID, max, rows)
+					cs.ID, limit, rows)
 			}
 		}
 	}
@@ -174,7 +175,7 @@ func RunCheck(ctx context.Context, c llm.Backend, model string, cs CheckSpec, se
 func loadChecks() ([]CheckSpec, error) {
 	entries, err := tasksFS.ReadDir("tasks/checks")
 	if err != nil {
-		return nil, nil // no checks shipped; not an error
+		return nil, nil //nolint:nilerr // no checks shipped is an empty battery, not an error
 	}
 	var out []CheckSpec
 	ids := map[string]bool{}
@@ -223,7 +224,7 @@ func decodeUserCheck(b []byte, into *CheckSpec) error {
 	}
 	if raw == nil {
 		return failure(FailureInvalidSpec, "load_user_task",
-			fmt.Errorf("task must be a JSON object"))
+			errors.New("task must be a JSON object"))
 	}
 
 	if encodedKind, ok := raw["kind"]; ok {
@@ -250,9 +251,9 @@ func decodeUserCheck(b []byte, into *CheckSpec) error {
 		return failure(FailureInvalidSpec, "load_user_task", err)
 	}
 	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			err = fmt.Errorf("content after the JSON object")
+			err = errors.New("content after the JSON object")
 		}
 		return failure(FailureInvalidSpec, "load_user_task", err)
 	}

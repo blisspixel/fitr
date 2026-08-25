@@ -281,25 +281,25 @@ func sortedNonemptyConfig(config map[string]string) []configEntry {
 }
 
 func cloneFingerprint(fp Fingerprint) Fingerprint {
-	copy := fp
+	snapshot := fp
 	if fp.Config != nil {
-		copy.Config = make(map[string]string, len(fp.Config))
+		snapshot.Config = make(map[string]string, len(fp.Config))
 		for name, value := range fp.Config {
-			copy.Config[name] = value
+			snapshot.Config[name] = value
 		}
 	}
-	return copy
+	return snapshot
 }
 
 func cloneContextVerification(context ContextVerification) ContextVerification {
-	copy := context
+	snapshot := context
 	if context.EffectiveTokens != nil {
 		effective := *context.EffectiveTokens
-		copy.EffectiveTokens = &effective
+		snapshot.EffectiveTokens = &effective
 	}
 	if context.Probe != nil {
 		probe := *context.Probe
-		copy.Probe = &probe
+		snapshot.Probe = &probe
 	}
-	return copy
+	return snapshot
 }

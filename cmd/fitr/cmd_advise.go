@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/advise"
@@ -190,7 +191,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 					errPrint(err.Error(), "", "")
 					return exitError
 				}
-				defer lk.Release() //nolint:errcheck
+				defer lk.Release() //nolint:errcheck // best effort on a advisory print
 				ctxLen := *ctxSize
 				if ctxLen <= 0 {
 					ctxLen = 2048
@@ -378,7 +379,7 @@ func cmdTune(ctx context.Context, args []string) int {
 	fmt.Fprintf(os.Stdout, "  %s  vs  %s\n", terminalText(a.Model), terminalText(b.Model))
 	d := a.Device.Diff(b.Device)
 	if ca, cb := resultNumCtx(a), resultNumCtx(b); ca != cb {
-		d = append([][3]string{{"num_ctx", fmt.Sprintf("%d", ca), fmt.Sprintf("%d", cb)}}, d...)
+		d = append([][3]string{{"num_ctx", strconv.Itoa(ca), strconv.Itoa(cb)}}, d...)
 	}
 	if len(d) == 0 {
 		fmt.Fprintln(os.Stdout, "  same fingerprint - quality is `fitr compare`'s job, not a device change")

@@ -18,7 +18,7 @@ func ps(ctx context.Context, script string) string {
 	if root == "" {
 		root = `C:\Windows`
 	}
-	exe := filepath.Join(root, `System32\WindowsPowerShell\v1.0\powershell.exe`)
+	exe := filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
 	if _, err := os.Stat(exe); err != nil {
 		return ""
 	}
@@ -100,7 +100,7 @@ func pickVideoController(all []videoController, nvName string) videoController {
 		best, bestLen := videoController{}, -1
 		for _, c := range all {
 			n := strings.TrimSpace(c.Name)
-			if n == "" || !(strings.Contains(n, nvName) || strings.Contains(nvName, n)) {
+			if n == "" || (!strings.Contains(n, nvName) && !strings.Contains(nvName, n)) {
 				continue
 			}
 			if len(n) > bestLen {

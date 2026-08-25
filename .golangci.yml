@@ -1,0 +1,111 @@
+# Static analysis gate.
+#
+# Everything enabled here passes on the whole tree, so this is a hard gate and
+# a red build means a real regression. A gate that ships red is a gate people
+# learn to ignore.
+#
+# Deliberately deferred, each with a reason rather than a shrug:
+#   funlen, gocognit, gocyclo, nestif, dupl - ~90 findings concentrated in the
+#     run pipeline. Enabling them before that code is decomposed buys a wall of
+#     nolint directives, not better code. Tracked in the roadmap.
+#   recvcheck - five types mix value and pointer receivers. Correcting that
+#     changes value semantics on types that are copied deliberately, which is a
+#     considered change, not a lint sweep.
+#   unparam - the cmdX(ctx, args) dispatch signature is uniform on purpose, so
+#     several commands legitimately ignore ctx.
+#   errname - Failure and FileWarning are domain nouns used across the evidence
+#     contract; renaming them to XxxError would churn the API to satisfy a
+#     naming convention.
+version: "2"
+
+run:
+  timeout: 10m
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/blisspixel/fitr
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    # Correctness.
+    - asasalint # []any passed to a variadic any
+    - bidichk # bidirectional unicode that hides code
+    - bodyclose # unclosed HTTP bodies in the backend clients
+    - durationcheck # duration multiplied by a duration
+    - errorlint # %v where %w is needed; == where errors.Is is needed
+    - makezero # append to a non-zero-length slice
+    - nilerr # returns nil after checking err != nil
+    - noctx # HTTP request built without a context
+    - reassign # package-level variable reassigned
+
+    # Idiom.
+    - gocritic
+    - intrange
+    - nakedret
+    - perfsprint
+    - predeclared # shadowing len, cap, new
+    - unconvert
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+
+    # Tests.
+    - thelper # helpers that never call t.Helper()
+    - usetesting # t.TempDir / t.Setenv over hand-rolled equivalents
+
+    # Hygiene.
+    - nolintlint
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      # Writing to stdout/stderr and closing a file opened for reading cannot
+      # meaningfully fail, and handling them adds noise without adding safety.
+      # A writer's Close is NOT in this list: it flushes, so it can lose data.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*os.File).Close
+        - (io.Closer).Close
+        - os.Setenv
+        - os.Unsetenv
+        - os.RemoveAll
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # churn without a measurable win here
+        - shadow # very noisy in error-heavy Go
+
+    gocritic:
+      # diagnostic and performance only. The style tag is largely taste
+      # (unnamedResult, paramTypeCombine, singleCaseSwitch) and enabling it
+      # today would mean rewriting working code to satisfy a preference.
+      enabled-tags: [diagnostic, performance]
+      disabled-checks:
+        - hugeParam # fires on deliberate value receivers
+        - rangeValCopy
+        - ifElseChain # an explicit chain is clearer than a bare switch here
+        - singleCaseSwitch # a one-case switch documents room to grow
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+  exclusions:
+    warn-unused: true
+    presets:
+      - std-error-handling
+      - common-false-positives
+    rules:
+      # Tests legitimately duplicate setup and ignore errors on teardown.
+      - path: '_test\.go'
+        linters: [errcheck, unparam, gocritic, noctx]

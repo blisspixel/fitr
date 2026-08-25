@@ -114,7 +114,7 @@ func TestActiveParamsRefusesToOverflow(t *testing.T) {
 	}
 
 	// A real MoE still resolves. Qwen3-30B-A3B: 48 blocks, 128 experts, 8 used.
-	real := ArchFromKVs(map[string]any{
+	genuine := ArchFromKVs(map[string]any{
 		"general.architecture":                "qwen3moe",
 		"general.parameter_count":             uint64(30532122624),
 		"qwen3moe.block_count":                uint64(48),
@@ -126,12 +126,12 @@ func TestActiveParamsRefusesToOverflow(t *testing.T) {
 		"qwen3moe.attention.head_count_kv":    uint64(4),
 		"qwen3moe.attention.key_length":       uint64(128),
 	})
-	p, ok := real.ActiveParams()
+	p, ok := genuine.ActiveParams()
 	if !ok || p <= 0 {
 		t.Fatalf("a real MoE failed to resolve: (%d, %v)", p, ok)
 	}
-	if p >= real.Params {
-		t.Fatalf("active %d is not below total %d for an MoE", p, real.Params)
+	if p >= genuine.Params {
+		t.Fatalf("active %d is not below total %d for an MoE", p, genuine.Params)
 	}
 }
 

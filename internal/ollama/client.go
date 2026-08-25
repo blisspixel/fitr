@@ -137,7 +137,7 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+path, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func decodeJSONFrame(frame []byte, into any) error {
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("content after JSON frame")
+			return errors.New("content after JSON frame")
 		}
 		return err
 	}
@@ -190,7 +190,7 @@ func nativeHTTPError(resp *http.Response) error {
 func validateGenFrame(g genResp) error {
 	if g.EvalCount < 0 || g.EvalDuration < 0 || g.PromptEvalCount < 0 ||
 		g.PromptEvalDuration < 0 || g.LoadDuration < 0 {
-		return fmt.Errorf("ollama generate frame contains a negative metric")
+		return errors.New("ollama generate frame contains a negative metric")
 	}
 	return nil
 }
@@ -220,7 +220,7 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling)
 		return "", Metrics{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return "", Metrics{}, nativeHTTPError(resp)
 	}
 
@@ -239,10 +239,10 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling)
 		totalBytes += len(line) + 1
 		frames++
 		if totalBytes > maxNativeStream || frames > maxNativeFrames {
-			return sb.String(), Metrics{}, fmt.Errorf("ollama generate stream exceeds protocol limits")
+			return sb.String(), Metrics{}, errors.New("ollama generate stream exceeds protocol limits")
 		}
 		if terminal {
-			return sb.String(), Metrics{}, fmt.Errorf("ollama generate stream contains data after the terminal frame")
+			return sb.String(), Metrics{}, errors.New("ollama generate stream contains data after the terminal frame")
 		}
 		var g genResp
 		if err := decodeJSONFrame(line, &g); err != nil {
@@ -267,7 +267,7 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling)
 		return sb.String(), Metrics{}, fmt.Errorf("ollama generate stream: %w", err)
 	}
 	if !terminal {
-		return sb.String(), Metrics{}, fmt.Errorf("ollama generate stream ended before a terminal frame")
+		return sb.String(), Metrics{}, errors.New("ollama generate stream ended before a terminal frame")
 	}
 
 	m := Metrics{
@@ -358,7 +358,7 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools [
 		return Message{}, Metrics{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return Message{}, Metrics{}, nativeHTTPError(resp)
 	}
 	var r chatResp
@@ -366,14 +366,14 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools [
 		return Message{}, Metrics{}, err
 	}
 	if !r.Done {
-		return Message{}, Metrics{}, fmt.Errorf("ollama chat response is missing the terminal receipt")
+		return Message{}, Metrics{}, errors.New("ollama chat response is missing the terminal receipt")
 	}
 	if r.Message.Role != "assistant" {
 		return Message{}, Metrics{}, fmt.Errorf(
 			"ollama chat response has role %q, want assistant", r.Message.Role)
 	}
 	if r.EvalCount < 0 || r.EvalDuration < 0 || r.PromptEvalCount < 0 || r.PromptEvalDuration < 0 {
-		return Message{}, Metrics{}, fmt.Errorf("ollama chat response contains a negative metric")
+		return Message{}, Metrics{}, errors.New("ollama chat response contains a negative metric")
 	}
 	m := Metrics{
 		WallSeconds:  round(time.Since(start).Seconds(), 2),
@@ -417,7 +417,7 @@ type ModelInfo struct {
 func (c *Client) Tags(ctx context.Context) ([]ModelInfo, error) {
 	cctx, cancel := context.WithTimeout(ctx, controlPlaneTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/tags", nil)
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, c.BaseURL+"/api/tags", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -436,7 +436,7 @@ func (c *Client) Tags(ctx context.Context) ([]ModelInfo, error) {
 		return nil, err
 	}
 	if r.Models == nil {
-		return nil, fmt.Errorf("ollama tags response is missing the models array")
+		return nil, errors.New("ollama tags response is missing the models array")
 	}
 	seen := make(map[string]bool, len(r.Models))
 	for _, model := range r.Models {
@@ -491,7 +491,7 @@ type RunningModel struct {
 func (c *Client) PS(ctx context.Context) ([]RunningModel, error) {
 	cctx, cancel := context.WithTimeout(ctx, controlPlaneTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/ps", nil)
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, c.BaseURL+"/api/ps", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -510,7 +510,7 @@ func (c *Client) PS(ctx context.Context) ([]RunningModel, error) {
 		return nil, err
 	}
 	if r.Models == nil {
-		return nil, fmt.Errorf("ollama ps response is missing the models array")
+		return nil, errors.New("ollama ps response is missing the models array")
 	}
 	seen := make(map[string]bool, len(r.Models))
 	for _, model := range r.Models {
@@ -671,7 +671,7 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return nativeHTTPError(resp)
 	}
 	sc := bufio.NewScanner(resp.Body)
@@ -686,10 +686,10 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 		totalBytes += len(line) + 1
 		frames++
 		if totalBytes > maxNativeStream || frames > maxNativeFrames {
-			return fmt.Errorf("ollama pull stream exceeds protocol limits")
+			return errors.New("ollama pull stream exceeds protocol limits")
 		}
 		if terminal {
-			return fmt.Errorf("ollama pull stream contains data after the terminal frame")
+			return errors.New("ollama pull stream contains data after the terminal frame")
 		}
 		var p struct {
 			Status    string `json:"status"`
@@ -704,7 +704,7 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 			return fmt.Errorf("pull: %s", p.Error)
 		}
 		if p.Total < 0 || p.Completed < 0 || (p.Total > 0 && p.Completed > p.Total) {
-			return fmt.Errorf("ollama pull frame contains invalid progress")
+			return errors.New("ollama pull frame contains invalid progress")
 		}
 		if p.Status == "success" {
 			terminal = true
@@ -721,7 +721,7 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 		return fmt.Errorf("ollama pull stream: %w", err)
 	}
 	if !terminal {
-		return fmt.Errorf("ollama pull stream ended before a success receipt")
+		return errors.New("ollama pull stream ended before a success receipt")
 	}
 	return nil
 }
@@ -732,7 +732,7 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 func (c *Client) Version(ctx context.Context) string {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	req, reqErr := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/version", nil)
+	req, reqErr := http.NewRequestWithContext(cctx, http.MethodGet, c.BaseURL+"/api/version", nil)
 	if reqErr == nil {
 		if resp, err := c.HTTP.Do(req); err == nil {
 			defer resp.Body.Close()
@@ -754,7 +754,7 @@ func (c *Client) Version(ctx context.Context) string {
 func (c *Client) Reachable(ctx context.Context) bool {
 	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, "GET", c.BaseURL+"/api/tags", nil)
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, c.BaseURL+"/api/tags", nil)
 	if err != nil {
 		return false
 	}
@@ -763,7 +763,7 @@ func (c *Client) Reachable(ctx context.Context) bool {
 		return false
 	}
 	resp.Body.Close()
-	return resp.StatusCode == 200
+	return resp.StatusCode == http.StatusOK
 }
 
 func round(v float64, places int) float64 {
