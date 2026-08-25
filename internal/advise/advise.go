@@ -17,6 +17,7 @@ package advise
 import (
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/render"
@@ -124,9 +125,16 @@ func (a Arch) kvBytesPerToken(elem float64) float64 {
 	if !a.KVReady() || elem <= 0 {
 		return 0
 	}
-	embdK := a.KVHeads * a.headDimK()
-	embdV := a.KVHeads * a.headDimV()
-	return float64(a.Blocks) * float64(embdK+embdV) * elem
+	// Accumulate in float64. The same product in int arithmetic wraps to a
+	// negative on absurd dimensions, and a negative cost per token turns the
+	// fit comparison inside out.
+	embdK := float64(a.KVHeads) * float64(a.headDimK())
+	embdV := float64(a.KVHeads) * float64(a.headDimV())
+	per := float64(a.Blocks) * (embdK + embdV) * elem
+	if math.IsNaN(per) || math.IsInf(per, 0) || per <= 0 {
+		return 0
+	}
+	return per
 }
 
 // ActiveParams is the decode-time parameter count. MoE loads every expert
@@ -143,23 +151,88 @@ func (a Arch) ActiveParams() (int64, bool) {
 	if a.ExpertUsed <= 0 || a.FFN <= 0 || a.Embed <= 0 || a.Blocks <= 0 {
 		return 0, false
 	}
+	// Every product below is bounded by metadata from an untrusted file. An
+	// unchecked chain wraps to a negative parameter count, which then prints
+	// as a negative model size. "Cannot be computed" is already this
+	// function's answer for that, so overflow returns it.
 	// Gated FFN: gate, up, down.
-	expertTotal := int64(a.Blocks) * 3 * int64(a.Embed) * int64(a.FFN) * int64(a.Experts)
-	expertActive := int64(a.Blocks) * 3 * int64(a.Embed) * int64(a.FFN) * int64(a.ExpertUsed)
+	expertTotal, ok1 := mulInt64(int64(a.Blocks), 3, int64(a.Embed), int64(a.FFN), int64(a.Experts))
+	expertActive, ok2 := mulInt64(int64(a.Blocks), 3, int64(a.Embed), int64(a.FFN), int64(a.ExpertUsed))
+	if !ok1 || !ok2 {
+		return 0, false
+	}
 	if a.Params > 0 && a.Params > expertTotal {
-		return (a.Params - expertTotal) + expertActive, true
+		rest, ok := addInt64(a.Params-expertTotal, expertActive)
+		if !ok {
+			return 0, false
+		}
+		return rest, true
 	}
 	// Reconstruct without a recorded total: attention + active FFN + embed.
 	if a.Heads <= 0 || a.headDimK() <= 0 {
 		return 0, false
 	}
-	q := int64(a.Embed) * int64(a.Heads*a.headDimK())
-	k := int64(a.Embed) * int64(a.KVHeads*a.headDimK())
-	v := int64(a.Embed) * int64(a.KVHeads*a.headDimV())
-	o := int64(a.Heads*a.headDimK()) * int64(a.Embed)
-	attn := int64(a.Blocks) * (q + k + v + o)
-	embed := int64(a.Vocab) * int64(a.Embed)
-	return attn + expertActive + embed, true
+	qHead, okq := mulInt64(int64(a.Heads), int64(a.headDimK()))
+	kvHeadK, okk := mulInt64(int64(a.KVHeads), int64(a.headDimK()))
+	kvHeadV, okv := mulInt64(int64(a.KVHeads), int64(a.headDimV()))
+	if !okq || !okk || !okv {
+		return 0, false
+	}
+	q, ok1 := mulInt64(int64(a.Embed), qHead)
+	k, ok2 := mulInt64(int64(a.Embed), kvHeadK)
+	v, ok3 := mulInt64(int64(a.Embed), kvHeadV)
+	o, ok4 := mulInt64(qHead, int64(a.Embed))
+	if !ok1 || !ok2 || !ok3 || !ok4 {
+		return 0, false
+	}
+	perBlock, ok := addInt64(q, k, v, o)
+	if !ok {
+		return 0, false
+	}
+	attn, ok := mulInt64(int64(a.Blocks), perBlock)
+	if !ok {
+		return 0, false
+	}
+	embed, ok := mulInt64(int64(a.Vocab), int64(a.Embed))
+	if !ok {
+		return 0, false
+	}
+	total, ok := addInt64(attn, expertActive, embed)
+	if !ok {
+		return 0, false
+	}
+	return total, true
+}
+
+// mulInt64 multiplies non-negative factors, reporting false rather than
+// wrapping. A wrapped product is a negative size presented as a measurement.
+func mulInt64(factors ...int64) (int64, bool) {
+	out := int64(1)
+	for _, f := range factors {
+		if f < 0 {
+			return 0, false
+		}
+		if f == 0 {
+			return 0, true
+		}
+		if out > math.MaxInt64/f {
+			return 0, false
+		}
+		out *= f
+	}
+	return out, true
+}
+
+// addInt64 sums non-negative terms, reporting false rather than wrapping.
+func addInt64(terms ...int64) (int64, bool) {
+	out := int64(0)
+	for _, t := range terms {
+		if t < 0 || out > math.MaxInt64-t {
+			return 0, false
+		}
+		out += t
+	}
+	return out, true
 }
 
 type Report struct {
@@ -168,6 +241,7 @@ type Report struct {
 	Quant         string    `json:"quant,omitempty"`
 	Why           string    `json:"why"`
 	Remedy        string    `json:"remedy,omitempty"`
+	KVRemedy      string    `json:"kv_remedy,omitempty"`
 	Hint          string    `json:"hint,omitempty"`
 	Flag          string    `json:"flag,omitempty"`
 	FlagValue     int       `json:"flag_value,omitempty"`
@@ -221,6 +295,69 @@ func ContextFlag(backend string) string {
 	default:
 		return "num_ctx"
 	}
+}
+
+// KVCacheFlag names the knob that sets KV cache dtype for a backend. An empty
+// string means the runtime does not expose one, and no dtype remedy is
+// offered rather than naming a flag the user cannot set.
+func KVCacheFlag(backend string) string {
+	switch strings.ToLower(backend) {
+	case "llama-server", "llamaserver":
+		return "--cache-type-k/--cache-type-v"
+	case "openai":
+		return ""
+	case "ollama", "":
+		return "OLLAMA_KV_CACHE_TYPE"
+	}
+	return ""
+}
+
+// kvCacheRemedy offers a quantized KV cache when the cache, not the weights,
+// is what overflowed. q8_0 halves bytes per element against f16, so it buys
+// back context that dtype was spending -- the third remedy next to "shorter
+// window" and "smaller quant". It is only offered when it actually beats the
+// f16 outcome, and it always says that the dtype is part of the device
+// fingerprint: evidence measured under a different cache dtype is not
+// comparable, so this is a re-measure, not a free win.
+//
+// elem is the current bytes per KV element and fitCtx is the window that fits
+// at that dtype. A zero return means no honest improvement to offer.
+func kvCacheRemedy(in Input, elem float64, ctx, fitCtx int, haveB float64) string {
+	const q8Elem = 1.0
+	flag := KVCacheFlag(in.Backend)
+	if flag == "" || elem <= q8Elem || in.WeightsB <= 0 {
+		return ""
+	}
+	// Ctx 0 means "the model's max". The main path resolves that before
+	// sizing the cache and the --fit path does not, so resolve here: a
+	// remedy is offered for a real window or not at all.
+	if ctx <= 0 {
+		ctx = in.Arch.MaxCtx
+	}
+	if ctx <= 0 {
+		return ""
+	}
+	perTok := in.Arch.kvBytesPerToken(q8Elem)
+	if perTok <= 0 {
+		return ""
+	}
+	room := haveB - float64(in.WeightsB)
+	if room <= 0 {
+		return ""
+	}
+	// Does the window the user actually asked for fit once the cache shrinks?
+	if float64(ctx)*perTok <= room {
+		fits := (float64(in.WeightsB) + float64(ctx)*perTok) / GiB
+		return fmt.Sprintf("%s=q8_0 keeps %d ctx -> fits in %s GB; changes the fingerprint, so re-measure",
+			flag, ctx, trim1(round1(fits)))
+	}
+	q8Ctx := (ctxTokens(room/perTok) / 256) * 256
+	if q8Ctx < 512 || q8Ctx <= fitCtx {
+		return ""
+	}
+	fits := (float64(in.WeightsB) + float64(q8Ctx)*perTok) / GiB
+	return fmt.Sprintf("%s=q8_0 raises the window to %d -> fits in %s GB; changes the fingerprint, so re-measure",
+		flag, q8Ctx, trim1(round1(fits)))
 }
 
 // KVElemBytes maps a cache dtype name onto bytes per element. Unknown
@@ -382,11 +519,12 @@ func evaluateCore(in Input) Report {
 			r.Remedy = "try a smaller quant, or a shorter context"
 			return r
 		}
-		fitCtx := int((haveB - float64(in.WeightsB)) / perTok)
+		fitCtx := ctxTokens((haveB - float64(in.WeightsB)) / perTok)
 		fitCtx = (fitCtx / 256) * 256
 		if fitCtx < 512 {
 			r.Tier = Incompatible
 			r.Remedy = "try a smaller quant; even a 512-token window does not fit next to the weights"
+			r.KVRemedy = kvCacheRemedy(in, elem, in.Ctx, fitCtx, haveB)
 			return r
 		}
 		fitB := float64(in.WeightsB) + perTok*float64(fitCtx)
@@ -395,6 +533,7 @@ func evaluateCore(in Input) Report {
 		r.FlagValue = fitCtx
 		r.FitsGB = round1(fitB / GiB)
 		r.Remedy = remedyLine(r.Flag, fitCtx, r.FitsGB)
+		r.KVRemedy = kvCacheRemedy(in, elem, in.Ctx, fitCtx, haveB)
 		return r
 	}
 
@@ -445,6 +584,16 @@ func evaluateCore(in Input) Report {
 	}
 	r.Ctx = ctx
 	perTok := in.Arch.kvBytesPerToken(elem)
+	// The --fit branch already refuses a non-positive per-token cost; this
+	// path divided and compared without checking. An unsizable cache is a
+	// SKIP, never a fit verdict computed from a number that cannot be real.
+	if perTok <= 0 {
+		r.Tier = Skip
+		r.Why = "the KV cache could not be sized from this architecture"
+		r.Hint = "pass a .gguf path with readable layer, KV head, and head-dim metadata"
+		r.Gaps = append(r.Gaps, "architecture metadata is missing or not believable")
+		return r
+	}
 	kvB := perTok * float64(ctx)
 	r.KVGB = round1(kvB / GiB)
 	needB := float64(in.WeightsB) + kvB
@@ -461,7 +610,7 @@ func evaluateCore(in Input) Report {
 	// Largest context that still fits, aligned down to 256. Below 512 is not
 	// a useful chat window - treat as incompatible even though weights fit.
 	maxTok := (haveB - float64(in.WeightsB)) / perTok
-	fitCtx := int(maxTok)
+	fitCtx := ctxTokens(maxTok)
 	if fitCtx > ctx {
 		fitCtx = ctx
 	}
@@ -470,6 +619,7 @@ func evaluateCore(in Input) Report {
 		r.Tier = Incompatible
 		r.Why = fmt.Sprintf("%d ctx needs %s GB; %s GB available", ctx, trim1(r.NeedGB), trim1(r.HaveGB))
 		r.Remedy = "try a smaller quant; even a 512-token window does not fit next to the weights"
+		r.KVRemedy = kvCacheRemedy(in, elem, ctx, fitCtx, haveB)
 		return r
 	}
 	fitB := float64(in.WeightsB) + perTok*float64(fitCtx)
@@ -479,6 +629,7 @@ func evaluateCore(in Input) Report {
 	r.FitsGB = round1(fitB / GiB)
 	r.Why = fmt.Sprintf("%d ctx needs %s GB; %s GB available", ctx, trim1(r.NeedGB), trim1(r.HaveGB))
 	r.Remedy = remedyLine(flag, fitCtx, r.FitsGB)
+	r.KVRemedy = kvCacheRemedy(in, elem, ctx, fitCtx, haveB)
 	return r
 }
 
@@ -490,7 +641,32 @@ func remedyLine(flag string, ctx int, fits float64) string {
 	return fmt.Sprintf("try %s=%d -> fits in %s GB", flag, ctx, n)
 }
 
-func round1(v float64) float64 { return float64(int64(v*10+0.5)) / 10 }
+// ctxTokens turns a token budget into a count. The quotient comes from
+// user-supplied memory and context figures, and converting a float64 outside
+// int range is undefined in Go, so it is clamped. No real context window
+// approaches the ceiling; anything that does is already not a measurement.
+func ctxTokens(tokens float64) int {
+	if math.IsNaN(tokens) || tokens <= 0 {
+		return 0
+	}
+	if tokens > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int(tokens)
+}
+
+// round1 rounds to one decimal for display. Converting a float64 outside
+// int64's range is undefined in Go and in practice yields the most negative
+// int64, so an oversized GB figure printed as a large negative number. Values
+// that cannot survive the conversion are returned unrounded: a wrong-looking
+// big number is a visible fault, a negative one reads as a real measurement.
+func round1(v float64) float64 {
+	const lim = float64(math.MaxInt64) / 10
+	if math.IsNaN(v) || math.IsInf(v, 0) || v > lim || v < -lim {
+		return v
+	}
+	return float64(int64(v*10+0.5)) / 10
+}
 
 func trim1(v float64) string {
 	s := fmt.Sprintf("%.1f", v)
@@ -516,6 +692,9 @@ func Write(w io.Writer, r Report) {
 	fmt.Fprintf(w, "  [%-12s]  %s\n", render.SingleLine(r.Label()), render.SingleLine(r.Why))
 	if r.Remedy != "" {
 		fmt.Fprintf(w, "  try            %s\n", render.SingleLine(r.Remedy))
+	}
+	if r.KVRemedy != "" {
+		fmt.Fprintf(w, "  or             %s\n", render.SingleLine(r.KVRemedy))
 	}
 	if r.Hint != "" {
 		fmt.Fprintf(w, "  hint           %s\n", render.SingleLine(r.Hint))
@@ -683,24 +862,44 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	if p != "" {
 		p += "."
 	}
-	a.Blocks = asInt(first(kvs, p+"block_count"))
-	a.Embed = asInt(first(kvs, p+"embedding_length"))
-	a.Heads = asInt(first(kvs, p+"attention.head_count"))
-	a.KVHeads = asInt(first(kvs, p+"attention.head_count_kv"))
+	a.Blocks = archDim(first(kvs, p+"block_count"))
+	a.Embed = archDim(first(kvs, p+"embedding_length"))
+	a.Heads = archDim(first(kvs, p+"attention.head_count"))
+	a.KVHeads = archDim(first(kvs, p+"attention.head_count_kv"))
 	if a.KVHeads == 0 {
 		a.KVHeads = a.Heads
 	}
-	a.KeyLength = asInt(first(kvs, p+"attention.key_length"))
-	a.ValLength = asInt(first(kvs, p+"attention.value_length"))
-	a.MaxCtx = asInt(first(kvs, p+"context_length"))
-	a.Experts = asInt(first(kvs, p+"expert_count"))
-	a.ExpertUsed = asInt(first(kvs, p+"expert_used_count"))
-	a.FFN = asInt(first(kvs, p+"expert_feed_forward_length", p+"feed_forward_length"))
-	a.FullAttentionInterval = asInt(first(kvs, p+"full_attention_interval"))
-	a.RecurrentLayers = asInt(first(kvs, p+"attention.recurrent_layer_count", "attention.recurrent_layer_count"))
+	a.KeyLength = archDim(first(kvs, p+"attention.key_length"))
+	a.ValLength = archDim(first(kvs, p+"attention.value_length"))
+	a.MaxCtx = archDim(first(kvs, p+"context_length"))
+	a.Experts = archDim(first(kvs, p+"expert_count"))
+	a.ExpertUsed = archDim(first(kvs, p+"expert_used_count"))
+	a.FFN = archDim(first(kvs, p+"expert_feed_forward_length", p+"feed_forward_length"))
+	a.FullAttentionInterval = archDim(first(kvs, p+"full_attention_interval"))
+	a.RecurrentLayers = archDim(first(kvs, p+"attention.recurrent_layer_count", "attention.recurrent_layer_count"))
 	a.Hybrid = a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 ||
 		strings.EqualFold(arch, "qwen35") || strings.EqualFold(arch, "qwen3.5")
 	return a
+}
+
+// maxArchDim bounds a single architecture dimension. The largest real models
+// are three orders of magnitude below this, so it rejects nothing genuine
+// while keeping products of these fields far inside int64. A GGUF header is
+// an untrusted file: a corrupt or hostile one declaring a block count near
+// 2^62 overflowed the KV arithmetic to a NEGATIVE bytes-per-token, and advise
+// then reported "compatible" for a model that does not fit, with a negative
+// GB figure printed next to it. Wrong in the direction that matters.
+const maxArchDim = 1 << 20
+
+// archDim reads a dimension and treats an implausible one as unmeasured.
+// Zero already means "not known" everywhere downstream, which routes the
+// verdict to SKIP -- the correct answer for metadata that cannot be believed.
+func archDim(v any) int {
+	n := asInt(v)
+	if n < 0 || n > maxArchDim {
+		return 0
+	}
+	return n
 }
 
 func first(kvs map[string]any, keys ...string) any {

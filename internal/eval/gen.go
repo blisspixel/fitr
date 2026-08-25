@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2"
 	"regexp"
 	"sort"
@@ -73,7 +74,16 @@ var (
 
 func one[T any](rng *rand.Rand, pool []T) T { return pool[rng.IntN(len(pool))] }
 
+// pick draws k distinct items. k comes from task parameters on at least one
+// path, and a task file is user input: a negative k panicked on make, and a k
+// past the pool panicked slicing the permutation. The pool is the bound.
 func pick[T any](rng *rand.Rand, pool []T, k int) []T {
+	if k <= 0 || len(pool) == 0 {
+		return nil
+	}
+	if k > len(pool) {
+		k = len(pool)
+	}
 	idx := rng.Perm(len(pool))[:k]
 	out := make([]T, k)
 	for i, j := range idx {
@@ -325,8 +335,11 @@ Facts: record %d is currently %s with priority %d. It is tagged %q, %q and %q, a
 }
 
 func genCSV(params map[string]any, rng *rand.Rand) Instance {
-	rows := pInt(params, "rows", 4)
-	prods := pick(rng, poolProducts, rows)
+	prods := pick(rng, poolProducts, pInt(params, "rows", 4))
+	// pick already bounded the draw by the pool; taking the row count from
+	// what it returned keeps the prompt, the canon and the slice in step
+	// whatever the parameter asked for.
+	rows := len(prods)
 	type rec struct {
 		p     string
 		qty   int
@@ -813,11 +826,23 @@ func pBool(p map[string]any, key string) bool {
 	return v
 }
 
+// pInt reads an integer task parameter. Converting a float64 outside int
+// range is undefined in Go, and these values come from a user's task file, so
+// an out-of-range number is clamped to stay out of range rather than
+// converted: validation then rejects it, instead of it silently becoming the
+// default or wrapping into a plausible-looking count.
 func pInt(p map[string]any, key string, def int) int {
-	if f, ok := toFloat(p[key]); ok {
-		return int(f)
+	f, ok := toFloat(p[key])
+	if !ok || math.IsNaN(f) {
+		return def
 	}
-	return def
+	switch {
+	case f > math.MaxInt32:
+		return math.MaxInt32
+	case f < math.MinInt32:
+		return math.MinInt32
+	}
+	return int(f)
 }
 
 func pString(p map[string]any, key, def string) string {
@@ -848,4 +873,15 @@ func firstLine(s string) string {
 		s = s[:120] + "..."
 	}
 	return s
+}
+
+// familyDrawLimit is the largest count a family's "rows" parameter can ask
+// for, set by the pool it draws from. ok is false for families that take no
+// count parameter.
+func familyDrawLimit(family string) (int, bool) {
+	switch family {
+	case "csv_strict":
+		return len(poolProducts), true
+	}
+	return 0, false
 }

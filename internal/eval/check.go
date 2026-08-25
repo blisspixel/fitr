@@ -93,6 +93,18 @@ func ValidateCheck(cs CheckSpec) error {
 	case cs.NumPredict <= 0:
 		return fmt.Errorf("check %s: num_predict must be positive", cs.ID)
 	}
+	// Count knobs are drawn from fixed pools, so a task asking for more rows
+	// than exist is not satisfiable. Say so at load: silently clamping would
+	// run a task the file did not describe.
+	if max, ok := familyDrawLimit(cs.Family); ok {
+		if rows, present := cs.Params["rows"]; present {
+			n := pInt(cs.Params, "rows", 0)
+			if n < 1 || n > max {
+				return fmt.Errorf("check %s: params.rows must be between 1 and %d, got %v",
+					cs.ID, max, rows)
+			}
+		}
+	}
 	if cs.Family == "static" {
 		if pString(cs.Params, "prompt", "") == "" {
 			return fmt.Errorf("check %s: static family needs params.prompt", cs.ID)

@@ -126,3 +126,7 @@ jobs:
         run: go test ./internal/record -run='^$' -fuzz=FuzzDecodeRecord -fuzztime=20000x -parallel=4
       - name: strict JSON fuzz smoke
         run: go test ./internal/strictjson -run='^$' -fuzz=FuzzValidate -fuzztime=20000x -parallel=4
+      - name: GGUF metadata fuzz smoke
+        run: go test ./internal/advise -run='^$' -fuzz=FuzzReadMetadata -fuzztime=20000x -parallel=4
+      - name: user task file fuzz smoke
+        run: go test ./internal/eval -run='^$' -fuzz=FuzzUserCheck -fuzztime=20000x -parallel=4

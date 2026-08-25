@@ -410,3 +410,118 @@ func TestHumanWritersNeutralizeTerminalControls(t *testing.T) {
 		}
 	}
 }
+
+// The contract says every negative fit verdict carries a remedy. When the KV
+// cache is what overflowed, dtype is a third lever next to "shorter window"
+// and "smaller quant", and advise already computes with it -- q8_0 halves
+// bytes per element, so the window it buys back is exactly double.
+func TestKVCacheRemedyOffersTheDtypeLever(t *testing.T) {
+	// Same fixture as TestLowMemoryNamesFlagAndNumber: 3 GiB of room for KV,
+	// 131072 bytes per token at f16 -> 24576. At q8_0, 65536 -> 49152.
+	r := Evaluate(Input{
+		Model: "llama3.1:8b", Quant: "Q4_K_M",
+		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
+		Ctx: 131072, Arch: llama8B(), Backend: "ollama",
+	})
+	if r.Tier != LowMemory {
+		t.Fatalf("tier = %s (%s), want low_memory", r.Tier, r.Why)
+	}
+	if !strings.Contains(r.KVRemedy, "OLLAMA_KV_CACHE_TYPE=q8_0") {
+		t.Fatalf("kv remedy = %q, want the Ollama dtype knob", r.KVRemedy)
+	}
+	if !strings.Contains(r.KVRemedy, "49152") {
+		t.Fatalf("kv remedy = %q, want the doubled window 49152", r.KVRemedy)
+	}
+	// Cache dtype is part of the device fingerprint. Offering it without
+	// saying so would invite an incomparable measurement.
+	if !strings.Contains(r.KVRemedy, "fingerprint") {
+		t.Fatalf("kv remedy = %q, must say the fingerprint changes", r.KVRemedy)
+	}
+	var buf bytes.Buffer
+	Write(&buf, r)
+	if out := buf.String(); !strings.Contains(out, "or ") {
+		t.Fatalf("printed report did not offer the alternative:\n%s", out)
+	}
+}
+
+func TestKVCacheRemedyKeepsTheRequestedWindowWhenItFits(t *testing.T) {
+	// 32768 ctx costs 4 GiB at f16 and 2 GiB at q8_0; 3 GiB of room means the
+	// requested window survives the dtype change intact.
+	r := Evaluate(Input{
+		Model: "llama3.1:8b", WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
+		Ctx: 32768, Arch: llama8B(), Backend: "ollama",
+	})
+	if r.Tier != LowMemory {
+		t.Fatalf("tier = %s (%s), want low_memory", r.Tier, r.Why)
+	}
+	if !strings.Contains(r.KVRemedy, "keeps 32768 ctx") {
+		t.Fatalf("kv remedy = %q, want the requested window kept", r.KVRemedy)
+	}
+	if !strings.Contains(r.KVRemedy, "7.0 GB") {
+		t.Fatalf("kv remedy = %q, want the resulting 7.0 GB", r.KVRemedy)
+	}
+}
+
+func TestKVCacheRemedyStaysSilentWhenItCannotHelp(t *testing.T) {
+	base := Input{
+		Model: "llama3.1:8b", WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
+		Ctx: 131072, Arch: llama8B(), Backend: "ollama",
+	}
+	t.Run("already quantized", func(t *testing.T) {
+		in := base
+		in.KVBytes, in.KVSrc = 1, "OLLAMA_KV_CACHE_TYPE=q8_0"
+		if r := Evaluate(in); r.KVRemedy != "" {
+			t.Fatalf("kv remedy = %q; q8_0 is already the remedy", r.KVRemedy)
+		}
+	})
+	t.Run("no knob on the runtime", func(t *testing.T) {
+		in := base
+		in.Backend = "openai"
+		if r := Evaluate(in); r.KVRemedy != "" {
+			t.Fatalf("kv remedy = %q; must not name a flag the user cannot set", r.KVRemedy)
+		}
+	})
+	t.Run("weights alone overflow", func(t *testing.T) {
+		in := base
+		in.WeightsB = 9 * GiB
+		if r := Evaluate(in); r.KVRemedy != "" {
+			t.Fatalf("kv remedy = %q; no cache dtype saves weights that do not fit", r.KVRemedy)
+		}
+	})
+}
+
+func TestKVCacheFlagNamesTheRuntimeKnob(t *testing.T) {
+	for backend, want := range map[string]string{
+		"ollama":       "OLLAMA_KV_CACHE_TYPE",
+		"":             "OLLAMA_KV_CACHE_TYPE",
+		"llama-server": "--cache-type-k/--cache-type-v",
+		"openai":       "",
+		"unknown":      "",
+	} {
+		if got := KVCacheFlag(backend); got != want {
+			t.Fatalf("KVCacheFlag(%q) = %q, want %q", backend, got, want)
+		}
+	}
+}
+
+// advise --ctx defaults to 0, meaning "the model's max". The main path
+// resolves that before sizing the cache; the --fit path never did, so a
+// dtype remedy computed from a zero context offers a zero-token window.
+func TestKVCacheRemedyResolvesADefaultContextOnTheFitPath(t *testing.T) {
+	r := Evaluate(Input{
+		Model: "llama3.1:8b", WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
+		Ctx: 0, Arch: llama8B(), Backend: "ollama",
+		FitB: 9 * GiB, FitSrc: "llama-fit-params",
+	})
+	if r.Tier != LowMemory {
+		t.Fatalf("tier = %s (%s), want low_memory", r.Tier, r.Why)
+	}
+	if strings.Contains(r.KVRemedy, "keeps 0 ctx") || strings.Contains(r.KVRemedy, " 0 ") {
+		t.Fatalf("kv remedy offers a zero-token window: %q", r.KVRemedy)
+	}
+	// llama8B max ctx is the resolved request; q8_0 must beat the f16 window
+	// of 24576 or say nothing at all.
+	if r.KVRemedy != "" && !strings.Contains(r.KVRemedy, "49152") {
+		t.Fatalf("kv remedy = %q, want the q8_0 window 49152", r.KVRemedy)
+	}
+}
