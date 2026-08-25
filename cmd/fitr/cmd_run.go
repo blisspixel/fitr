@@ -521,74 +521,18 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		return nil, fmt.Errorf("establish clean runtime state: %w", err)
 	}
 	if err := standardStep("speed", fmt.Sprintf("x%d", reps), func() error {
-		for i := range reps {
-			// The nonce MUST vary: identical long prompts hit the prefix cache
-			// and prefill becomes fiction.
-			nonce := fmt.Sprintf("%s-%d", res.StartedAt, i)
-			s, err := eval.RunSpeed(ctx, c, model, spec, nonce)
-			if err != nil {
-				return err
-			}
-			res.Speed = append(res.Speed, s)
-			if live, ok := disp.(liveTelemetry); ok {
-				live.LiveSpeed(s, i+1, reps)
-			}
-		}
-		var dec, ttft, pre []float64
-		cached := 0
-		for _, s := range res.Speed {
-			dec = append(dec, s.DecodeTPS)
-			ttft = append(ttft, s.TTFT)
-			pre = append(pre, s.PrefillTPS)
-			cached += s.CachedPromptTok
-		}
-		res.DecodeSum, res.TTFTSum, res.PrefillSum = stats.MeanSD(dec), stats.MeanSD(ttft), stats.MeanSD(pre)
-		if cached > 0 {
-			disp.Note(fmt.Sprintf("prefill probe hit the prompt cache (%d tokens) despite the "+
-				"nonce - the prefill figure is partly fiction and should not be trusted", cached), "warn")
-		}
-		// Outlier census, hyperfine-style: flag, explain the likely cause,
-		// name the fix. Needs n>=5; below that the estimator is degenerate
-		// and stays silent rather than guessing.
-		for i, isOut := range stats.ModifiedZOutliers(dec) {
-			if isOut {
-				disp.Note(fmt.Sprintf("decode run %d (%.2f tok/s) is a statistical outlier vs "+
-					"median %.2f - another process likely interfered; the summary includes it, "+
-					"a re-run on a quiet system would not", i+1, dec[i], stats.Median(dec)), "warn")
-			}
-		}
-		return nil
+		return measureSpeed(ctx, c, model, spec, res, reps, disp)
 	}); err != nil {
 		return nil, err
 	}
 	if err := standardStep("memory", "resident @32K", func() error {
-		m, err := eval.RunMemory(ctx, c, model, 32768)
-		res.Memory = m
-		if live, ok := disp.(liveTelemetry); ok && m.ResidentGB > 0 {
-			live.LiveMemory(m.ResidentGB)
-		}
-		return err
+		return measureMemory(ctx, c, model, res, disp)
 	}); err != nil {
 		return nil, err
 	}
 
 	if err := standardStep("coding", fmt.Sprintf("x%d", reps), func() error {
-		for i := range reps {
-			w, err := eval.RunExec(ctx, c, model, spec.CodeWrite, filepath.Join(work, fmt.Sprintf("cw%d", i)))
-			if err != nil {
-				return err
-			}
-			res.CodeWrite = append(res.CodeWrite, w)
-			f, err := eval.RunExec(ctx, c, model, spec.CodeFix, filepath.Join(work, fmt.Sprintf("cf%d", i)))
-			if err != nil {
-				return err
-			}
-			res.CodeFix = append(res.CodeFix, f)
-			if live, ok := disp.(liveTelemetry); ok {
-				live.LiveProgress(i+1, reps, fmt.Sprintf("repeat %d of %d", i+1, reps))
-			}
-		}
-		return nil
+		return measureCoding(ctx, c, model, spec, res, reps, work, disp)
 	}); err != nil {
 		return nil, err
 	}
@@ -682,64 +626,12 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	}
 
 	// Plumbing BEFORE capability: a tools failure is uninterpretable until you
-	// know the template and parser work.
-	if err := standardStep("plumbing", "tool round-trip", func() error {
-		p, err := eval.RunPlumbing(ctx, c, model, spec.Plumbing)
-		if err != nil {
-			return err
-		}
-		res.Plumbing = &p
-		return nil
-	}); err != nil {
+	// know the template and parser work. The three phases move together because
+	// plumbing gates the other two, so splitting them would separate a decision
+	// from the evidence it rests on.
+	toolReady, err := measureToolPhases(ctx, c, model, spec, res, opts, work, disp, step, standardStep, stopAll)
+	if err != nil {
 		return nil, err
-	}
-
-	toolReady := res.Plumbing != nil && res.Plumbing.Outcome == eval.OutcomePass && res.Plumbing.Healthy
-	if !toolReady && level != "checks" {
-		reason := "tool capability not measured because plumbing is unavailable"
-		if res.Plumbing != nil && res.Plumbing.Verdict != "" {
-			reason = res.Plumbing.Verdict
-		}
-		disp.Note("tool and agent tasks skipped: "+reason, "warn")
-		for range reps {
-			res.Tools = append(res.Tools, eval.ToolLoopResult{
-				Outcome: eval.OutcomeSkipped, Ended: "plumbing_unavailable", Detail: reason,
-			})
-		}
-	}
-	if toolReady {
-		if err := standardStep("tools", fmt.Sprintf("x%d", reps), func() error {
-			for i := range reps {
-				t, err := eval.RunToolLoop(ctx, c, model, spec.Tools, filepath.Join(work, fmt.Sprintf("tl%d", i)))
-				if err != nil {
-					return err
-				}
-				res.Tools = append(res.Tools, t)
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	if level != "quick" && level != "checks" {
-		if toolReady {
-			if err := step("withdrawal", "a tool vanishes mid-loop", func() error {
-				w, err := eval.RunToolLoop(ctx, c, model, spec.Withdrawal, filepath.Join(work, "wd"))
-				if err != nil {
-					return err
-				}
-				res.Withdrawal = &w
-				return nil
-			}); err != nil {
-				return nil, err
-			}
-		} else {
-			res.Withdrawal = &eval.ToolLoopResult{
-				Outcome: eval.OutcomeSkipped, Ended: "plumbing_unavailable",
-				Detail: "tool plumbing did not establish a usable protocol",
-			}
-		}
 	}
 
 	if level != "quick" && level != "checks" {
@@ -1158,4 +1050,156 @@ func placementWarning(placement string) string {
 			"measures RAM bandwidth rather than the GPU. Free VRAM and re-run for a resident measurement"
 	}
 	return ""
+}
+
+// measureSpeed runs the throughput probe and summarises it. Extracted from the
+// battery so the phase can be exercised on its own: at 570 lines the enclosing
+// function could only be tested end to end.
+func measureSpeed(ctx context.Context, c llm.Backend, model string, spec *eval.Spec,
+	res *Result, reps int, disp render.Display) error {
+	for i := range reps {
+		// The nonce MUST vary: identical long prompts hit the prefix cache
+		// and prefill becomes fiction.
+		nonce := fmt.Sprintf("%s-%d", res.StartedAt, i)
+		s, err := eval.RunSpeed(ctx, c, model, spec, nonce)
+		if err != nil {
+			return err
+		}
+		res.Speed = append(res.Speed, s)
+		if live, ok := disp.(liveTelemetry); ok {
+			live.LiveSpeed(s, i+1, reps)
+		}
+	}
+	var dec, ttft, pre []float64
+	cached := 0
+	for _, s := range res.Speed {
+		dec = append(dec, s.DecodeTPS)
+		ttft = append(ttft, s.TTFT)
+		pre = append(pre, s.PrefillTPS)
+		cached += s.CachedPromptTok
+	}
+	res.DecodeSum, res.TTFTSum, res.PrefillSum = stats.MeanSD(dec), stats.MeanSD(ttft), stats.MeanSD(pre)
+	if cached > 0 {
+		disp.Note(fmt.Sprintf("prefill probe hit the prompt cache (%d tokens) despite the "+
+			"nonce - the prefill figure is partly fiction and should not be trusted", cached), "warn")
+	}
+	// Outlier census, hyperfine-style: flag, explain the likely cause,
+	// name the fix. Needs n>=5; below that the estimator is degenerate
+	// and stays silent rather than guessing.
+	for i, isOut := range stats.ModifiedZOutliers(dec) {
+		if isOut {
+			disp.Note(fmt.Sprintf("decode run %d (%.2f tok/s) is a statistical outlier vs "+
+				"median %.2f - another process likely interfered; the summary includes it, "+
+				"a re-run on a quiet system would not", i+1, dec[i], stats.Median(dec)), "warn")
+		}
+	}
+	return nil
+}
+
+// measureMemory records the resident footprint at a fixed 32K window.
+func measureMemory(ctx context.Context, c llm.Backend, model string,
+	res *Result, disp render.Display) error {
+	m, err := eval.RunMemory(ctx, c, model, 32768)
+	res.Memory = m
+	if live, ok := disp.(liveTelemetry); ok && m.ResidentGB > 0 {
+		live.LiveMemory(m.ResidentGB)
+	}
+	return err
+}
+
+// measureCoding generates and grades the code-write and code-fix tasks.
+func measureCoding(ctx context.Context, c llm.Backend, model string, spec *eval.Spec,
+	res *Result, reps int, work string, disp render.Display) error {
+	for i := range reps {
+		w, err := eval.RunExec(ctx, c, model, spec.CodeWrite, filepath.Join(work, fmt.Sprintf("cw%d", i)))
+		if err != nil {
+			return err
+		}
+		res.CodeWrite = append(res.CodeWrite, w)
+		f, err := eval.RunExec(ctx, c, model, spec.CodeFix, filepath.Join(work, fmt.Sprintf("cf%d", i)))
+		if err != nil {
+			return err
+		}
+		res.CodeFix = append(res.CodeFix, f)
+		if live, ok := disp.(liveTelemetry); ok {
+			live.LiveProgress(i+1, reps, fmt.Sprintf("repeat %d of %d", i+1, reps))
+		}
+	}
+	return nil
+}
+
+// measureToolPhases runs the tool plumbing probe and, only if it established a
+// usable protocol, the tool loop and the mid-loop withdrawal. It reports
+// whether tools were usable, because later phases need the same answer.
+//
+// A capability number measured through broken plumbing is not a capability
+// number, so a plumbing failure records SKIP for the dependent phases rather
+// than a zero score.
+func measureToolPhases(ctx context.Context, c llm.Backend, model string, spec *eval.Spec,
+	res *Result, opts runOpts, work string, disp render.Display,
+	step, standardStep func(string, string, func() error) error,
+	stopAll func() error) (bool, error) {
+	level, reps := opts.level, opts.reps
+	toolReady := false
+	// Plumbing BEFORE capability: a tools failure is uninterpretable until you
+	// know the template and parser work.
+	if err := standardStep("plumbing", "tool round-trip", func() error {
+		p, err := eval.RunPlumbing(ctx, c, model, spec.Plumbing)
+		if err != nil {
+			return err
+		}
+		res.Plumbing = &p
+		return nil
+	}); err != nil {
+		return toolReady, err
+	}
+
+	toolReady = res.Plumbing != nil && res.Plumbing.Outcome == eval.OutcomePass && res.Plumbing.Healthy
+	if !toolReady && level != "checks" {
+		reason := "tool capability not measured because plumbing is unavailable"
+		if res.Plumbing != nil && res.Plumbing.Verdict != "" {
+			reason = res.Plumbing.Verdict
+		}
+		disp.Note("tool and agent tasks skipped: "+reason, "warn")
+		for range reps {
+			res.Tools = append(res.Tools, eval.ToolLoopResult{
+				Outcome: eval.OutcomeSkipped, Ended: "plumbing_unavailable", Detail: reason,
+			})
+		}
+	}
+	if toolReady {
+		if err := standardStep("tools", fmt.Sprintf("x%d", reps), func() error {
+			for i := range reps {
+				t, err := eval.RunToolLoop(ctx, c, model, spec.Tools, filepath.Join(work, fmt.Sprintf("tl%d", i)))
+				if err != nil {
+					return err
+				}
+				res.Tools = append(res.Tools, t)
+			}
+			return nil
+		}); err != nil {
+			return toolReady, err
+		}
+	}
+
+	if level != "quick" && level != "checks" {
+		if toolReady {
+			if err := step("withdrawal", "a tool vanishes mid-loop", func() error {
+				w, err := eval.RunToolLoop(ctx, c, model, spec.Withdrawal, filepath.Join(work, "wd"))
+				if err != nil {
+					return err
+				}
+				res.Withdrawal = &w
+				return nil
+			}); err != nil {
+				return toolReady, err
+			}
+		} else {
+			res.Withdrawal = &eval.ToolLoopResult{
+				Outcome: eval.OutcomeSkipped, Ended: "plumbing_unavailable",
+				Detail: "tool plumbing did not establish a usable protocol",
+			}
+		}
+	}
+	return toolReady, nil
 }
