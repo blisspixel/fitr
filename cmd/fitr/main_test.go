@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1199,11 +1200,16 @@ func TestArtifactRejectsStoredScorecardTampering(t *testing.T) {
 type runIntegrationBackend struct {
 	stopCalls     int
 	generateCalls int
+	psCalls       int
 	stopErrAt     map[int]error
 	generateErrAt map[int]error
 	digest        string
 	effectiveCtx  int
 	contextErr    error
+	// flapPlacement makes /api/ps report a different resident split on later
+	// calls, the way a real runtime does once a battery has finished and the
+	// model's allocation has changed.
+	flapPlacement bool
 }
 
 type digestVerifyingBackend struct {
@@ -1257,7 +1263,19 @@ func (b *runIntegrationBackend) Show(context.Context, string) (ollama.ModelInfo,
 	return ollama.ModelInfo{Name: "model", Capabilities: []string{"completion"}}, nil
 }
 func (b *runIntegrationBackend) PS(context.Context) ([]ollama.RunningModel, error) {
-	return []ollama.RunningModel{{Name: "model", Size: 1024, SizeVRAM: 1024}}, nil
+	b.psCalls++
+	vram := int64(1024)
+	if b.flapPlacement {
+		// Every call reports a distinct split, so any two placement probes
+		// taken at different moments disagree. Keying off one call index
+		// would depend on how many unrelated PS calls the run happens to make.
+		if drop := int64(b.psCalls-1) * 64; drop < 960 {
+			vram = 1024 - drop
+		} else {
+			vram = 64
+		}
+	}
+	return []ollama.RunningModel{{Name: "model", Size: 1024, SizeVRAM: vram}}, nil
 }
 func (b *runIntegrationBackend) EffectiveContext(context.Context, string) (int, bool, error) {
 	if b.contextErr != nil {
@@ -1767,5 +1785,83 @@ func TestResultNumCtxFallsBackToDefault(t *testing.T) {
 	}
 	if resultNumCtx(&Result{DeviceKey: "host|gpu|ctx=2048"}) != 2048 {
 		t.Fatal("legacy key suffix must still parse")
+	}
+}
+
+// Ollama's /api/show returns architecture metadata but no size field, so
+// advise must recover the weight bytes from the model list the way inventory
+// always has. Without it, `fitr <model>` SKIPs with "model weights were not
+// measured" while bare `fitr` prints that model's size on the same screen.
+func TestWeightsFromTagsRecoversSizeWhenShowOmitsIt(t *testing.T) {
+	ctx := context.Background()
+	b := &inventoryBackend{runIntegrationBackend: &runIntegrationBackend{}, name: "ollama",
+		tags: []ollama.ModelInfo{
+			{Name: "gemma4:e2b", Size: 7 << 30},
+			{Name: "qwen3:30b", Size: 18 << 30},
+		}}
+
+	if got := weightsFromTags(ctx, b, "qwen3:30b"); got != 18<<30 {
+		t.Fatalf("weights = %d, want %d", got, int64(18)<<30)
+	}
+	// A bare name must resolve to the served tag the same way inventory joins.
+	if got := weightsFromTags(ctx, b, "qwen3:30b"); got == 0 {
+		t.Fatal("served model must not report zero weights")
+	}
+	if got := weightsFromTags(ctx, b, "not-installed:7b"); got != 0 {
+		t.Fatalf("an unlisted model must stay unmeasured, got %d", got)
+	}
+}
+
+func TestWeightsFromTagsStaysUnmeasuredOnFailure(t *testing.T) {
+	ctx := context.Background()
+	failing := &inventoryBackend{runIntegrationBackend: &runIntegrationBackend{}, name: "ollama",
+		err: errors.New("malformed models response")}
+	if got := weightsFromTags(ctx, failing, "qwen3:30b"); got != 0 {
+		t.Fatalf("a failed model list must not become a weight reading, got %d", got)
+	}
+
+	zeroSize := &inventoryBackend{runIntegrationBackend: &runIntegrationBackend{}, name: "ollama",
+		tags: []ollama.ModelInfo{{Name: "qwen3:30b", Size: 0}}}
+	if got := weightsFromTags(ctx, zeroSize, "qwen3:30b"); got != 0 {
+		t.Fatalf("size 0 is unmeasured, not a reading, got %d", got)
+	}
+}
+
+// Inference placement is derived from the resident VRAM split, so it changes
+// as a model's allocation changes. It is observed once while the model is
+// resident for context verification, then sealed into DeviceV2 and the
+// comparability key. A re-probe after the battery reads a different residency
+// state, and if it overwrites the sealed value the record's legacy and v2
+// device fields disagree -- the manifest check then rejects the save and a
+// completed measurement is thrown away. Placement is sealed, not refreshed.
+func TestExecuteSealsInferencePlacementAgainstALaterReprobe(t *testing.T) {
+	backend := &runIntegrationBackend{
+		digest: integrationDigest(), effectiveCtx: eval.NumCtx, flapPlacement: true,
+	}
+	display := render.New("none")
+	defer display.Close()
+	result, err := execute(context.Background(), backend, "model", runOpts{
+		level: "quick", profile: "default", reps: 1, checksReps: 1,
+	}, display)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend.psCalls < 2 {
+		t.Fatalf("placement was probed %d times; the flap is not exercised", backend.psCalls)
+	}
+	if result.DeviceV2 == nil {
+		t.Fatal("run produced no v2 fingerprint")
+	}
+	if result.Device.InferenceDevice != result.DeviceV2.Device.InferenceDevice {
+		t.Fatalf("placement diverged after sealing: legacy %q vs v2 %q",
+			result.Device.InferenceDevice, result.DeviceV2.Device.InferenceDevice)
+	}
+	if !reflect.DeepEqual(result.Device, result.DeviceV2.Device) {
+		t.Fatalf("legacy device fields differ from fingerprint v2:\n legacy=%+v\n v2=%+v",
+			result.Device, result.DeviceV2.Device)
+	}
+	// The manifest check is what actually refuses the save.
+	if err := result.ValidateEvidenceContract(); err != nil {
+		t.Fatalf("evidence contract = %v", err)
 	}
 }

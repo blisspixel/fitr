@@ -395,6 +395,44 @@ func ParseNvidiaSMIMemory(out string) float64 {
 	return best
 }
 
+func nvidiaSMIName(ctx context.Context) string {
+	if _, err := exec.LookPath("nvidia-smi"); err != nil {
+		return ""
+	}
+	cmd := exec.CommandContext(ctx, "nvidia-smi",
+		"--query-gpu=name,memory.total", "--format=csv,noheader,nounits")
+	cmd.WaitDelay = 250 * time.Millisecond
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return ParseNvidiaSMIName(string(out))
+}
+
+// ParseNvidiaSMIName reads nvidia-smi "name,memory.total" CSV and returns the
+// name of the largest card, matching the card ParseNvidiaSMIMemory reports.
+// The two must agree: a fingerprint that names one GPU and sizes another is
+// not a device receipt.
+func ParseNvidiaSMIName(out string) string {
+	var best float64
+	name := ""
+	for _, line := range strings.Split(out, "\n") {
+		parts := strings.Split(line, ",")
+		if len(parts) < 2 {
+			continue
+		}
+		n := strings.TrimSpace(parts[0])
+		mib, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err != nil || mib <= 0 || n == "" {
+			continue
+		}
+		if mib > best {
+			best, name = mib, n
+		}
+	}
+	return name
+}
+
 // NormalizeAccel maps a free-form build/log string onto the small set of
 // compute APIs that change measurements. GPU needles win over "cpu" so
 // "CUDA + CPU offload" does not classify as a CPU run.

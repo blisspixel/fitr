@@ -31,19 +31,93 @@ func ps(ctx context.Context, script string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// videoController is one Win32_VideoController row. AdapterRAM is a uint32
+// that silently caps at 4 GB, so it ranks adapters but never sizes them.
+type videoController struct {
+	Name          string `json:"Name"`
+	DriverVersion string `json:"DriverVersion"`
+	DriverDate    string `json:"DriverDate"`
+	AdapterRAM    int64  `json:"AdapterRAM"`
+}
+
 func gpuInfo(ctx context.Context) (name, driver, date string) {
-	raw := ps(ctx, `Get-CimInstance Win32_VideoController | Select-Object -First 1 `+
-		`Name,DriverVersion,@{n='DriverDate';e={$_.DriverDate.ToString('yyyy-MM-dd')}} `+
+	// Windows PowerShell 5.1 has no ConvertTo-Json -AsArray, and it collapses a
+	// single adapter to a bare object, so both shapes have to be accepted here.
+	raw := ps(ctx, `Get-CimInstance Win32_VideoController | Select-Object `+
+		`Name,DriverVersion,AdapterRAM,@{n='DriverDate';e={$_.DriverDate.ToString('yyyy-MM-dd')}} `+
 		`| ConvertTo-Json -Compress`)
-	var d struct {
-		Name          string `json:"Name"`
-		DriverVersion string `json:"DriverVersion"`
-		DriverDate    string `json:"DriverDate"`
-	}
-	if json.Unmarshal([]byte(raw), &d) != nil {
+	all, ok := parseVideoControllers(raw)
+	if !ok {
 		return "", "", ""
 	}
-	return d.Name, d.DriverVersion, d.DriverDate
+	c := pickVideoController(all, nvidiaSMIName(ctx))
+	return c.Name, c.DriverVersion, c.DriverDate
+}
+
+// parseVideoControllers accepts either the JSON array PowerShell emits for
+// several adapters or the bare object it emits for exactly one.
+func parseVideoControllers(raw string) ([]videoController, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+	if strings.HasPrefix(raw, "[") {
+		var all []videoController
+		if json.Unmarshal([]byte(raw), &all) != nil {
+			return nil, false
+		}
+		return all, true
+	}
+	var one videoController
+	if json.Unmarshal([]byte(raw), &one) != nil {
+		return nil, false
+	}
+	return []videoController{one}, true
+}
+
+// pickVideoController chooses the adapter that actually serves inference.
+// Taking the first row picks whatever Windows enumerated first, which on a box
+// with a headset dock or remote-desktop driver is a virtual monitor with no
+// memory -- and GPU name is part of the device fingerprint key, so naming the
+// wrong adapter silently partitions this machine's evidence. Prefer the card
+// nvidia-smi already sized, then the largest reported adapter.
+func pickVideoController(all []videoController, nvName string) videoController {
+	if len(all) == 0 {
+		return videoController{}
+	}
+	if nvName != "" {
+		for _, c := range all {
+			if strings.EqualFold(strings.TrimSpace(c.Name), nvName) {
+				return c
+			}
+		}
+		// nvidia-smi and CIM spell the same card differently often enough
+		// ("NVIDIA GeForce RTX 4090" vs a vendor suffix) to warrant a
+		// containment pass before falling back to size. Take the most
+		// specific match: a stub adapter named "NVIDIA" is a substring of
+		// every NVIDIA card, and letting it win reintroduces exactly the
+		// wrong-fingerprint bug the exact pass above prevents.
+		best, bestLen := videoController{}, -1
+		for _, c := range all {
+			n := strings.TrimSpace(c.Name)
+			if n == "" || !(strings.Contains(n, nvName) || strings.Contains(nvName, n)) {
+				continue
+			}
+			if len(n) > bestLen {
+				best, bestLen = c, len(n)
+			}
+		}
+		if bestLen >= 0 {
+			return best
+		}
+	}
+	best := all[0]
+	for _, c := range all[1:] {
+		if c.AdapterRAM > best.AdapterRAM {
+			best = c
+		}
+	}
+	return best
 }
 
 func cpuName(ctx context.Context) string {

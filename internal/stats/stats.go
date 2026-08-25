@@ -356,11 +356,17 @@ func ModifiedZOutliers(xs []float64) []bool {
 	return out
 }
 
-// Median is the sample median.
+// Median is the sample median. An empty sample has no median and returns
+// zero, the way MeanSD returns a zero Summary: callers already treat an
+// unmeasured statistic as absent, and the even-length branch would otherwise
+// index s[-1] and panic.
 func Median(xs []float64) float64 {
 	s := append([]float64(nil), xs...)
 	sort.Float64s(s)
 	n := len(s)
+	if n == 0 {
+		return 0
+	}
 	if n%2 == 1 {
 		return s[n/2]
 	}

@@ -379,6 +379,19 @@ func TestParseNvidiaSMIMemoryTakesLargestCard(t *testing.T) {
 	}
 }
 
+func TestParseNvidiaSMINameMatchesTheSizedCard(t *testing.T) {
+	got := ParseNvidiaSMIName("NVIDIA T400, 2048\nNVIDIA GeForce RTX 4090, 24564\n")
+	if got != "NVIDIA GeForce RTX 4090" {
+		t.Fatalf("got %q; the name must be the card ParseNvidiaSMIMemory sizes", got)
+	}
+	if ParseNvidiaSMIName("") != "" {
+		t.Fatal("empty nvidia-smi output names no card")
+	}
+	if ParseNvidiaSMIName("[NVIDIA]\nfailed") != "" {
+		t.Fatal("garbage must not name a card")
+	}
+}
+
 func TestFormatVRAMDoesNotPrintZeroAsAReading(t *testing.T) {
 	if got := FormatVRAM(0, ""); got != "unknown (not measured)" {
 		t.Fatalf("got %q", got)

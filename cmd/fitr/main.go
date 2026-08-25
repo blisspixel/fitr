@@ -742,6 +742,27 @@ func canonicalBackendKind(kind string) (string, bool) {
 }
 
 // ---------------------------------------------------------------- advise
+
+// weightsFromTags recovers the on-disk weight size for a served model from the
+// runtime's model list. Ollama's /api/show carries architecture metadata but
+// no size field, so advise alone would SKIP every Ollama model for "weights
+// were not measured" while bare `fitr` printed that model's size on the same
+// screen -- inventory has always read the byte total from /api/tags. This is
+// still a runtime reading, not an estimate: same source, same model identity.
+// Returns 0 when the runtime does not list the model, which stays SKIP.
+func weightsFromTags(ctx context.Context, c llm.Backend, model string) int64 {
+	tags, err := c.Tags(ctx)
+	if err != nil {
+		return 0
+	}
+	for _, t := range tags {
+		if modelref.SameServed(model, t.Name) && t.Size > 0 {
+			return t.Size
+		}
+	}
+	return 0
+}
+
 // cmdAdvise answers: does this model fit on this box, and if not, which
 // flag to try? SKIP when fit cannot be measured (no VRAM reading, no
 // weights, no architecture) - never a fabricated GB number.
@@ -866,6 +887,9 @@ func cmdAdvise(ctx context.Context, args []string) int {
 					in.Source = "GGUF at " + info.Path
 				}
 			}
+		}
+		if in.WeightsB == 0 {
+			in.WeightsB = weightsFromTags(ctx, c, model)
 		}
 		if in.Source == "" {
 			in.Source = c.Name() + " (no architecture metadata)"
@@ -1927,7 +1951,14 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		}
 	}
 
-	res.Device.InferenceDevice = device.InferenceDeviceFor(ctx, c, model)
+	// Inference placement is observed once, above, while the model is resident
+	// for context verification, and is then sealed into DeviceV2 and the
+	// comparability key. Re-probing here overwrote that sealed value from a
+	// different residency state: the battery has finished and the model may be
+	// unloaded, so the two observations disagree, res.Device and
+	// DeviceV2.Device diverge, and the manifest check rejects the save --
+	// discarding a completed measurement. A later reading taken under
+	// different conditions does not correct the sealed one.
 
 	// Degeneracy over the longest text this model produced.
 	longest := ""
