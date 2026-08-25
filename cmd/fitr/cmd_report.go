@@ -82,6 +82,7 @@ func cmdExport(ctx context.Context, args []string) int {
 func cmdView(_ context.Context, args []string) int {
 	fs := flag.NewFlagSet("view", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	viewFull := fs.Bool("full", false, "with --display json, emit the complete sealed result record instead of the scorecard")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code
@@ -136,7 +137,21 @@ func cmdView(_ context.Context, args []string) int {
 	case "json":
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(selected); err != nil {
+		// The sealed record carries per-trial evidence and the run manifest,
+		// which is what `--full` is for. What a reader of `view` wants is the
+		// scorecard the command prints.
+		var payload any = selected
+		if !*viewFull {
+			card, meta := selected.Scorecard, resultMeta(selected, selected.Profile)
+			if artifact, err := artifactFrom(selected); err == nil {
+				card, meta = artifact.Scorecard, artifact.Meta
+			}
+			payload = map[string]any{
+				"schema": "fitr.view.v1", "model": selected.Model,
+				"scorecard": card, "meta": meta,
+			}
+		}
+		if err := encoder.Encode(payload); err != nil {
 			errPrint("could not render result: "+err.Error(), "", "")
 			return exitError
 		}
@@ -161,6 +176,7 @@ func cmdBoard(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("board", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	current := fs.Bool("current", false, "only this machine, including its measured context variants")
+	full := fs.Bool("full", false, "with --display json, emit the complete sealed result records instead of the reported columns")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code
@@ -314,7 +330,17 @@ func cmdBoard(ctx context.Context, args []string) int {
 		return exitError
 	}
 	if render.Resolve(*mode) == "json" {
-		payload := map[string]any{"groups": visible, "current": cur}
+		// Default to what the board reports, not the sealed records behind it.
+		// The records are an order of magnitude larger, grow without bound in
+		// the number of models, and none of the extra fields appear on screen.
+		payload := map[string]any{
+			"schema": "fitr.board.v1", "current": cur,
+			"groups": board.Groups, "results": board.Results,
+		}
+		if *full {
+			payload["groups"] = visible
+			payload["schema"] = "fitr.board.full.v1"
+		}
 		if excludedContaminated > 0 {
 			payload["inconclusive_excluded"] = excludedContaminated
 		}

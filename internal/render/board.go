@@ -10,26 +10,37 @@ import (
 // Board is the presentation model for the saved-result overview. It contains
 // only values needed by the terminal, which keeps layout concerns out of the
 // measurement and scoring code.
+// The JSON tags matter: this presentation model is what `--display json`
+// emits. Encoding the sealed result records instead produced 23 KB for two
+// models, which grows past what a caller can hold in one read at three, and
+// buries the handful of fields the board actually reports.
 type Board struct {
-	Groups  []BoardGroup
-	Results int
+	Groups  []BoardGroup `json:"groups"`
+	Results int          `json:"results"`
 }
 
 type BoardGroup struct {
-	GPU, Driver, KV, Note string
-	NumCtx                int
-	EffectiveCtx          int
-	ContextState          string
-	Rows                  []BoardRow
+	GPU          string     `json:"gpu"`
+	Driver       string     `json:"gpu_driver,omitempty"`
+	KV           string     `json:"kv_cache_type,omitempty"`
+	Note         string     `json:"note,omitempty"`
+	NumCtx       int        `json:"num_ctx,omitempty"`
+	EffectiveCtx int        `json:"effective_ctx,omitempty"`
+	ContextState string     `json:"context_state,omitempty"`
+	Rows         []BoardRow `json:"rows"`
 }
 
 type BoardRow struct {
-	Model, ParamSize, Quant string
-	DecodeMean, DecodeSD    float64
-	PrefillMean, ResidentGB float64
-	DecodeSeries            []float64
-	Repeats                 int
-	Serves                  []string
+	Model        string    `json:"model"`
+	ParamSize    string    `json:"parameter_size,omitempty"`
+	Quant        string    `json:"quant,omitempty"`
+	DecodeMean   float64   `json:"decode_tps"`
+	DecodeSD     float64   `json:"decode_sd,omitempty"`
+	PrefillMean  float64   `json:"prefill_tps,omitempty"`
+	ResidentGB   float64   `json:"resident_gb,omitempty"`
+	DecodeSeries []float64 `json:"decode_series,omitempty"`
+	Repeats      int       `json:"repeats"`
+	Serves       []string  `json:"serves,omitempty"`
 }
 
 // WriteBoard renders a data-dense overview without taking over the terminal.

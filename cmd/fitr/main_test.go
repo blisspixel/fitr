@@ -330,7 +330,7 @@ func TestViewDefaultsToNewestSavedResult(t *testing.T) {
 	}
 }
 
-func TestViewReadsResultPathAndCanEmitRawJSON(t *testing.T) {
+func TestViewReadsResultPathAndEmitsBothJSONShapes(t *testing.T) {
 	dir := t.TempDir()
 	r := golden(t)
 	path := filepath.Join(dir, "result.json")
@@ -342,28 +342,58 @@ func TestViewReadsResultPathAndCanEmitRawJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output, err := os.CreateTemp(dir, "view-output-*.json")
-	if err != nil {
-		t.Fatal(err)
+	emit := func(t *testing.T, args ...string) []byte {
+		t.Helper()
+		out, err := os.CreateTemp(dir, "view-output-*.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved := os.Stdout
+		os.Stdout = out
+		code := cmdView(context.Background(), append([]string{path}, args...))
+		out.Close()
+		os.Stdout = saved
+		body, err := os.ReadFile(out.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if code != exitOK {
+			t.Fatalf("view exited %d: %s", code, body)
+		}
+		return body
 	}
-	old := os.Stdout
-	os.Stdout = output
-	code := cmdView(context.Background(), []string{path, "--display", "json"})
-	output.Close()
-	os.Stdout = old
-	out, err := os.ReadFile(output.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code != exitOK {
-		t.Fatalf("view exited %d: %s", code, out)
-	}
+
+	// --full returns the sealed record unchanged.
+	full := emit(t, "--display", "json", "--full")
 	var got Result
-	if err := json.Unmarshal(out, &got); err != nil {
-		t.Fatalf("view JSON is invalid: %v\n%s", err, out)
+	if err := json.Unmarshal(full, &got); err != nil {
+		t.Fatalf("view --full JSON is invalid: %v", err)
 	}
 	if got.Model != r.Model || got.SchemaVersion != r.SchemaVersion {
-		t.Fatalf("view JSON changed the saved result: got %q schema %d", got.Model, got.SchemaVersion)
+		t.Fatalf("view --full changed the saved result: got %q schema %d", got.Model, got.SchemaVersion)
+	}
+
+	// The default is the scorecard the command prints. The record behind it is
+	// an order of magnitude larger and carries per-trial evidence nobody
+	// reading `view` asked for.
+	brief := emit(t, "--display", "json")
+	var card map[string]any
+	if err := json.Unmarshal(brief, &card); err != nil {
+		t.Fatalf("view JSON is invalid: %v", err)
+	}
+	if card["schema"] != "fitr.view.v1" {
+		t.Fatalf("view JSON does not identify itself: %v", card["schema"])
+	}
+	if card["model"] != r.Model {
+		t.Fatalf("view JSON names %v, want %q", card["model"], r.Model)
+	}
+	if card["scorecard"] == nil {
+		t.Fatalf("view JSON carries no scorecard")
+	}
+	// A projection that approaches the size of the record it replaced has
+	// stopped being a projection.
+	if len(brief) >= len(full) {
+		t.Fatalf("projection is %d bytes against a %d-byte record", len(brief), len(full))
 	}
 }
 

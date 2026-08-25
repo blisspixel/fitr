@@ -235,7 +235,12 @@ func addInt64(terms ...int64) (int64, bool) {
 	return out, true
 }
 
+// ReportSchema names the advise JSON contract. Every fitr JSON document
+// carries one so a reader can tell what it is holding from the payload alone.
+const ReportSchema = "fitr.advise.v1"
+
 type Report struct {
+	Schema        string    `json:"schema"`
 	Tier          string    `json:"tier"`
 	Model         string    `json:"model,omitempty"`
 	Quant         string    `json:"quant,omitempty"`
@@ -390,6 +395,7 @@ func kvElemBytes(in Input) (float64, string, bool) {
 
 func Evaluate(in Input) Report {
 	r := evaluateCore(in)
+	r.Schema = ReportSchema
 	r.Fit = ContextFit(in)
 	return r
 }
