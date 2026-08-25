@@ -334,10 +334,10 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	var vsrc string
 	var wg sync.WaitGroup
 	wg.Add(4)
-	go func() { defer wg.Done(); gpu, drv, date = gpuInfo(probeCtx) }()
-	go func() { defer wg.Done(); cpu = cpuName(probeCtx) }()
-	go func() { defer wg.Done(); ram = ramGB(probeCtx) }()
-	go func() { defer wg.Done(); vram, vsrc = vramInfo(probeCtx) }()
+	go func() { defer wg.Done(); gpu, drv, date = cachedGPUInfo(probeCtx) }()
+	go func() { defer wg.Done(); cpu = cachedCPUName(probeCtx) }()
+	go func() { defer wg.Done(); ram = cachedRAMGB(probeCtx) }()
+	go func() { defer wg.Done(); vram, vsrc = cachedVRAMInfo(probeCtx) }()
 
 	cfg := map[string]string{}
 	version := ""
@@ -687,4 +687,89 @@ func IsDenseAndBig(paramSize, family string, p Profile) bool {
 		return false
 	}
 	return v > lim
+}
+
+// ---------------------------------------------------------------- host probes
+// The host facts below are process round-trips on Windows, and Detect runs on
+// the path of nearly every command -- some commands call it several times. The
+// CPU, RAM, GPU and memory of the machine cannot change while one fitr process
+// runs, so probing them repeatedly buys nothing and costs a subprocess storm.
+//
+// That cost is not theoretical. An empty CPU name is fatal downstream:
+// fingerprint v2 refuses to seal without it and the run dies. On a loaded
+// machine a probe sharing a five-second budget with three others can return
+// nothing at all, which is how a run failed with "fingerprint is missing CPU"
+// on a busy CI runner. Probing once per process removes both the latency and
+// the chance of a slow probe cancelling a measurement.
+//
+// Only successful readings are cached. A probe that failed under load must be
+// allowed to succeed on the next attempt rather than pinning an empty value
+// for the life of the process.
+var hostProbes struct {
+	sync.Mutex
+	gpu, gpuDriver, gpuDate string
+	gpuOK                   bool
+	cpu                     string
+	ram                     float64
+	vram                    float64
+	vramSource              string
+	vramOK                  bool
+}
+
+func cachedGPUInfo(ctx context.Context) (name, driver, date string) {
+	hostProbes.Lock()
+	defer hostProbes.Unlock()
+	if hostProbes.gpuOK {
+		return hostProbes.gpu, hostProbes.gpuDriver, hostProbes.gpuDate
+	}
+	name, driver, date = gpuInfo(ctx)
+	if name != "" {
+		hostProbes.gpu, hostProbes.gpuDriver, hostProbes.gpuDate = name, driver, date
+		hostProbes.gpuOK = true
+	}
+	return name, driver, date
+}
+
+func cachedCPUName(ctx context.Context) string {
+	hostProbes.Lock()
+	defer hostProbes.Unlock()
+	if hostProbes.cpu != "" {
+		return hostProbes.cpu
+	}
+	hostProbes.cpu = cpuName(ctx)
+	return hostProbes.cpu
+}
+
+func cachedRAMGB(ctx context.Context) float64 {
+	hostProbes.Lock()
+	defer hostProbes.Unlock()
+	if hostProbes.ram > 0 {
+		return hostProbes.ram
+	}
+	hostProbes.ram = ramGB(ctx)
+	return hostProbes.ram
+}
+
+func cachedVRAMInfo(ctx context.Context) (float64, string) {
+	hostProbes.Lock()
+	defer hostProbes.Unlock()
+	if hostProbes.vramOK {
+		return hostProbes.vram, hostProbes.vramSource
+	}
+	gb, source := vramInfo(ctx)
+	// An unmeasured budget is a legitimate reading on a CPU-only box, so it is
+	// cached too: the distinguishing fact is whether the probe ran, not
+	// whether it found a GPU.
+	hostProbes.vram, hostProbes.vramSource, hostProbes.vramOK = gb, source, true
+	return gb, source
+}
+
+// resetHostProbes clears the per-process cache. Tests only.
+func resetHostProbes() {
+	hostProbes.Lock()
+	defer hostProbes.Unlock()
+	hostProbes.gpu, hostProbes.gpuDriver, hostProbes.gpuDate, hostProbes.gpuOK = "", "", "", false
+	hostProbes.cpu = ""
+	hostProbes.ram = 0
+	hostProbes.vram, hostProbes.vramSource, hostProbes.vramOK = 0, "", false
 }

@@ -156,13 +156,19 @@ clean install on each operating system.
       losing the result. The run now names the step that failed, says nothing
       was saved, and lists what was completed and thrown away.
 - [x] Stop a slow probe from cancelling a measurement. Four device probes
-      shared one budget, and an empty CPU name is fatal: fingerprint v2
-      refuses to seal without it, so a run died with "fingerprint is missing
-      CPU". A loaded machine is exactly when someone measures, and this was
-      first seen on a busy CI runner rather than reasoned about. The CPU probe
-      now retries once on its own budget, and the diagnostic says a probe
-      returned nothing and to try again, rather than reading like broken
-      hardware.
+      shared one five-second budget, and an empty CPU name is fatal:
+      fingerprint v2 refuses to seal without it, so a run died with
+      "fingerprint is missing CPU". A loaded machine is exactly when someone
+      measures, and this was first seen failing repeatedly on a busy CI runner
+      rather than reasoned about.
+      Host facts cannot change while one process runs, and `Detect` is on the
+      path of nearly every command -- a run calls it several times -- so each
+      call was re-running the same subprocesses and re-rolling the same dice.
+      They are now read once per process, the CPU probe retries on its own
+      budget, and the diagnostic says a probe returned nothing and to try
+      again rather than reading like broken hardware. Only successful readings
+      are cached: one slow moment must not pin an empty value for the life of
+      the process.
 - [ ] Reconsider retry only if the intermittent transport fault recurs. Ten
       direct reproductions of the withdrawal loop did not trigger it, so there
       is no failure model to design a retry around, and a retry that hides a
