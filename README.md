@@ -88,6 +88,21 @@ This is the part that makes the rest worth trusting.
 - **It will not run generated code by default**, and it says so rather than
   scoring coding as if it had.
 
+## Local, and yours
+
+Everything happens on your machine. No account, no sign-in, no telemetry, no
+upload. fitr only ever talks to the runtime you point it at, and it works the
+same with the network unplugged. Sharing a result is an explicit command, and
+the artifact it writes leaves out the raw model output.
+
+It also has no opinion about which models you should run. Whatever your runtime
+serves is what fitr measures, and how often a model refuses is a first-class
+need in the battery (`no filtering / low refusal`) rather than an awkward
+footnote — because whether a model will actually answer you is a property of
+that model on your hardware, and worth knowing before you commit to it.
+
+Apache 2.0, and the evidence stays where it was produced.
+
 ## Documentation
 
 **Start here** — [design](docs/design.md) for what a result means and why, then
