@@ -3860,9 +3860,14 @@ func cmdCompare(ctx context.Context, args []string) int {
 				"compare two runs at the same --ctx, or re-measure")
 			return exitError
 		}
-		errPrint("these results were measured on different hardware/config",
-			"tok/s is device-specific; the comparison would be meaningless",
-			"re-measure both on this machine")
+		// Naming the machine is misleading when both runs happened on it: the
+		// usual cause is that its STATE moved between them -- a model resident
+		// from something else, so one run was partly offloaded and the other
+		// was not. Fingerprint.Diff already knows exactly which fields moved,
+		// so say them instead of sending the operator to re-measure blind.
+		note := incomparableNote(a.Device.Diff(b.Device))
+		errPrint("these results were not measured under the same conditions", note,
+			"re-measure both with the machine in the same state, then compare")
 		return exitError
 	}
 
@@ -4071,4 +4076,18 @@ func placementWarning(placement string) string {
 			"measures RAM bandwidth rather than the GPU. Free VRAM and re-run for a resident measurement"
 	}
 	return ""
+}
+
+// incomparableNote turns a fingerprint delta into the reason two runs cannot
+// be ranked together. Naming the machine is misleading when both runs happened
+// on it, which is the common case: what moved was its state, not its hardware.
+func incomparableNote(diff [][3]string) string {
+	if len(diff) == 0 {
+		return "tok/s is device-specific; the comparison would be meaningless"
+	}
+	parts := make([]string, 0, len(diff))
+	for _, d := range diff {
+		parts = append(parts, fmt.Sprintf("%s %q vs %q", d[0], d[1], d[2]))
+	}
+	return "differs by " + strings.Join(parts, "; ")
 }
