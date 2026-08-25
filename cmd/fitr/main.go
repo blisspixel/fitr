@@ -1675,6 +1675,16 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	for _, conflict := range res.Device.IdentityConflicts() {
 		disp.Note("device identity: "+conflict, "warn")
 	}
+	// Doctor has always warned about partial offload; run did not, so a
+	// measurement taken with most of the model on the GPU and the rest in
+	// system RAM was saved looking like any other. The same 7B measured 179
+	// tok/s resident and 16 tok/s at GPU 65% on one machine -- an order of
+	// magnitude, with nothing said at the time. Placement is part of the
+	// comparability key, so such a run cannot be ranked against a resident
+	// one, but the operator should hear it while it is still worth acting on.
+	if note := placementWarning(res.Device.InferenceDevice); note != "" {
+		disp.Note(note, "warn")
+	}
 	if prof.Name == "default" {
 		disp.Note("using the UNCALIBRATED default profile - verdicts are rough; "+
 			"copy profiles/default.json and tune it for this box", "warn")
@@ -4042,4 +4052,23 @@ func abandonedStepSummary(completed []string) string {
 		return "no step had completed yet"
 	}
 	return "already completed and now discarded: " + strings.Join(completed, ", ")
+}
+
+// placementWarning describes a measurement that is not really being taken on
+// the accelerator it appears to be taken on. It mirrors the rule doctor
+// applies, so the two surfaces cannot drift into disagreeing about the same
+// machine. An empty string means placement is either fully offloaded or was
+// not observed, and an unobserved placement is not a fault to shout about.
+func placementWarning(placement string) string {
+	switch {
+	case placement == "" || placement == "GPU 100%" || placement == "unknown":
+		return ""
+	case placement == "CPU":
+		return "inference is running on the CPU with no offload; decode here is a fraction of " +
+			"what this model does on a GPU, and the number is only meaningful against other CPU runs"
+	case strings.HasPrefix(placement, "GPU "):
+		return "partial offload (" + placement + "); the rest of the model is in system RAM, so decode " +
+			"measures RAM bandwidth rather than the GPU. Free VRAM and re-run for a resident measurement"
+	}
+	return ""
 }

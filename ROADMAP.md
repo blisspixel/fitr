@@ -271,7 +271,26 @@ change the 1.0 product loop.
       itself to a lower standard than it holds a model to. The correction is
       published as a measured residual with its own uncertainty, never folded
       silently into the estimate.
-- [ ] Publish repeatability and test-retest studies.
+- [ ] Publish repeatability and test-retest studies. First measurements taken,
+      on one host with a 7B model:
+      | Condition | Decode CV | Note |
+      |---|---|---|
+      | Within one run, k=3, resident | 1.6% | the sampling noise the intervals model |
+      | Across 5 separate runs, same placement | 0.6% | reload does not add much |
+      | Across placements, resident vs `GPU 65%` | ~1000% | 179 tok/s against 16 tok/s |
+      The dominant source of variance is not sampling, and it is not reload.
+      It is machine state: the same model, the same binary and the same box
+      differ by an order of magnitude depending on how much of it fits. That
+      is why placement belongs in the comparability key, and why a run now
+      says so while the operator can still act on it. A behavioural task is
+      separately unstable -- ten seeded, temperature-zero runs of the tool
+      withdrawal loop took four to eight turns and split nine to one on
+      outcome, so turn counts are not a measurement.
+- [x] Warn at measurement time when inference is not really on the
+      accelerator. Doctor had this rule and run did not, so a partial-offload
+      run was saved looking like any other. Found by accident: a repeatability
+      study returned 16 tok/s for a model that had measured 179 an hour
+      earlier, because something else had taken most of the VRAM.
 - [ ] Build a formal backend-conformance corpus.
 
 Exit criterion: an independent reviewer can reproduce the protocol and
