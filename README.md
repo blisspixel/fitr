@@ -2,16 +2,24 @@
 
 [![CI](https://github.com/blisspixel/fitr/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/fitr/actions/workflows/ci.yml)
 
-**Know which local models are worth running on your machine, and what to
-change when one isn't.**
+**Get the most out of the hardware you already have.**
 
-fitr is a single static binary that reads the models your runtime is already
-serving, works out what fits in your VRAM, measures what they actually do on
-this box, and refuses to compare results that are not comparable.
+New local models land constantly and open weights keep getting better, so this
+is not a question you answer once. Most of the noise is not even aimed at you:
+the model everyone is posting about wants more VRAM than your card has, and its
+numbers came from someone else's GPU anyway.
 
-A new model lands on your feed. The post skipped the quant. The leaderboard was
-someone else's GPU. You still do not know whether this artifact fits in *your*
-VRAM, or what it does once it is there.
+The question that actually matters is narrower, and it comes back every few
+weeks. *Given this machine, what is worth running right now, and at what
+settings?*
+
+Without a way to answer it you get two bad options: burn an evening re-testing
+things by hand every time something drops, or quietly keep running something
+worse than your card is capable of.
+
+fitr answers it here. It reads what your runtime is already serving, tells you
+which models fit and at what context length, measures what they actually do on
+your hardware, and hands you the exact flag to change when the answer is no.
 
 > `llmfit` tells you what fits. Leaderboards tell you what is smart on someone
 > else's machine. **`fitr` tells you what is true on yours**, and what is
@@ -33,8 +41,10 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
-No Python, no venv, no package manager. Installers bind the downloaded asset to
-its exact `SHA256SUMS` entry. Details and build-from-source are in
+One command, then it runs. No Python, no venv, no CUDA wrangling, nothing to
+keep up to date. No telemetry either: fitr only ever talks to the runtime you
+point it at. Installers verify the download against its published checksum.
+Pinning, relocating and building from source are in
 [install](docs/usage.md#install).
 
 ## The loop
