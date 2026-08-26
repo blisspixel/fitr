@@ -116,10 +116,38 @@ func TestNoColorThemeRetainsNonColorState(t *testing.T) {
 	}
 }
 
-func TestSparklineOneCellUsesLatestSample(t *testing.T) {
-	got := sparkline([]float64{1, 2, 3}, 1, DefaultGlyphs(true))
-	if len([]rune(got)) != 1 {
-		t.Fatalf("sparkline = %q, want one cell", got)
+// The monitor had its own copy of the sparkline, with the two faults the CLI
+// renderer had: it drew the unreadable ASCII ramp when Unicode was off, and it
+// normalised to the series min and max with no floor, so a 0.4% wobble and a
+// tenfold swing rendered identically.
+func TestSparklineOnlyDrawsWhatItCanSupport(t *testing.T) {
+	uni, ascii := DefaultGlyphs(false), DefaultGlyphs(true)
+	cases := []struct {
+		name   string
+		values []float64
+		limit  int
+		glyphs Glyphs
+		want   string
+	}{
+		{"no ASCII ramp is readable", []float64{0, 2, 4}, 7, ascii, "-"},
+		{"one observation has no shape", []float64{4}, 7, uni, "-"},
+		{"one cell cannot depict a series", []float64{1, 2, 3}, 1, uni, "-"},
+		{"identical values are flat", []float64{4, 4, 4}, 7, uni, "flat"},
+		{"spread below the floor is flat", []float64{100, 100.5, 100.2}, 7, uni, "flat"},
+		{"real spread draws", []float64{0, 2, 4}, 7, uni, "▁▅█"},
+	}
+	for _, tc := range cases {
+		if got := sparkline(tc.values, tc.limit, tc.glyphs); got != tc.want {
+			t.Errorf("%s: sparkline = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	// Down-sampling must not divide by zero or index out of range at any limit.
+	series := []float64{1, 9, 2, 8, 3, 7, 4, 6, 5, 10, 0, 11}
+	for limit := 1; limit <= 20; limit++ {
+		got := sparkline(series, limit, uni)
+		if n := len([]rune(got)); limit >= 2 && n > limit {
+			t.Errorf("limit %d produced %d cells: %q", limit, n, got)
+		}
 	}
 }
 

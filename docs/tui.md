@@ -138,8 +138,18 @@ Hostile control sequences are removed before layout, and long names are
 truncated by display cells.
 
 `NO_COLOR` removes color while retaining text and selection shape. Any
-non-empty `FITR_ASCII` replaces structural Unicode and graph glyphs. The
-terminal's default background remains the default background.
+non-empty `FITR_ASCII` replaces structural Unicode -- rules, bars, selection
+markers -- with stable ASCII. Repeat-shape graphs are *withheld* rather than
+replaced: `.:-=+*#@` is not a perceptual ramp, since `#` and `@` are dense but
+not tall, so a reader cannot order it by height and the drawn shape says
+nothing. The numbers on the row carry it instead. The terminal's default
+background remains the default background.
+
+A shape is also withheld when there is nothing to show: fewer than two
+observations reads `-`, and a series whose spread is under 5% of its mean
+reads `flat`. Those are different statements and are never printed for each
+other, because a graph normalised to its own min and max would otherwise draw
+a 0.4% wobble as a dramatic zigzag.
 
 ## Presentation contracts
 

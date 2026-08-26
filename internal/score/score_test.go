@@ -3,6 +3,7 @@ package score
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -453,4 +454,32 @@ func TestExcludeContaminationDoesNotMutateStoredScorecard(t *testing.T) {
 	if excluded.Needs["coding"].State != Inconclusive || len(excluded.Serves) != 0 {
 		t.Fatalf("excluded scorecard retained a claim: %+v", excluded)
 	}
+}
+
+// The design doc names the needs. When a label is reworded in code and not
+// there, the doc quietly starts describing a tool that no longer exists --
+// which is exactly what happened when "leaves tools alone when they don't
+// apply" became "leaves unused tools alone" and three others changed with it.
+//
+// Trailing parentheticals are stripped from both sides: "(chat)" and
+// "(~/.fitr/tasks)" are UI hints for the column, and prose is entitled to
+// leave them out.
+func TestDesignDocNamesTheSameNeedsAsTheCode(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "design.md"))
+	if err != nil {
+		t.Fatalf("design doc is unreadable, so nothing is checking it: %v", err)
+	}
+	doc := string(b)
+	for key, label := range NeedLabel {
+		if want := stripParenthetical(label); !strings.Contains(doc, want) {
+			t.Errorf("docs/design.md does not name %s as %q (label is %q)", key, want, label)
+		}
+	}
+}
+
+func stripParenthetical(s string) string {
+	if i := strings.LastIndex(s, " ("); i > 0 && strings.HasSuffix(s, ")") {
+		return s[:i]
+	}
+	return s
 }

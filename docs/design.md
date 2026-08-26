@@ -45,13 +45,14 @@ and fail another, and one number cannot say that.
 |---|---|
 | **fast + pretty good** | responsiveness; TTFT-dominated |
 | **great coding / reasoning** | computed-answer checks today; executable assertions stay INCONCLUSIVE until isolated |
-| **emits valid structured output** | quantization breaks JSON before prose - the earliest damage signal |
+| **valid structured output** | quantization breaks JSON before prose - the earliest damage signal |
 | **follows exact instructions** | verifiable constraints, graded by code |
 | **no filtering / low refusal** | a first-class need, not a footnote |
-| **works unattended** | prefill-bound, not decode-bound |
-| **leaves tools alone when they don't apply** | restraint at rest (no calls on an unrelated question) and under change (a tool vanishes mid-loop) |
-| **small enough to keep resident** | measured resident bytes, not file size |
+| **works unattended (agent)** | prefill-bound, not decode-bound |
+| **leaves unused tools alone** | restraint at rest (no calls on an unrelated question) and under change (a tool vanishes mid-loop) |
+| **keeps a small footprint** | measured resident bytes, not file size |
 | **reads images** | a capability, not a grade |
+| **no degenerate output** | five independent loop/repetition signals; length correlates negatively with quality |
 | **your tasks** | `~/.fitr/tasks/*.json` - the built-ins are defaults, your work is the point |
 
 Verdicts are **PASS / FAIL / INCONCLUSIVE / SKIP / n/a / BLKD**. `SKIP` means

@@ -603,8 +603,28 @@ func valueBar(value, ceiling float64, width int, glyphs Glyphs) string {
 	return "[" + strings.Repeat(glyphs.Full, filled) + strings.Repeat(glyphs.Empty, width-filled) + "]"
 }
 
+// flatFloor is the relative spread below which no shape is drawn.
+//
+// A sparkline is normalised to its own min and max, so without a floor a run
+// that varied by 0.4% renders the identical dramatic zigzag to one that varied
+// tenfold. The monitor states the mean and the spread on the same row, and
+// those already say everything a picture of noise could.
+//
+// The CLI renderer holds the same constant. The two are deliberately not
+// shared: this package is a renderer-neutral state reducer over the standard
+// library, and importing the display layer to borrow one float would trade
+// that for nothing.
+const flatFloor = 0.05
+
+// sparkline draws repeat shape, or says why it did not.
+//
+// "flat" is a claim about the data and is only returned when the data supports
+// it. Being unable to draw -- one observation, or an ASCII stream with no
+// readable ramp -- is a different statement and prints as an absence.
 func sparkline(values []float64, limit int, glyphs Glyphs) string {
-	if len(values) == 0 || limit < 1 || len(glyphs.Spark) == 0 {
+	// One cell cannot depict a series, and it is also the divide-by-zero in the
+	// down-sampling step below.
+	if limit < 2 {
 		return "-"
 	}
 	clean := make([]float64, 0, len(values))
@@ -613,29 +633,43 @@ func sparkline(values []float64, limit int, glyphs Glyphs) string {
 			clean = append(clean, value)
 		}
 	}
-	if len(clean) == 0 {
+	if len(clean) < 2 {
+		return "-"
+	}
+	if flatSeries(clean) {
+		return "flat"
+	}
+	if len(glyphs.Spark) == 0 {
 		return "-"
 	}
 	if len(clean) > limit {
-		if limit == 1 {
-			clean = clean[len(clean)-1:]
-		} else {
-			sampled := make([]float64, limit)
-			for i := range sampled {
-				index := int(math.Round(float64(i) * float64(len(clean)-1) / float64(limit-1)))
-				sampled[i] = clean[index]
-			}
-			clean = sampled
+		sampled := make([]float64, limit)
+		for i := range sampled {
+			index := int(math.Round(float64(i) * float64(len(clean)-1) / float64(limit-1)))
+			sampled[i] = clean[index]
 		}
+		clean = sampled
 	}
 	lo, hi := slices.Min(clean), slices.Max(clean)
+	if hi <= lo {
+		return "flat"
+	}
 	var out strings.Builder
 	for _, value := range clean {
-		index := (len(glyphs.Spark) - 1) / 2
-		if hi > lo {
-			index = int(math.Round(float64(len(glyphs.Spark)-1) * (value - lo) / (hi - lo)))
-		}
-		out.WriteRune(glyphs.Spark[index])
+		out.WriteRune(glyphs.Spark[int(math.Round(float64(len(glyphs.Spark)-1)*(value-lo)/(hi-lo)))])
 	}
 	return out.String()
+}
+
+func flatSeries(clean []float64) bool {
+	lo, hi := slices.Min(clean), slices.Max(clean)
+	if hi <= lo {
+		return true
+	}
+	sum := 0.0
+	for _, v := range clean {
+		sum += v
+	}
+	mean := sum / float64(len(clean))
+	return mean == 0 || (hi-lo)/math.Abs(mean) < flatFloor
 }

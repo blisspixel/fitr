@@ -159,6 +159,7 @@ fitr run m -q                # results only     -v  detail, no progress
 NO_COLOR=1 fitr board        # honored (empty string means unset)
 FITR_ASCII=1 fitr board      # force ASCII glyphs
 FITR_UNICODE=1 fitr board    # force Unicode; Windows Terminal already enables it
+FITR_WIDTH=120 fitr view     # compose to a width other than the default 80
 fitr top                     # interactive terminal only
 fitr top --snapshot          # pipe-safe presentation JSON, no terminal controls
 ```
@@ -166,6 +167,22 @@ fitr top --snapshot          # pipe-safe presentation JSON, no terminal controls
 `--display auto` chooses `rich` on a capable terminal and `plain` when stdout
 is redirected. `rich` can be forced for a capture; `plain`, `json`, and `none`
 are stable automation surfaces. Unknown mode names are usage errors.
+
+### Width
+
+Reports compose to **80 columns**. A narrower terminal narrows them; a wider
+one does not widen them, so what you see on screen and what lands in
+`fitr run m > out.txt` are the same bytes and a pasted result is the result.
+`FITR_WIDTH` overrides both directions and is clamped to a 40-column floor.
+
+Nothing is truncated to make the width: long text -- a family breakdown, an
+undecided verdict's explanation, a doctor diagnosis -- wraps under its own
+column rather than running off the edge. Two things are exempt on purpose. The
+`fitr board` table is a fixed-column comparison grid and states its own width.
+The device comparability key from `fitr device` is one identifier containing
+spaces, so wrapping it would put a line break where a space is and anyone
+copying it would copy something else; it gets its own line and the terminal
+decides what happens next.
 
 Progress goes to **stderr**, results to **stdout**, so `fitr run m > out.txt`
 is clean. Errors are plain text on stderr even under `--display json`; the

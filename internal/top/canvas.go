@@ -77,10 +77,16 @@ type Glyphs struct {
 }
 
 // DefaultGlyphs returns either Unicode data glyphs or stable ASCII fallbacks.
+//
+// Spark is empty on the ASCII side on purpose. `.:-=+*#@` is not a perceptual
+// ramp: `#` and `@` are dense but not tall, `-` sits mid-cell, and a reader
+// cannot order those by height, which is the only channel a sparkline has.
+// Structure and bars degrade to ASCII fine; a shape does not, so it is refused
+// rather than drawn in glyphs nobody can read.
 func DefaultGlyphs(ascii bool) Glyphs {
 	if ascii {
 		return Glyphs{Horizontal: "-", Vertical: "|", Selected: ">", Full: "#",
-			Empty: ".", Spark: []rune(".:-=+*#@"), Ellipsis: "...", Dot: " | "}
+			Empty: ".", Ellipsis: "...", Dot: " | "}
 	}
 	return Glyphs{Horizontal: "─", Vertical: "│", Selected: "›", Full: "█",
 		Empty: "░", Spark: []rune("▁▂▃▄▅▆▇█"), Ellipsis: "…", Dot: " · "}
