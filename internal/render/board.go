@@ -96,9 +96,18 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 		} else if group.EffectiveCtx > 0 {
 			ctx = fmt.Sprintf("ctx %d verified", group.EffectiveCtx)
 		}
+		// The GPU name comes from the machine, so this line has no bound of its
+		// own: "Microsoft Hyper-V Video" pushes it one column past the rule that
+		// a desktop card fits inside. Wrap it rather than trusting the hardware
+		// to be politely named.
 		header := fmt.Sprintf("%s%sdriver %s%sKV %s%s%s",
 			SingleLine(group.GPU), g.Dot, SingleLine(group.Driver), g.Dot, SingleLine(kv), g.Dot, SingleLine(ctx))
-		fmt.Fprintln(w, p.wrap(p.Head, header))
+		for i, l := range wrap(header, boardWidth-2) {
+			if i > 0 {
+				l = "  " + l
+			}
+			fmt.Fprintln(w, p.wrap(p.Head, l))
+		}
 		noteStyle := p.Muted
 		if strings.Contains(group.Note, "not comparable") {
 			noteStyle = p.Warn

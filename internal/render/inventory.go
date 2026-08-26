@@ -104,16 +104,20 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 		g = pickGlyphs()
 	}
 
+	// CPU, GPU and runtime strings come from the machine, so none of them has a
+	// bound of its own. Wrap under the label column rather than trusting the
+	// hardware to be politely named.
+	width := Width()
 	fmt.Fprintf(w, "  %s\n", p.wrap(p.Head, SingleLine("fitr "+inv.Fitr)))
 	if inv.CPU != "" {
-		fmt.Fprintf(w, "  cpu       %s\n", SingleLine(inv.CPU))
+		Field(w, "  cpu", invHeaderLabel, inv.CPU, width)
 	}
 	if inv.GPU != "" {
 		gpu := SingleLine(inv.GPU)
 		if inv.GPUBackend != "" {
 			gpu += "  (" + SingleLine(inv.GPUBackend) + ")"
 		}
-		fmt.Fprintf(w, "  gpu       %s\n", gpu)
+		Field(w, "  gpu", invHeaderLabel, gpu, width)
 	}
 	if inv.MemoryGB > 0 && inv.MemorySource != "" {
 		mem := fmt.Sprintf("%.1f (%s)", inv.MemoryGB, inv.MemorySource)
@@ -124,14 +128,15 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 		if inv.FreeGB > 0 && inv.FreeGB < inv.MemoryGB*0.9 {
 			mem += fmt.Sprintf(", %.1f free now", inv.FreeGB)
 		}
-		fmt.Fprintf(w, "  memory    %s\n", SingleLine(mem))
+		Field(w, "  memory", invHeaderLabel, mem, width)
 	}
 	if inv.RuntimeKind == "" {
 		fmt.Fprintln(w, "  runtime   none reachable")
 	} else {
-		fmt.Fprintf(w, "  runtime   %s  %s\n", SingleLine(inv.RuntimeKind), SingleLine(inv.RuntimeURL))
+		Field(w, "  runtime", invHeaderLabel,
+			SingleLine(inv.RuntimeKind)+"  "+SingleLine(inv.RuntimeURL), width)
 		for _, extra := range inv.Also {
-			fmt.Fprintf(w, "  also      %s\n", SingleLine(extra))
+			Field(w, "  also", invHeaderLabel, extra, width)
 		}
 	}
 	if inv.Profile != "" {
@@ -141,10 +146,16 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 			label += g.Dot + "UNCALIBRATED"
 			style = p.Warn
 		}
-		fmt.Fprintf(w, "  profile   %s\n", p.wrap(style, label))
+		fmt.Fprintf(w, "  profile   %s\n", p.wrap(style, fit(label, width-invHeaderLabel, g.Ell)))
 	}
 	for _, warning := range inv.Warnings {
-		fmt.Fprintf(w, "  warning   %s\n", p.wrap(p.Warn, SingleLine(warning)))
+		for i, l := range wrap(SingleLine(warning), width-invHeaderLabel) {
+			lead := pad("  warning", invHeaderLabel, "")
+			if i > 0 {
+				lead = strings.Repeat(" ", invHeaderLabel)
+			}
+			fmt.Fprintf(w, "%s%s\n", lead, p.wrap(p.Warn, l))
+		}
 	}
 
 	switch inv.Empty {
@@ -161,7 +172,6 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 	}
 
 	fmt.Fprintln(w)
-	width := Width()
 	modelWidth := max(width-invFixed, 12)
 	fmt.Fprintf(w, "  %s %-*s %-*s %*s  %s\n",
 		pad("MODEL", modelWidth, ""), invStateWidth, "STATE",
@@ -202,7 +212,14 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 	// on the row. Keeping them made every row carry the model name twice and
 	// pushed the longest to 117 columns, so the table wrapped on any ordinary
 	// terminal. One worked example is worth more than fourteen repetitions.
-	fmt.Fprintln(w, p.wrap(p.Muted, "  next reads as `fitr <next> <model>`, e.g. fitr advise "+exampleModel(inv.Rows)))
+	for i, l := range wrap("next reads as `fitr <next> <model>`, e.g. fitr advise "+
+		exampleModel(inv.Rows), width-4) {
+		lead := "  "
+		if i > 0 {
+			lead = "    "
+		}
+		fmt.Fprintln(w, p.wrap(p.Muted, lead+l))
+	}
 	fmt.Fprintln(w, p.wrap(p.Muted, "  * loaded    CTX is measured, or measured/serving when they differ"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  * suggested window   > requested window that does not fit"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  unmeasured is a candidate, never a recommendation"))
@@ -214,9 +231,11 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 // telling the reader nothing on the majority of the table, while the model
 // name and the command were both being truncated for want of them.
 const (
-	invStateWidth = 16
-	invCtxWidth   = 5
-	invSizeWidth  = 7
+	// invHeaderLabel is the "  runtime   " column above the table.
+	invHeaderLabel = 12
+	invStateWidth  = 16
+	invCtxWidth    = 5
+	invSizeWidth   = 7
 	// Wide enough for the longest NEXT after shortening: "try a smaller quant",
 	// which is advice rather than a command and so keeps its own words.
 	invNextWidth  = 19

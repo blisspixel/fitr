@@ -114,6 +114,65 @@ func TestLabelAndMeasureNeverCollide(t *testing.T) {
 	}
 }
 
+// Machine-supplied strings have no length of their own, and the demo assets
+// only exercise whatever hardware happens to be running the test: this caught
+// nothing locally on an "NVIDIA GeForce RTX 4090" and failed in CI on a
+// "Microsoft Hyper-V Video", one column past the rule. Every surface that
+// prints a device name gets an implausibly long one here instead.
+func TestLongMachineStringsStayInsideTheRule(t *testing.T) {
+	const longGPU = "Advanced Micro Devices Radeon Instinct MI300X Accelerator (Bare Metal Passthrough)"
+	const longCPU = "Intel(R) Xeon(R) Platinum 8592+ Processor with Advanced Matrix Extensions (128 logical)"
+
+	surfaces := map[string]func(w *strings.Builder){
+		"board": func(w *strings.Builder) {
+			WriteBoard(w, Board{Results: 1, Groups: []BoardGroup{{
+				GPU: longGPU, Driver: "32.0.31007.5012.1234.5678", KV: "q8_0",
+				NumCtx: 131072, EffectiveCtx: 65536, Note: "measured here",
+				Rows: []BoardRow{{Model: "a-model-name-well-past-the-column:70b-instruct-q5",
+					ParamSize: "70.6B", Quant: "Q5_K_M", DecodeMean: 9.1, Repeats: 8,
+					Serves: []string{"coding", "unattended_agentic", "structured_output", "uncensored", "vision"}}},
+			}}}, "plain")
+		},
+		"inventory": func(w *strings.Builder) {
+			WriteInventory(w, Inventory{
+				Fitr: "0.9.7", CPU: longCPU, GPU: longGPU, GPUBackend: "rocm",
+				MemoryGB: 192, MemorySource: "rocm-smi", FreeGB: 12,
+				RuntimeKind: "llama-server", RuntimeURL: "http://192.168.100.200:8080/v1",
+				Also:    []string{"ollama http://127.0.0.1:11434"},
+				Profile: "a-profile-with-an-unreasonably-descriptive-name", Uncalibrated: true,
+				Warnings: []string{"3 saved result files could not be trusted and were skipped, " +
+					"because their device fingerprint does not match this machine"},
+				Rows: []InventoryRow{{
+					Model: "a-model-name-well-past-the-column:70b-instruct-q5", State: "unproven",
+					Fit: "low_memory", SizeB: 48 << 30, Next: "fitr advise a-model-name-well-past-the-column:70b-instruct-q5",
+					Note: "weights exceed the memory reading; the process is running, so the budget is the suspect number",
+				}},
+			}, "plain")
+		},
+		"scorecard": func(w *strings.Builder) {
+			d := plainDisplay(w)
+			d.Result(score.Scorecard{Model: "a-model-name-well-past-the-column:70b-instruct-q5",
+				UseFor: "daily driver (coding + agents), JSON/structured pipelines, no-filter writing/chat"},
+				Meta{GPU: longGPU, Driver: "32.0.31007.5012.1234.5678", Device: "GPU 87% / CPU 13%",
+					Profile: "a-profile-with-an-unreasonably-descriptive-name", Repeats: 8,
+					ParamSize: "70.6B", Quant: "Q5_K_M", Family: "qwen3moe"})
+		},
+	}
+	for name, render := range surfaces {
+		var buf strings.Builder
+		render(&buf)
+		limit := DefaultWidth
+		if name == "board" {
+			limit = boardWidth
+		}
+		for _, line := range strings.Split(buf.String(), "\n") {
+			if n := len([]rune(line)); n > limit {
+				t.Errorf("%s: %d cols against %d: %q", name, n, limit, line)
+			}
+		}
+	}
+}
+
 // Results saved before verdicts carried parts hold only the composed string.
 // Rendering them as an empty row would silently drop the explanation.
 func TestLegacyVerdictsStillShowTheirExplanation(t *testing.T) {
