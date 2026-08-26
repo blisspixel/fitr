@@ -766,6 +766,11 @@ func measure(r *Result) score.Measured {
 	for _, ck := range r.Checks {
 		pass, measured := eval.MeasuredOutcome(ck.Outcome, ck.Pass)
 		if !measured {
+			// A tool check the runtime declined because the model has no tool
+			// support is a capability fact worth reporting, not an empty pool.
+			if strings.Contains(ck.Detail, "does not support tools") {
+				m.ToolsUnsupported = true
+			}
 			continue
 		}
 		var pool *score.Pool
@@ -776,6 +781,10 @@ func measure(r *Result) score.Measured {
 			pool = &m.Precision
 		case "reasoning":
 			pool = &m.Reasoning
+		case "tool_calling":
+			pool = &m.ToolCalling
+		case "tool_restraint":
+			pool = &m.ToolRestraintPool
 		default:
 			pool = &m.User
 		}
@@ -1187,7 +1196,27 @@ func measureToolPhases(ctx context.Context, c llm.Backend, model string, spec *e
 			if err := step("withdrawal", "a tool vanishes mid-loop", func() error {
 				w, err := eval.RunToolLoop(ctx, c, model, spec.Withdrawal, filepath.Join(work, "wd"))
 				if err != nil {
-					return err
+					// A transport fault inside this loop makes THIS task
+					// undecidable; it does not invalidate anything already
+					// measured. The loop is self-contained -- its own
+					// conversation, its own workspace -- so a fault here cannot
+					// reach back into speed, memory, or the check pools, which
+					// is the only reason abandoning a run is ever right.
+					//
+					// It is the last behavioural step, so the old behaviour
+					// threw away a battery that had run for minutes because the
+					// runtime hiccuped on the final task. An unmeasurable task
+					// is INCONCLUSIVE, which is a verdict fitr already has.
+					if ctx.Err() != nil {
+						return err
+					}
+					res.Withdrawal = &eval.ToolLoopResult{
+						Outcome: eval.OutcomeInconclusive, Ended: "transport_fault",
+						Detail: "the tool loop could not complete: " + render.SingleLine(err.Error()),
+					}
+					disp.Note("withdrawal could not complete, so restraint under change is "+
+						"undecided on this run; every other measurement stands", "warn")
+					return nil
 				}
 				res.Withdrawal = &w
 				return nil

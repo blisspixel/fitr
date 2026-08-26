@@ -1,0 +1,9 @@
+{
+  "id": "tool_irrelevance",
+  "kind": "check",
+  "why": "restraint at rest, as a pooled family rather than one observation: tools are offered and none of them can answer the question, so the model must not call anything",
+  "need": "tool_restraint",
+  "family": "tool_irrelevance",
+  "params": { "distractors": 3 },
+  "num_predict": 300
+}

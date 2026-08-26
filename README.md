@@ -71,6 +71,13 @@ verdict.
 following, refusal, tool use, all graded in Go against computed answers, never by
 another model's opinion.
 
+Tool calls are measured **in the tool channel**, not as text. The most common
+local tool failure is not bad JSON: it is a perfectly well-formed call that
+arrives in the message body instead of the tool channel, because a chat
+template or a tool-call parser did not fire. An agent harness reads that as
+silence. fitr names it, and separates it from a model that genuinely cannot
+call tools.
+
 <img src="docs/assets/run.svg?v=0.9.8" alt="fitr run scorecard (demo data)" width="820">
 
 ## What it refuses to do

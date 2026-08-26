@@ -63,6 +63,45 @@ The battery is deliberately weighted toward structured output, because that
 is what quantization breaks first: JSON validity and tool-argument fidelity
 degrade well before prose does.
 
+## Tool calls, in the tool channel
+
+`tool_args` grades a JSON object the model writes **as text** when asked for
+one. That is a real skill and it is not the same skill as being handed a tool
+and calling it, which also exercises the chat template and the runtime's
+tool-call parser.
+
+The difference matters because the most-reported local tool failure is not bad
+JSON. It is a perfectly well-formed call arriving in `content` with a normal
+stop reason, which the model never routed through the tool channel. To an agent
+harness that is silence; to a text grader it is indistinguishable from an
+answer. Four generated families run through the real channel:
+
+| Family | Need | Asks |
+|---|---|---|
+| `tool_call` | `tool_calling` | one tool, exact arguments, computed from the prompt |
+| `tool_call_strict` | `tool_calling` | adds a closed enum and a bounded integer, so a syntactically perfect call can still be wrong |
+| `tool_fanout` | `tool_calling` | the right tool among 12 plausible neighbours, shuffled so calling the first one never passes |
+| `tool_irrelevance` | `tool_restraint` | tools are offered and none can answer; the model must call nothing |
+
+The verdict is binary like every fitr trial, but the failure **mode** rides
+along in the detail, because the modes have different fixes:
+
+`prose_channel` (a call emitted as text - template or parser, not the weights),
+`no_call`, `wrong_name`, `extra_calls`, `bad_json`, `missing_param`,
+`wrong_type`, `extra_param`, `wrong_value`.
+
+Two design notes:
+
+- **A model with no tool support does not fail; it is `n/a`.** Runtimes signal
+  this with a generic HTTP 400, and reading that as a transport fault would
+  abandon the run and discard every completed measurement. It is a capability
+  fact, like vision, and the scorecard says so.
+- **`tool_restraint` is now pooled.** Restraint at rest used to rest on one
+  plumbing observation, which cannot carry an interval. Restraint under
+  *change* stays a separate binary rather than being averaged in: a model that
+  stops cleanly when a tool is withdrawn and one that keeps calling a dead tool
+  are not the same model, and pooling would let a good rate at rest hide it.
+
 ## Tool withdrawal
 
 Restraint at rest is the plumbing irrelevance rung: no tool calls on an

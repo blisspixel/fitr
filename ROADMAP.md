@@ -23,7 +23,7 @@ flags live in [usage](docs/usage.md). Statistical methods live in
 | Horizon | Release | Outcome |
 |---|---|---|
 | Shipped | 0.9.8 | Output that fits the terminal, and verdicts the renderer can lay out |
-| Now | 0.9.9 | Decompose the run pipeline far enough to turn on the complexity gates, and finish the native matrix |
+| Now | 0.9.9 | Tool calls measured in the tool channel; then decomposition and the native matrix |
 | Then | 1.0 | A new user can install fitr and close the loop on a clean machine without reading source code |
 | Next | Trust C | Isolated executable evidence, stronger release provenance, and calibrated profile provenance |
 | Later | Candidate discovery | Find models worth measuring, then measure them; plus loop extensions |
@@ -249,8 +249,31 @@ one renders them with implausibly long device names so the guard does not
 depend on whose hardware runs it, and a third asserts the design doc names
 every need the code does.
 
-### 0.9.9 - decomposition and the native matrix
+### 0.9.9 - tool calls in the tool channel, and the native matrix
 
+- [x] Measure tool calls where they actually happen. `tool_args` grades a JSON
+      object written as text; it never populated the `tools` parameter and
+      never looked at `message.tool_calls`, so the single most-reported local
+      failure -- a well-formed call arriving in `content` with a normal stop
+      reason -- was invisible to it. Four generated families now run through
+      the real channel (`tool_call`, `tool_call_strict`, `tool_fanout`,
+      `tool_irrelevance`) with a mechanical failure taxonomy, so the detail
+      line distinguishes "buy a better model" from "your GGUF ships no PARSER
+      directive".
+- [x] Make `tool_restraint` interval-bearing. It rested on a single plumbing
+      observation, which cannot carry an interval. Restraint under *change*
+      stays a separate binary rather than being averaged in: a model that stops
+      cleanly when a tool is withdrawn and one that keeps calling a dead tool
+      are not the same model.
+- [x] Stop abandoning a run over a fault in the last behavioural task. A
+      transport fault inside the withdrawal loop now makes that task
+      INCONCLUSIVE. The loop is self-contained -- its own conversation, its own
+      workspace -- so a fault there cannot reach back into speed, memory or the
+      check pools, which is the only thing that ever justified discarding a
+      run. This closes the contract decision recorded above.
+- [x] A model with no tool support is `n/a`, not a failure and not a fault.
+      Runtimes signal it with a generic HTTP 400; reading that as transport
+      discarded the whole battery for a model that is simply text-only.
 - [ ] Decompose the run pipeline far enough to turn on the complexity gates.
       `execute` went from 571 lines to 463 by extracting the measurement
       phases, and `main.go` from 4,074 to 1,199, but `funlen`, `gocognit`,

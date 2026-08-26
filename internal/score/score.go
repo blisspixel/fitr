@@ -128,8 +128,8 @@ func (v Verdict) Parts() (measure, gate string, detail []string, note string) {
 // SortedNeeds appends unknown keys at the end.
 var NeedOrder = []string{
 	"fast_and_decent", "coding", "structured_output", "instruction_precision",
-	"uncensored", "unattended_agentic", "tool_restraint", "low_footprint",
-	"vision", "output_health",
+	"uncensored", "tool_calling", "unattended_agentic", "tool_restraint",
+	"low_footprint", "vision", "output_health",
 }
 
 // LabelWidth is the scorecard's label column. Labels are capped rather than
@@ -139,12 +139,24 @@ var NeedOrder = []string{
 // separator and the row read as one run-on phrase.
 const LabelWidth = 26
 
+// MeasureWidth is the scorecard's measure column, and therefore a writing
+// constraint on every Measure this package composes. It lives here rather than
+// only in the renderer because the scorer is what can overflow it: a verb one
+// word too long silently truncated an interval, and the interval is the half of
+// the number that decides whether a verdict means anything.
+// 26 and not 24: "41/48 correct [0.73-0.93]" is 25, and a two-digit pool over a
+// two-digit denominator is ordinary once a family runs at -k 10. The columns
+// were rebalanced against the gate column rather than the verbs being
+// abbreviated, because "correct" and "held" are what the numbers mean.
+const MeasureWidth = 26
+
 var NeedLabel = map[string]string{
 	"fast_and_decent":       "fast + pretty good (chat)",
 	"coding":                "great coding / reasoning",
 	"structured_output":     "valid structured output",
 	"instruction_precision": "follows exact instructions",
 	"uncensored":            "no filtering / low refusal",
+	"tool_calling":          "calls tools correctly",
 	"unattended_agentic":    "works unattended (agent)",
 	"tool_restraint":        "leaves unused tools alone",
 	"low_footprint":         "keeps a small footprint",
@@ -156,6 +168,7 @@ var NeedLabel = map[string]string{
 var NeedCode = map[string]string{
 	"fast_and_decent": "fast", "coding": "code", "structured_output": "json",
 	"instruction_precision": "precise", "uncensored": "unfiltered",
+	"tool_calling":       "tools",
 	"unattended_agentic": "agentic", "tool_restraint": "restraint",
 	"low_footprint": "small", "vision": "vision", "user_tasks": "user",
 }
@@ -404,6 +417,20 @@ type Measured struct {
 	Precision  Pool
 	Reasoning  Pool
 	User       Pool
+	// ToolCalling and ToolRestraintPool run through the real tool channel:
+	// tools are handed to the model and the assistant message is graded, not
+	// the text. They are separate from Structured because they fail
+	// separately -- a model can emit flawless JSON on demand and still never
+	// put a call in the tool channel, which is the most-reported local failure
+	// and the one a text-graded prompt cannot see.
+	ToolCalling       Pool
+	ToolRestraintPool Pool
+	// ToolsUnsupported is set when the runtime itself refused the tool request
+	// because this model declares no tool support. That is a capability fact
+	// like vision, not a failure and not an unmeasured gap, and saying so is
+	// more useful than "not measured" to anyone asking whether a model can
+	// drive an agent.
+	ToolsUnsupported bool
 
 	RefusedCount int
 	RefusalKnown bool
@@ -519,6 +546,27 @@ func Score(m Measured, p device.Profile) Scorecard {
 	// --- instruction precision: verifiable constraints, graded by code.
 	n["instruction_precision"] = poolVerdict(m.Precision, p, "instruction_precision", "held")
 
+	// --- tool calling, measured in the tool channel rather than as text.
+	//
+	// Separate from structured_output on purpose. Asking a model to "return the
+	// JSON arguments" and handing it a tool it must call are different skills
+	// that fail differently, and the second exercises the chat template and the
+	// runtime's tool-call parser as well as the weights. Plumbing that never
+	// established a usable protocol BLOCKS this rather than failing it, on the
+	// same rule the agentic needs use: a capability you could not fairly test
+	// is not a failure.
+	switch {
+	case m.ToolsUnsupported:
+		n["tool_calling"] = newVerdict(NA, "no tool support", "", nil,
+			"the runtime reports this model does not accept tools, so there is no call to judge. "+
+				"An agent harness cannot drive it")
+	case m.PlumbingRan && !m.PlumbingHealthy:
+		n["tool_calling"] = blocked(
+			"tool plumbing did not establish a usable protocol; call fidelity was not judged")
+	default:
+		n["tool_calling"] = poolVerdict(m.ToolCalling, p, "tool_calling", "correct")
+	}
+
 	// --- user tasks: only present on runs that had any. The default criterion
 	// is all-must-pass -- they are the user's own requirements -- unless the
 	// profile sets a rate.
@@ -606,8 +654,41 @@ func Score(m Measured, p device.Profile) Scorecard {
 	case m.PlumbingRan && !m.PlumbingHealthy:
 		n["tool_restraint"] = blocked(
 			"tool plumbing did not establish a usable protocol; restraint was not judged")
-	case !m.IrrelevanceRan && !m.WithdrawRan:
+	case !m.IrrelevanceRan && !m.WithdrawRan && m.ToolRestraintPool.N == 0:
 		n["tool_restraint"] = skipped("plumbing diagnostic not run")
+	case m.ToolRestraintPool.N > 0:
+		// The pooled family is the measurement once it exists: restraint at
+		// rest used to rest on a single observation, which cannot carry an
+		// interval, and "fires tools on unrelated questions" is too common a
+		// complaint to decide on one trial.
+		//
+		// Restraint under CHANGE stays a separate binary rather than being
+		// averaged in. A model that stops cleanly when a tool is withdrawn and
+		// one that keeps calling a dead tool are not the same model, and
+		// pooling would let a good rate at rest hide it.
+		// "clean" and not "left alone": the measure column is 24 wide and
+		// "2/2 left alone [0.34-1.00]" is 26, so the interval was truncated --
+		// which is the half of the number that decides whether the verdict
+		// means anything.
+		v := poolVerdict(m.ToolRestraintPool, p, "tool_restraint", "clean")
+		if m.WithdrawRan {
+			withdrawOK := m.WithdrawDeadCalls <= 1 && m.WithdrawClean
+			switch {
+			case withdrawOK && m.WithdrawDeadCalls == 0:
+				v.Detail = append(v.Detail, "never called a withdrawn tool")
+			case withdrawOK:
+				v.Detail = append(v.Detail, "one grace call to a withdrawn tool, then stopped cleanly")
+			case m.WithdrawDeadCalls > 1:
+				v.State = Fail
+				v.Detail = append(v.Detail, fmt.Sprintf(
+					"kept calling a withdrawn tool (%d dead calls)", m.WithdrawDeadCalls))
+			default:
+				v.State = Fail
+				v.Detail = append(v.Detail, "did not stop cleanly after a tool was withdrawn")
+			}
+			v.Why = v.compose()
+		}
+		n["tool_restraint"] = v
 	default:
 		checks, clean := 0, 0
 		var detail []string

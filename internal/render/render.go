@@ -365,8 +365,9 @@ const (
 	colGap   = 2
 	// measureWidth holds the widest real measure, "10/11 passes [0.62-0.98]".
 	// Truncating here would cut the interval, which is the half of the number
-	// that decides whether the verdict means anything.
-	measureWidth = 24
+	// that decides whether the verdict means anything. The scorer owns the
+	// constant because the scorer is what can overflow it.
+	measureWidth = score.MeasureWidth
 	// contIndent puts continuation lines under the label column, so the tag
 	// gutter stays a single uninterrupted strip the eye can scan for FAIL.
 	contIndent = gutter + tagWidth + colGap

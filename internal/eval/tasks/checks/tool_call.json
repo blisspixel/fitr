@@ -1,0 +1,9 @@
+{
+  "id": "tool_call",
+  "kind": "check",
+  "why": "in-channel tool-call fidelity: the model is handed a real tool and must call it. The dominant reported local failure is a well-formed call arriving in content with a normal stop reason, which a text-graded prompt cannot see at all",
+  "need": "tool_calling",
+  "family": "tool_call",
+  "params": {},
+  "num_predict": 300
+}

@@ -1,0 +1,9 @@
+{
+  "id": "tool_call_strict",
+  "kind": "check",
+  "why": "a closed enum and a bounded integer, so a model can be syntactically perfect and still wrong. A loose schema is satisfied by almost any object",
+  "need": "tool_calling",
+  "family": "tool_call_strict",
+  "params": {},
+  "num_predict": 300
+}

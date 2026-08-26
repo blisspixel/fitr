@@ -35,6 +35,12 @@ const maxUserChecks = 1024
 var checkNeeds = map[string]bool{
 	"structured_output": true, "instruction_precision": true,
 	"reasoning": true, "user_tasks": true,
+	// tool_calling and tool_restraint are pooled generated families that run
+	// through the real tool channel. They are separate needs because they fail
+	// separately: a model can emit flawless JSON on demand and never once put a
+	// call in the tool channel, and it can call correctly when asked and also
+	// call on questions no tool can answer.
+	"tool_calling": true, "tool_restraint": true,
 }
 
 var executableUserTaskKinds = map[string]bool{
@@ -90,7 +96,8 @@ func ValidateCheck(cs CheckSpec) error {
 		return fmt.Errorf("check %s: unknown family %q", cs.ID, cs.Family)
 	case !checkNeeds[cs.Need]:
 		return fmt.Errorf("check %s: need must be one of structured_output, "+
-			"instruction_precision, reasoning, user_tasks; got %q", cs.ID, cs.Need)
+			"instruction_precision, reasoning, tool_calling, tool_restraint, "+
+			"user_tasks; got %q", cs.ID, cs.Need)
 	case cs.NumPredict <= 0:
 		return fmt.Errorf("check %s: num_predict must be positive", cs.ID)
 	}
@@ -156,6 +163,9 @@ func RunCheck(ctx context.Context, c llm.Backend, model string, cs CheckSpec, se
 	out := CheckOutcome{TaskID: cs.ID, Family: cs.Family, Need: cs.Need, Origin: cs.Origin, Seed: seed}
 	inst := Generate(cs, seed)
 	samp := ollama.Deterministic(cs.NumPredict, numCtx(ctx))
+	if inst.UsesToolChannel() {
+		return runToolChannelCheck(ctx, c, model, cs, out, inst, samp)
+	}
 	text, m, err := c.Generate(ctx, model, inst.Prompt, samp)
 	if err != nil {
 		out.Outcome = OutcomeError
@@ -168,6 +178,75 @@ func RunCheck(ctx context.Context, c llm.Backend, model string, cs CheckSpec, se
 		out.Detail += " (output hit the token cap)"
 	}
 	return out, nil
+}
+
+// runToolChannelCheck runs one trial as a tool-enabled chat turn.
+//
+// A transport error here is a transport error, exactly as in the text path: it
+// returns FailureTransport so the caller can abandon rather than record a
+// failure the model did not commit. What this must NOT do is treat "the
+// runtime returned no tool calls" as an error -- that is the single most
+// informative outcome this family produces, and the grader classifies it.
+func runToolChannelCheck(ctx context.Context, c llm.Backend, model string, cs CheckSpec,
+	out CheckOutcome, inst Instance, samp ollama.Sampling,
+) (CheckOutcome, error) {
+	msgs := []ollama.Message{{Role: "user", Content: inst.Prompt}}
+	msg, m, err := c.Chat(ctx, model, msgs, inst.Tools, samp)
+	if err != nil {
+		// A runtime refusing the request because this model has no tool support
+		// is a capability fact, not a fault. Returning a transport failure here
+		// would abandon the whole run -- discarding every completed measurement
+		// -- for a model that is simply text-only, which is the same shape as
+		// the transport bug that once cost three batteries.
+		if declinesTools(err) {
+			out.Outcome = OutcomeSkipped
+			out.Detail = "runtime reports this model does not support tools"
+			return out, nil
+		}
+		out.Outcome = OutcomeError
+		return out, failure(FailureTransport, cs.ID+".chat", err)
+	}
+	out.Pass, out.Detail = inst.GradeCall(msg)
+	out.Outcome = outcomeFor(out.Pass)
+	out.Truncated = m.Truncated
+	if m.Truncated && !out.Pass {
+		out.Detail += " (output hit the token cap)"
+	}
+	return out, nil
+}
+
+// declinesTools reports whether a chat error means "this model has no tool
+// support" rather than "the call failed".
+//
+// It matches on message text, which is normally a thing this repo refuses to
+// do -- error strings are not a stable contract. It is done here because the
+// alternative is worse: the runtimes signal this with a generic HTTP 400, so
+// there is no status code or typed error to key on, and mistaking it for a
+// transport fault discards an entire completed run. The match is deliberately
+// narrow, and a miss degrades to the existing behaviour rather than to a wrong
+// answer.
+func declinesTools(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "tool") {
+		return false
+	}
+	for _, phrase := range []string{
+		"does not support tools",
+		"does not support tool",
+		"doesn't support tools",
+		"tools are not supported",
+		"tool use is not supported",
+		"tool calling is not supported",
+		"no tool support",
+	} {
+		if strings.Contains(msg, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // loadChecks reads every embedded tasks/checks/*.json, validated and sorted by

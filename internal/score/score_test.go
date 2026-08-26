@@ -483,3 +483,44 @@ func stripParenthetical(s string) string {
 	}
 	return s
 }
+
+// Every measure this package composes has to fit the column it is written
+// into. Nothing enforced that, and a verb one word too long silently truncated
+// a Wilson interval to "2/2 left alone..." on a real run -- dropping exactly
+// the half of the number that decides whether the verdict means anything.
+func TestEveryComposedMeasureFitsItsColumn(t *testing.T) {
+	profile := lappy(t)
+	m := good()
+	// Widest realistic pools: two-digit over two-digit, and a rate whose
+	// bounds both need four characters.
+	m.Structured = Pool{Passes: 34, N: 40}
+	m.Precision = Pool{Passes: 22, N: 30}
+	m.Reasoning = Pool{Passes: 17, N: 20}
+	m.ToolCalling = Pool{Passes: 41, N: 48}
+	m.ToolRestraintPool = Pool{Passes: 11, N: 12}
+	m.User = Pool{Passes: 13, N: 16}
+	m.CodePasses, m.CodeRepeats = 10, 11
+	m.RefusalKnown, m.RefusedCount = true, 2
+	m.MemoryKnown, m.ResidentGB32K = true, 123.45
+	m.SpeedKnown = true
+	m.DecodeTPS, m.TTFT, m.PrefillTPS = 1234.56, 0.89, 5432.10
+	m.IrrelevanceRan, m.IrrelevancePass = true, true
+	m.WithdrawRan, m.WithdrawClean = true, true
+	m.Rep.Words, m.Rep.GzipRatio = 400, 2.1
+
+	sc := Score(m, profile)
+	for _, need := range SortedNeeds(sc.Needs) {
+		v, ok := sc.Needs[need]
+		if !ok {
+			continue
+		}
+		if n := len([]rune(v.Measure)); n > MeasureWidth {
+			t.Errorf("%s: measure %q is %d cols, the column is %d",
+				need, v.Measure, n, MeasureWidth)
+		}
+		if n := len([]rune(NeedLabel[need])); n > LabelWidth {
+			t.Errorf("%s: label %q is %d cols, the column is %d",
+				need, NeedLabel[need], n, LabelWidth)
+		}
+	}
+}

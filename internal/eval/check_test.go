@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/blisspixel/fitr/internal/ollama"
 )
 
 // Every check family must be self-consistent: the canonical correct answer it
@@ -30,6 +32,12 @@ func TestEveryCheckGradesItsOwnCanon(t *testing.T) {
 			}
 			if strings.TrimSpace(inst.Canon) == "" {
 				t.Fatalf("%s seed %d: no canonical answer to self-test with", cs.ID, seed)
+			}
+			// Tool-channel families grade an assistant message, not text, so
+			// they self-test against a synthesized correct call instead.
+			if inst.UsesToolChannel() {
+				checkToolCanon(t, cs.ID, seed, inst)
+				continue
 			}
 			if ok, why := inst.Grade(inst.Canon); !ok {
 				t.Errorf("%s seed %d: grader rejects its own canonical answer: %s", cs.ID, seed, why)
@@ -300,5 +308,66 @@ func TestUserChecksRejectOversizedFile(t *testing.T) {
 	}
 	if got, err := LoadUserChecks(dir); err == nil || got != nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("oversized task = %v, %v", got, err)
+	}
+}
+
+// checkToolCanon holds tool-channel graders to the same invariant as text
+// graders: a grader that rejects a correct answer reports a harness bug as a
+// model failure, which is the sin this repo exists to avoid. Canon carries the
+// tool name and its exact arguments, so the correct call can be reconstructed
+// and fed back through the real grader.
+func checkToolCanon(t *testing.T, id string, seed uint64, inst Instance) {
+	t.Helper()
+
+	// Restraint families are correct when they call nothing.
+	if strings.HasSuffix(id, "irrelevance") {
+		if ok, why := inst.GradeCall(ollama.Message{
+			Role: "assistant", Content: "Here is a haiku about winter.",
+		}); !ok {
+			t.Errorf("%s seed %d: grader rejects a correct no-call answer: %s", id, seed, why)
+		}
+		if ok, _ := inst.GradeCall(ollama.Message{Role: "assistant"}); ok {
+			t.Errorf("%s seed %d: grader accepts an empty non-answer", id, seed)
+		}
+		call := ollama.Message{Role: "assistant", ToolCalls: []ollama.ToolCall{{}}}
+		call.ToolCalls[0].Function.Name = inst.Tools[0].Function.Name
+		call.ToolCalls[0].Function.Arguments = []byte(`{}`)
+		if ok, _ := inst.GradeCall(call); ok {
+			t.Errorf("%s seed %d: grader accepts a spurious tool call", id, seed)
+		}
+		return
+	}
+
+	name, rawArgs, found := strings.Cut(inst.Canon, " ")
+	if !found {
+		t.Fatalf("%s seed %d: canon %q is not \"<name> <json>\"", id, seed, inst.Canon)
+	}
+	good := ollama.Message{Role: "assistant", ToolCalls: []ollama.ToolCall{{}}}
+	good.ToolCalls[0].Function.Name = name
+	good.ToolCalls[0].Function.Arguments = []byte(rawArgs)
+	if ok, why := inst.GradeCall(good); !ok {
+		t.Errorf("%s seed %d: grader rejects its own canonical call: %s", id, seed, why)
+	}
+
+	// The failure the whole family exists to detect: a correct call that never
+	// entered the tool channel must fail, and must say so by name.
+	prose := ollama.Message{Role: "assistant",
+		Content: "<tool_call>{\"name\":\"" + name + "\",\"arguments\":" + rawArgs + "}</tool_call>"}
+	ok, why := inst.GradeCall(prose)
+	if ok {
+		t.Errorf("%s seed %d: grader accepted a call emitted as prose", id, seed)
+	}
+	if !strings.Contains(why, string(failProseChannel)) {
+		t.Errorf("%s seed %d: prose-channel failure not named: %s", id, seed, why)
+	}
+
+	if ok, _ := inst.GradeCall(ollama.Message{Role: "assistant", Content: "Sure, I can help!"}); ok {
+		t.Errorf("%s seed %d: grader accepts a chatty non-answer", id, seed)
+	}
+	wrong := good
+	wrong.ToolCalls = []ollama.ToolCall{good.ToolCalls[0]}
+	wrong.ToolCalls[0].Function.Arguments = []byte(`{"title":"something else"}`)
+	if ok, _ := inst.GradeCall(wrong); ok {
+		t.Errorf("%s seed %d: grader accepts wrong arguments", id, seed)
 	}
 }

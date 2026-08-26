@@ -1,0 +1,9 @@
+{
+  "id": "tool_fanout",
+  "kind": "check",
+  "why": "tool selection among 12 plausible neighbours. Agent harnesses ship 15-60 tools; choosing one of four is not that task",
+  "need": "tool_calling",
+  "family": "tool_fanout",
+  "params": { "distractors": 11 },
+  "num_predict": 300
+}

@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
@@ -39,7 +40,23 @@ type Instance struct {
 	Prompt string
 	Canon  string
 	Grade  func(text string) (bool, string)
+
+	// Tools, when non-empty, routes this instance through the chat tool
+	// channel instead of plain generation, and GradeCall decides the outcome
+	// from the assistant message rather than from text.
+	//
+	// This exists because the most-reported local tool failure is not bad
+	// JSON. It is a well-formed call arriving in `content` with a normal stop
+	// reason, which a text-graded prompt cannot see: asking a model to "return
+	// the JSON arguments" measures a different skill from asking it to call a
+	// tool it has been handed.
+	Tools     []ollama.Tool
+	GradeCall func(msg ollama.Message) (bool, string)
 }
+
+// UsesToolChannel reports whether this instance must be run as a tool-enabled
+// chat turn rather than a plain generation.
+func (i Instance) UsesToolChannel() bool { return len(i.Tools) > 0 && i.GradeCall != nil }
 
 type genFunc func(params map[string]any, rng *rand.Rand) Instance
 
@@ -49,14 +66,20 @@ var families = map[string]genFunc{
 	"json_schema":  genJSONSchema,
 	"csv_strict":   genCSV,
 	"tool_args":    genToolArgs,
-	"format":       genFormat,
-	"line_rules":   genLineRules,
-	"keywords":     genKeywords,
-	"math_chain":   genMathChain,
-	"date_math":    genDateMath,
-	"state_track":  genStateTrack,
-	"list_ops":     genListOps,
-	"static":       genStatic,
+	// In-channel families. tool_args grades a JSON object written as text;
+	// these hand the model real tools and grade the call it makes.
+	"tool_call":        genToolCall,
+	"tool_call_strict": genToolCallStrict,
+	"tool_fanout":      genToolFanout,
+	"tool_irrelevance": genToolIrrelevance,
+	"format":           genFormat,
+	"line_rules":       genLineRules,
+	"keywords":         genKeywords,
+	"math_chain":       genMathChain,
+	"date_math":        genDateMath,
+	"state_track":      genStateTrack,
+	"list_ops":         genListOps,
+	"static":           genStatic,
 }
 
 // FamilyKnown reports whether a family name has a generator.

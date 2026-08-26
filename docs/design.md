@@ -48,6 +48,7 @@ and fail another, and one number cannot say that.
 | **valid structured output** | quantization breaks JSON before prose - the earliest damage signal |
 | **follows exact instructions** | verifiable constraints, graded by code |
 | **no filtering / low refusal** | a first-class need, not a footnote |
+| **calls tools correctly** | measured in the tool channel, not as text. Asking for "the JSON arguments" and handing over a tool it must call are different skills, and the second exercises the chat template and the runtime's tool-call parser too |
 | **works unattended (agent)** | prefill-bound, not decode-bound |
 | **leaves unused tools alone** | restraint at rest (no calls on an unrelated question) and under change (a tool vanishes mid-loop) |
 | **keeps a small footprint** | measured resident bytes, not file size |
