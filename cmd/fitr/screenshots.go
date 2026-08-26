@@ -105,7 +105,9 @@ func shotTop(context.Context) (string, error) {
 	}
 	snapshot := buildTopSnapshot([]*Result{a, b})
 	state := top.NewState(snapshot)
-	state.View, state.Width, state.Height = top.ViewBoard, 110, 18
+	// The demo canvas matches the width every other surface composes to, so
+	// the docs show one terminal rather than eight different ones.
+	state.View, state.Width, state.Height = top.ViewBoard, render.DefaultWidth, 18
 	return "$ fitr top\n\n" + topCanvasANSI(top.Render(state, top.DefaultGlyphs(false))), nil
 }
 

@@ -850,8 +850,9 @@ func applyOpenAI(ctxN int) []string {
 
 // WriteApply prints the human form. Never claims fitr ran the commands.
 func WriteApply(w io.Writer, p ApplyPlan) {
+	width := render.Width()
 	fmt.Fprintln(w, "  apply prints how to persist a measured context.")
-	fmt.Fprintln(w, "  "+render.SingleLine(p.Note)+".")
+	render.Field(w, "", 2, render.SingleLine(p.Note)+".", width)
 	fmt.Fprintln(w)
 	if p.Model != "" {
 		fmt.Fprintf(w, "  model          %s\n", render.SingleLine(p.Model))
@@ -873,7 +874,10 @@ func WriteApply(w io.Writer, p ApplyPlan) {
 			fmt.Fprintf(w, "  %s\n", render.SingleLine(s))
 			continue
 		}
-		fmt.Fprintf(w, "    %s\n", render.SingleLine(s))
+		// A step is prose plus, sometimes, a command. Wrap it under its own
+		// indent rather than letting the terminal break it at an arbitrary
+		// column: a step the reader has to reassemble is a step they mistype.
+		render.Field(w, "", 4, s, width)
 	}
 }
 

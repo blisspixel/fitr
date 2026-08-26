@@ -723,7 +723,18 @@ func samePhysicalMachine(a, b device.Fingerprint) bool {
 	return a.Host != "" && a.Host == b.Host && a.OS == b.OS && a.CPU == b.CPU && a.GPU == b.GPU
 }
 
+// doctorIDWidth is the check-name column; doctorHang puts wrapped detail under
+// it. A doctor detail is a diagnosis, so it runs long -- the JSON-determinism
+// finding is 286 characters -- and it used to be printed after a padded column
+// with nothing bounding it, which wrapped at whatever column the terminal
+// happened to end at.
+const (
+	doctorIDWidth = 18
+	doctorHang    = 2 + 6 + 1
+)
+
 func printDoctor(w io.Writer, r eval.DoctorResult, color bool) {
+	width := render.Width()
 	for _, ck := range r.Checks {
 		tag := fmt.Sprintf("%-4s", ck.State)
 		if color {
@@ -736,9 +747,18 @@ func printDoctor(w io.Writer, r eval.DoctorResult, color bool) {
 				tag = "\x1b[31m" + tag + "\x1b[0m"
 			}
 		}
-		fmt.Fprintf(w, "  [%s] %-18s %s\n", tag, terminalText(ck.ID), terminalText(ck.Detail))
+		head := fmt.Sprintf("  [%s] %-*s", tag, doctorIDWidth, terminalText(ck.ID))
+		detail := terminalText(ck.Detail)
+		// Short enough to sit beside its check name; otherwise the whole
+		// diagnosis becomes a block under it rather than a ragged tail.
+		if inline := doctorHang + doctorIDWidth + 1; len(detail) <= width-inline {
+			fmt.Fprintf(w, "%s %s\n", head, detail)
+			continue
+		}
+		fmt.Fprintln(w, head)
+		render.Field(w, "", doctorHang, detail, width)
 	}
-	fmt.Fprintf(w, "  => %s\n", terminalText(r.Verdict))
+	render.Field(w, "  =>", doctorHang, terminalText(r.Verdict), render.Width())
 }
 
 func printInventory(ctx context.Context, backendKind, mode string) int {

@@ -470,17 +470,17 @@ func cmdCompare(ctx context.Context, args []string) int {
 	} {
 		lo, hi, ratio, ok := stats.FiellerRatio(p.x, p.y)
 		if ok {
-			verdict := "~ cannot separate"
+			verdict := "cannot separate"
 			if lo > 1 {
 				verdict = "first is faster"
 			} else if hi < 1 {
 				verdict = "second is faster"
 			}
-			fmt.Printf("  %-22s %8.2f vs %8.2f   %.2fx [%.2f .. %.2f]  %s\n",
+			fmt.Printf("  %-21s %7.2f vs %7.2f  %5.2fx [%.2f-%.2f]  %s\n",
 				p.label, p.x.Mean, p.y.Mean, ratio, lo, hi, verdict)
 		} else {
 			ratio, _, _ := stats.RatioWithError(p.x, p.y)
-			fmt.Printf("  %-22s %8.2f vs %8.2f   %.2fx (no interval - not enough data to support one)\n",
+			fmt.Printf("  %-21s %7.2f vs %7.2f  %5.2fx  no interval - too little data\n",
 				p.label, p.x.Mean, p.y.Mean, ratio)
 		}
 	}
@@ -498,13 +498,13 @@ func cmdCompare(ctx context.Context, args []string) int {
 			continue
 		}
 		d := float64(pa.Passes)/float64(pa.N) - float64(pb.Passes)/float64(pb.N)
-		verdict := "~ cannot separate"
+		verdict := "cannot separate"
 		if lo > 0 {
-			verdict = "first is better here"
+			verdict = "first is better"
 		} else if hi < 0 {
-			verdict = "second is better here"
+			verdict = "second is better"
 		}
-		fmt.Printf("  %-22s %d/%d vs %d/%d   diff %+.2f [%+.2f .. %+.2f]  %s\n",
+		fmt.Printf("  %-21s %d/%d vs %d/%d  %+.2f [%+.2f..%+.2f]  %s\n",
 			need, pa.Passes, pa.N, pb.Passes, pb.N, d, lo, hi, verdict)
 	}
 
@@ -523,6 +523,9 @@ func cmdCompare(ctx context.Context, args []string) int {
 	return exitOK
 }
 
+// pairedHang aligns the paired block's wrapped text under its own label.
+const pairedHang = 11
+
 // pairedCompare runs McNemar's exact test on instances both models faced.
 // Concordant instances carry no information about the difference; only the
 // flips decide, and with fewer than six of them no split can reach p<0.05 -
@@ -533,11 +536,15 @@ func pairedCompare(a, b *Result) {
 		fmt.Println("  paired: seedsets match but no shared instances were found.")
 		return
 	}
-	fmt.Printf("  paired on %d identical instances: %s alone passed %d, %s alone passed %d, agreed on %d\n",
-		flips.Shared, terminalText(a.Model), flips.AOnly, terminalText(b.Model), flips.BOnly, flips.Agree)
+	width := render.Width()
+	render.Field(os.Stdout, "  paired", pairedHang, fmt.Sprintf(
+		"on %d identical instances: %s alone passed %d, %s alone passed %d, agreed on %d",
+		flips.Shared, terminalText(a.Model), flips.AOnly, terminalText(b.Model),
+		flips.BOnly, flips.Agree), width)
 	if flips.HidesDisagreement() {
-		fmt.Printf("  accuracy hid %d item-level flip(s) (%d/%d vs %d/%d) - rates match, the questions did not\n",
-			flips.AOnly+flips.BOnly, flips.APass, flips.Shared, flips.BPass, flips.Shared)
+		render.Field(os.Stdout, "  accuracy", pairedHang, fmt.Sprintf(
+			"hid %d item-level flip(s) (%d/%d vs %d/%d) - rates match, the questions did not",
+			flips.AOnly+flips.BOnly, flips.APass, flips.Shared, flips.BPass, flips.Shared), width)
 	}
 	if line, ok := quantDamageLine(a, b, flips); ok {
 		fmt.Println("  " + terminalText(line))

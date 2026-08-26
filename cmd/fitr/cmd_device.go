@@ -81,10 +81,23 @@ func cmdDevice(ctx context.Context, args []string) int {
 		}
 		fmt.Printf("    %-26s %s\n", terminalText(k), terminalText(v))
 	}
-	fmt.Printf("  profile            %s - %s\n", terminalText(prof.Name), terminalText(prof.Description))
-	fmt.Printf("  key                %s\n", terminalText(fp.Key()))
+	// Both of these run long: a profile description is a sentence, and the
+	// comparability key is a pipe-joined record of every field that decides
+	// whether two runs may be compared. Wrapping keeps them inside the rule the
+	// rest of the block observes.
+	render.Field(os.Stdout, "  profile", deviceLabelWidth,
+		terminalText(prof.Name)+" - "+terminalText(prof.Description), render.Width())
+	// The key is deliberately NOT wrapped. It is one identifier, and the GPU
+	// name inside it contains spaces, so a wrap would put a line break where a
+	// space is and anyone copying it out would copy something else. Let the
+	// terminal own that decision.
+	fmt.Println("  key")
+	fmt.Printf("    %s\n", terminalText(fp.Key()))
 	return exitOK
 }
+
+// deviceLabelWidth matches the "  inference_device   " column above.
+const deviceLabelWidth = 21
 
 func cmdProfiles(ctx context.Context, args []string) int {
 	if len(args) > 0 {

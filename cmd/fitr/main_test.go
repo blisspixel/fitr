@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -897,6 +899,56 @@ func TestScreenshotsWriteDemoSVGs(t *testing.T) {
 			t.Fatalf("top screenshot lost its rich terminal color:\n%.400s", got)
 		}
 	}
+}
+
+// Every surface composes to the same width, and the demo assets are the proof
+// a reader sees first. They are also the only place all eight surfaces render
+// together, so this is where a regression in any one of them shows up.
+//
+// It used to be worth checking and nobody was: the scorecard reached 224
+// columns, the inventory 117, doctor 286, and the board drew a 104-column rule
+// around 123-column rows.
+func TestEveryDemoSurfaceComposesToTheWidth(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_PROFILES", dir)
+	t.Setenv("FITR_RESULTS", t.TempDir())
+	t.Setenv("NO_COLOR", "1")
+	if code := cmdScreenshots(context.Background(), []string{dir}); code != exitOK {
+		t.Fatalf("screenshots exited %d", code)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".svg") {
+			continue
+		}
+		seen++
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range svgTextLines(string(b)) {
+			if n := len([]rune(line)); n > render.DefaultWidth {
+				t.Errorf("%s: %d cols against %d: %q", e.Name(), n, render.DefaultWidth, line)
+			}
+		}
+	}
+	if seen < 8 {
+		t.Fatalf("only %d demo surfaces rendered; expected every one", seen)
+	}
+}
+
+// svgTextLines recovers the terminal lines a demo SVG was built from.
+func svgTextLines(svg string) []string {
+	var out []string
+	for _, block := range regexp.MustCompile(`(?s)<text[^>]*>(.*?)</text>`).FindAllStringSubmatch(svg, -1) {
+		stripped := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(block[1], "")
+		out = append(out, html.UnescapeString(stripped))
+	}
+	return out
 }
 
 func TestTunePrintsProtocolWithoutSweeping(t *testing.T) {

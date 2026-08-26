@@ -7,19 +7,20 @@ import (
 	"strings"
 )
 
-// Board column widths. boardWidth is derived from them rather than written
-// down separately, which is how the old value drifted: the rule said 104 while
-// rows carrying a full serves list reached 123, so the boundary was routinely
-// crossed by the table it was drawn around.
+// Board column plan.
+//
+// The rule used to say 104 while a row carrying a full serves list reached 123,
+// so the boundary was crossed by the table it was drawn around, and 123 wraps
+// on any ordinary terminal. Build and serves moved to a continuation line --
+// neither is a number you scan a column of -- which buys the numeric row an
+// exact fit at DefaultWidth with every column intact.
 const (
-	boardModelWidth  = 24
-	boardBuildWidth  = 14
-	boardServesWidth = 28
-	// 2 gutter + model + build + bar(10) + tok/s(6) + sd(6) + runs(8) +
-	// prefill(7) + GB(6) + k(2), with a single space between each and two
-	// before serves.
-	boardFixed = 2 + boardModelWidth + 1 + boardBuildWidth + 1 + 10 + 1 + 6 + 1 + 6 + 1 + 8 + 1 + 7 + 1 + 6 + 1 + 2 + 2
-	boardWidth = boardFixed + boardServesWidth
+	boardModelWidth = 24
+	boardHeaderFmt  = "  %-*s %-10s %7s %6s %-8s %8s %6s %2s"
+	boardRowFmt     = "  %s %s %7.2f %6s %s %8.1f %6.2f %s\n"
+	// 2 gutter + model + bar(10) + tok/s(7) + sd(6) + runs(8) + prefill(8) +
+	// GB(6) + k(2), one space between each.
+	boardWidth = 2 + boardModelWidth + 1 + 10 + 1 + 7 + 1 + 6 + 1 + 8 + 1 + 8 + 1 + 6 + 1 + 2
 )
 
 // Board is the presentation model for the saved-result overview. It contains
@@ -110,12 +111,10 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 				maxDecode = row.DecodeMean
 			}
 		}
-		fmt.Fprintf(w, "  %-24s %-14s %-10s %6s %6s %-8s %7s %6s %2s  %s\n",
-			"model", "build", "decode", "tok/s", "sd", "runs", "prefill", "GB", "k", "serves")
+		fmt.Fprintf(w, "%s\n", fmt.Sprintf(boardHeaderFmt,
+			boardModelWidth, "model", "decode", "tok/s", "sd", "runs", "prefill", "GB", "k"))
 		for _, row := range group.Rows {
-			build := strings.TrimSpace(row.ParamSize + " " + row.Quant)
 			model := p.wrap(p.Head, pad(row.Model, boardModelWidth, g.Ell))
-			build = p.wrap(p.Muted, pad(build, boardBuildWidth, g.Ell))
 			bar := p.wrap(p.Accent, valueBar(row.DecodeMean, maxDecode, 8, unicode))
 			// "flat" is a claim about the data. Not being able to draw -- one
 			// repeat, or no Unicode on this stream -- is not the same claim, so
@@ -128,8 +127,7 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 			default:
 				spark = "-"
 			}
-			trend := p.wrap(p.Muted, fmt.Sprintf("%-8s", spark))
-			serves := p.wrap(p.Pass, fit(strings.Join(row.Serves, ","), boardServesWidth, g.Ell))
+			trend := p.wrap(p.Muted, pad(spark, 8, ""))
 			sd := "-"
 			if row.Repeats > 1 && row.DecodeSD > 0 {
 				sd = fmt.Sprintf("%.2f", row.DecodeSD)
@@ -138,11 +136,28 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 			if row.Repeats < 3 {
 				k = p.wrap(p.Warn, k)
 			}
-			fmt.Fprintf(w, "  %s %s %s %6.2f %6s %s %7.1f %6.2f %s  %s\n",
-				model, build, bar, row.DecodeMean, sd, trend, row.PrefillMean, row.ResidentGB, k, serves)
+			fmt.Fprintf(w, boardRowFmt, model, bar, row.DecodeMean, sd, trend,
+				row.PrefillMean, row.ResidentGB, k)
+			// The build and what the model serves are read once per row, not
+			// scanned down a column, so they cost a dim continuation line
+			// instead of 42 columns of table.
+			var tail []string
+			if build := strings.TrimSpace(row.ParamSize + " " + row.Quant); build != "" {
+				tail = append(tail, build)
+			}
+			if len(row.Serves) > 0 {
+				tail = append(tail, "serves "+strings.Join(row.Serves, ", "))
+			}
+			if len(tail) > 0 {
+				// Joined with the visible separator, not extra spaces: wrapping
+				// collapses runs of whitespace, so spacing cannot carry a break.
+				for _, l := range wrap(SingleLine(strings.Join(tail, g.Dot)), boardWidth-4) {
+					fmt.Fprintf(w, "    %s\n", p.wrap(p.Muted, l))
+				}
+			}
 		}
 		fmt.Fprintln(w, p.wrap(p.Muted, "  decode bars are relative only within this device/config block"))
-		fmt.Fprintln(w, p.wrap(p.Muted, "  runs is repeat shape oldest to newest; flat means the repeats did not move"))
+		fmt.Fprintln(w, p.wrap(p.Muted, "  runs is repeat shape oldest to newest; flat means repeats did not move"))
 	}
 	if len(board.Groups) > 1 {
 		fmt.Fprintln(w)
