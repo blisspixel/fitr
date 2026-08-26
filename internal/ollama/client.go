@@ -338,7 +338,36 @@ type chatResp struct {
 // what makes an agentic loop measurable: it is the size of the transcript the
 // model just re-processed, which is both the prefill bill and the input to
 // the compaction watchdog.
+// Chat sends one turn. A non-terminal reply that evaluated no tokens is
+// retried once: see chatOnce for why that specific case, and only that case.
 func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools []Tool, s Sampling) (Message, Metrics, error) {
+	msg, m, err := c.chatOnce(ctx, model, msgs, tools, s)
+	if err == nil || !errors.Is(err, errEmptyNonTerminal) {
+		return msg, m, err
+	}
+	// The server produced no generation at all, so there is nothing measured
+	// to protect and nothing to contaminate. Ask again rather than throw away
+	// a battery that has already run for minutes.
+	return c.chatOnce(ctx, model, msgs, tools, s)
+}
+
+// errEmptyNonTerminal marks a reply that is neither finished nor a generation:
+// no terminal receipt, and zero tokens evaluated on either side.
+//
+// This is worth singling out because fail-closed is otherwise right. A run
+// that stops is better than a run that quietly retries around a real fault,
+// and a partial generation must never be reused. But a reply that evaluated
+// ZERO tokens measured nothing: it cannot be a truncated answer, a refusal, or
+// a slow model, because none of those are free. It has been observed carrying
+// tool calls with no content and no timings, which is a shape the model cannot
+// produce. Retrying it risks nothing and has already cost three completed
+// batteries today, each several minutes in.
+//
+// A real fault still stops the run: anything with eval_count above zero, any
+// HTTP error, and a second failure here all return unretried.
+var errEmptyNonTerminal = errors.New("ollama chat returned no generation and no terminal receipt")
+
+func (c *Client) chatOnce(ctx context.Context, model string, msgs []Message, tools []Tool, s Sampling) (Message, Metrics, error) {
 	payload := map[string]any{
 		"model": model, "messages": msgs, "stream": false,
 		"options": map[string]any{
@@ -366,7 +395,19 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools [
 		return Message{}, Metrics{}, err
 	}
 	if !r.Done {
-		return Message{}, Metrics{}, errors.New("ollama chat response is missing the terminal receipt")
+		// The diagnostic carries the fields that identify the cause rather
+		// than just naming the symptom: done_reason separates a load reply
+		// from a truncated generation, and the token counts separate "the
+		// model produced something incomplete" from "the model never ran".
+		detail := fmt.Sprintf(
+			"(done_reason=%q role=%q content=%d bytes tool_calls=%d eval=%d prompt_eval=%d)",
+			r.DoneReason, r.Message.Role, len(r.Message.Content),
+			len(r.Message.ToolCalls), r.EvalCount, r.PromptEvalCount)
+		if r.EvalCount == 0 && r.PromptEvalCount == 0 {
+			return Message{}, Metrics{}, fmt.Errorf("%w %s", errEmptyNonTerminal, detail)
+		}
+		return Message{}, Metrics{}, fmt.Errorf(
+			"ollama chat response is missing the terminal receipt %s", detail)
 	}
 	if r.Message.Role != "assistant" {
 		return Message{}, Metrics{}, fmt.Errorf(

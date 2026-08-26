@@ -175,10 +175,16 @@ clean install on each operating system.
       again rather than reading like broken hardware. Only successful readings
       are cached: one slow moment must not pin an empty value for the life of
       the process.
-- [ ] Reconsider retry only if the intermittent transport fault recurs. Ten
-      direct reproductions of the withdrawal loop did not trigger it, so there
-      is no failure model to design a retry around, and a retry that hides a
-      real fault is worse than a run that stops.
+- [x] Retry the one transport fault that measures nothing. The intermittent
+      "missing the terminal receipt" failure recurred during a measurement
+      campaign and was captured: the server returns a reply that is not
+      finished, carries tool calls, and has evaluated **zero tokens on either
+      side**. Nothing was generated, so nothing was measured and nothing can
+      be contaminated; the shape is not one a model can produce. That case,
+      and only that case, is now asked again once. Anything with a token count
+      above zero is a real partial generation and still stops the run on the
+      first attempt, because a retry that hides a real fault is worse than a
+      run that stops. It had cost three completed batteries, each minutes in.
 - [x] Offer KV cache dtype as a remedy. The contract says every negative fit
       verdict carries a remedy, and `q8_0` halves KV bytes per element, which
       buys back context that `f16` spends. `advise` now prints it as a second
