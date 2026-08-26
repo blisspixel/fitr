@@ -274,6 +274,38 @@ every need the code does.
 - [x] A model with no tool support is `n/a`, not a failure and not a fault.
       Runtimes signal it with a generic HTTP 400; reading that as transport
       discarded the whole battery for a model that is simply text-only.
+- [ ] Finish the anytime-valid gate. `internal/stats/gate.go` implements the
+      Robbins beta-mixture e-process with property and vector tests, and
+      `cmd_run.go` still calls `stats.GateSPRT`. gate.go's own header records
+      why: SPRT certified a model sitting exactly on the gate 44% of the time
+      against a nominal 5%. So the method in use is the one this repo documents
+      as miscalibrated, `docs/statistics.md` section 6 still describes it, and
+      the replacement is built and unwired.
+
+      Two things move together with it. `GateEvidence.LowerBound` exists so the
+      stopping rule and the reported bound are the same arithmetic and cannot
+      contradict each other; today an adaptive run prints a fixed-sample
+      Rao-Scott Wilson interval computed on a stopping time, which is the same
+      class of error. And the process is one-sided -- it can certify "above the
+      gate" and cannot certify "below it" -- so a maintenance loop cannot state
+      a regression, only suspect one. The mirror process is a small addition to
+      gate.go and it is what turns "we can say it is good" into "we can say it
+      broke".
+
+      Changing the persisted adaptive receipt is a spec bump, which is why this
+      is a release item and not a patch.
+- [ ] Put the model artifact digest in the comparability key. `FingerprintV2`
+      seals host, OS, CPU, RAM, GPU, driver, backend, VRAM, runtime, placement,
+      config and context -- and not the weights. Tags are mutable, so an
+      `ollama pull` can replace what is behind `:latest` with the device key
+      unchanged. Joining measurements by model name is the wrong join, and it
+      is the highest-severity gap for anything that accumulates evidence over
+      time.
+- [ ] Say what went stale. `advise.evidenceUsable` is an exact key match and
+      `staleNote` says only "device or runtime changed since the last
+      measurement". `Fingerprint.Diff` already computes the field-level answer
+      and `incomparableNote` already renders it in `compare`. Wiring it into
+      the inventory path is small and self-contained.
 - [ ] Decompose the run pipeline far enough to turn on the complexity gates.
       `execute` went from 571 lines to 463 by extracting the measurement
       phases, and `main.go` from 4,074 to 1,199, but `funlen`, `gocognit`,

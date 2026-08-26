@@ -581,6 +581,17 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 			for round := range rounds {
 				roundsRun = round + 1
 				for _, cs := range spec.Checks {
+					// A need that has decided stops drawing trials.
+					//
+					// Without this the trial still ran and was appended to
+					// res.Checks, but the guard below withheld it from the
+					// test -- so the interval printed on the scorecard and the
+					// decision that stopped the run were computed from
+					// different samples of the same battery, and could
+					// disagree on the same screen. Skipping keeps one sample.
+					if s, ok := sprts[cs.Need]; ok && s.State() != stats.SPRTContinue {
+						continue
+					}
 					seed := eval.InstanceSeed(res.SeedSet, cs.ID, round)
 					o, err := eval.RunCheck(ctx, c, model, cs, seed)
 					if err != nil {
