@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+// The two formats are written together so the header can never drift from the
+// rows it labels. Both compose to exactly DefaultWidth.
+const (
+	fitHeaderFmt = "  %-12s %7s %6s %5s %7s %5s %5s %6s %7s  %s"
+	fitRowFmt    = "  %s %7s %6.1f %5.1f %7s %5.1f %5.1f %6s %7s  %s\n"
+)
+
 // ContextFit is the presentation model for advise's multi-window table.
 type ContextFit struct {
 	HaveGB float64
@@ -51,7 +58,12 @@ func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 		unicode = unicodeOK()
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, p.wrap(p.Head, "  CTX     WEIGHTS     KV    BUFFERS    NEED   ROOM  DECODE  PREFILL"))
+	// The tier leads. Status belongs in the leftmost column so the eye scans one
+	// vertical strip for "incompatible" instead of reading to the end of a row;
+	// it was last, behind eight numeric columns, which also pushed the row to 90
+	// characters against an 80-column terminal.
+	fmt.Fprintf(w, "%s\n", p.wrap(p.Head, fmt.Sprintf(fitHeaderFmt,
+		"FIT", "CTX", "WEIGHT", "KV", "BUFFERS", "NEED", "ROOM", "DECODE", "PREFILL", "OF HAVE")))
 	maxNeed := 0.0
 	for _, pt := range table.Points {
 		if pt.NeedGB > maxNeed {
@@ -84,10 +96,11 @@ func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 			pre = fmt.Sprintf("%.1f", pt.PrefillTPS)
 		}
 		bar := valueBar(math.Max(pt.NeedGB, 0), maxNeed, 6, unicode)
-		tier := p.wrap(fitTierColor(p, pt.Tier), fmt.Sprintf("%-12s", pt.Tier))
-		fmt.Fprintf(w, " %s %-6d %8.1f %6.1f %9s %7.1f %6.1f %7s %8s  %s %s\n",
-			mark, pt.Ctx, pt.WeightsGB, pt.KVGB, buf, pt.NeedGB, pt.HeadroomGB,
-			dec, pre, p.wrap(p.Accent, bar), tier)
+		fmt.Fprintf(w, fitRowFmt,
+			p.wrap(fitTierColor(p, pt.Tier), pad(pt.Tier, 12, g.Ell)),
+			fmt.Sprintf("%s%d", mark, pt.Ctx),
+			pt.WeightsGB, pt.KVGB, buf, pt.NeedGB, pt.HeadroomGB,
+			dec, pre, p.wrap(p.Accent, bar))
 		if pt.Note != "" && pt.BuffersKnown {
 			fmt.Fprintf(w, "          %s\n", p.wrap(p.Muted, SingleLine(pt.Note)))
 		}

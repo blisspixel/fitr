@@ -44,9 +44,83 @@ const (
 	Inconclusive State = "INCONCLUSIVE"
 )
 
+// Verdict is a state plus the evidence for it, kept in parts.
+//
+// It used to be a state and one string, assembled here with "; " and ", "
+// joins. That put layout in the scorer: the renderer received a sentence it
+// could only print or truncate, and the longest one reached 224 characters
+// against a 78-column rule. A renderer cannot lay out a string it did not
+// structure, so the structure lives here and the composition is derived.
 type Verdict struct {
-	State State  `json:"state"`
-	Why   string `json:"why"`
+	State State `json:"state"`
+	// Why is the one-line composition of the parts below. It is the persisted
+	// contract and what machine readers have always consumed, so it stays.
+	// Derive it with newVerdict; do not assign it beside the parts.
+	Why string `json:"why"`
+	// Measure is the quantity the verdict rests on, short enough for a column.
+	Measure string `json:"measure,omitempty"`
+	// Gate is the threshold Measure was judged against.
+	Gate string `json:"gate,omitempty"`
+	// Detail is the breakdown behind Measure, one fragment per element.
+	Detail []string `json:"detail,omitempty"`
+	// Note is prose: caveats, exclusions, and the readings to head off.
+	Note string `json:"note,omitempty"`
+}
+
+func newVerdict(s State, measure, gate string, detail []string, note string) Verdict {
+	v := Verdict{State: s, Measure: measure, Gate: gate, Detail: detail, Note: note}
+	v.Why = v.compose()
+	return v
+}
+
+// skipped and blocked are verdicts whose whole content is prose: nothing was
+// measured, so there is no quantity and no threshold to show.
+func skipped(note string) Verdict { return newVerdict(Skip, "", "", nil, note) }
+func blocked(note string) Verdict { return newVerdict(Blocked, "", "", nil, note) }
+
+func (v Verdict) compose() string {
+	var bits []string
+	head := v.Measure
+	switch {
+	case head != "" && v.Gate != "":
+		head += " (" + v.Gate + ")"
+	case head == "":
+		head = v.Gate
+	}
+	if head != "" {
+		bits = append(bits, head)
+	}
+	if len(v.Detail) > 0 {
+		bits = append(bits, strings.Join(v.Detail, ", "))
+	}
+	if v.Note != "" {
+		bits = append(bits, v.Note)
+	}
+	return strings.Join(bits, "; ")
+}
+
+// withNote appends a caveat and recomposes. Used by the exclusion paths, which
+// qualify a verdict that has already been built.
+func (v Verdict) withNote(extra string) Verdict {
+	switch {
+	case extra == "":
+	case v.Note == "":
+		v.Note = extra
+	default:
+		v.Note += "; " + extra
+	}
+	v.Why = v.compose()
+	return v
+}
+
+// Parts returns the display parts. Results saved before the parts existed carry
+// only Why, so it falls back to treating that whole string as prose rather than
+// rendering an empty row for a verdict that has an explanation.
+func (v Verdict) Parts() (measure, gate string, detail []string, note string) {
+	if v.Measure == "" && v.Gate == "" && len(v.Detail) == 0 && v.Note == "" {
+		return "", "", nil, v.Why
+	}
+	return v.Measure, v.Gate, v.Detail, v.Note
 }
 
 // Needs are the independent questions, in display order. user_tasks is not
@@ -58,15 +132,22 @@ var NeedOrder = []string{
 	"vision", "output_health",
 }
 
+// LabelWidth is the scorecard's label column. Labels are capped rather than
+// truncated at render time because the cap is a writing constraint, not a
+// display accident: "leaves tools alone when they don't apply" was 39 columns
+// against a 34-column field, so it ran into the text beside it with no
+// separator and the row read as one run-on phrase.
+const LabelWidth = 26
+
 var NeedLabel = map[string]string{
 	"fast_and_decent":       "fast + pretty good (chat)",
 	"coding":                "great coding / reasoning",
-	"structured_output":     "emits valid structured output",
+	"structured_output":     "valid structured output",
 	"instruction_precision": "follows exact instructions",
 	"uncensored":            "no filtering / low refusal",
-	"unattended_agentic":    "works unattended (agent loop)",
-	"tool_restraint":        "leaves tools alone when they don't apply",
-	"low_footprint":         "small enough to keep resident",
+	"unattended_agentic":    "works unattended (agent)",
+	"tool_restraint":        "leaves unused tools alone",
+	"low_footprint":         "keeps a small footprint",
 	"vision":                "reads images",
 	"output_health":         "no degenerate output",
 	"user_tasks":            "your tasks (~/.fitr/tasks)",
@@ -370,61 +451,65 @@ func Score(m Measured, p device.Profile) Scorecard {
 
 	// --- fast + pretty good
 	if tpsMin, ok1 := p.Float("fast_chat", "decode_tps_min"); !ok1 {
-		n["fast_and_decent"] = Verdict{Skip, "no fast_chat gate in profile"}
+		n["fast_and_decent"] = skipped("no fast_chat gate in profile")
 	} else if !m.SpeedKnown {
-		n["fast_and_decent"] = Verdict{Skip, "speed not measured"}
+		n["fast_and_decent"] = skipped("speed not measured")
 	} else {
 		ttftMax, _ := p.Float("fast_chat", "ttft_s_max")
 		// A cache-hit TTFT is not a new-question measurement. Judging it
 		// would let a warm-prefix figure wear a cold-prompt badge (usually
 		// a false PASS). Exclude it from the gate and say so.
 		ok := m.DecodeTPS >= tpsMin
-		why := fmt.Sprintf("%.2f tok/s (need >=%.1f), TTFT %.2fs loaded/uncached (need <=%.1f)",
-			m.DecodeTPS, tpsMin, m.TTFT, ttftMax)
+		detail := []string{fmt.Sprintf("TTFT %.2fs loaded/uncached (need <=%.1f)", m.TTFT, ttftMax)}
+		note := ""
 		if m.TTFTCacheContaminated {
-			why += "; gated TTFT was a cache hit - not a new-question number, excluded from the gate"
+			note = "gated TTFT was a cache hit - not a new-question number, excluded from the gate"
 		} else {
 			ok = ok && m.TTFT <= ttftMax
 		}
 		if m.TTFTCold > 0 {
-			why += fmt.Sprintf(", cold start %.1fs", m.TTFTCold)
+			detail = append(detail, fmt.Sprintf("cold start %.1fs", m.TTFTCold))
 		}
 		if m.TTFTWarm > 0 {
-			why += fmt.Sprintf(", cached prefix %.2fs", m.TTFTWarm)
+			detail = append(detail, fmt.Sprintf("cached prefix %.2fs", m.TTFTWarm))
 		}
 		if m.TimingsClientDerived {
-			why += "; client-derived wall-clock (not server timings)"
+			note = joinNote(note, "client-derived wall-clock (not server timings)")
 		}
-		n["fast_and_decent"] = Verdict{state(ok), why}
+		n["fast_and_decent"] = newVerdict(state(ok),
+			fmt.Sprintf("%.2f tok/s", m.DecodeTPS),
+			fmt.Sprintf("need >=%.1f", tpsMin), detail, note)
 	}
 
 	// --- coding. The gate is the executed code tasks; generated reasoning
 	// checks pool into the same interval (each instance is an independent
 	// trial) so the number rests on more than six observations.
 	if !m.CodeKnown {
-		why := "not measured"
+		v := skipped("executable coding not measured")
 		if m.Reasoning.N > 0 {
 			wi := stats.Wilson(m.Reasoning.Passes, m.Reasoning.N)
-			why = fmt.Sprintf("executable coding not measured; reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
-				m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi)
+			v = newVerdict(Skip, "not measured", "", nil, fmt.Sprintf(
+				"reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
+				m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi))
 		}
-		n["coding"] = Verdict{Skip, why}
+		n["coding"] = v
 	} else {
 		ok := m.CodeWritePass && m.CodeFixPass
-		why := fmt.Sprintf("write=%v, fix=%v", m.CodeWritePass, m.CodeFixPass)
+		measure := "write+fix"
+		detail := []string{fmt.Sprintf("write=%v, fix=%v", m.CodeWritePass, m.CodeFixPass)}
+		note := ""
 		if pooledN := m.CodeRepeats + m.Reasoning.N; pooledN > 1 {
-			flag := ""
-			if m.CodeFlaky {
-				flag = " FLAKY"
-			}
 			wi := stats.Wilson(m.CodePasses+m.Reasoning.Passes, pooledN)
-			why = fmt.Sprintf("%d/%d passes [%.2f-%.2f]%s",
-				m.CodePasses+m.Reasoning.Passes, pooledN, wi.Lo, wi.Hi, flag)
+			measure = fmt.Sprintf("%d/%d passes [%.2f-%.2f]",
+				m.CodePasses+m.Reasoning.Passes, pooledN, wi.Lo, wi.Hi)
 			if m.Reasoning.N > 0 {
-				why += fmt.Sprintf(" incl. reasoning %d/%d", m.Reasoning.Passes, m.Reasoning.N)
+				detail = append(detail, fmt.Sprintf("incl. reasoning %d/%d", m.Reasoning.Passes, m.Reasoning.N))
+			}
+			if m.CodeFlaky {
+				note = "FLAKY - the same task passed on some repeats and failed on others"
 			}
 		}
-		n["coding"] = Verdict{state(ok), why}
+		n["coding"] = newVerdict(state(ok), measure, "", detail, note)
 	}
 
 	// --- structured output. Quantization degrades JSON validity long before
@@ -439,32 +524,32 @@ func Score(m Measured, p device.Profile) Scorecard {
 	// profile sets a rate.
 	if m.User.N > 0 {
 		wi := stats.Wilson(m.User.Passes, m.User.N)
+		measure := fmt.Sprintf("%d/%d passed [%.2f-%.2f]", m.User.Passes, m.User.N, wi.Lo, wi.Hi)
 		if minRate, ok := p.Float("user_tasks", "pass_rate_min"); ok {
-			why := fmt.Sprintf("%d/%d passed [%.2f-%.2f] (need >=%.2f)",
-				m.User.Passes, m.User.N, wi.Lo, wi.Hi, minRate)
-			verdictState := state(m.User.rate() >= minRate)
+			verdictState, note := state(m.User.rate() >= minRate), ""
 			if gateInsideInterval(wi.Lo, wi.Hi, minRate) {
 				verdictState = Inconclusive
-				why += undecidedWhy(wi.Lo, wi.Hi, minRate)
+				note = undecidedWhy(wi.Lo, wi.Hi, minRate)
 			}
-			n["user_tasks"] = Verdict{verdictState, why}
+			n["user_tasks"] = newVerdict(verdictState, measure,
+				fmt.Sprintf("need >=%.2f", minRate), nil, note)
 		} else {
-			n["user_tasks"] = Verdict{state(m.User.Passes == m.User.N), fmt.Sprintf(
-				"%d/%d passed [%.2f-%.2f] (default: all must pass; set a user_tasks gate to loosen)",
-				m.User.Passes, m.User.N, wi.Lo, wi.Hi)}
+			n["user_tasks"] = newVerdict(state(m.User.Passes == m.User.N), measure,
+				"all must pass", nil, "default criterion: these are your own requirements; set a user_tasks gate to loosen")
 		}
 	}
 
 	// --- uncensored: a first-class need, not a footnote
 	if !m.RefusalKnown {
-		n["uncensored"] = Verdict{Skip, "refusal battery not run"}
+		n["uncensored"] = skipped("refusal battery not run")
 	} else {
 		maxRef, ok := p.Float("uncensored", "refused_max")
 		if !ok {
 			maxRef = 0
 		}
-		n["uncensored"] = Verdict{state(float64(m.RefusedCount) <= maxRef),
-			fmt.Sprintf("refused/partial %d/3 (need <=%.0f)", m.RefusedCount, maxRef)}
+		n["uncensored"] = newVerdict(state(float64(m.RefusedCount) <= maxRef),
+			fmt.Sprintf("refused/partial %d/3", m.RefusedCount),
+			fmt.Sprintf("need <=%.0f", maxRef), nil, "")
 	}
 
 	// --- unattended agentic. Broken plumbing BLOCKS rather than fails: roughly
@@ -472,35 +557,38 @@ func Score(m Measured, p device.Profile) Scorecard {
 	// context size, and a capability you could not fairly test is not a failure.
 	switch {
 	case m.PlumbingRan && !m.PlumbingHealthy:
-		n["unattended_agentic"] = Verdict{Blocked,
+		n["unattended_agentic"] = blocked(
 			"tool plumbing failed before capability could be judged: " +
-				m.PlumbingVerdict + " -- fix template/parser, then re-run"}
+				m.PlumbingVerdict + " -- fix template/parser, then re-run")
 	case !m.AgenticRan && m.ToolsRan:
-		n["unattended_agentic"] = Verdict{Skip, fmt.Sprintf(
+		n["unattended_agentic"] = skipped(fmt.Sprintf(
 			"only the 4-call proxy ran (tools=%v); use --full for the long-horizon verdict",
-			m.ToolsPass)}
+			m.ToolsPass))
 	case !m.AgenticRan:
-		n["unattended_agentic"] = Verdict{Skip, "not measured (use --full)"}
+		n["unattended_agentic"] = skipped("not measured (use --full)")
 	default:
 		pmin, ok := p.Float("unattended_agentic", "prefill_tps_min")
 		if !ok {
-			n["unattended_agentic"] = Verdict{Skip, "no unattended_agentic gate in profile"}
+			n["unattended_agentic"] = skipped("no unattended_agentic gate in profile")
 			break
 		}
 		bmax, _ := p.Float("unattended_agentic", "malformed_tool_calls_max")
 		ok2 := m.PrefillTPS >= pmin && float64(m.AgenticMalformed) <= bmax && m.AgenticPass
-		why := fmt.Sprintf(
-			"prefill %.1f tok/s (need >=%.0f), unattended pass=%v in %d turns, malformed=%d",
-			m.PrefillTPS, pmin, m.AgenticPass, m.AgenticTurns, m.AgenticMalformed)
+		detail := []string{
+			fmt.Sprintf("unattended pass=%v in %d turns", m.AgenticPass, m.AgenticTurns),
+			fmt.Sprintf("malformed=%d", m.AgenticMalformed),
+		}
+		note := ""
 		if m.AgenticCtxCeiling && !m.AgenticCompacted {
 			ok2 = false
-			why += fmt.Sprintf("; transcript peaked at %d tokens and never shrank - filled the window with no compaction",
+			note = fmt.Sprintf("transcript peaked at %d tokens and never shrank - filled the window with no compaction",
 				m.AgenticMaxPrompt)
 		} else if m.AgenticCtxCeiling {
-			why += fmt.Sprintf("; transcript peaked at %d tokens then compacted",
-				m.AgenticMaxPrompt)
+			note = fmt.Sprintf("transcript peaked at %d tokens then compacted", m.AgenticMaxPrompt)
 		}
-		n["unattended_agentic"] = Verdict{state(ok2), why}
+		n["unattended_agentic"] = newVerdict(state(ok2),
+			fmt.Sprintf("prefill %.1f tok/s", m.PrefillTPS),
+			fmt.Sprintf("need >=%.0f", pmin), detail, note)
 	}
 
 	// --- tool restraint: needs no ground truth, and it is the most common
@@ -509,55 +597,62 @@ func Score(m Measured, p device.Profile) Scorecard {
 	// mid-loop; one grace call to discover that, then stop).
 	switch {
 	case m.PlumbingRan && !m.PlumbingHealthy:
-		n["tool_restraint"] = Verdict{Blocked,
-			"tool plumbing did not establish a usable protocol; restraint was not judged"}
+		n["tool_restraint"] = blocked(
+			"tool plumbing did not establish a usable protocol; restraint was not judged")
 	case !m.IrrelevanceRan && !m.WithdrawRan:
-		n["tool_restraint"] = Verdict{Skip, "plumbing diagnostic not run"}
+		n["tool_restraint"] = skipped("plumbing diagnostic not run")
 	default:
-		ok := true
-		var bits []string
+		checks, clean := 0, 0
+		var detail []string
 		if m.IrrelevanceRan {
+			checks++
 			if m.IrrelevancePass {
-				bits = append(bits, "left tools alone on an unrelated question")
+				clean++
+				detail = append(detail, "left tools alone on an unrelated question")
 			} else {
-				ok = false
-				bits = append(bits, fmt.Sprintf("fired %d tool call(s) on an unrelated question", m.SpuriousCalls))
+				detail = append(detail, fmt.Sprintf("fired %d tool call(s) on an unrelated question", m.SpuriousCalls))
 			}
 		}
 		if m.WithdrawRan {
+			checks++
 			withdrawOK := m.WithdrawDeadCalls <= 1 && m.WithdrawClean
 			switch {
 			case withdrawOK && m.WithdrawDeadCalls == 0:
-				bits = append(bits, "never called a withdrawn tool")
+				clean++
+				detail = append(detail, "never called a withdrawn tool")
 			case withdrawOK:
-				bits = append(bits, "one grace call to a withdrawn tool, then stopped cleanly")
+				clean++
+				detail = append(detail, "one grace call to a withdrawn tool, then stopped cleanly")
 			case m.WithdrawDeadCalls > 1:
-				ok = false
-				bits = append(bits, fmt.Sprintf("kept calling a withdrawn tool (%d dead calls)", m.WithdrawDeadCalls))
+				detail = append(detail, fmt.Sprintf("kept calling a withdrawn tool (%d dead calls)", m.WithdrawDeadCalls))
 			default:
-				ok = false
-				bits = append(bits, "did not stop cleanly after a tool was withdrawn")
+				detail = append(detail, "did not stop cleanly after a tool was withdrawn")
 			}
 		}
-		n["tool_restraint"] = Verdict{state(ok), strings.Join(bits, "; ")}
+		n["tool_restraint"] = newVerdict(state(clean == checks),
+			fmt.Sprintf("%d/%d clean", clean, checks),
+			fmt.Sprintf("need %d/%d", checks, checks), detail, "")
 	}
 
 	// --- footprint
 	if lim, ok := p.Float("always_on_capable", "resident_gb_at_32k_max"); !ok {
-		n["low_footprint"] = Verdict{Skip, "no always_on_capable gate in profile"}
+		n["low_footprint"] = skipped("no always_on_capable gate in profile")
 	} else if !m.MemoryKnown {
-		n["low_footprint"] = Verdict{Skip, "memory not measured"}
+		n["low_footprint"] = skipped("memory not measured")
 	} else {
-		n["low_footprint"] = Verdict{state(m.ResidentGB32K <= lim), fmt.Sprintf(
-			"resident@32K %.2f GB (need <=%.0f)", m.ResidentGB32K, lim)}
+		n["low_footprint"] = newVerdict(state(m.ResidentGB32K <= lim),
+			fmt.Sprintf("resident@32K %.2f GB", m.ResidentGB32K),
+			fmt.Sprintf("need <=%.0f", lim), nil, "")
 	}
 
 	// --- vision. Not claiming vision is NOT a deficiency; it is a different
 	// kind of model.
 	if hasCap(m.Capabilities, "vision") {
-		n["vision"] = Verdict{Pass, fmt.Sprintf("capabilities=%v", m.Capabilities)}
+		n["vision"] = newVerdict(Pass, "declared", "", nil,
+			fmt.Sprintf("capabilities=%v", m.Capabilities))
 	} else {
-		n["vision"] = Verdict{NA, "text-only model - not a deficiency, just not what it is for"}
+		n["vision"] = newVerdict(NA, "text-only", "", nil,
+			"not a deficiency, just not what this model is for")
 	}
 
 	n["output_health"] = outputHealth(m, p)
@@ -603,11 +698,7 @@ func ExcludeEvidence(sc Scorecard, reason string) Scorecard {
 	for need, verdict := range sc.Needs {
 		if verdict.State == Pass || verdict.State == Fail {
 			verdict.State = Inconclusive
-			if verdict.Why == "" {
-				verdict.Why = detail
-			} else {
-				verdict.Why += "; " + detail
-			}
+			verdict = verdict.withNote(detail)
 		}
 		needs[need] = verdict
 	}
@@ -653,34 +744,31 @@ func ExcludeContamination(sc Scorecard, models []string) Scorecard {
 // When the gate sits inside the interval, the verdict says so.
 func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
 	if pool.N == 0 {
-		return Verdict{Skip, "not measured"}
+		return skipped("not measured")
 	}
 	minRate, ok := p.Float(gate, "pass_rate_min")
 	if !ok {
-		return Verdict{Skip, "no " + gate + " gate in profile"}
+		return skipped("no " + gate + " gate in profile")
 	}
 	wi := stats.ClusteredWilson(pool.clusters())
-	why := fmt.Sprintf("%d/%d %s [%.2f-%.2f] (need >=%.2f)",
-		pool.Passes, pool.N, verb, wi.Lo, wi.Hi, minRate)
-	if fam := familyBreakdown(pool.Families); fam != "" {
-		why += "; " + fam
-	}
-	verdictState := state(pool.rate() >= minRate)
+	verdictState, note := state(pool.rate() >= minRate), ""
 	if gateInsideInterval(wi.Lo, wi.Hi, minRate) {
 		verdictState = Inconclusive
-		why += undecidedWhy(wi.Lo, wi.Hi, minRate)
+		note = undecidedWhy(wi.Lo, wi.Hi, minRate)
 	}
 	if dead := establishedFamilyBelowGate(pool.Families, minRate); dead != "" && verdictState == Pass {
 		verdictState = Inconclusive
-		why += " - undecided: family " + dead + " is established below the bar, so the " +
-			"pooled rate is hiding it. Not thin evidence: look at that family"
+		note = joinNote(note, "undecided: family "+dead+" is established below the bar, so the "+
+			"pooled rate is hiding it. Not thin evidence: look at that family")
 	}
-	return Verdict{verdictState, why}
+	return newVerdict(verdictState,
+		fmt.Sprintf("%d/%d %s [%.2f-%.2f]", pool.Passes, pool.N, verb, wi.Lo, wi.Hi),
+		fmt.Sprintf("need >=%.2f", minRate), familyBreakdown(pool.Families), note)
 }
 
-func familyBreakdown(families []FamilyPool) string {
+func familyBreakdown(families []FamilyPool) []string {
 	if len(families) == 0 {
-		return ""
+		return nil
 	}
 	names := append([]FamilyPool(nil), families...)
 	sort.Slice(names, func(i, j int) bool { return names[i].Family < names[j].Family })
@@ -688,7 +776,18 @@ func familyBreakdown(families []FamilyPool) string {
 	for _, f := range names {
 		parts = append(parts, fmt.Sprintf("%s %d/%d", f.Family, f.Passes, f.N))
 	}
-	return strings.Join(parts, ", ")
+	return parts
+}
+
+func joinNote(existing, extra string) string {
+	switch {
+	case extra == "":
+		return existing
+	case existing == "":
+		return extra
+	default:
+		return existing + "; " + extra
+	}
 }
 
 func establishedFamilyBelowGate(families []FamilyPool, gate float64) string {
@@ -710,10 +809,10 @@ func gateInsideInterval(lo, hi, gate float64) bool {
 
 func outputHealth(m Measured, p device.Profile) Verdict {
 	if _, ok := p.Gates["quality"]; !ok {
-		return Verdict{Skip, "no quality gate in profile"}
+		return skipped("no quality gate in profile")
 	}
 	if m.Rep.Words < 150 {
-		return Verdict{Skip, "not enough generated text to judge"}
+		return skipped("not enough generated text to judge")
 	}
 	type chk struct {
 		name string
@@ -738,14 +837,18 @@ func outputHealth(m Measured, p device.Profile) Verdict {
 			breached = append(breached, fmt.Sprintf("%s %.3g > %.3g", c.name, c.val, lim))
 		}
 	}
+	// Truncation is a separate finding, not one of the value checks: counting it
+	// in the same denominator would let a fully breached card report "-1/5".
+	held := len(measured) - len(breached)
 	if allow, ok := p.Bool("quality", "allow_truncation"); m.Rep.Truncated && (!ok || !allow) {
 		breached = append(breached,
 			"output TRUNCATED (hit token cap; ~92% of truncations are loops)")
 	}
+	measure := fmt.Sprintf("%d/%d checks", held, len(measured))
 	if len(breached) > 0 {
-		return Verdict{Fail, strings.Join(breached, "; ")}
+		return newVerdict(Fail, measure, "all must hold", breached, "")
 	}
-	return Verdict{Pass, strings.Join(measured, ", ")}
+	return newVerdict(Pass, measure, "all must hold", measured, "")
 }
 
 // useFor never prints a bare dismissal. If nothing passed it says how much went
@@ -851,6 +954,6 @@ func SortedNeeds(n map[string]Verdict) []string {
 // researchers asked six true/false questions about one endorse three and a
 // half false statements on average, no better than untrained undergraduates.
 func undecidedWhy(lo, hi, gate float64) string {
-	return fmt.Sprintf(" - undecided: %.0f%% sits inside %.0f-%.0f%%, so this run fits both "+
+	return fmt.Sprintf("undecided: %.0f%% sits inside %.0f-%.0f%%, so this run fits both "+
 		"clearing and missing the bar. Not a fail", 100*gate, 100*lo, 100*hi)
 }

@@ -149,25 +149,43 @@ func TestGoldenResultRendersCleanly(t *testing.T) {
 	out, _ := io.ReadAll(pr)
 	got := string(out)
 
+	// Prose wraps to the rule, so assertions on sentences run against the
+	// reflowed text. Assertions on columns run against the raw output.
+	flat := strings.Join(strings.Fields(got), " ")
 	for _, want := range []string{
 		"[PASS]", "[n/a ]",
-		"ctx      8192",
-		"emits valid structured output",
+		"valid structured output",
 		"follows exact instructions",
 		// The resolution line reports two figures, because a gate test and a
 		// model-versus-model comparison do not resolve the same difference.
-		"evidence  ",
+		"evidence",
 		"resolves ~",
 		"against a gate",
 		"Separates broken from working",
 	} {
-		if !strings.Contains(got, want) {
+		if !strings.Contains(flat, want) {
 			t.Errorf("rendered scorecard missing %q\n%s", want, got)
 		}
 	}
 	for _, never := range []string{"+/- 0.00", "not recommended", "[FAIL]"} {
-		if strings.Contains(got, never) {
+		if strings.Contains(flat, never) {
 			t.Errorf("rendered scorecard must not contain %q\n%s", never, got)
+		}
+	}
+
+	// The header keeps its aligned label column, which reflowing would erase.
+	if !strings.Contains(got, "ctx      8192") {
+		t.Errorf("header lost its aligned value column\n%s", got)
+	}
+
+	// The rule is the promise the report makes about its own width. Every row
+	// used to be free to break it: 7 of 10 verdict rows did, the longest at 224
+	// columns against a 78-column rule, which wrapped into unreadable text at
+	// exactly the moment a reader was trying to find the failing need.
+	width := render.DefaultWidth
+	for _, line := range strings.Split(got, "\n") {
+		if n := len([]rune(line)); n > width {
+			t.Errorf("line is %d cols against a %d-col rule: %q", n, width, line)
 		}
 	}
 }
@@ -327,7 +345,10 @@ func TestViewDefaultsToNewestSavedResult(t *testing.T) {
 	if !strings.Contains(got, "model    newer") || strings.Contains(got, "model    older") {
 		t.Fatalf("view did not select the newest result:\n%s", got)
 	}
-	for _, want := range []string{"performance", "decode", "prefill", "graphs show repeat shape"} {
+	// The spread rides on the row it belongs to. The old caption named an axis
+	// ("oldest to newest") without ever giving a scale, so the glyphs it
+	// explained were still unreadable; min and max on the row are the scale.
+	for _, want := range []string{"performance", "decode", "prefill", "min 22.71, max 23.60"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("view missing %q:\n%s", want, got)
 		}

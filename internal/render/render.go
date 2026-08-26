@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"regexp"
 	"strings"
@@ -352,12 +353,102 @@ func (d *textDisplay) stateStyle(s score.State) string {
 	}
 }
 
+// Scorecard column plan. Everything is composed to a resolved width, so the
+// rule and the rows agree: a rule narrower than the content it bounds reads as
+// a rendering fault, and the previous fixed 78 was violated by 7 of 10 rows.
+const (
+	gutter = 2
+	// tagWidth covers "[PASS]". The brackets stay: the tag is the one field a
+	// reader greps for, and they make it unmistakably a marker rather than the
+	// first word of the sentence beside it.
+	tagWidth = 6
+	colGap   = 2
+	// measureWidth holds the widest real measure, "10/11 passes [0.62-0.98]".
+	// Truncating here would cut the interval, which is the half of the number
+	// that decides whether the verdict means anything.
+	measureWidth = 24
+	// contIndent puts continuation lines under the label column, so the tag
+	// gutter stays a single uninterrupted strip the eye can scan for FAIL.
+	contIndent = gutter + tagWidth + colGap
+	// minTailWidth is the narrowest useful gate column. Below it the measure
+	// and gate move to a continuation line rather than being truncated.
+	minTailWidth = 10
+	// evidenceHang aligns the closing notes under the header block's value
+	// column, so the whole report has two left edges and not five.
+	evidenceHang = 9
+)
+
+// verdictRow renders one need: a scannable primary line, then its receipts.
+//
+// The primary line is fixed-width by construction, so every tag, label, and
+// measure lands in the same screen column on every row and in every run. The
+// variable-length text -- the family breakdown and the prose caveat -- is
+// wrapped underneath rather than allowed to run off the right edge, which is
+// what produced a 224-character row against a 78-column rule.
+func (d *textDisplay) verdictRow(w io.Writer, label string, v score.Verdict, width int) {
+	measure, gate, detail, note := v.Parts()
+	// On a narrow terminal the label yields before anything else. Truncating a
+	// need's name costs a word; truncating its measure costs the interval.
+	labelWidth := min(score.LabelWidth, max(width-contIndent-minTailWidth, 8))
+	// The tag pads inside the brackets, not outside, so the closing bracket
+	// lands in the same column on every row: "[n/a ]" beside "[PASS]".
+	line := strings.Repeat(" ", gutter) +
+		d.pal.wrap(d.stateStyle(v.State), "["+pad(stateTag(v.State), tagWidth-2, "")+"]") +
+		strings.Repeat(" ", colGap) + pad(label, labelWidth, d.g.Ell)
+
+	tailStart := contIndent + labelWidth + colGap
+	tailWidth := width - tailStart
+	gateWidth := tailWidth - measureWidth - colGap
+
+	switch {
+	case tailWidth < minTailWidth:
+		// Too narrow for a tail at all. Measure and gate become the first
+		// continuation line rather than being cut down to nothing.
+		fmt.Fprintln(w, strings.TrimRight(line, " "))
+		if head := strings.TrimSpace(measure + " " + gate); head != "" {
+			d.continuation(w, head, width, "")
+		}
+	case gateWidth < minTailWidth:
+		fmt.Fprintln(w, strings.TrimRight(line+strings.Repeat(" ", colGap)+
+			fit(strings.TrimSpace(measure+" "+gate), tailWidth, d.g.Ell), " "))
+	default:
+		// A verdict with no quantity and no threshold has only prose. Promote a
+		// short note into the tail so an unmeasured need costs one line, not two.
+		if measure == "" && gate == "" && note != "" && len([]rune(note)) <= tailWidth {
+			measure, note = note, ""
+			line += strings.Repeat(" ", colGap) + d.pal.wrap(d.pal.Muted, measure)
+			fmt.Fprintln(w, strings.TrimRight(line, " "))
+			break
+		}
+		line += strings.Repeat(" ", colGap) + pad(measure, measureWidth, d.g.Ell)
+		line += strings.Repeat(" ", colGap) + d.pal.wrap(d.pal.Muted, fit(gate, gateWidth, d.g.Ell))
+		fmt.Fprintln(w, strings.TrimRight(line, " "))
+	}
+
+	if len(detail) > 0 {
+		d.continuation(w, strings.Join(detail, ", "), width, d.pal.Muted)
+	}
+	if note != "" {
+		d.continuation(w, note, width, d.pal.Muted)
+	}
+}
+
+func (d *textDisplay) continuation(w io.Writer, text string, width int, style string) {
+	for _, l := range wrap(SingleLine(text), max(width-contIndent, MinWidth-contIndent)) {
+		fmt.Fprintf(w, "%s%s\n", strings.Repeat(" ", contIndent), d.pal.wrap(style, l))
+	}
+}
+
 func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	w := d.out
-	rule := strings.Repeat("-", 78)
+	width := Width()
+	rule := strings.Repeat("-", width)
 	fmt.Fprintln(w, rule)
 	fmt.Fprintf(w, "model    %s\n", SingleLine(sc.Model))
-	fmt.Fprintf(w, "size     %s  %s  %s\n", SingleLine(m.ParamSize), SingleLine(m.Quant), SingleLine(m.Family))
+	if size := strings.TrimSpace(fmt.Sprintf("%s  %s  %s",
+		SingleLine(m.ParamSize), SingleLine(m.Quant), SingleLine(m.Family))); size != "" {
+		fmt.Fprintf(w, "size     %s\n", size)
+	}
 	if m.NumCtx > 0 {
 		switch {
 		case m.EffectiveCtx > 0 && m.EffectiveCtx != m.NumCtx:
@@ -387,51 +478,38 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	if m.Calibration {
 		useFor = "calibration evidence only - not a standalone product verdict"
 	}
-	fmt.Fprintf(w, "use for  %s\n", d.pal.wrap(d.pal.Accent, SingleLine(useFor)))
-	fmt.Fprintf(w, "device   %s%sdriver %s%s%s%sprofile %s\n",
-		SingleLine(m.GPU), d.g.Dot, SingleLine(m.Driver), d.g.Dot, SingleLine(m.Device), d.g.Dot, SingleLine(m.Profile))
+	d.headerField(w, "use for", useFor, width, d.pal.Accent)
+	d.headerField(w, "device", fmt.Sprintf("%s%sdriver %s%s%s%sprofile %s",
+		SingleLine(m.GPU), d.g.Dot, SingleLine(m.Driver), d.g.Dot,
+		SingleLine(m.Device), d.g.Dot, SingleLine(m.Profile)), width, "")
 	fmt.Fprintln(w, rule)
 	for _, k := range score.SortedNeeds(sc.Needs) {
 		v, ok := sc.Needs[k]
 		if !ok {
 			continue
 		}
-		fmt.Fprintf(w, "[%s] %-34s %s\n",
-			d.pal.wrap(d.stateStyle(v.State), fmt.Sprintf("%-4s", stateTag(v.State))),
-			SingleLine(score.NeedLabel[k]), SingleLine(v.Why))
+		d.verdictRow(w, score.NeedLabel[k], v, width)
 	}
 
 	if m.DecodeN > 0 || m.PrefillN > 0 || m.TTFTN > 0 || m.ResidentGB > 0 {
 		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "performance"))
 		if m.DecodeN > 0 {
-			fmt.Fprintf(w, "  %-8s %s tok/s", "decode", stat(m.DecodeMean, m.DecodeSD, m.DecodeN, m.DecodeMin, m.DecodeMax, d.g))
-			if len(m.DecodeSeries) > 0 {
-				fmt.Fprintf(w, "  %s", d.pal.wrap(d.pal.Accent, sparkline(m.DecodeSeries, 12, d.rich && unicodeOK())))
-			}
-			fmt.Fprintln(w)
+			d.perfRow(w, "decode", "tok/s", m.DecodeMean, m.DecodeSD, m.DecodeN,
+				m.DecodeSeries, m.DecodeMin, m.DecodeMax, width)
 		}
 		if m.PrefillN > 0 {
-			fmt.Fprintf(w, "  %-8s %s tok/s", "prefill", stat(m.PrefillMean, m.PrefillSD, m.PrefillN, 0, 0, d.g))
-			if len(m.PrefillSeries) > 0 {
-				fmt.Fprintf(w, "  %s", d.pal.wrap(d.pal.Accent, sparkline(m.PrefillSeries, 12, d.rich && unicodeOK())))
-			}
-			fmt.Fprintln(w)
+			d.perfRow(w, "prefill", "tok/s", m.PrefillMean, m.PrefillSD, m.PrefillN,
+				m.PrefillSeries, 0, 0, width)
 		}
 		if m.TTFTN > 0 {
-			fmt.Fprintf(w, "  %-8s %s s", "TTFT", stat(m.TTFTMean, m.TTFTSD, m.TTFTN, 0, 0, d.g))
-			if len(m.TTFTSeries) > 0 {
-				fmt.Fprintf(w, "  %s", d.pal.wrap(d.pal.Accent, sparkline(m.TTFTSeries, 12, d.rich && unicodeOK())))
-			}
-			fmt.Fprintln(w)
+			d.perfRow(w, "TTFT", "s", m.TTFTMean, m.TTFTSD, m.TTFTN, m.TTFTSeries, 0, 0, width)
 		}
 		if m.ResidentGB > 0 {
 			fmt.Fprintf(w, "  %-8s %.2f GB resident\n", "memory", m.ResidentGB)
 		}
-		if len(m.DecodeSeries) > 1 || len(m.PrefillSeries) > 1 || len(m.TTFTSeries) > 1 {
-			fmt.Fprintf(w, "  %s\n", d.pal.wrap(d.pal.Muted, "graphs show repeat shape, oldest to newest"))
-		}
 		if m.FirstRunSlow {
-			fmt.Fprintf(w, "  %s\n", d.pal.wrap(d.pal.Warn, fmt.Sprintf("! first decode repeat was %.1fx slower than the settled repeats", m.FirstRunRatio)))
+			d.footer(w, fmt.Sprintf("! first decode repeat was %.1fx slower than the settled repeats",
+				m.FirstRunRatio), width, 2, 4, d.pal.Warn)
 		}
 	}
 	// Say what this sample CANNOT resolve. An honest gap beats implied precision.
@@ -449,14 +527,15 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 		// The plain-English version of the same fact, for the reader who is
 		// not going to convert percentage points into a decision.
 		line += ". Separates broken from working, not good from slightly better"
-		fmt.Fprintf(w, "%s\n", d.pal.wrap(d.pal.Muted, line))
+		fmt.Fprintln(w)
+		d.footer(w, line, width, 0, evidenceHang, d.pal.Muted)
 		// Name what the ranges are, and both things they are not. Readers
 		// reliably take an interval for the spread of scores they will see, or
 		// for the tool's confidence in the model, and neither is what it says.
 		if m.ShowsIntervals {
-			fmt.Fprintf(w, "%s\n", d.pal.wrap(d.pal.Muted,
-				"ranges are what this run pins the true rate to. They are not the spread of "+
-					"scores you will see, and not how sure fitr is that the model is good"))
+			d.footer(w, "ranges are what this run pins the true rate to. They are not the spread of "+
+				"scores you will see, and not how sure fitr is that the model is good",
+				width, evidenceHang, evidenceHang, d.pal.Muted)
 		}
 	}
 	if m.Repeats < 3 {
@@ -465,30 +544,106 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 		if m.Calibration {
 			warning = "! single calibration instance - use -k 5 for a workflow pass and -k 10 for decision evidence"
 		}
-		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Warn, warning))
+		fmt.Fprintln(w)
+		d.footer(w, warning, width, 0, 2, d.pal.Warn)
 	}
 	fmt.Fprintln(w, rule)
+}
+
+// headerField prints one label/value pair from the header block, wrapping the
+// value under its own column. The device line and a long use-for both exceed
+// the rule on ordinary runs.
+func (d *textDisplay) headerField(w io.Writer, label, value string, width int, style string) {
+	lines := wrap(SingleLine(value), max(width-evidenceHang, MinWidth))
+	if len(lines) == 0 {
+		return
+	}
+	for i, l := range lines {
+		lead := pad(label, evidenceHang, "")
+		if i > 0 {
+			lead = strings.Repeat(" ", evidenceHang)
+		}
+		fmt.Fprintf(w, "%s%s\n", lead, d.pal.wrap(style, l))
+	}
+}
+
+// footer wraps a closing note to the rule, hanging continuations under the
+// first line's text so a wrapped sentence still reads as one block.
+func (d *textDisplay) footer(w io.Writer, text string, width, lead, hang int, style string) {
+	for i, l := range wrap(SingleLine(text), max(width-hang, MinWidth)) {
+		indent := lead
+		if i > 0 {
+			indent = hang
+		}
+		fmt.Fprintf(w, "%s%s\n", strings.Repeat(" ", indent), d.pal.wrap(style, l))
+	}
+}
+
+// perfRow prints one measured series: the estimate, then the spread.
+//
+// The tail is either the drawn shape between its own endpoints or the endpoints
+// stated in words -- the same information, one of them a picture. Putting the
+// endpoints on the row is what makes the glyphs readable: a sparkline is
+// normalised to its own min and max, so without them "▁▄█" could be a 0.4%
+// wobble or a tenfold swing, and the caption it used to carry ("graphs show
+// repeat shape, oldest to newest") named the axis without ever giving a scale.
+func (d *textDisplay) perfRow(w io.Writer, name, unit string, mean, sd float64, n int,
+	series []float64, knownMin, knownMax float64, width int,
+) {
+	head := fmt.Sprintf("  %-8s %s %s", name, stat(mean, sd, n, d.g), unit)
+	lo, hi, ok := seriesRange(series)
+	if !ok && knownMax > knownMin {
+		lo, hi, ok = knownMin, knownMax, true
+	}
+	if !ok {
+		fmt.Fprintln(w, head)
+		return
+	}
+	tail := fmt.Sprintf("min %.2f, max %.2f", lo, hi)
+	if spark, informative := sparkline(series, 12, d.rich && unicodeOK()); informative {
+		tail = fmt.Sprintf("%.2f %s %.2f", lo, d.pal.wrap(d.pal.Accent, spark), hi)
+	}
+	// Pad to a shared column so the tails line up down the block, but never
+	// past the width: alignment is worth a few spaces, not a wrapped line.
+	gap := 2
+	if pad := 38 - len([]rune(head)); pad > gap {
+		gap = pad
+	}
+	if len([]rune(head))+gap+len([]rune(SingleLine(tail))) > width {
+		gap = 2
+	}
+	fmt.Fprintf(w, "%s%s%s\n", head, strings.Repeat(" ", gap), d.pal.wrap(d.pal.Muted, tail))
+}
+
+func seriesRange(series []float64) (lo, hi float64, ok bool) {
+	for _, v := range series {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
+		if !ok {
+			lo, hi, ok = v, v, true
+			continue
+		}
+		lo, hi = math.Min(lo, v), math.Max(hi, v)
+	}
+	return lo, hi, ok && hi > lo
 }
 
 // stat never prints "+/- 0.00". A single observation is not an estimate;
 // hyperfine relabels it rather than inventing a zero sigma. When there is a
 // real spread, the coefficient of variation rides along: it is the one
 // dimensionless stability number that compares across devices.
-func stat(mean, sd float64, n int, mn, mx float64, g glyphs) string {
+func stat(mean, sd float64, n int, g glyphs) string {
 	if n == 0 {
 		return "n/a"
 	}
 	if n < 2 || sd == 0 {
 		return fmt.Sprintf("%.2f (abs, n=1)", mean)
 	}
-	cv := ""
 	if mean != 0 {
-		cv = fmt.Sprintf(", CV %.1f%%", 100*sd/mean)
+		return fmt.Sprintf("%.2f %s%.2f (CV %.1f%%, n=%d)", mean, g.PM, sd, 100*sd/mean, n)
 	}
-	if mn != 0 || mx != 0 {
-		return fmt.Sprintf("%.2f %s%.2f (min %.2f, max %.2f%s)", mean, g.PM, sd, mn, mx, cv)
-	}
-	return fmt.Sprintf("%.2f %s%.2f", mean, g.PM, sd)
+	return fmt.Sprintf("%.2f %s%.2f (n=%d)", mean, g.PM, sd, n)
 }
 
 func (d *textDisplay) Emit(v any) {}

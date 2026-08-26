@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 )
 
 const InventorySchema = "fitr.inventory.v1"
@@ -160,21 +161,17 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "  %-24s %-12s %-12s %-8s %8s  %s\n", "MODEL", "STATE", "FIT", "CTX", "SIZE", "NEXT")
+	width := Width()
+	modelWidth := max(width-invFixed, 12)
+	fmt.Fprintf(w, "  %s %-*s %-*s %*s  %s\n",
+		pad("MODEL", modelWidth, ""), invStateWidth, "STATE",
+		invCtxWidth, "CTX", invSizeWidth, "SIZE", "NEXT")
 	for _, row := range inv.Rows {
 		name := row.Model
 		if row.Loaded {
 			name = "* " + name
 		}
-		state := p.wrap(stateColor(p, row.State), fmt.Sprintf("%-12s", row.State))
-		fitLabel := row.Fit
-		if fitLabel == "" {
-			fitLabel = "-"
-		}
-		if fitLabel == "low_memory" {
-			fitLabel = "low mem"
-		}
-		fitCol := p.wrap(fitTierColor(p, row.Fit), fmt.Sprintf("%-12s", fitLabel))
+		state, style := inventoryState(row, p)
 		ctxCol := row.Ctx
 		if ctxCol == "" {
 			ctxCol = "-"
@@ -183,13 +180,17 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 		if row.SizeB > 0 {
 			size = fmt.Sprintf("%.1f GB", float64(row.SizeB)/(1024*1024*1024))
 		}
-		fmt.Fprintf(w, "  %-24s %s %s %-8s %8s  %s\n",
-			fit(name, 24, g.Ell), state, fitCol, ctxCol, size, SingleLine(row.Next))
-		if row.Note != "" {
-			fmt.Fprintf(w, "  %-24s %s\n", "", p.wrap(p.Muted, SingleLine(row.Note)))
-		}
-		if row.Windows != "" {
-			fmt.Fprintf(w, "  %-24s %s\n", "", p.wrap(p.Muted, SingleLine(row.Windows)))
+		fmt.Fprintf(w, "  %s %s %-*s %*s  %s\n",
+			pad(name, modelWidth, g.Ell), p.wrap(style, pad(state, invStateWidth, g.Ell)),
+			invCtxWidth, ctxCol, invSizeWidth, size,
+			fit(shortNext(row.Next, row.Model), invNextWidth, g.Ell))
+		for _, extra := range []string{row.Note, row.Windows} {
+			if extra == "" {
+				continue
+			}
+			for _, l := range wrap(SingleLine(extra), max(width-invNoteIndent, MinWidth)) {
+				fmt.Fprintf(w, "%s%s\n", strings.Repeat(" ", invNoteIndent), p.wrap(p.Muted, l))
+			}
 		}
 	}
 	fmt.Fprintln(w)
@@ -197,10 +198,85 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, fmt.Sprintf("showing %d of %d installed; name one with fitr advise <model>",
 			len(inv.Rows), len(inv.Rows)+inv.Hidden)))
 	}
+	// NEXT drops the verb's `fitr ` and the model name, because both are already
+	// on the row. Keeping them made every row carry the model name twice and
+	// pushed the longest to 117 columns, so the table wrapped on any ordinary
+	// terminal. One worked example is worth more than fourteen repetitions.
+	fmt.Fprintln(w, p.wrap(p.Muted, "  next reads as `fitr <next> <model>`, e.g. fitr advise "+exampleModel(inv.Rows)))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  * loaded    CTX is measured, or measured/serving when they differ"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  * suggested window   > requested window that does not fit"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  unmeasured is a candidate, never a recommendation"))
-	fmt.Fprintln(w, p.wrap(p.Muted, "  next is one command per row; board compares only measured runs"))
+	fmt.Fprintln(w, p.wrap(p.Muted, "  board compares only measured runs"))
+}
+
+// Inventory column plan. STATE carries what STATE and FIT used to say between
+// them: FIT read "-" on every unmeasured row, so eleven columns were spent
+// telling the reader nothing on the majority of the table, while the model
+// name and the command were both being truncated for want of them.
+const (
+	invStateWidth = 16
+	invCtxWidth   = 5
+	invSizeWidth  = 7
+	// Wide enough for the longest NEXT after shortening: "try a smaller quant",
+	// which is advice rather than a command and so keeps its own words.
+	invNextWidth  = 19
+	invNoteIndent = 4
+	invFixed      = 2 + 1 + invStateWidth + 1 + invCtxWidth + 1 + invSizeWidth + 2 + invNextWidth
+)
+
+// inventoryState folds the fit tier into the state word. "unproven" alone does
+// not say whether the thing is even loadable; "fits, unproven" does, in the
+// same column.
+func inventoryState(row InventoryRow, p palette) (string, string) {
+	tier := row.Fit
+	if tier == "low_memory" {
+		tier = "tight"
+	}
+	if row.State != "unproven" || tier == "" || tier == "-" {
+		return row.State, stateColor(p, row.State)
+	}
+	if tier == "compatible" {
+		tier = "fits"
+	}
+	return tier + ", unproven", fitTierColor(p, row.Fit)
+}
+
+// shortNext strips what the row already shows: the binary's own name and the
+// model the command is about.
+func shortNext(next, model string) string {
+	s := strings.TrimPrefix(SingleLine(next), "fitr ")
+	if model != "" {
+		// Quoted first: a shell-quoted name contains the bare one, so matching
+		// the bare form first would leave the quotes behind. Only a whole
+		// argument is removed, never a prefix of a longer model name.
+		for _, form := range []string{`"` + model + `"`, `'` + model + `'`, model} {
+			if i := strings.Index(s, form); i >= 0 && isWholeArg(s, i, len(form)) {
+				s = s[:i] + s[i+len(form):]
+				break
+			}
+		}
+	}
+	if s = strings.Join(strings.Fields(s), " "); s == "" {
+		return "-"
+	}
+	return s
+}
+
+func isWholeArg(s string, start, length int) bool {
+	if start > 0 && s[start-1] != ' ' {
+		return false
+	}
+	end := start + length
+	return end == len(s) || s[end] == ' '
+}
+
+func exampleModel(rows []InventoryRow) string {
+	for _, row := range rows {
+		if row.Model != "" {
+			return SingleLine(row.Model)
+		}
+	}
+	return "<model>"
 }
 
 func stateColor(p palette, state string) string {

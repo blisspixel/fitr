@@ -684,6 +684,10 @@ func trim1(v float64) string {
 	return s
 }
 
+// adviseLabelWidth holds "  [incompatible]", the widest label in the report,
+// so every value in the block starts in the same column.
+const adviseLabelWidth = 17
+
 // Write prints the human report. SKIP never prints a 0.0 GB budget as if it
 // were a measurement.
 func Write(w io.Writer, r Report) {
@@ -700,32 +704,40 @@ func Write(w io.Writer, r Report) {
 	if len(bits) > 0 {
 		fmt.Fprintf(w, "  %s\n\n", strings.Join(bits, "  "))
 	}
-	fmt.Fprintf(w, "  [%-12s]  %s\n", render.SingleLine(r.Label()), render.SingleLine(r.Why))
+	// Every field wraps under its own column. The verdict line in particular
+	// carries an unbounded sentence -- "resident 19.0 GB exceeds the 24.0 GB
+	// budget reading; the process is running, so the budget is the suspect
+	// number" is 110 characters on its own -- and used to run off the right
+	// edge of any terminal narrower than its longest explanation.
+	width := render.Width()
+	render.Field(w, "  ["+render.SingleLine(r.Label())+"]", adviseLabelWidth, r.Why, width)
 	if r.Remedy != "" {
-		fmt.Fprintf(w, "  try            %s\n", render.SingleLine(r.Remedy))
+		render.Field(w, "  try", adviseLabelWidth, r.Remedy, width)
 	}
 	if r.KVRemedy != "" {
-		fmt.Fprintf(w, "  or             %s\n", render.SingleLine(r.KVRemedy))
+		render.Field(w, "  or", adviseLabelWidth, r.KVRemedy, width)
 	}
 	if r.Hint != "" {
-		fmt.Fprintf(w, "  hint           %s\n", render.SingleLine(r.Hint))
+		render.Field(w, "  hint", adviseLabelWidth, r.Hint, width)
 	}
 	for _, g := range r.Gaps {
-		fmt.Fprintf(w, "  note           %s\n", render.SingleLine(g))
+		render.Field(w, "  note", adviseLabelWidth, g, width)
 	}
 	if r.Source != "" {
-		fmt.Fprintf(w, "  source         %s\n", render.SingleLine(r.Source))
+		render.Field(w, "  source", adviseLabelWidth, r.Source, width)
 	}
 	if r.HaveSource != "" && r.Tier != Skip {
-		fmt.Fprintf(w, "  memory         %s GB (%s)\n", trim1(r.HaveGB), render.SingleLine(r.HaveSource))
+		render.Field(w, "  memory", adviseLabelWidth,
+			fmt.Sprintf("%s GB (%s)", trim1(r.HaveGB), render.SingleLine(r.HaveSource)), width)
 		// The verdict above is computed against the whole card, which is the
 		// right question only on a machine doing nothing else. Say what is
 		// actually free when that is a materially different number, because
 		// "compatible" is cold comfort if the model cannot load right now.
 		if r.FreeGB > 0 && r.WeightsGB > 0 && r.FreeGB < r.WeightsGB {
-			fmt.Fprintf(w, "  ! free now     %s GB, less than this model's %s GB of weights. The verdict "+
-				"above assumes the card is yours; right now it is not\n",
-				trim1(r.FreeGB), trim1(r.WeightsGB))
+			render.Field(w, "  ! free now", adviseLabelWidth, fmt.Sprintf(
+				"%s GB, less than this model's %s GB of weights. The verdict above "+
+					"assumes the card is yours; right now it is not",
+				trim1(r.FreeGB), trim1(r.WeightsGB)), width)
 		}
 	}
 	if r.Fit != nil && len(r.Fit.Points) > 0 {

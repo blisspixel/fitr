@@ -7,6 +7,21 @@ import (
 	"strings"
 )
 
+// Board column widths. boardWidth is derived from them rather than written
+// down separately, which is how the old value drifted: the rule said 104 while
+// rows carrying a full serves list reached 123, so the boundary was routinely
+// crossed by the table it was drawn around.
+const (
+	boardModelWidth  = 24
+	boardBuildWidth  = 14
+	boardServesWidth = 28
+	// 2 gutter + model + build + bar(10) + tok/s(6) + sd(6) + runs(8) +
+	// prefill(7) + GB(6) + k(2), with a single space between each and two
+	// before serves.
+	boardFixed = 2 + boardModelWidth + 1 + boardBuildWidth + 1 + 10 + 1 + 6 + 1 + 6 + 1 + 8 + 1 + 7 + 1 + 6 + 1 + 2 + 2
+	boardWidth = boardFixed + boardServesWidth
+)
+
 // Board is the presentation model for the saved-result overview. It contains
 // only values needed by the terminal, which keeps layout concerns out of the
 // measurement and scoring code.
@@ -61,9 +76,11 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 		unicode = unicodeOK()
 	}
 
+	// The board's columns are fixed, so its rule matches them rather than the
+	// terminal: a rule wider than the content is as wrong as one narrower.
 	title := fmt.Sprintf("FITR BOARD  %d result(s)  %d device/config block(s)", board.Results, len(board.Groups))
 	fmt.Fprintln(w, p.wrap(p.Head, title))
-	fmt.Fprintln(w, p.wrap(p.Muted, strings.Repeat("-", 104)))
+	fmt.Fprintln(w, p.wrap(p.Muted, strings.Repeat("-", boardWidth)))
 	for i, group := range board.Groups {
 		if i > 0 {
 			fmt.Fprintln(w)
@@ -97,11 +114,22 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 			"model", "build", "decode", "tok/s", "sd", "runs", "prefill", "GB", "k", "serves")
 		for _, row := range group.Rows {
 			build := strings.TrimSpace(row.ParamSize + " " + row.Quant)
-			model := p.wrap(p.Head, fmt.Sprintf("%-24s", fit(row.Model, 24, g.Ell)))
-			build = p.wrap(p.Muted, fmt.Sprintf("%-14s", fit(build, 14, g.Ell)))
+			model := p.wrap(p.Head, pad(row.Model, boardModelWidth, g.Ell))
+			build = p.wrap(p.Muted, pad(build, boardBuildWidth, g.Ell))
 			bar := p.wrap(p.Accent, valueBar(row.DecodeMean, maxDecode, 8, unicode))
-			trend := p.wrap(p.Muted, fmt.Sprintf("%-8s", sparkline(row.DecodeSeries, 7, unicode)))
-			serves := p.wrap(p.Pass, fit(strings.Join(row.Serves, ","), 28, g.Ell))
+			// "flat" is a claim about the data. Not being able to draw -- one
+			// repeat, or no Unicode on this stream -- is not the same claim, so
+			// it prints an absence instead of asserting stability.
+			spark, informative := sparkline(row.DecodeSeries, 7, unicode)
+			switch {
+			case informative:
+			case len(row.DecodeSeries) > 1 && flatSeries(row.DecodeSeries):
+				spark = "flat"
+			default:
+				spark = "-"
+			}
+			trend := p.wrap(p.Muted, fmt.Sprintf("%-8s", spark))
+			serves := p.wrap(p.Pass, fit(strings.Join(row.Serves, ","), boardServesWidth, g.Ell))
 			sd := "-"
 			if row.Repeats > 1 && row.DecodeSD > 0 {
 				sd = fmt.Sprintf("%.2f", row.DecodeSD)
@@ -113,7 +141,8 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 			fmt.Fprintf(w, "  %s %s %s %6.2f %6s %s %7.1f %6.2f %s  %s\n",
 				model, build, bar, row.DecodeMean, sd, trend, row.PrefillMean, row.ResidentGB, k, serves)
 		}
-		fmt.Fprintln(w, p.wrap(p.Muted, "  decode bars are relative only within this device/config block; runs show repeat shape"))
+		fmt.Fprintln(w, p.wrap(p.Muted, "  decode bars are relative only within this device/config block"))
+		fmt.Fprintln(w, p.wrap(p.Muted, "  runs is repeat shape oldest to newest; flat means the repeats did not move"))
 	}
 	if len(board.Groups) > 1 {
 		fmt.Fprintln(w)
@@ -138,9 +167,46 @@ func valueBar(value, ceiling float64, width int, unicode bool) string {
 	return "[" + strings.Repeat(full, filled) + strings.Repeat(empty, width-filled) + "]"
 }
 
-func sparkline(values []float64, limit int, unicode bool) string {
-	if limit < 1 || len(values) == 0 {
-		return "-"
+// flatFloor is the relative spread below which a sparkline is refused.
+//
+// The glyph row is normalised to the series min and max, so a run that varied
+// by 0.4% renders the same dramatic zigzag as one that varied by tenfold. On a
+// tool that will not print "+/- 0.00" for a single sample, drawing a trend out
+// of noise is the same error with a nicer face. Below this the numbers on the
+// row already say everything the picture could.
+const flatFloor = 0.05
+
+// flatSeries reports whether a series varies too little for a drawn shape to be
+// honest about it.
+func flatSeries(values []float64) bool {
+	lo, hi, ok := seriesRange(values)
+	if !ok {
+		return true
+	}
+	sum, n := 0.0, 0
+	for _, v := range values {
+		if !math.IsNaN(v) && !math.IsInf(v, 0) {
+			sum += v
+			n++
+		}
+	}
+	if n == 0 {
+		return true
+	}
+	mean := sum / float64(n)
+	return mean == 0 || (hi-lo)/math.Abs(mean) < flatFloor
+}
+
+// sparkline returns the glyph row and whether it carries information.
+//
+// It is refused outright without Unicode. The ASCII ramp it used to fall back
+// to -- .:-=+*#@ -- is not a perceptual ramp: `#` and `@` are dense but not
+// tall, `-` sits mid-cell, and readers cannot order those by height, which is
+// the only channel a sparkline has. `@.**@#=*=#` is noise wearing a chart's
+// clothes, and a chart nobody can read is worse than no chart.
+func sparkline(values []float64, limit int, unicode bool) (string, bool) {
+	if limit < 1 || len(values) < 2 || !unicode {
+		return "", false
 	}
 	clean := make([]float64, 0, len(values))
 	for _, value := range values {
@@ -148,8 +214,8 @@ func sparkline(values []float64, limit int, unicode bool) string {
 			clean = append(clean, value)
 		}
 	}
-	if len(clean) == 0 {
-		return "-"
+	if len(clean) < 2 {
+		return "", false
 	}
 	if len(clean) > limit {
 		if limit == 1 {
@@ -163,22 +229,14 @@ func sparkline(values []float64, limit int, unicode bool) string {
 			clean = sampled
 		}
 	}
-	levels := []rune(".:-=+*#@")
-	if unicode {
-		levels = []rune("▁▂▃▄▅▆▇█")
+	if flatSeries(clean) {
+		return "", false
 	}
-	lo, hi := clean[0], clean[0]
-	for _, value := range clean[1:] {
-		lo = math.Min(lo, value)
-		hi = math.Max(hi, value)
-	}
+	levels := []rune("▁▂▃▄▅▆▇█")
+	lo, hi, _ := seriesRange(clean)
 	var out strings.Builder
 	for _, value := range clean {
-		index := (len(levels) - 1) / 2
-		if hi > lo {
-			index = int(math.Round(float64(len(levels)-1) * (value - lo) / (hi - lo)))
-		}
-		out.WriteRune(levels[index])
+		out.WriteRune(levels[int(math.Round(float64(len(levels)-1)*(value-lo)/(hi-lo)))])
 	}
-	return out.String()
+	return out.String(), true
 }

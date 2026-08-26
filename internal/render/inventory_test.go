@@ -24,9 +24,12 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"fitr 0.6.0", "cpu", "gpu", "ollama", "UNCALIBRATED",
-		"measured", "unproven", "incompatible", "FIT", "CTX", "16k/8k", "*16k ok",
-		"fitr apply qwen3:8b", "fitr advise gemma4:12b", "try a smaller quant",
+		"measured", "unproven", "incompatible", "CTX", "16k/8k", "*16k ok",
+		// The verb survives; the model name and the binary's own name do not,
+		// because the row already carries both.
+		"apply", "advise", "try a smaller quant",
 		"* gemma4:12b", "never a recommendation",
+		"fitr advise qwen3:8b", // the one worked example in the legend
 		"warning", "could not be trusted",
 	} {
 		if !strings.Contains(got, want) {
@@ -38,6 +41,54 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 	}
 	if strings.Contains(got, "fitr run llama3.1:70b") {
 		t.Fatal("incompatible row must not suggest run")
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if n := len([]rune(line)); n > DefaultWidth {
+			t.Errorf("inventory line is %d cols against %d: %q", n, DefaultWidth, line)
+		}
+	}
+}
+
+// The fit tier lives in the state word now. An unmeasured model that advise has
+// already sized says so in one column instead of leaving a second column at "-".
+func TestInventoryStateCarriesTheFitTier(t *testing.T) {
+	cases := []struct {
+		state, fit, want string
+	}{
+		{"unproven", "compatible", "fits, unproven"},
+		{"unproven", "low_memory", "tight, unproven"},
+		{"unproven", "", "unproven"},
+		{"unproven", "-", "unproven"},
+		{"measured", "compatible", "measured"},
+		{"incompatible", "", "incompatible"},
+	}
+	for _, tc := range cases {
+		got, _ := inventoryState(InventoryRow{State: tc.state, Fit: tc.fit}, palette{})
+		if got != tc.want {
+			t.Errorf("state=%q fit=%q -> %q, want %q", tc.state, tc.fit, got, tc.want)
+		}
+		if len([]rune(got)) > invStateWidth {
+			t.Errorf("state %q is %d cols, column is %d", got, len([]rune(got)), invStateWidth)
+		}
+	}
+}
+
+func TestShortNextDropsWhatTheRowAlreadyShows(t *testing.T) {
+	cases := []struct{ next, model, want string }{
+		{"fitr run mistral-openorca:7b -k 3", "mistral-openorca:7b", "run -k 3"},
+		{"fitr advise qwen3-coder:30b", "qwen3-coder:30b", "advise"},
+		{`fitr run "model with spaces"`, "model with spaces", "run"},
+		{"try a smaller quant", "llama3:70b", "try a smaller quant"},
+		{"fitr apply qwen3:8b --ctx 16384", "qwen3:8b", "apply --ctx 16384"},
+		{"", "m", "-"},
+		// A command that is nothing but the binary and the model still has to
+		// render as something a reader can act on.
+		{"fitr qwen3:8b", "qwen3:8b", "-"},
+	}
+	for _, tc := range cases {
+		if got := shortNext(tc.next, tc.model); got != tc.want {
+			t.Errorf("shortNext(%q, %q) = %q, want %q", tc.next, tc.model, got, tc.want)
+		}
 	}
 }
 

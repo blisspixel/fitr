@@ -269,11 +269,13 @@ func htmlDataFrom(a Artifact) htmlData {
 	}
 
 	if a.Meta.DecodeN > 0 {
-		d.Decode = stat(a.Meta.DecodeMean, a.Meta.DecodeSD, a.Meta.DecodeN,
-			a.Meta.DecodeMin, a.Meta.DecodeMax, g)
+		d.Decode = stat(a.Meta.DecodeMean, a.Meta.DecodeSD, a.Meta.DecodeN, g)
+		if a.Meta.DecodeMin > 0 || a.Meta.DecodeMax > 0 {
+			d.Decode += fmt.Sprintf(" min %.2f, max %.2f", a.Meta.DecodeMin, a.Meta.DecodeMax)
+		}
 	}
 	if a.Meta.PrefillN > 0 {
-		d.Prefill = stat(a.Meta.PrefillMean, a.Meta.PrefillSD, a.Meta.PrefillN, 0, 0, g)
+		d.Prefill = stat(a.Meta.PrefillMean, a.Meta.PrefillSD, a.Meta.PrefillN, g)
 	}
 	if a.Meta.MDEpp > 0 {
 		d.MDE = fmt.Sprintf("%d binary trials - resolves ~%s against a gate", a.Meta.Trials, resolutionText(a.Meta.MDEpp))
