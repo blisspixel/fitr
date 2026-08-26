@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/boundedio"
+	"github.com/blisspixel/fitr/internal/diskspace"
 	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
@@ -718,7 +719,7 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64*1024), maxNativeLine)
 	var totalBytes, frames int
-	terminal := false
+	terminal, sizeChecked := false, false
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
@@ -750,6 +751,21 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 		if p.Status == "success" {
 			terminal = true
 		}
+		// The first frame carrying a size is the first moment the download's
+		// cost is knowable. Check it then, and abandon before writing tens of
+		// gigabytes rather than after filling the volume.
+		//
+		// Ollama reports Total per layer, not for the whole model, so this is a
+		// floor on the requirement and not the requirement. That is the right
+		// direction to be wrong in: it catches the case that matters, a pull
+		// far larger than the room left, and never invents a total it was not
+		// given.
+		if !sizeChecked && p.Total > 0 {
+			sizeChecked = true
+			if err := c.checkPullRoom(p.Total); err != nil {
+				return err
+			}
+		}
 		if progress != nil && p.Status != "" {
 			pct := -1
 			if p.Total > 0 {
@@ -765,6 +781,56 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 		return errors.New("ollama pull stream ended before a success receipt")
 	}
 	return nil
+}
+
+// modelStoreDir is where the runtime writes weights, which is the volume that
+// matters -- not fitr's own results directory, and not the working directory.
+func modelStoreDir() string {
+	if d := os.Getenv("OLLAMA_MODELS"); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".ollama", "models")
+}
+
+// checkPullRoom refuses a download that would not leave the volume its
+// headroom.
+//
+// fitr had no disk awareness at all: `fitr run <model> --pull` streamed
+// gigabytes with no idea how much room was left, and a pasted Hugging Face
+// reference pulls without even asking for --pull. A measurement tool that
+// bricks the machine it was measuring has not made an honest trade.
+//
+// An unreadable free-space figure does not block the pull. fitr does not
+// invent numbers and must not act on one it failed to read.
+func (c *Client) checkPullRoom(want int64) error {
+	dir := modelStoreDir()
+	if dir == "" || want <= 0 {
+		return nil
+	}
+	// The leaf may not exist yet on a first pull; the volume still answers.
+	probe := dir
+	for range 4 {
+		if _, err := os.Stat(probe); err == nil {
+			break
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return nil
+		}
+		probe = parent
+	}
+	ok, free, known := diskspace.Fits(probe, uint64(want))
+	if !known || ok {
+		return nil
+	}
+	return fmt.Errorf(
+		"pull needs at least %.1f GB but %s has %.1f GB free; "+
+			"free space or set OLLAMA_MODELS to a larger volume",
+		float64(want)/(1<<30), probe, float64(free)/(1<<30))
 }
 
 // Version asks the server, falling back to the CLI. The server's answer wins:

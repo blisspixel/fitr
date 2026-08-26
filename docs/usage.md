@@ -59,6 +59,21 @@ Terminal views of the loop, regenerated from the real printers:
 <img src="assets/board.svg?v=0.9.8" alt="fitr board (demo data)" width="820">
 <img src="assets/top.svg?v=0.9.8" alt="fitr top (demo data)" width="820">
 
+### Disk
+
+`--pull` refuses a download that would not leave the model volume its headroom:
+min(10% of the volume, 10 GB), which is BuildKit's reserve policy and the
+closest well-tested analogue for artifacts this size.
+
+The check fires on the first frame that reports a size, so an oversized pull is
+abandoned before it writes rather than after it fills the disk. Ollama reports
+size per layer, so the figure is a floor on the requirement rather than the
+requirement: it catches the case that matters and never invents a total it was
+not given. The volume is `$OLLAMA_MODELS` if set, else `~/.ollama/models`.
+
+If free space cannot be read the pull proceeds. fitr does not invent numbers and
+will not act on one it failed to read.
+
 ### Memory budget by platform
 
 `fitr` reports the memory a model may actually use, not the memory installed.

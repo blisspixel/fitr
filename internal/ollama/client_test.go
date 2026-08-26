@@ -339,3 +339,43 @@ func TestPullRejectsMalformedAndIncompleteStreams(t *testing.T) {
 		})
 	}
 }
+
+// fitr had no disk awareness at all: `fitr run <model> --pull` streamed
+// gigabytes with no idea how much room was left, and a pasted Hugging Face
+// reference pulls without even asking for --pull. A measurement tool that
+// bricks the machine it was measuring has not made an honest trade.
+func TestPullRefusesWhatWillNotFit(t *testing.T) {
+	c := &Client{}
+	// Larger than any real volume: must be refused, and the diagnostic must
+	// name both figures and a way out.
+	err := c.checkPullRoom(1 << 60)
+	if err == nil {
+		t.Fatal("a pull larger than the disk was allowed to start")
+	}
+	for _, want := range []string{"GB free", "OLLAMA_MODELS"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("diagnostic is missing %q: %v", want, err)
+		}
+	}
+	// An ordinary download must not be blocked.
+	if err := c.checkPullRoom(1 << 20); err != nil {
+		t.Errorf("a 1 MB pull was refused: %v", err)
+	}
+	// A size the server never reported is not a reason to refuse.
+	if err := c.checkPullRoom(0); err != nil {
+		t.Errorf("an unreported size must not block the pull: %v", err)
+	}
+}
+
+// The model store is the volume that matters, not fitr's results directory and
+// not the working directory. OLLAMA_MODELS moves it.
+func TestModelStoreDirFollowsTheRuntime(t *testing.T) {
+	t.Setenv("OLLAMA_MODELS", filepath.Join("some", "other", "volume"))
+	if got := modelStoreDir(); got != filepath.Join("some", "other", "volume") {
+		t.Errorf("modelStoreDir = %q, want the OLLAMA_MODELS override", got)
+	}
+	t.Setenv("OLLAMA_MODELS", "")
+	if got := modelStoreDir(); got == "" || !strings.Contains(got, ".ollama") {
+		t.Errorf("default model store = %q, want the runtime's own path", got)
+	}
+}
