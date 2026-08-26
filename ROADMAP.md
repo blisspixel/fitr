@@ -22,8 +22,8 @@ flags live in [usage](docs/usage.md). Statistical methods live in
 
 | Horizon | Release | Outcome |
 |---|---|---|
-| Shipped | 0.9.7 | Second-machine correctness, hardened untrusted input, and a static analysis gate |
-| Now | 0.9.8 | Decompose the run pipeline far enough to turn on the complexity gates, and finish the native matrix |
+| Shipped | 0.9.8 | Output that fits the terminal, and verdicts the renderer can lay out |
+| Now | 0.9.9 | Decompose the run pipeline far enough to turn on the complexity gates, and finish the native matrix |
 | Then | 1.0 | A new user can install fitr and close the loop on a clean machine without reading source code |
 | Next | Trust C | Isolated executable evidence, stronger release provenance, and calibrated profile provenance |
 | Later | Candidate discovery | Find models worth measuring, then measure them; plus loop extensions |
@@ -59,7 +59,9 @@ model would have caught the first defect immediately.
 
 A fourth item is a contract decision rather than a defect: an intermittent
 transport error in the final battery step aborted a run and discarded every
-completed measurement. It reproduced once and not on retry. See 0.9.9.
+completed measurement. It reproduced once and not on retry. Fixed in 0.9.8 by
+retrying exactly the case that produced it: a chat reply carrying neither a
+generation nor a terminal receipt.
 
 ## Pre-1.0 releases
 
@@ -202,14 +204,31 @@ clean install on each operating system.
 Exit criterion: an interrupted or degraded run produces an interpretable
 result, and all three backends have a native positive run.
 
-### 0.9.8 - decomposition and the native matrix
+### 0.9.8 - output that fits [shipped]
 
-- [ ] Decompose the run pipeline far enough to turn on the complexity gates.
-      `execute` went from 571 lines to 463 by extracting the measurement
-      phases, and `main.go` from 4,074 to 1,199, but `funlen`, `gocognit`,
-      `gocyclo`, `nestif` and `dupl` are still off in `.golangci.yml` with the
-      reason recorded there. Turning them on is the exit criterion, not the
-      line count.
+The scorecard drew a 78-column rule and then crossed it on 7 of 10 verdict
+rows, the longest at 224 characters. `doctor` reached 286, the inventory 117,
+`compare` 107, and `board` drew a 104-column rule around 123-column rows. On an
+ordinary terminal the thing a reader looks at most wrapped into mush.
+
+- [x] Give `Verdict` a structure. The width was the symptom; the cause was one
+      string assembled in the scorer with `"; "` and `", "` joins, which a
+      renderer can only print or truncate. `Measure`, `Gate`, `Detail` and
+      `Note` are now separate, `Why` is composed from them so the persisted
+      contract is unchanged, and results saved before the parts existed still
+      render their explanation.
+- [x] Compose every surface to a resolved width: `FITR_WIDTH`, then the
+      terminal if it is narrower than 80, then 80. The terminal may narrow but
+      never widen, so piped output is byte-identical to what was on screen.
+      Nothing is truncated to fit; long text wraps under its own column.
+- [x] Stop drawing sparklines the data does not support. They normalise to the
+      series min and max, so a 0.4% wobble drew the same zigzag as a tenfold
+      swing. Below a 5% relative spread there is no line, the ASCII ramp
+      `.:-=+*#@` is gone because nobody can order it by height, and where a
+      line does draw its own min and max sit on the row as the scale. The
+      monitor had a second copy of the same two faults; it has the same fix.
+- [x] Retry the transport case that discarded three completed batteries: a
+      chat reply with neither a generation nor a terminal receipt.
 - [x] Say what is free, not only what the card holds. A fit verdict computed
       against total memory answers a question nobody has: nobody uses a machine
       only for inference. This box reports 24.0 GB total with 0.7 GB free,
@@ -219,6 +238,25 @@ result, and all three backends have a native positive run.
       caveat now names the gap. Free memory is display-only and never enters
       the comparability key: it moves minute to minute, and a volatile value
       in the key would put every run in a block of its own.
+- [x] Correct the README's positioning line. "`llmfit` tells you what fits"
+      stopped being true: `llmfit bench` measures on your own machine and
+      `bench --share` feeds a hardware-keyed leaderboard. Verified against its
+      own docs rather than from memory.
+
+Guards, because measuring this was worth doing and nobody was doing it: a test
+renders all eight demo surfaces and fails on any line past the width, a second
+one renders them with implausibly long device names so the guard does not
+depend on whose hardware runs it, and a third asserts the design doc names
+every need the code does.
+
+### 0.9.9 - decomposition and the native matrix
+
+- [ ] Decompose the run pipeline far enough to turn on the complexity gates.
+      `execute` went from 571 lines to 463 by extracting the measurement
+      phases, and `main.go` from 4,074 to 1,199, but `funlen`, `gocognit`,
+      `gocyclo`, `nestif` and `dupl` are still off in `.golangci.yml` with the
+      reason recorded there. Turning them on is the exit criterion, not the
+      line count.
 - [ ] Complete a positive native run for llama-server, the one backend row
       still resting on automated tests alone.
 - [ ] Run the acceptance path on clean macOS and Linux installs.
@@ -539,6 +577,7 @@ These features must preserve the evidence contract.
 | 0.9.5 | Backend and GGUF boundary hardening, bounded local inputs, deterministic profiles, cancellation fixes, and Apache License 2.0 |
 | 0.9.6 | Duplicate-key JSON rejection, fail-closed model inventory, bounded discovery and control calls, and portable task-file boundaries |
 | 0.9.7 | Second-machine correctness: the fit verdict restored on Ollama, device identity sealed and gated, untrusted GGUF and task-file input hardened and fuzzed, the KV dtype remedy, whole-loop live coverage, and a static analysis gate |
+| 0.9.8 | Output that fits: every surface composed to a resolved width, verdicts given a structure the renderer can lay out, sparklines refused where the data cannot support them, and the transport retry that stopped discarding completed runs |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

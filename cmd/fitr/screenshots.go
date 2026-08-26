@@ -237,7 +237,10 @@ func shotInventory(context.Context) (string, error) {
 	fmt.Println("$ fitr")
 	fmt.Println()
 	render.WriteInventory(os.Stdout, render.Inventory{
-		Fitr: "0.9.6", CPU: "AMD Ryzen 7 7840U  (16 logical)", GPU: "AMD Radeon 780M",
+		// Tracks the real version. Hardcoding it left the headline screenshot
+		// claiming 0.9.6 two releases later, which is the first thing a reader
+		// sees and the easiest thing to leave stale.
+		Fitr: buildinfo.Version(), CPU: "AMD Ryzen 7 7840U  (16 logical)", GPU: "AMD Radeon 780M",
 		GPUBackend: "rocm", MemoryGB: 32, MemorySource: "unified memory (system RAM)",
 		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
 		Profile: "lappy", Uncalibrated: false,

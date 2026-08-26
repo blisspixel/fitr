@@ -17,7 +17,7 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 That installs one static binary. The shell installer reports when its
 destination is not on `PATH`; the PowerShell installer adds its destination to
 the user `PATH`. The default evidence path needs no Go, Python, or venv. Pin a
-release with `FITR_VERSION=v0.9.6`; relocate with `FITR_BIN`.
+release with `FITR_VERSION=v0.9.8`; relocate with `FITR_BIN`.
 
 Both installers bind the downloaded binary to the exact asset entry in the
 release's `SHA256SUMS` file. A missing checksum tool, manifest, or asset entry
@@ -54,16 +54,16 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.9.8" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.9.8" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.9.8" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.9.8" alt="fitr top (demo data)" width="820">
 
 ## Commands
 
 | Command | Does |
 |---|---|
-| `fitr` | installed inventory: measured / unproven / incompatible / stale, fit windows, one next command per row |
+| `fitr` | installed inventory: measured / unproven / incompatible / stale, fit windows, and the one thing to do next on each row |
 | `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model; checks-only runs the generated battery for calibration |
 | `fitr [model]` / `fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]` | no model: inventory. With a model: does it fit, and if not, which flag to try |
 | `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |

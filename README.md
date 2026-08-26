@@ -26,7 +26,7 @@ exact setting to change when one does not fit.
 > that still writes clean prose but emits malformed tool calls, the parser that
 > swallows them, the loop your GPU triggers and nobody else's does.
 
-<img src="docs/assets/inventory.svg" alt="fitr inventory (demo data)" width="820">
+<img src="docs/assets/inventory.svg?v=0.9.8" alt="fitr inventory (demo data)" width="820">
 
 ## Install
 
@@ -58,20 +58,20 @@ fitr apply qwen3:30b          # print how to persist that context
 fitr board                    # compare only runs this device can honestly compare
 ```
 
-Every row ends in one next command, so there is never a question of what to do
-next.
+Every row ends in the one thing to do next, so there is never a question of
+what to run.
 
 **Does it fit, and what do I change if not.** Weights, KV cache and headroom at
 each context length, with a flag and a resulting number on every negative
 verdict.
 
-<img src="docs/assets/advise.svg" alt="fitr advise (demo data)" width="820">
+<img src="docs/assets/advise.svg?v=0.9.8" alt="fitr advise (demo data)" width="820">
 
 **What it actually does here.** Speed, memory, structured output, instruction
 following, refusal, tool use, all graded in Go against computed answers, never by
 another model's opinion.
 
-<img src="docs/assets/run.svg" alt="fitr run scorecard (demo data)" width="820">
+<img src="docs/assets/run.svg?v=0.9.8" alt="fitr run scorecard (demo data)" width="820">
 
 ## What it refuses to do
 
