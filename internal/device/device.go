@@ -773,6 +773,33 @@ func resetHostProbes() {
 // question is what will run alongside the work already on the card, and a box
 // reporting 24 GB total with 0.7 GB free will not load a 17 GB model no matter
 // what the arithmetic says.
+// appleWiredLimitFraction is the share of system RAM Apple Silicon will let the
+// GPU wire down when iogpu.wired_limit_mb is unset, which is the default state.
+//
+// The exact figure is a kernel policy, not a published constant, and it varies
+// with installed RAM. 0.75 is the widely-reported value for the large-memory
+// machines this matters on. It is applied as an ASSUMPTION and labelled as one,
+// because the alternative -- reporting installed RAM as GPU-available memory --
+// is not a smaller error, it is the same error other tools ship: on a 128 GB
+// machine it overstates the budget by tens of gigabytes and certifies a model
+// that cannot load.
+const appleWiredLimitFraction = 0.75
+
+// Memory-source labels for Apple Silicon. They are constants because a trust
+// decision keys on them by exact string: changing one silently turned every
+// macOS model unproven once already.
+const (
+	// AppleWiredLimitSource is an explicit kernel setting the user chose.
+	AppleWiredLimitSource = "iogpu.wired_limit_mb"
+	// AppleAssumedShareSource is derived. It says "assumed" because every place
+	// the budget is printed shows its source, and a derived number must not
+	// read like a measured one.
+	AppleAssumedShareSource = "unified memory (assumed GPU share of system RAM)"
+	// AppleLegacyRAMSource is what fitr wrote before the budget was corrected.
+	// Retained so saved results still read as measured.
+	AppleLegacyRAMSource = "unified memory (system RAM)"
+)
+
 func AvailableVRAM(ctx context.Context) (float64, bool) {
 	if _, err := exec.LookPath("nvidia-smi"); err != nil {
 		return 0, false

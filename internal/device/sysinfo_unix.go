@@ -75,9 +75,7 @@ func vramInfo(ctx context.Context) (float64, string) {
 		return gb, "nvidia-smi"
 	}
 	if runtime.GOOS == "darwin" {
-		if r := ramGB(ctx); r > 0 {
-			return r, "unified memory (system RAM)"
-		}
+		return appleGPUBudget(ctx)
 	}
 	if gb := drmVRAM(); gb > 0 {
 		return gb, "drm sysfs"
@@ -106,6 +104,30 @@ func drmVRAM() float64 {
 		}
 	}
 	return best
+}
+
+// appleGPUBudget reports how much memory the GPU may actually use, not how much
+// is installed.
+//
+// Apple Silicon shares one pool, but the GPU cannot wire all of it: the kernel
+// caps the working set, and `sysctl iogpu.wired_limit_mb` both reports an
+// explicit override and is how users raise it. Reading hw.memsize and calling
+// it VRAM is the unified-memory version of grading against total instead of
+// free, which is precisely the failure fitr exists to catch elsewhere.
+func appleGPUBudget(ctx context.Context) (float64, string) {
+	ram := ramGB(ctx)
+	if ram <= 0 {
+		return 0, ""
+	}
+	// An explicit override is a measurement: the user set it, the kernel honours
+	// it, and it needs no assumption.
+	if mb, err := strconv.ParseInt(strings.TrimSpace(
+		run(ctx, "sysctl", "-n", "iogpu.wired_limit_mb")), 10, 64); err == nil && mb > 0 {
+		if gb := float64(mb) * 1024 * 1024 / GB; gb > 0 && gb <= ram {
+			return gb, AppleWiredLimitSource
+		}
+	}
+	return ram * appleWiredLimitFraction, AppleAssumedShareSource
 }
 
 func ramGB(ctx context.Context) float64 {

@@ -59,6 +59,30 @@ Terminal views of the loop, regenerated from the real printers:
 <img src="assets/board.svg?v=0.9.8" alt="fitr board (demo data)" width="820">
 <img src="assets/top.svg?v=0.9.8" alt="fitr top (demo data)" width="820">
 
+### Memory budget by platform
+
+`fitr` reports the memory a model may actually use, not the memory installed.
+The source is printed beside the number everywhere it appears.
+
+| Platform | Source | Kind |
+|---|---|---|
+| NVIDIA | `nvidia-smi` total, and free where a contention caveat applies | measured |
+| AMD on Linux | `drm sysfs` | measured |
+| Apple Silicon, limit set | `iogpu.wired_limit_mb` | measured |
+| Apple Silicon, default | 75% of `hw.memsize` | **assumed** |
+| Override | `--vram-gb N` | you said so |
+
+Apple Silicon shares one pool, but the GPU cannot wire all of it. Reporting
+installed RAM as GPU-available memory is the unified-memory version of grading
+against total instead of free: on a 128 GB machine it overstates the budget by
+tens of gigabytes and will certify a 111 GB model that cannot load. Raise the
+ceiling with `sudo sysctl iogpu.wired_limit_mb=N` and fitr reads it back as a
+measurement rather than an assumption.
+
+The 75% figure is kernel policy, not a published constant, so it is labelled
+assumed and errs low. It declines to certify rather than certifying something
+that will not load.
+
 ## Commands
 
 | Command | Does |

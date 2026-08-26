@@ -324,7 +324,18 @@ func stateOrder(state string) int {
 
 func memoryBudgetTrusted(src string) bool {
 	switch src {
-	case "nvidia-smi", "unified memory (system RAM)", "drm sysfs":
+	case "nvidia-smi", "drm sysfs",
+		// Apple Silicon. The explicit kernel setting is a measurement. The
+		// derived share is an assumption, and it is trusted anyway because it
+		// replaced a worse one: reporting installed RAM as GPU-available memory
+		// overstated a 128 GB machine's budget by tens of gigabytes. It errs
+		// low, so it declines to certify rather than certifying something that
+		// cannot load, and the source string carries the word "assumed"
+		// everywhere the budget is printed.
+		"iogpu.wired_limit_mb", "unified memory (assumed GPU share of system RAM)",
+		// Retained so results saved before the budget was corrected still read
+		// as measured rather than silently becoming unproven.
+		"unified memory (system RAM)":
 		return true
 	}
 	return strings.HasPrefix(src, "--vram-gb")

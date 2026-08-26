@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/blisspixel/fitr/internal/device"
 )
 
 // Qwen3-30B-A3B architecture as stored in GGUF / Ollama model_info.
@@ -523,5 +525,30 @@ func TestKVCacheRemedyResolvesADefaultContextOnTheFitPath(t *testing.T) {
 	// of 24576 or say nothing at all.
 	if r.KVRemedy != "" && !strings.Contains(r.KVRemedy, "49152") {
 		t.Fatalf("kv remedy = %q, want the q8_0 window 49152", r.KVRemedy)
+	}
+}
+
+// The memory-source label is a trust decision keyed by exact string. Correcting
+// the Apple Silicon budget changed that label, and without this test every
+// macOS model would have silently become "unproven" instead of getting a fit
+// verdict, on a platform with no CI hardware to notice.
+func TestEveryMemorySourceFitrEmitsIsTrusted(t *testing.T) {
+	for _, src := range []string{
+		"nvidia-smi",
+		"drm sysfs",
+		device.AppleWiredLimitSource,
+		device.AppleAssumedShareSource,
+		device.AppleLegacyRAMSource, // saved results predating the correction
+		"--vram-gb 24",
+	} {
+		if !memoryBudgetTrusted(src) {
+			t.Errorf("fitr emits %q as a memory source but does not trust it, so "+
+				"every model on that platform reads as unproven", src)
+		}
+	}
+	for _, src := range []string{"", "guess", "unknown (not measured)"} {
+		if memoryBudgetTrusted(src) {
+			t.Errorf("%q must not be trusted enough to declare a model incompatible", src)
+		}
 	}
 }
