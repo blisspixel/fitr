@@ -20,9 +20,11 @@ the models you already have, works out which ones fit in your VRAM and at what
 context length, measures how each actually performs here, and tells you the
 exact setting to change when one does not fit.
 
-> `llmfit` tells you what fits. Leaderboards tell you what is smart on someone
-> else's machine. **`fitr` tells you what is true on yours**, and what is
-> quietly wrong.
+> `llmfit` estimates what fits, and benchmarks how fast. Leaderboards rank what
+> is smart on someone else's machine. Neither checks whether the model is
+> *behaving*. **`fitr` tells you what is silently broken on yours** - the Q4
+> that still writes clean prose but emits malformed tool calls, the parser that
+> swallows them, the loop your GPU triggers and nobody else's does.
 
 <img src="docs/assets/inventory.svg" alt="fitr inventory (demo data)" width="820">
 

@@ -251,8 +251,26 @@ typed parsing errors (Inspect AI).
 
 ## Positioning, final form
 
-> `llmfit` tells you what fits.
-> Leaderboards tell you what's smart on someone else's machine.
+> `llmfit` estimates what fits, and benchmarks how fast.
+> Leaderboards rank what's smart on someone else's machine.
+> Neither checks whether the model is *behaving*.
 > **`fitr` tells you what's silently broken on yours** - the Q4 that still
 > writes clean prose but emits malformed tool calls, the parser that swallows
 > them, the loop your GPU triggers and nobody else's does.
+
+The first clause used to read "`llmfit` tells you what fits", which stopped
+being true some time before August 2026: `llmfit bench` measures real tokens
+per second against a live Ollama, vLLM, MLX or llama-server, and `bench
+--share` feeds a hardware-keyed community leaderboard. A line a knowledgeable
+reader knows is wrong costs more than it wins, and the claim we can still make
+is the stronger one anyway.
+
+Two things follow for our own positioning:
+
+- **Hardware-keyed comparison is table stakes, not a differentiator.** `llmfit`
+  keys its leaderboard to identical hardware and publishes a written trust
+  order; PocketPal does it more rigorously with Glicko-2. Claiming novelty here
+  would be the same kind of stale claim in the other direction.
+- **The gap is behaviour, not speed.** Nothing in the field checks whether a
+  quantized build still emits well-formed tool calls, stops calling a withdrawn
+  tool, or holds a format under a long transcript. That is the claim to defend.
