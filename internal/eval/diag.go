@@ -135,7 +135,7 @@ type PlumbingResult struct {
 // RunPlumbing answers "can this model use tools AT ALL, in this setup?" before
 // any capability claim is made.
 //
-// Roughly 4 in 5 "model cannot use tools" results are the chat template, the
+// Most "model cannot use tools" results are the chat template, the
 // tool-call parser, the quant, or the context size -- not the weights. Skipping
 // this once produced a published claim that a model "fails tool use" when it in
 // fact emits valid calls and consumes results correctly; it simply fires them on

@@ -552,9 +552,16 @@ func Score(m Measured, p device.Profile) Scorecard {
 			fmt.Sprintf("need <=%.0f", maxRef), nil, "")
 	}
 
-	// --- unattended agentic. Broken plumbing BLOCKS rather than fails: roughly
-	// 4 in 5 "cannot use tools" results are the template, parser, quant, or
-	// context size, and a capability you could not fairly test is not a failure.
+	// --- unattended agentic. Broken plumbing BLOCKS rather than fails: most
+	// "cannot use tools" results are the template, parser, quant, or context
+	// size, and a capability you could not fairly test is not a failure.
+	//
+	// "Most" rather than a ratio on purpose. This carried "roughly 4 in 5" for
+	// a long time and that figure had no source; the mechanisms are real and
+	// nameable -- lazy-grammar trigger strings, a missing PARSER directive on a
+	// side-loaded GGUF, a newline baked into a Jinja terminator -- and several
+	// reproduce byte-identically at temperature 0. The claim did not need a
+	// number to be true, and the number was not one we could stand behind.
 	switch {
 	case m.PlumbingRan && !m.PlumbingHealthy:
 		n["unattended_agentic"] = blocked(

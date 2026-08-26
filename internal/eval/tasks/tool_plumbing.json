@@ -1,7 +1,7 @@
 {
   "id": "tool_plumbing",
   "kind": "diagnostic",
-  "why": "~4 in 5 'model cannot use tools' results are the chat template, the tool-call parser, the quant, or the context size. Run this BEFORE treating a tools failure as a property of the weights.",
+  "why": "Most 'model cannot use tools' results are the chat template, the tool-call parser, the quant, or the context size. Run this BEFORE treating a tools failure as a property of the weights.",
   "tools": [
     {
       "type": "function",

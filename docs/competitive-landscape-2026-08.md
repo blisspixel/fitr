@@ -240,8 +240,26 @@ typed parsing errors (Inspect AI).
    **Prepare an answer to "just raise the temperature."**
 2. **Quant x structured-output validity, per machine.** Prose survives
    quantization; JSON does not. KLD has a documented "silent zone" that cannot
-   rank near-baseline quants. Measured evidence exists (23-point drop at Q4_K_M
-   for Llama-family, Qwen3 unmoved) - at 1 star.
+   rank near-baseline quants ([arXiv:2606.19558](https://arxiv.org/abs/2606.19558),
+   14 measurement variants, correlation with real quality rho ~ 0.00 near
+   baseline - verified).
+
+   This bullet previously read "Measured evidence exists (23-point drop at
+   Q4_K_M for Llama-family, Qwen3 unmoved)". **That figure has no source.** It
+   is arithmetically the same unverifiable "63% -> 39.6% function calling at
+   Q4_K_M" claim retracted elsewhere in this project, wearing different
+   clothes, and a systematic search of quantization x {tool calling,
+   instruction following, structured output} found nothing reporting it. It is
+   struck rather than softened.
+
+   What is actually supported, and is a better argument anyway:
+   [arXiv:2407.09141](https://arxiv.org/abs/2407.09141) ("Accuracy is Not All
+   You Need", Microsoft Research India) shows compressed models *flip*
+   individual answers correct-to-incorrect while aggregate accuracy stays
+   close - "the behavior of compressed models as visible to end-users is often
+   significantly different from the baseline model, even when accuracy is
+   similar". That is fitr's thesis stated by someone else: the aggregate score
+   is not the thing that broke.
 3. **A plumbing taxonomy built for local backends**, where cloud-error-string
    taxonomies go blind.
 4. **Local agentic eval that actually runs.**
