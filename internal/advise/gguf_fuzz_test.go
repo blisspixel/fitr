@@ -3,6 +3,7 @@ package advise
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"testing"
 )
 
@@ -99,6 +100,42 @@ func FuzzReadMetadata(f *testing.F) {
 			// hand back a zero or negative per-token cost.
 			if got := a.kvBytesPerToken(2); got <= 0 {
 				t.Fatalf("KVReady architecture reports %v bytes per token: %+v", got, a)
+			}
+		}
+
+		// The prefix reader is a second entry point for the same hostile bytes,
+		// and it is the one a remote candidate arrives through: fitr will point
+		// it at 4 KiB fetched over HTTP from a repo it does not control. It
+		// must hold every invariant the all-or-nothing reader holds, and it
+		// must additionally never report corruption as truncation.
+		pkvs, perr := ReadMetadataPrefix(bytes.NewReader(data))
+		switch {
+		case perr == nil:
+			if pkvs == nil {
+				t.Fatal("prefix decode succeeded with a nil map")
+			}
+		case errors.Is(perr, ErrMetadataTruncated):
+			// Truncation may return keys or none, never a non-nil empty map
+			// masquerading as a usable result.
+			if pkvs != nil && len(pkvs) == 0 {
+				t.Fatal("truncated decode returned an empty non-nil map")
+			}
+		default:
+			if pkvs != nil {
+				t.Fatalf("rejected file returned %d keys from the prefix reader", len(pkvs))
+			}
+		}
+		if len(pkvs) > maxKVs {
+			t.Fatalf("prefix decoded %d keys, over the %d cap", len(pkvs), maxKVs)
+		}
+		pa := ArchFromKVs(pkvs)
+		if pa.Blocks < 0 || pa.Embed < 0 || pa.Heads < 0 || pa.KVHeads < 0 ||
+			pa.KeyLength < 0 || pa.MaxCtx < 0 || pa.Experts < 0 || pa.ExpertUsed < 0 {
+			t.Fatalf("negative architecture field from a prefix decode: %+v", pa)
+		}
+		if pa.KVReady() {
+			if got := pa.kvBytesPerToken(2); got <= 0 {
+				t.Fatalf("KVReady prefix architecture reports %v bytes per token: %+v", got, pa)
 			}
 		}
 	})

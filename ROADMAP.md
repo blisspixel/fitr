@@ -274,6 +274,24 @@ every need the code does.
 - [x] A model with no tool support is `n/a`, not a failure and not a fault.
       Runtimes signal it with a generic HTTP 400; reading that as transport
       discarded the whole battery for a model that is simply text-only.
+- [x] Prove a candidate can be sized without downloading it. A 4 KiB HTTP
+      range read returns a GGUF header, and every key the fit math needs --
+      block_count, head counts, key and value length, context length, embedding
+      length, and the MoE expert fields -- sits ahead of the tokenizer vocab
+      array. Verified against a real 5 GB model: `arch=qwen3 layers=36
+      kv_heads=8 ctx=40960` from 4,096 bytes, KV-ready.
+
+      `ReadMetadata` discarded all of it, because an `io.ErrUnexpectedEOF` in
+      the middle of the vocab array is the right answer for a local file and
+      the wrong one for a deliberately bounded read. `ReadMetadataPrefix`
+      returns what it decoded and distinguishes truncation from corruption,
+      which is the distinction that keeps the two callers from sharing a
+      failure mode. It is covered by the existing CI fuzz gate, which now
+      exercises both entry points.
+
+      This matters more than the bytes saved: an HTTP range body is an
+      `io.Reader`, so discovery reuses the fuzz-hardened fit arithmetic instead
+      of growing a second, weaker copy of it.
 - [ ] Finish the anytime-valid gate. `internal/stats/gate.go` implements the
       Robbins beta-mixture e-process with property and vector tests, and
       `cmd_run.go` still calls `stats.GateSPRT`. gate.go's own header records

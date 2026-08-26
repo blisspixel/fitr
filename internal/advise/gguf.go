@@ -133,7 +133,52 @@ func completeGGUFSize(path string, selected os.FileInfo) (int64, error) {
 }
 
 func ReadMetadata(r io.Reader) (map[string]any, error) {
-	return readMetadata(r, maxMetadataBytes)
+	kvs, err := readMetadata(r, maxMetadataBytes)
+	if err != nil {
+		// All-or-nothing, deliberately: a short GGUF on disk is a damaged
+		// GGUF. ReadMetadataPrefix is the variant for a bounded read.
+		return nil, err
+	}
+	return kvs, nil
+}
+
+// ErrMetadataTruncated marks a header that ran out of bytes mid-decode rather
+// than one that was malformed. The distinction is the whole point: a truncated
+// read is an expected, benign outcome; a corrupt one is not, and they must not
+// share an error path.
+var ErrMetadataTruncated = errors.New("GGUF metadata ended early")
+
+// ReadMetadataPrefix decodes as much of a GGUF header as the reader supplies
+// and returns what it got, with ErrMetadataTruncated when the bytes ran out.
+//
+// It exists so a candidate can be sized without downloading it. Every key the
+// fit math needs -- block_count, head counts, key/value length, context length,
+// embedding length, and the MoE expert fields -- sits within the first two
+// kilobytes of every text-generation architecture tested. The tokenizer vocab
+// array comes after them and is megabytes long, so a bounded HTTP range read
+// gets the architecture and nothing else, and a 16 GB model costs 4 KiB to
+// size.
+//
+// ReadMetadata discards everything on truncation, which is right for a local
+// file: a short GGUF on disk is a damaged GGUF. It is wrong for a deliberately
+// bounded read, where stopping early is the plan.
+//
+// The returned map is still hostile input. It goes through the same decoder,
+// the same budget, and the same duplicate-key and dimension checks, and a
+// caller must treat missing keys as unmeasured rather than as zero -- which is
+// what ArchFromKVs already does.
+func ReadMetadataPrefix(r io.Reader) (map[string]any, error) {
+	kvs, err := readMetadata(r, maxMetadataBytes)
+	if err == nil {
+		return kvs, nil
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		if len(kvs) == 0 {
+			return nil, fmt.Errorf("%w before any key decoded", ErrMetadataTruncated)
+		}
+		return kvs, fmt.Errorf("%w after %d keys", ErrMetadataTruncated, len(kvs))
+	}
+	return nil, err
 }
 
 type metadataDecoder struct {
@@ -174,14 +219,16 @@ func readMetadata(r io.Reader, budget uint64) (map[string]any, error) {
 	for i := range kvCount {
 		key, err := d.readString()
 		if err != nil {
-			return nil, fmt.Errorf("kv %d key: %w", i, err)
+			// Partial map, not nil: ReadMetadataPrefix needs the keys already
+			// decoded, and ReadMetadata discards them at its own boundary.
+			return kvs, fmt.Errorf("kv %d key: %w", i, err)
 		}
 		if _, exists := kvs[key]; exists {
-			return nil, fmt.Errorf("duplicate GGUF metadata key %q", key)
+			return kvs, fmt.Errorf("duplicate GGUF metadata key %q", key)
 		}
 		v, err := d.readValue()
 		if err != nil {
-			return nil, fmt.Errorf("kv %q: %w", key, err)
+			return kvs, fmt.Errorf("kv %q: %w", key, err)
 		}
 		kvs[key] = v
 	}
