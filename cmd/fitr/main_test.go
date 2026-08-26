@@ -919,7 +919,13 @@ func TestExportGoldenHTMLCarriesFingerprintAndEscapes(t *testing.T) {
 		"A number without its device is meaningless",
 		"num_ctx",
 		"8192",
-		"PASS",
+		// Every need in this fixture is excluded, so the page must show the
+		// excluded state and say why. It previously asserted "PASS", which
+		// appeared only inside the phrase "excluded from PASS/FAIL claims" --
+		// the test was passing on a substring of an explanation, not on a
+		// verdict, and it went red the moment that sentence was reworded.
+		"INCONCLUSIVE",
+		"does not count",
 		"n/a",
 		"resolves ~",
 		"against a gate",

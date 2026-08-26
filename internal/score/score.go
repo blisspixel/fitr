@@ -592,7 +592,12 @@ func ExcludeEvidence(sc Scorecard, reason string) Scorecard {
 	if reason == "" {
 		reason = "evidence contract is unavailable"
 	}
-	detail := reason + "; measured outcome excluded from PASS/FAIL claims"
+	// Distinct from a thin sample on purpose. A thin sample is fixed by running
+	// more trials; this is fixed by changing the environment and running again.
+	// One word covers both states today, so the text has to carry the
+	// difference: a reader who thinks contamination means "measure harder" will
+	// measure the same contaminated thing harder.
+	detail := reason + "; this run does not count - not a fail, and not fixed by more trials"
 
 	needs := make(map[string]Verdict, len(sc.Needs))
 	for need, verdict := range sc.Needs {
@@ -667,7 +672,8 @@ func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
 	}
 	if dead := establishedFamilyBelowGate(pool.Families, minRate); dead != "" && verdictState == Pass {
 		verdictState = Inconclusive
-		why += " - INCONCLUSIVE: family " + dead + " is established below the gate"
+		why += " - undecided: family " + dead + " is established below the bar, so the " +
+			"pooled rate is hiding it. Not thin evidence: look at that family"
 	}
 	return Verdict{verdictState, why}
 }

@@ -418,8 +418,16 @@ func TestContaminationExcludesMeasuredScoreClaims(t *testing.T) {
 		if verdict.State != Inconclusive {
 			t.Fatalf("%s = %s, want INCONCLUSIVE: %s", need, verdict.State, verdict.Why)
 		}
-		if !strings.Contains(verdict.Why, "other:7b") || !strings.Contains(verdict.Why, "excluded") {
-			t.Fatalf("%s must disclose the exclusion and resident model: %q", need, verdict.Why)
+		// Naming the contaminating model is the actionable half. The other
+		// half is saying this is not the same state as a thin sample: a
+		// reader who reads contamination as "measure harder" will measure the
+		// same contaminated thing harder.
+		if !strings.Contains(verdict.Why, "other:7b") {
+			t.Fatalf("%s does not name the resident model: %q", need, verdict.Why)
+		}
+		if !strings.Contains(verdict.Why, "does not count") ||
+			!strings.Contains(verdict.Why, "not fixed by more trials") {
+			t.Fatalf("%s does not distinguish a void run from a thin one: %q", need, verdict.Why)
 		}
 	}
 	if sc.Needs["uncensored"].State != Skip {
