@@ -153,3 +153,45 @@ func ramGB(ctx context.Context) float64 {
 // unix probes read sysfs and run vendor binaries directly, with no shell in
 // between, so there is no interpreter version to record.
 func ProbeTooling(context.Context) string { return "" }
+
+// availableVRAMFallback reads free VRAM where a vendor tool is absent.
+//
+// AMD on Linux exposes used and total bytes in the same sysfs directory the
+// total already comes from, so free is a subtraction and needs no new
+// dependency and no root.
+//
+// Apple Silicon deliberately returns nothing. There is no separate VRAM to be
+// free: the GPU budget is a share of one pool that the OS is also using, and
+// "free system RAM" is a different question wearing the same words. Reporting
+// it would invent a number.
+func availableVRAMFallback(context.Context) (float64, bool) {
+	totals, err := filepath.Glob("/sys/class/drm/card*/device/mem_info_vram_total")
+	if err != nil {
+		return 0, false
+	}
+	var best float64
+	var found bool
+	for _, totalPath := range totals {
+		total := readSysfsUint(totalPath)
+		used := readSysfsUint(strings.Replace(totalPath, "_total", "_used", 1))
+		if total <= 0 || used < 0 || used > total {
+			continue
+		}
+		if gb := float64(total-used) / GB; gb > best {
+			best, found = gb, true
+		}
+	}
+	return best, found
+}
+
+func readSysfsUint(path string) int64 {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return -1
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	if err != nil || n < 0 {
+		return -1
+	}
+	return n
+}

@@ -74,6 +74,30 @@ not given. The volume is `$OLLAMA_MODELS` if set, else `~/.ollama/models`.
 If free space cannot be read the pull proceeds. fitr does not invent numbers and
 will not act on one it failed to read.
 
+### Hardware coverage
+
+What fitr can read, by platform and vendor. Where it cannot read something it
+says so and omits the caveat rather than estimating one.
+
+| | GPU name | Total budget | Free right now |
+|---|---|---|---|
+| NVIDIA, any OS | `nvidia-smi` | `nvidia-smi` | `nvidia-smi` |
+| AMD, Linux | `rocm-smi`, else `lspci` | `drm sysfs` | `drm sysfs` (total minus used) |
+| AMD, Windows | `Win32_VideoController` | registry `qwMemorySize` | not available |
+| Apple Silicon | `system_profiler` | `iogpu.wired_limit_mb`, else assumed share | not applicable |
+| Intel iGPU | `lspci` / CIM | treated as unified memory | not available |
+
+Two honest gaps. AMD free VRAM on Windows needs DXGI's `QueryVideoMemoryInfo`,
+which is COM and per-adapter; the registry figure is a static capacity, not
+live state. And Apple Silicon has no separate VRAM to be free -- the GPU budget
+is a share of one pool the OS is also using, so "free system RAM" is a
+different question wearing the same words.
+
+This is what has been exercised on real hardware so far: Windows with an
+NVIDIA card. Everything else is written from the platform's documented
+interfaces and covered by tests that do not need the hardware. Treat the
+unexercised rows as untested rather than as working.
+
 ### Memory budget by platform
 
 `fitr` reports the memory a model may actually use, not the memory installed.

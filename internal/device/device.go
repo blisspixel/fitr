@@ -390,7 +390,12 @@ func preferUnifiedMemory(gpu string, ram, vram float64, src string) (float64, st
 	if ram <= 0 || !unifiedMemoryGPU(gpu) {
 		return vram, src
 	}
-	if src == "nvidia-smi" || src == "unified memory (system RAM)" || src == "drm sysfs" {
+	// Sources that already know what the GPU may use. Apple Silicon is on this
+	// list because its budget is now computed against the wired-memory limit
+	// rather than installed RAM, so second-guessing it here would undo that.
+	switch src {
+	case "nvidia-smi", "drm sysfs",
+		AppleWiredLimitSource, AppleAssumedShareSource, AppleLegacyRAMSource:
 		return vram, src
 	}
 	if vram > 0 && ram < vram*2 {
@@ -802,7 +807,10 @@ const (
 
 func AvailableVRAM(ctx context.Context) (float64, bool) {
 	if _, err := exec.LookPath("nvidia-smi"); err != nil {
-		return 0, false
+		// Not every GPU ships an nvidia-smi. Free memory is the number that
+		// decides whether a model loads right now, and answering it only for
+		// one vendor makes the caveat a vendor feature.
+		return availableVRAMFallback(ctx)
 	}
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

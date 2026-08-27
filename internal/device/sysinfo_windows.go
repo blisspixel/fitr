@@ -177,3 +177,11 @@ func nvidiaSMIName(ctx context.Context) string {
 	}
 	return ParseNvidiaSMIName(string(out))
 }
+
+// availableVRAMFallback has no answer on Windows without nvidia-smi.
+//
+// AMD's free VRAM is reachable only through DXGI's QueryVideoMemoryInfo, which
+// is COM and per-adapter, and the registry figure is a static capacity rather
+// than live state. Returning "unknown" is the honest result: the caller prints
+// no free-memory caveat rather than a fabricated one.
+func availableVRAMFallback(context.Context) (float64, bool) { return 0, false }
