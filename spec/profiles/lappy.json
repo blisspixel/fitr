@@ -33,12 +33,12 @@
       "why": "verifiable constraints (exact envelope, line rules, word budgets) graded by code. Persistent misses mean every prompt needs a retry wrapper."
     },
     "tool_calling": {
-      "pass_rate_min": 0.9,
-      "why": "an agent harness calls a tool on almost every turn, so a 10% miss rate is a loop that stalls several times per session. This is deliberately stricter than structured_output: a malformed JSON reply can be retried, a call that never reaches the tool channel is silence the harness reads as an answer"
+      "pass_rate_min": 0.7,
+      "why": "a gate has to be reachable by the battery that feeds it. Three families at -k 3 is nine trials, and nine perfect trials pin the rate no tighter than [0.70, 1.00] -- so 0.70 is the strictest bar this sample can clear, and a stricter one would leave the need permanently undecided rather than strict. This separates a model whose tool calls land from one whose do not; it cannot separate 90% from 95%, and does not pretend to. Raise -k to raise the bar"
     },
     "tool_restraint": {
-      "pass_rate_min": 0.9,
-      "why": "firing a tool on a question no tool can answer is how a local model burns a turn, corrupts a transcript, and drags an agent loop off course. Restraint at rest should be near-total"
+      "pass_rate_min": 0.7,
+      "why": "same arithmetic: three irrelevance specs at -k 3 is nine trials. Firing a tool on a question no tool can answer burns a turn and drags an agent loop off course, so the bar should be as high as the evidence supports and no higher"
     },
     "unattended_agentic": {
       "prefill_tps_min": 100.0,

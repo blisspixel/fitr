@@ -347,6 +347,18 @@ unknown fields, unsupported match keys, surrounding match whitespace, and
 files over 1 MiB are hard errors so a damaged calibration cannot silently fall
 back to unrelated gates. `match` accepts only `gpu_contains` and `host`.
 
+### Where fitr keeps things
+
+| Path | Holds | Override |
+|---|---|---|
+| `~/.fitr/results` | canonical measurements, one JSON per model | `$FITR_RESULTS` |
+| `~/.fitr/results/.history` | an archive copy of every completed run | - |
+| `~/.fitr/profiles` | your calibrated gates | `$FITR_PROFILES` |
+| `~/.fitr/tasks` | your own check tasks | `$FITR_TASKS` |
+
+Model weights are not fitr's; they live wherever the runtime put them
+(`$OLLAMA_MODELS`, else `~/.ollama/models`). fitr never deletes them.
+
 Results are stored as JSON under `~/.fitr/results` (override with
 `$FITR_RESULTS`). Canonical files use a readable model prefix plus a short
 SHA-256 suffix so two model names that sanitize alike cannot overwrite each

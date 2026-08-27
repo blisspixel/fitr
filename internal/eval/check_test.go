@@ -36,7 +36,7 @@ func TestEveryCheckGradesItsOwnCanon(t *testing.T) {
 			// Tool-channel families grade an assistant message, not text, so
 			// they self-test against a synthesized correct call instead.
 			if inst.UsesToolChannel() {
-				checkToolCanon(t, cs.ID, seed, inst)
+				checkToolCanon(t, cs.ID, cs.Family, seed, inst)
 				continue
 			}
 			if ok, why := inst.Grade(inst.Canon); !ok {
@@ -316,11 +316,13 @@ func TestUserChecksRejectOversizedFile(t *testing.T) {
 // model failure, which is the sin this repo exists to avoid. Canon carries the
 // tool name and its exact arguments, so the correct call can be reconstructed
 // and fed back through the real grader.
-func checkToolCanon(t *testing.T, id string, seed uint64, inst Instance) {
+func checkToolCanon(t *testing.T, id, family string, seed uint64, inst Instance) {
 	t.Helper()
 
-	// Restraint families are correct when they call nothing.
-	if strings.HasSuffix(id, "irrelevance") {
+	// Restraint families are correct when they call nothing. Routed by family,
+	// not by id: several specs share one family with different tool-list sizes,
+	// and matching on the id silently sent them down the wrong branch.
+	if family == "tool_irrelevance" {
 		if ok, why := inst.GradeCall(ollama.Message{
 			Role: "assistant", Content: "Here is a haiku about winter.",
 		}); !ok {

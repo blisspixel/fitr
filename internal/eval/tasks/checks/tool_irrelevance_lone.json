@@ -1,0 +1,9 @@
+{
+  "id": "tool_irrelevance_lone",
+  "kind": "check",
+  "why": "restraint with a single tool offered. The narrow case: nothing to choose between, so a call is pure over-eagerness",
+  "need": "tool_restraint",
+  "family": "tool_irrelevance",
+  "params": { "distractors": 0 },
+  "num_predict": 300
+}

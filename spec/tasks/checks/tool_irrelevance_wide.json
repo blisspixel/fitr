@@ -1,0 +1,9 @@
+{
+  "id": "tool_irrelevance_wide",
+  "kind": "check",
+  "why": "restraint with a large tool list. Offering one tool and offering twelve are different temptations, and agent harnesses ship 15-60",
+  "need": "tool_restraint",
+  "family": "tool_irrelevance",
+  "params": { "distractors": 11 },
+  "num_predict": 300
+}
