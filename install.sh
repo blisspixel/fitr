@@ -10,6 +10,7 @@ set -eu
 
 REPO="blisspixel/fitr"
 VERSION="${FITR_VERSION:-latest}"
+RELEASE_BASE_URL="${FITR_RELEASE_BASE_URL:-}"
 
 err() {
   echo "error: $1" >&2
@@ -77,7 +78,11 @@ esac
 
 BIN_DIR="${FITR_BIN:-$default_bin}"
 
-if [ "$VERSION" = "latest" ]; then
+if [ -n "$RELEASE_BASE_URL" ]; then
+  RELEASE_BASE_URL=${RELEASE_BASE_URL%/}
+  url="$RELEASE_BASE_URL/$asset"
+  sum_url="$RELEASE_BASE_URL/SHA256SUMS"
+elif [ "$VERSION" = "latest" ]; then
   url="https://github.com/$REPO/releases/latest/download/$asset"
   sum_url="https://github.com/$REPO/releases/latest/download/SHA256SUMS"
 else
@@ -154,6 +159,9 @@ if [ "$got_binary" -eq 1 ]; then
   chmod +x "$tmp"
   mv "$tmp" "$BIN_DIR/$bin"
   trap 'rm -f "$tmp.sums"' EXIT
+elif [ "${FITR_REQUIRE_BINARY:-}" = "1" ]; then
+  err "could not fetch the required release binary" "$url" \
+    "verify the candidate assets and checksum manifest"
 elif have go; then
   rm -f "$tmp"
   gover=$VERSION

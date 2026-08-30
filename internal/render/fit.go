@@ -22,24 +22,24 @@ type ContextFit struct {
 }
 
 type ContextFitPoint struct {
-	Ctx          int
-	Tier         string
-	WeightsGB    float64
-	KVGB         float64
-	BuffersGB    float64
-	BuffersKnown bool
-	NeedGB       float64
-	HeadroomGB   float64
-	DecodeTPS    float64
-	PrefillTPS   float64
-	Requested    bool
-	Suggested    bool
-	Note         string
+	Ctx        int
+	Tier       string
+	WeightsGB  float64
+	KVGB       float64
+	OtherGB    float64
+	OtherKnown bool
+	NeedGB     float64
+	HeadroomGB float64
+	DecodeTPS  float64
+	PrefillTPS float64
+	Requested  bool
+	Suggested  bool
+	Note       string
 }
 
-// WriteContextFit prints weights / KV / buffers / headroom at each ctx.
-// State is in the tier column. Color is optional. Buffers stay "n/a"
-// unless a measurement at that exact window exists.
+// WriteContextFit prints weights / KV / derived other resident / headroom at
+// each ctx. State is in the tier column. Other stays "n/a" unless total
+// allocation at that exact window was observed.
 func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 	if len(table.Points) == 0 && table.Note == "" {
 		return
@@ -63,7 +63,7 @@ func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 	// it was last, behind eight numeric columns, which also pushed the row to 90
 	// characters against an 80-column terminal.
 	fmt.Fprintf(w, "%s\n", p.wrap(p.Head, fmt.Sprintf(fitHeaderFmt,
-		"FIT", "CTX", "WEIGHT", "KV", "BUFFERS", "NEED", "ROOM", "DECODE", "PREFILL", "OF HAVE")))
+		"FIT", "CTX", "WEIGHT", "KV", "OTHER", "NEED", "ROOM", "DECODE", "PREFILL", "OF HAVE")))
 	maxNeed := 0.0
 	for _, pt := range table.Points {
 		if pt.NeedGB > maxNeed {
@@ -84,9 +84,9 @@ func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 				mark = "*"
 			}
 		}
-		buf := "n/a"
-		if pt.BuffersKnown {
-			buf = fmt.Sprintf("%.1f", pt.BuffersGB)
+		other := "n/a"
+		if pt.OtherKnown {
+			other = fmt.Sprintf("%.1f", pt.OtherGB)
 		}
 		dec, pre := "-", "-"
 		if pt.DecodeTPS > 0 {
@@ -99,16 +99,16 @@ func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 		fmt.Fprintf(w, fitRowFmt,
 			p.wrap(fitTierColor(p, pt.Tier), pad(pt.Tier, 12, g.Ell)),
 			fmt.Sprintf("%s%d", mark, pt.Ctx),
-			pt.WeightsGB, pt.KVGB, buf, pt.NeedGB, pt.HeadroomGB,
+			pt.WeightsGB, pt.KVGB, other, pt.NeedGB, pt.HeadroomGB,
 			dec, pre, p.wrap(p.Accent, bar))
-		if pt.Note != "" && pt.BuffersKnown {
+		if pt.Note != "" && pt.OtherKnown {
 			fmt.Fprintf(w, "          %s\n", p.wrap(p.Muted, SingleLine(pt.Note)))
 		}
 	}
 	if table.Note != "" {
 		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, SingleLine(table.Note)))
 	}
-	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, "* suggested   > requested   buffers n/a until --load or --fit at that ctx"))
+	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, "* suggested   > requested   other n/a until allocation is observed"))
 	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, "decode/prefill only from a saved run at that exact window"+g.Dot+"never invented"))
 }
 

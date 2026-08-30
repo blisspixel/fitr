@@ -19,8 +19,9 @@ type FlipReport struct {
 	BPass  int
 }
 
-// PairFlips aligns outcomes by (task, seed). Instances only one side saw
-// are dropped, not invented.
+// PairFlips aligns scorable outcomes by (task, seed). Instances only one side
+// saw, and pairs where either side was not measured as PASS or FAIL, are
+// dropped rather than invented or silently counted as failures.
 func PairFlips(a, b []CheckOutcome) FlipReport {
 	type key struct {
 		id   string
@@ -28,7 +29,10 @@ func PairFlips(a, b []CheckOutcome) FlipReport {
 	}
 	left := map[key]bool{}
 	for _, ck := range a {
-		left[key{ck.TaskID, ck.Seed}] = ck.Pass
+		pass, measured := MeasuredOutcome(ck.Outcome, ck.Pass)
+		if measured {
+			left[key{ck.TaskID, ck.Seed}] = pass
+		}
 	}
 	var r FlipReport
 	for _, ck := range b {
@@ -36,15 +40,19 @@ func PairFlips(a, b []CheckOutcome) FlipReport {
 		if !ok {
 			continue
 		}
+		pb, measured := MeasuredOutcome(ck.Outcome, ck.Pass)
+		if !measured {
+			continue
+		}
 		r.Shared++
 		if pa {
 			r.APass++
 		}
-		if ck.Pass {
+		if pb {
 			r.BPass++
 		}
 		switch {
-		case pa == ck.Pass:
+		case pa == pb:
 			r.Agree++
 		case pa:
 			r.AOnly++
@@ -53,6 +61,95 @@ func PairFlips(a, b []CheckOutcome) FlipReport {
 		}
 	}
 	return r
+}
+
+// FamilyDirectionReport is the direction of paired differences after each
+// generated family contributes at most one sign. Item-level flips remain
+// descriptive; this is the unit used within one need for a paired claim.
+type FamilyDirectionReport struct {
+	Shared int
+	Agree  int
+	AOnly  int // more paired passes for A within the family
+	BOnly  int // more paired passes for B within the family
+}
+
+// NeedDirectionStat keeps independent product questions out of one global
+// model winner. Its family directions are interpreted only within Need.
+type NeedDirectionStat struct {
+	Need string
+	FamilyDirectionReport
+}
+
+// NeedDirections aligns scorable instances and aggregates paired pass counts
+// by family within each need. It is the claimable paired estimand: independent
+// product questions remain separate, and each family contributes at most one
+// sign inside that need.
+func NeedDirections(a, b []CheckOutcome) []NeedDirectionStat {
+	type key struct {
+		id   string
+		seed uint64
+	}
+	type observed struct {
+		check CheckOutcome
+		pass  bool
+	}
+	left := map[key]observed{}
+	for _, ck := range a {
+		pass, measured := MeasuredOutcome(ck.Outcome, ck.Pass)
+		if measured {
+			left[key{ck.TaskID, ck.Seed}] = observed{check: ck, pass: pass}
+		}
+	}
+	type stratum struct{ need, family string }
+	type counts struct{ a, b int }
+	byStratum := map[stratum]counts{}
+	for _, ck := range b {
+		pa, ok := left[key{ck.TaskID, ck.Seed}]
+		if !ok {
+			continue
+		}
+		pb, measured := MeasuredOutcome(ck.Outcome, ck.Pass)
+		if !measured {
+			continue
+		}
+		need := firstNonEmpty(ck.Need, pa.check.Need)
+		if need == "" {
+			need = "unspecified"
+		}
+		family := firstNonEmpty(ck.Family, pa.check.Family)
+		if family == "" {
+			family = ck.TaskID
+		}
+		k := stratum{need: need, family: family}
+		c := byStratum[k]
+		if pa.pass {
+			c.a++
+		}
+		if pb {
+			c.b++
+		}
+		byStratum[k] = c
+	}
+	byNeed := map[string]FamilyDirectionReport{}
+	for k, c := range byStratum {
+		r := byNeed[k.need]
+		r.Shared++
+		switch {
+		case c.a > c.b:
+			r.AOnly++
+		case c.b > c.a:
+			r.BOnly++
+		default:
+			r.Agree++
+		}
+		byNeed[k.need] = r
+	}
+	out := make([]NeedDirectionStat, 0, len(byNeed))
+	for need, report := range byNeed {
+		out = append(out, NeedDirectionStat{Need: need, FamilyDirectionReport: report})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Need < out[j].Need })
+	return out
 }
 
 // HidesDisagreement reports that the rates are identical and the item-level
@@ -117,7 +214,9 @@ func ItemStats(a, b []CheckOutcome) []ItemStat {
 	}
 	left := map[key]CheckOutcome{}
 	for _, ck := range a {
-		left[key{ck.TaskID, ck.Seed}] = ck
+		if _, measured := MeasuredOutcome(ck.Outcome, ck.Pass); measured {
+			left[key{ck.TaskID, ck.Seed}] = ck
+		}
 	}
 	type acc struct {
 		family, need          string
@@ -129,19 +228,24 @@ func ItemStats(a, b []CheckOutcome) []ItemStat {
 		if !ok {
 			continue
 		}
+		paPass, paMeasured := MeasuredOutcome(pa.Outcome, pa.Pass)
+		pbPass, pbMeasured := MeasuredOutcome(ck.Outcome, ck.Pass)
+		if !paMeasured || !pbMeasured {
+			continue
+		}
 		s := by[ck.TaskID]
 		if s == nil {
 			s = &acc{family: firstNonEmpty(ck.Family, pa.Family), need: firstNonEmpty(ck.Need, pa.Need)}
 			by[ck.TaskID] = s
 		}
 		s.shared++
-		if pa.Pass {
+		if paPass {
 			s.aP++
 		}
-		if ck.Pass {
+		if pbPass {
 			s.bP++
 		}
-		if pa.Pass != ck.Pass {
+		if paPass != pbPass {
 			s.flips++
 		}
 	}

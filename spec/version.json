@@ -1,6 +1,6 @@
 {
   "spec_version": 2,
-  "result_schema_version": 5,
+  "result_schema_version": 6,
   "provenance": "core tasks extracted from reference-python/tasks_core.py and tasks_agentic.py, kept in lockstep by its tests",
   "note": "Language-neutral definition of the eval. The harness may be written in any language; `runner` arrays name the interpreter needed to execute a task's fixtures, which is deliberately decoupled from the harness language. Tasks of kind `check` are parameterized families: the JSON names the family and its knobs, and the family contract (generator + grader) is implemented by the harness. Instances are generated per run from a recorded seed and the correct answer is computed, never stored - a static answer string in a public repo is future training data."
 }

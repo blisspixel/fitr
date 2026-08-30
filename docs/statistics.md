@@ -1,13 +1,13 @@
 # The statistics of fitr
 
-fitr runs a handful of trials on one machine and turns them into verdicts.
-That regime - three to fifty binary outcomes, three to ten timing repeats -
-is exactly where most benchmark statistics quietly stop being true. This
+fitr runs a finite battery on one machine and turns it into verdicts. That
+regime - small family counts, repeated instances, and three to ten timing
+repeats - is exactly where most benchmark statistics quietly stop being true. This
 document states every method fitr uses, why it was chosen over the obvious
 alternative, and what it refuses to compute. Each section follows the same
 shape: the situation, the method, the rejected alternative, the reference.
 
-<img src="assets/compare.svg?v=0.9.8" alt="fitr compare (mock data)" width="820">
+<img src="assets/compare.svg?v=0.9.9" alt="fitr compare (mock data)" width="820">
 
 Two design rules govern everything below:
 
@@ -17,10 +17,11 @@ Two design rules govern everything below:
 2. "Cannot separate" is a real answer. When the sample does not decide, fitr
    says so in those words rather than picking a winner.
 
-## 1. One pass rate: the Wilson score interval
+## 1. One binary rate: the Wilson score interval
 
-Every binary pool (coding trials, structured-output checks, instruction
-checks) is summarized as `passes/n` with a 95% Wilson score interval:
+Every genuinely unclustered binary pool is summarized as `passes/n` with a
+95% Wilson score interval. Generated need-level pools use the cluster-adjusted
+extension in section 2 instead:
 
     center = (p + z^2/2n) / (1 + z^2/n)
     half   = (z / (1 + z^2/n)) * sqrt(p(1-p)/n + z^2/4n^2)
@@ -31,38 +32,51 @@ to zero width at p = 0 or 1, which is precisely where small batteries live
 [0.29, 1.0]). Brown, Cai and DasGupta (2001) co-recommend Wilson and
 Jeffreys at small n; Wilson wins here because it needs one square root
 instead of an inverse incomplete beta function (fitr has zero dependencies),
-it behaves at the boundaries unmodified, and the Newcombe interval of
-section 3 is built from Wilson bounds, so a single interval family serves
-every display coherently.
+it behaves at the boundaries unmodified and provides the conservative iid
+baseline that clustered intervals are not allowed to narrow.
 
-## 2. What a run cannot resolve: the minimum detectable effect
+## 2. Uncertainty belongs to each need
 
-Every run prints its minimum detectable effect, computed at the worst case
-(p = 0.5, 80% power, alpha = 0.05):
+The current battery contains 22 generated checks across 16 families. Those
+checks do not measure one exchangeable property. Structured output, exact
+instructions, reasoning, tool calling, and tool restraint are independent
+product questions with different gates and different family structures.
 
-    MDE ~ 2.8 * sqrt(0.25 / n)
+fitr therefore does not add all PASS, FAIL, SKIP, and INCONCLUSIVE outcomes
+into a global sample size or print a global minimum detectable effect. Such a
+number would invent a denominator that no verdict uses. Each need prints its
+own count, family breakdown, interval, and gate. If the gate lies inside that
+need's interval, the verdict is `INCONCLUSIVE`.
 
-A default run's ~23 binary trials give an MDE near 29 percentage points:
-fitr can tell broken from working, not good from slightly better, and the
-scorecard says that sentence on every run. Tools that omit this number are
-not more precise; they are less honest about the same sample.
+The practical reading is local: `6/7 [0.49-0.97]` against a 0.75 structured
+output gate does not establish either side, even if several unrelated needs
+passed. More repeats add instances within declared families. They do not turn
+different needs into one quality score or make one family prove a broader
+need.
 
-## 2b. Need-level pooling is clustered by family
+## 2a. Need-level pooling is clustered by family
 
-The generated checks are 16 families, not 16 iid draws of one skill.
+The generated checks are 22 task specs across 16 families, not 22 iid draws
+of one skill.
 `json_object` and `csv_strict` both feed `structured_output`, but a model
 that emits valid objects and broken CSV is not a 15/16 Bernoulli process.
 Pooling them as iid Wilson overstates n and can mint a PASS that hides a
 dead family: 60/70 with one family at 0/10 looks like `[0.76, 0.93]`
 against a 0.75 gate.
 
-Need-level intervals therefore use a Rao-Scott adjusted Wilson. Each
-family is a cluster. Intra-cluster correlation ρ̂ comes from the ANOVA
-estimator; the design effect is `1 + (m̄ - 1)ρ̂`; the Wilson interval is
-computed at `n_eff = n / deff`. When every family has one trial, or there
-is only one family, this equals ordinary Wilson. The clustered interval is
-never narrower than iid Wilson. Per-family counts stay on the why line so
-the interval is not the only disclosure.
+Need-level intervals therefore use a conservative cluster-adjusted Wilson
+approximation. Each family is a cluster. Intra-cluster correlation ρ̂ comes
+from the unequal-size one-way ANOVA estimator. The design effect is:
+
+    deff = 1 + (((1 + CV_size^2) * mean_size) - 1) * ρ̂
+    n_eff = n / deff
+
+The Wilson interval is evaluated at `n_eff` and is never allowed to become
+narrower than iid Wilson. Singleton families reduce exactly to ordinary
+Wilson. A single repeated family has one effective unit because between-family
+variation is not identifiable; it can establish behavior inside that family,
+not the broader need. Per-family counts remain on the explanation line so the
+interval is not the only disclosure.
 
 A family whose own Wilson interval lies entirely below the gate cannot
 let the need PASS. Reasoning checks observed while executable coding is
@@ -73,45 +87,50 @@ Rejected alternative: raising default `-k` until iid Wilson looks wide
 enough. That spends wall time to paper over a dependence structure the
 interval should have named.
 
-Reference: Rao, J. N. K. and Scott, A. J. (1981), "The Analysis of
-Categorical Data from Complex Sample Surveys: Chi-Squared Tests for
-Goodness of Fit and Independence in Two-Way Tables," *JASA* 76(374).
+This is a fixed-sample design-effect approximation, not an exact interval and
+not a sequential confidence sequence. Its implementation is pinned by
+boundary, single-family, singleton-family, dead-family, and unequal-size
+tests.
 
-## 3. Comparing two models, unpaired: the Newcombe difference interval
+## 3. Why unpaired behavior does not get a winner claim
 
-The intuitive rule - "the two intervals overlap, so no claim" - is not a 5%
-test. Requiring non-overlap of two 95% intervals corresponds to an effective
-alpha near 0.006 (Schenker and Gentleman 2001; Payton et al. 2003 show that
-~83% intervals would give the intended 5%). The overlap rule silently misses
-real differences, which is the opposite failure from the one it is guarding
-against.
+Newcombe's hybrid score interval is an appropriate difference interval for
+two independent binomial proportions. fitr retains a pinned implementation
+for that statistical primitive. It does not apply it to the generated
+behavior battery, because repeated task instances are clustered by family and
+the two runs usually face different instances. Treating those observations as
+independent binomial arms would overstate evidence and can conflict with the
+paired item-level result.
 
-fitr therefore claims a difference if and only if the 95% interval for the
-difference of the two rates excludes zero, using Newcombe's hybrid score
-interval (1998, method 10), assembled from the per-arm Wilson bounds:
+For reference, the independent-arm interval is assembled from Wilson bounds:
 
     L = d - sqrt((p1-l1)^2 + (u2-p2)^2)
     U = d + sqrt((u1-p1)^2 + (p2-l2)^2)
 
-Worked example, from Newcombe's own paper: 56/70 vs 48/80 gives a difference
-of +0.20 with interval [0.052, 0.334]; zero is excluded, so the difference
-is claimed. The per-model intervals shown alongside are context, not the
-test.
+The CLI instead prints no unpaired behavior winner and tells the operator how
+to create a paired run. Descriptive per-need rates remain visible inside each
+scorecard.
 
-## 4. Comparing two models, paired: seedsets and McNemar's exact test
+## 4. Comparing two models, paired: seedsets and a family-level exact sign test
 
 Generated check tasks are drawn from a seeded RNG. Two runs that share a
-`--seedset` face byte-identical instances, which upgrades the comparison
-from "two rates" to "item-level flips": instances both models passed or
-both failed carry no information about the difference, and only the
-discordant ones decide. With b flips won by model A and c by model B, the
-exact conditional McNemar test evaluates the split against Binomial(b+c,
-1/2):
+`--seedset` face byte-identical instances. fitr prints item-level flips as a
+descriptive view, but does not treat repeated instances from one generated
+family as independent evidence.
+
+For a claim, fitr first requires matching sealed plans and a scorable PASS or
+FAIL on both sides for every planned instance. Missing, SKIP, or INCONCLUSIVE
+evidence leaves the flips descriptive only. It then totals paired passes inside
+each family and need. A family contributes one direction within that need:
+model A had more paired passes, model B had more, or the family tied. Unrelated
+needs never form a global winner. With b discordant family directions favoring
+A and c favoring B inside one need, an exact two-sided sign test evaluates the
+split against Binomial(b+c, 1/2):
 
     p = min(1, 2 * P[X <= min(b,c)])
 
 Two honesty rules ride along. First, the smallest achievable p is
-2^(1-(b+c)), so with fewer than six discordant instances no split can reach
+2^(1-(b+c)), so with fewer than six discordant family directions no split can reach
 p < 0.05; fitr prints "too few to separate regardless of split" instead of
 a p-value that was never in play. Second, the mid-p variant (Fagerland,
 Lydersen and Laake 2013 recommend it as less conservative) is reported as a
@@ -124,7 +143,8 @@ instances per run remain the default and the pinning is explicit.
 Accuracy deltas hide item-level disagreement. One run can fail three items the
 other passed and pass three the other failed, and both score 6/8.
 `fitr compare` on a shared seedset therefore prints the flips even when the
-rates match ("accuracy hid N item-level flips"). FitR does not attribute those
+rates match ("accuracy hid N item-level flips"). Those flips are descriptive;
+only complete, need-stratified family directions feed an exact test. fitr does not attribute those
 flips to quantization: matching family, parameter size, and a ranked GGUF dtype
 do not prove both artifacts descend from the same exact base revision. Until a
 sealed same-base lineage receipt binds both runtime-bound artifact digests,
@@ -140,6 +160,11 @@ ratio of independent normal means, with Welch-Satterthwaite degrees of
 freedom floored into the t-table (fewer degrees of freedom widen the
 interval - the conservative direction):
 
+Prefill comparison adds an evidence rule before any ratio is allowed: every
+sample on both sides must carry an explicit zero-cache receipt. Unknown cache
+state or any positive cached-token count remains visible descriptively but
+cannot support an uncached-prefill winner claim.
+
     g    = t^2 * (sb^2/nb) / mb^2
     half = (t/|mb|) * sqrt((sa^2/na)(1-g) + R^2(sb^2/nb))
     CI   = [(R-half)/(1-g), (R+half)/(1-g)]
@@ -150,25 +175,31 @@ an interval, and any numbers printed from it would be fiction. fitr reports
 "no interval" and shows the bare ratio unclaimed. The old quadrature
 propagation (hyperfine's method) survives only as that fallback display.
 
-## 6. Deciding against a gate sequentially: Wald's SPRT
+## 6. Fixed denominators and sealed schedules
 
-`fitr run --adaptive` replaces the fixed repeat count with the sequential
-probability ratio test (Wald 1945). For a gate at rate g, it tests
-p0 = g - 0.1 against p1 = g + 0.1 at alpha = beta = 0.05: each fresh
-instance moves a running log-likelihood ratio by ln(p1/p0) on a pass or
-ln((1-p1)/(1-p0)) on a fail, and crossing +/-ln(19) decides. Wald and
-Wolfowitz (1948) proved no test with the same error rates needs fewer
-expected trials - for a gate at 0.75 the expected sample is roughly 22-26
-trials, worst case near 38.
+Current runs execute every task spec in every requested round. Before
+inference, the manifest seals the ordered task ID, family, need, origin, and
+derived seed for every scheduled observation. A count alone would allow a
+missing hard task to be replaced with a duplicate easy task.
 
-Two deliberate choices. The indifference half-width of 0.10 is a budget
-statement: expected sample size grows as 1/delta^2, so halving the width
-would quadruple the run time for a distinction the battery cannot support
-anyway. And at the truncation cap the outcome is reported as "undecided:
-the sample cannot separate the rate from the gate" - the three-way honesty
-that Wald's original truncation rule (decide by the sign of the final ratio)
-deliberately gives up. Precedent for the whole construction: Stockfish's
-Fishtest has gated every engine patch by truncated SPRT for over a decade.
+PASS and FAIL are the only outcomes that enter a rate. SKIP, ERROR, and
+INCONCLUSIVE remain terminal observations, are never anonymously padded, and
+cannot establish a need. The raw observations, outcome counts, scorecard, and
+profile are signed at completion. Readers recompute the scorecard from those
+raw observations and the sealed profile before accepting it.
+
+The former public adaptive mode is intentionally unavailable. Its sequential
+Bernoulli process treated heterogeneous raw task specs as exchangeable while
+the scorecard treated their families as clusters. Several specs share a
+family, so completing every spec in a round was spec-balanced, not
+equal-family-balanced. That mismatch could not support the advertised
+anytime-valid pooled-rate claim.
+
+A future sequential design must first declare its estimand and stratified
+sampling plan. The current research direction is one fresh instance per
+distinct family per complete round, with an anytime-valid bounded-mean process
+over complete-round family averages. Until that design has replayable receipts
+and calibration tests, fixed sampling is the evidence-bearing path.
 
 ## 7. Zero failures observed: the exact bound behind "deterministic"
 
@@ -235,10 +266,11 @@ is deliberately laxer because its warning gates advice rather than data).
   conditional. BMC Medical Research Methodology 13:91.
 - Fieller, E.C. (1954). Some problems in interval estimation. Journal of
   the Royal Statistical Society B 16(2):175-185.
-- Wald, A. (1945). Sequential tests of statistical hypotheses. Annals of
-  Mathematical Statistics 16(2):117-186.
-- Wald, A., Wolfowitz, J. (1948). Optimum character of the sequential
-  probability ratio test. Annals of Mathematical Statistics 19(3):326-339.
+- Robbins, H. (1970). Statistical methods related to the law of the iterated
+  logarithm. Annals of Mathematical Statistics 41(5):1397-1409.
+- Howard, S.R., Ramdas, A., McAuliffe, J., Sekhon, J. (2021). Time-uniform,
+  nonparametric, nonasymptotic confidence sequences. Annals of Statistics
+  49(2):1055-1080.
 - Hanley, J.A., Lippman-Hand, A. (1983). If nothing goes wrong, is
   everything all right? Interpreting zero numerators. JAMA 249(13):1743-1745.
 - Iglewicz, B., Hoaglin, D.C. (1993). How to Detect and Handle Outliers.

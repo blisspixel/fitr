@@ -5,17 +5,20 @@
 # Downloads one static .exe. No interpreter, no package manager, no venv.
 # Set FITR_VERSION to pin, FITR_BIN to relocate. FITR_NO_VERIFY=1 skips the
 # checksum check explicitly.
+& {
 $ErrorActionPreference = "Stop"
 
 $Repo = "blisspixel/fitr"
 $Version = $env:FITR_VERSION
 if (-not $Version) { $Version = "latest" }
+$ReleaseBaseUrl = $env:FITR_RELEASE_BASE_URL
 
-function Write-FitrError {
+function Stop-Fitr {
     param([string]$Message, [string]$Note = "", [string]$Hint = "")
     [Console]::Error.WriteLine("error: $Message")
     if ($Note) { [Console]::Error.WriteLine(" note: $Note") }
     if ($Hint) { [Console]::Error.WriteLine(" hint: $Hint") }
+    throw $Message
 }
 
 try {
@@ -27,8 +30,7 @@ $proc = $env:PROCESSOR_ARCHITECTURE
 if ($proc -eq "ARM64" -or $env:PROCESSOR_ARCHITEW6432 -eq "ARM64") {
     $archName = "arm64"
 } elseif ($proc -eq "x86" -and -not [Environment]::Is64BitOperatingSystem) {
-    Write-FitrError "unsupported architecture x86" "fitr ships amd64 and arm64 builds" ""
-    exit 1
+    Stop-Fitr "unsupported architecture x86" "fitr ships amd64 and arm64 builds" ""
 }
 
 $BinDir = $env:FITR_BIN
@@ -37,7 +39,11 @@ if (-not $BinDir) {
 }
 
 $asset = "fitr-windows-$archName.exe"
-if ($Version -eq "latest") {
+if ($ReleaseBaseUrl) {
+    $ReleaseBaseUrl = $ReleaseBaseUrl.TrimEnd("/")
+    $url = "$ReleaseBaseUrl/$asset"
+    $sumUrl = "$ReleaseBaseUrl/SHA256SUMS"
+} elseif ($Version -eq "latest") {
     $url = "https://github.com/$Repo/releases/latest/download/$asset"
     $sumUrl = "https://github.com/$Repo/releases/latest/download/SHA256SUMS"
 } else {
@@ -66,8 +72,7 @@ if ($gotBinary) {
             $sumContent = (Invoke-WebRequest -Uri $sumUrl -UseBasicParsing).Content
         } catch {
             Remove-Item -Force $tmp -ErrorAction SilentlyContinue
-            Write-FitrError "cannot verify the download" "could not fetch $sumUrl" "check the release, or set FITR_NO_VERIFY=1 to accept the risk explicitly"
-            exit 1
+            Stop-Fitr "cannot verify the download" "could not fetch $sumUrl" "check the release, or set FITR_NO_VERIFY=1 to accept the risk explicitly"
         }
         try {
             if ($sumContent -is [byte[]]) {
@@ -78,8 +83,7 @@ if ($gotBinary) {
             }
         } catch {
             Remove-Item -Force $tmp -ErrorAction SilentlyContinue
-            Write-FitrError "invalid checksum manifest" "SHA256SUMS is not valid UTF-8 text" "verify the release assets and re-run the installer"
-            exit 1
+            Stop-Fitr "invalid checksum manifest" "SHA256SUMS is not valid UTF-8 text" "verify the release assets and re-run the installer"
         }
         $entries = @([regex]::Matches(
             [string]$sums,
@@ -87,14 +91,12 @@ if ($gotBinary) {
         ) | Where-Object { $_.Groups['file'].Value.Trim() -eq $asset })
         if ($entries.Count -ne 1) {
             Remove-Item -Force $tmp -ErrorAction SilentlyContinue
-            Write-FitrError "invalid checksum manifest" "need exactly one entry for $asset" "verify the release assets and re-run the installer"
-            exit 1
+            Stop-Fitr "invalid checksum manifest" "need exactly one entry for $asset" "verify the release assets and re-run the installer"
         }
         $expected = $entries[0].Groups['digest'].Value.ToLower()
         if ($got -cne $expected) {
             Remove-Item -Force $tmp -ErrorAction SilentlyContinue
-            Write-FitrError "checksum mismatch for $asset" "expected $expected; got $got" "the download may be corrupt; re-run the installer"
-            exit 1
+            Stop-Fitr "checksum mismatch for $asset" "expected $expected; got $got" "the download may be corrupt; re-run the installer"
         }
         Write-Host "  verified: sha256 $got"
     } else {
@@ -103,10 +105,12 @@ if ($gotBinary) {
     Move-Item -Force $tmp $dest
 } else {
     Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+    if ($env:FITR_REQUIRE_BINARY -eq "1") {
+        Stop-Fitr "could not fetch the required release binary" $url "verify the candidate assets and checksum manifest"
+    }
     $go = Get-Command go -ErrorAction SilentlyContinue
     if (-not $go) {
-        Write-FitrError "download failed" $url "no GitHub release yet and no Go on PATH; install Go 1.25+ or clone and 'go install ./cmd/fitr'"
-        exit 1
+        Stop-Fitr "download failed" $url "no GitHub release yet and no Go on PATH; install Go 1.25+ or clone and 'go install ./cmd/fitr'"
     }
     Write-Host "  no release binary; building with Go -> $BinDir"
     $prevGobin = $env:GOBIN
@@ -116,8 +120,7 @@ if ($gotBinary) {
         if ($LASTEXITCODE -ne 0) { throw "go install exited $LASTEXITCODE" }
     } catch {
         $env:GOBIN = $prevGobin
-        Write-FitrError "go install failed" $_.Exception.Message "needs Go 1.25+; or git clone https://github.com/$Repo and 'go install ./cmd/fitr'"
-        exit 1
+        Stop-Fitr "go install failed" $_.Exception.Message "needs Go 1.25+; or git clone https://github.com/$Repo and 'go install ./cmd/fitr'"
     }
     $env:GOBIN = $prevGobin
 }
@@ -146,3 +149,4 @@ Write-Host ""
 Write-Host "  next:  fitr                        # hardware and reachable runtime"
 Write-Host "         fitr advise <model>         # does this quant fit"
 Write-Host "         fitr run <model>            # measure it on this machine"
+}

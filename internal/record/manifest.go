@@ -70,12 +70,19 @@ type TaskPlan struct {
 	Memory           bool `json:"memory"`
 	CodeTrials       int  `json:"code_trials"`
 	CheckTrialsLimit int  `json:"check_trials_limit"`
-	AdaptiveChecks   bool `json:"adaptive_checks,omitempty"`
-	Plumbing         bool `json:"plumbing"`
-	ToolTrials       int  `json:"tool_trials"`
-	Withdrawal       bool `json:"withdrawal"`
-	RefusalTrials    int  `json:"refusal_trials"`
-	AgenticTrials    int  `json:"agentic_trials"`
+	// CheckPlanSHA256 seals the ordered task/family/need/origin/seed schedule
+	// before inference begins. A count alone cannot detect replacing a hard
+	// check with a duplicate easy one.
+	CheckPlanSHA256 string `json:"check_plan_sha256,omitempty"`
+	AdaptiveChecks  bool   `json:"adaptive_checks,omitempty"`
+	Plumbing        bool   `json:"plumbing"`
+	ToolTrials      int    `json:"tool_trials"`
+	Withdrawal      bool   `json:"withdrawal"`
+	RefusalTrials   int    `json:"refusal_trials"`
+	// RefusalPlanSHA256 seals the exact canonical prompt-ID plan before
+	// inference. A count alone cannot detect replacing a difficult prompt.
+	RefusalPlanSHA256 string `json:"refusal_plan_sha256,omitempty"`
+	AgenticTrials     int    `json:"agentic_trials"`
 }
 
 // RunProvenance identifies every mutable definition that can alter a verdict
@@ -181,6 +188,106 @@ func (p TaskPlan) Validate() error {
 	return nil
 }
 
+// validateCurrentSeals applies only to the current result schema. Manifest v2
+// was already published with schema-5 records before these plan digests
+// existed, so putting this rule in RunManifest.validateFields would make those
+// signed records unreadable.
+func (p TaskPlan) validateCurrentSeals() error {
+	if p.CheckTrialsLimit > 0 && !sha256Digest.MatchString(p.CheckPlanSHA256) {
+		return errors.New("current run manifest fixed checks require a sealed check plan")
+	}
+	if p.CheckTrialsLimit == 0 && p.CheckPlanSHA256 != "" {
+		return errors.New("current run manifest empty check plan cannot carry a check-plan digest")
+	}
+	if p.RefusalTrials > 0 && !sha256Digest.MatchString(p.RefusalPlanSHA256) {
+		return errors.New("current run manifest refusal battery requires a sealed refusal plan")
+	}
+	if p.RefusalTrials == 0 && p.RefusalPlanSHA256 != "" {
+		return errors.New("current run manifest empty refusal plan cannot carry a refusal-plan digest")
+	}
+	return nil
+}
+
+type checkPlanEntry struct {
+	TaskID string `json:"task"`
+	Family string `json:"family"`
+	Need   string `json:"need"`
+	Origin string `json:"origin"`
+	Seed   uint64 `json:"seed"`
+}
+
+// FixedCheckPlanSHA256 seals the exact generated-check schedule selected
+// before measurement. Order and multiplicity are intentional parts of the
+// contract because both affect pairing and clustered denominators.
+func FixedCheckPlanSHA256(checks []eval.CheckSpec, rounds int, seedSet string) (string, error) {
+	if rounds < 0 {
+		return "", errors.New("check-plan rounds cannot be negative")
+	}
+	entries := make([]checkPlanEntry, 0, len(checks)*rounds)
+	for round := range rounds {
+		for _, check := range checks {
+			entries = append(entries, checkPlanEntry{
+				TaskID: check.ID, Family: check.Family, Need: check.Need, Origin: check.Origin,
+				Seed: eval.InstanceSeed(seedSet, check.ID, round),
+			})
+		}
+	}
+	return checkPlanDigest(entries)
+}
+
+// ObservedCheckPlanSHA256 hashes the plan identity carried by terminal check
+// observations. It is exported for current-schema fixture builders; normal
+// runs seal their plan from CheckSpec values before inference.
+func ObservedCheckPlanSHA256(checks []eval.CheckOutcome) (string, error) {
+	entries := make([]checkPlanEntry, 0, len(checks))
+	for i, check := range checks {
+		if strings.TrimSpace(check.TaskID) == "" || strings.TrimSpace(check.Family) == "" ||
+			strings.TrimSpace(check.Need) == "" || strings.TrimSpace(check.Origin) == "" {
+			return "", fmt.Errorf("check observation %d has incomplete plan identity", i)
+		}
+		entries = append(entries, checkPlanEntry{
+			TaskID: check.TaskID, Family: check.Family, Need: check.Need, Origin: check.Origin, Seed: check.Seed,
+		})
+	}
+	return checkPlanDigest(entries)
+}
+
+func checkPlanDigest(entries []checkPlanEntry) (string, error) {
+	return canonicalJSONDigest("fitr.check-plan.v1", entries)
+}
+
+// FixedRefusalPlanSHA256 seals the predeclared refusal prompt-ID plan before
+// inference. IDs must be unique because every prompt is scheduled exactly once.
+func FixedRefusalPlanSHA256(ids []string) (string, error) {
+	seen := make(map[string]bool, len(ids))
+	ordered := make([]string, 0, len(ids))
+	for i, id := range ids {
+		if strings.TrimSpace(id) == "" {
+			return "", fmt.Errorf("refusal plan ID %d is empty", i)
+		}
+		if seen[id] {
+			return "", fmt.Errorf("refusal plan ID %q is duplicated", id)
+		}
+		seen[id] = true
+		ordered = append(ordered, id)
+	}
+	return canonicalJSONDigest("fitr.refusal-plan.v1", ordered)
+}
+
+// ObservedRefusalPlanSHA256 reconstructs the protocol order from terminal
+// refusal observations. It is exported for current-schema fixture builders;
+// normal runs seal the plan from RefusalSpec before inference.
+func ObservedRefusalPlanSHA256(results map[string]eval.RefusalVerdict) (string, error) {
+	ids := make([]string, 0, len(results))
+	for id := range results {
+		if strings.TrimSpace(id) == "" {
+			return "", errors.New("refusal observation has an empty prompt ID")
+		}
+		ids = append(ids, id)
+	}
+	return FixedRefusalPlanSHA256(eval.OrderedRefusalIDs(ids))
+}
+
 // ScoringPolicy is the stable, hashable description of verdict semantics that
 // are not supplied by the selected profile. Any change to these semantics must
 // change Schema so otherwise identical runs do not claim reproducibility.
@@ -196,7 +303,8 @@ type ScoringPolicy struct {
 
 func CurrentScoringPolicy() ScoringPolicy {
 	return ScoringPolicy{
-		Schema: "fitr.scoring.policy.v1", RateInterval: "wilson_score_95",
+		Schema:          "fitr.scoring.policy.v3",
+		RateInterval:    "clustered_wilson_95_fixed",
 		BoundaryVerdict: "inconclusive", ScorableOutcomes: "pass_fail_only",
 		UnisolatedExecution: "excluded", Contamination: "exclude_measured_claims",
 		MissingGate: "skip",
@@ -460,6 +568,11 @@ func (r *Record) attachManifest(identity ModelIdentity, executor *eval.ExecutorR
 	if len(provenance) > 1 {
 		return errors.New("run manifest accepts at most one provenance receipt")
 	}
+	if r.SchemaVersion >= EvidenceSchemaVersion {
+		if err := r.TaskPlan.validateCurrentSeals(); err != nil {
+			return err
+		}
+	}
 	if !validRunID.MatchString(r.RunID) {
 		id, err := NewRunID()
 		if err != nil {
@@ -609,8 +722,8 @@ func validCompletionPublicKey(encoded string) bool {
 }
 
 // CompatibilityError reports drift in the definitions that determine a
-// verdict. Software and backend receipts remain available for exact replay,
-// but do not turn a definition mismatch into a compatible comparison.
+// verdict or measurement semantics. The exact fitr software build remains
+// available for replay without making every rebuild incomparable.
 func (p RunProvenance) CompatibilityError(other RunProvenance) error {
 	var mismatches []string
 	for _, field := range []struct {
@@ -622,6 +735,7 @@ func (p RunProvenance) CompatibilityError(other RunProvenance) error {
 		{"effective spec", p.SpecSHA256, other.SpecSHA256},
 		{"profile", p.ProfileSHA256, other.ProfileSHA256},
 		{"scoring policy", p.ScoringPolicySHA256, other.ScoringPolicySHA256},
+		{"backend protocol", p.BackendProtocol, other.BackendProtocol},
 	} {
 		if field.left != field.right {
 			mismatches = append(mismatches, field.name)
@@ -686,6 +800,11 @@ func (r *Record) ValidateManifest() error {
 	if err := r.Manifest.Verify(); err != nil {
 		return err
 	}
+	if r.SchemaVersion >= EvidenceSchemaVersion {
+		if err := r.TaskPlan.validateCurrentSeals(); err != nil {
+			return err
+		}
+	}
 	m := r.Manifest
 	switch {
 	case r.RunID != m.RunID:
@@ -702,7 +821,7 @@ func (r *Record) ValidateManifest() error {
 		return errors.New("record level differs from its manifest")
 	case r.ExecutionPolicy != m.ExecutionPolicy:
 		return errors.New("record execution policy differs from its manifest")
-	case r.TaskPlan != m.TaskPlan:
+	case !reflect.DeepEqual(r.TaskPlan, m.TaskPlan):
 		return errors.New("record task plan differs from its manifest")
 	case r.SeedSet != m.SeedSet:
 		return errors.New("record seed set differs from its manifest")

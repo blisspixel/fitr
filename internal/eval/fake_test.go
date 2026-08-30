@@ -26,6 +26,7 @@ type fakeBackend struct {
 	turns         []fakeTurn
 	i             int
 	gens          []ollama.Metrics
+	genTexts      []string
 	gi            int
 	toolsSeen     []int // len(tools) per Chat call
 	generateCalls int
@@ -62,12 +63,16 @@ func (f *fakeBackend) Generate(ctx context.Context, model, prompt string, s olla
 	if f.generateErr != nil {
 		return "", ollama.Metrics{}, f.generateErr
 	}
-	if f.gi >= len(f.gens) {
-		return "ok", ollama.Metrics{}, nil
+	text := "ok"
+	if f.generateCalls <= len(f.genTexts) {
+		text = f.genTexts[f.generateCalls-1]
 	}
-	m := f.gens[f.gi]
-	f.gi++
-	return "ok", m, nil
+	m := ollama.Metrics{}
+	if f.gi < len(f.gens) {
+		m = f.gens[f.gi]
+		f.gi++
+	}
+	return text, m, nil
 }
 
 func (f *fakeBackend) Chat(ctx context.Context, model string, msgs []ollama.Message, tools []ollama.Tool, s ollama.Sampling) (ollama.Message, ollama.Metrics, error) {
@@ -182,7 +187,7 @@ func TestWarmPrefixTTFTUsesTheCacheReceipt(t *testing.T) {
 	f := &fakeBackend{gens: []ollama.Metrics{
 		{TTFTSeconds: 4.0, LoadSeconds: 3.5},
 		{TTFTSeconds: 0.9, DecodeTPS: 23, CacheKnown: true, CachedTokens: 0, PromptTokens: 80},
-		{TTFTSeconds: 0.12, CacheKnown: true, CachedTokens: 78, PromptTokens: 80},
+		{TTFTSeconds: 0.12, CacheKnown: true, CachedTokens: 78, PromptTokens: 2},
 		{PrefillTPS: 220, PromptTokens: 2800},
 	}}
 	r, err := RunSpeed(context.Background(), f, "m", s, "nonce-w")
@@ -192,13 +197,16 @@ func TestWarmPrefixTTFTUsesTheCacheReceipt(t *testing.T) {
 	if r.TTFT != 0.9 {
 		t.Fatalf("TTFT = %v, want the uncached 0.9", r.TTFT)
 	}
+	if !r.FirstOutputObserved {
+		t.Fatal("decode text was returned but the first-output receipt is false")
+	}
 	if r.WarmTTFT != 0.12 {
 		t.Fatalf("WarmTTFT = %v, want the cache-hit 0.12", r.WarmTTFT)
 	}
 	if r.ColdTTFT != 4.0 {
 		t.Fatalf("ColdTTFT = %v, want the loading 4.0", r.ColdTTFT)
 	}
-	if r.GatedPromptTok != 80 || r.GatedCachedTok != 0 {
+	if r.GatedPromptTok != 80 || r.GatedCachedTok != 0 || !r.GatedCacheKnown {
 		t.Fatalf("gated prompt/cached = %d/%d, want 80/0 (uncached new question)", r.GatedPromptTok, r.GatedCachedTok)
 	}
 	if r.GatedTTFTContaminated() {
@@ -207,8 +215,8 @@ func TestWarmPrefixTTFTUsesTheCacheReceipt(t *testing.T) {
 
 	hit := &fakeBackend{gens: []ollama.Metrics{
 		{TTFTSeconds: 0.8, LoadSeconds: 0},
-		{TTFTSeconds: 0.05, DecodeTPS: 23, CacheKnown: true, CachedTokens: 78, PromptTokens: 80},
-		{TTFTSeconds: 0.05, CacheKnown: true, CachedTokens: 78, PromptTokens: 80},
+		{TTFTSeconds: 0.05, DecodeTPS: 23, CacheKnown: true, CachedTokens: 78, PromptTokens: 2},
+		{TTFTSeconds: 0.05, CacheKnown: true, CachedTokens: 78, PromptTokens: 2},
 		{PrefillTPS: 220, PromptTokens: 2800},
 	}}
 	rh, _ := RunSpeed(context.Background(), hit, "m", s, "nonce-hit")
@@ -219,6 +227,9 @@ func TestWarmPrefixTTFTUsesTheCacheReceipt(t *testing.T) {
 	// would hide the contamination.
 	if rh.PromptTok != 2800 {
 		t.Fatalf("prefill tokens = %d", rh.PromptTok)
+	}
+	if rh.WarmPromptTok != 2 || rh.WarmCachedTok != 78 || !rh.WarmCacheKnown {
+		t.Fatalf("warm cache receipt = %d+%d known=%v", rh.WarmPromptTok, rh.WarmCachedTok, rh.WarmCacheKnown)
 	}
 
 	// A backend that cannot report cache must not spend a second generate
@@ -234,6 +245,69 @@ func TestWarmPrefixTTFTUsesTheCacheReceipt(t *testing.T) {
 	}
 	if f2.gi != 3 {
 		t.Fatalf("generates = %d, want 3 (warmup + decode + prefill); a 4th would be a fabricated warm probe", f2.gi)
+	}
+	if r2.GatedCacheKnown || r2.PrefillCacheKnown {
+		t.Fatal("backend without a cache receipt was recorded as cache-known")
+	}
+}
+
+func TestRunSpeedRecordsWhenDecodeProducedNoOutput(t *testing.T) {
+	s, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeBackend{
+		genTexts: []string{"warm", "", "prefill"},
+		gens: []ollama.Metrics{
+			{TTFTSeconds: 0.2},
+			{TTFTSeconds: 0, DecodeTPS: 20},
+			{PrefillTPS: 100, PromptTokens: 100},
+		},
+	}
+	r, err := RunSpeed(context.Background(), f, "m", s, "no-output")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.FirstOutputObserved {
+		t.Fatal("empty decode output was recorded as an observed first output")
+	}
+}
+
+func TestCacheClassificationsRequireExplicitMisses(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		uncached, cached int
+		wantPrefill      bool
+	}{
+		{name: "sixteen percent", uncached: 100, cached: 20, wantPrefill: true},
+		{name: "exactly eighty percent", uncached: 20, cached: 80, wantPrefill: true},
+		{name: "all cached", cached: 100, wantPrefill: true},
+		{name: "just below former boundary", uncached: 2, cached: 7, wantPrefill: true},
+		{name: "integer boundary", uncached: 2, cached: 8, wantPrefill: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := SpeedResult{
+				GatedCacheKnown: true, GatedPromptTok: tc.uncached, GatedCachedTok: tc.cached,
+				PrefillCacheKnown: true, PromptTok: tc.uncached, CachedPromptTok: tc.cached,
+			}
+			if got, want := s.GatedTTFTContaminated(), tc.cached > 0; got != want {
+				t.Fatalf("gated contamination = %v, want %v", got, want)
+			}
+			if got := s.PrefillContaminated(); got != tc.wantPrefill {
+				t.Fatalf("prefill contamination = %v, want %v", got, tc.wantPrefill)
+			}
+		})
+	}
+}
+
+func TestKnownCacheReceiptRequiresPositiveDenominator(t *testing.T) {
+	empty := SpeedResult{GatedCacheKnown: true, PrefillCacheKnown: true, WarmCacheKnown: true}
+	if empty.GatedCacheReceiptValid() || empty.PrefillCacheReceiptValid() || empty.WarmCacheReceiptValid() {
+		t.Fatal("known zero-token receipts cannot establish cache state")
+	}
+	miss := SpeedResult{GatedCacheKnown: true, GatedPromptTok: 1}
+	if !miss.GatedCacheReceiptValid() || miss.GatedTTFTContaminated() {
+		t.Fatal("a positive explicit miss must be valid and uncontaminated")
 	}
 }
 

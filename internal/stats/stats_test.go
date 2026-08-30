@@ -26,16 +26,35 @@ func TestWilsonKnownValue(t *testing.T) {
 	}
 }
 
-func TestClusteredWilsonMatchesWilsonForSingletonsAndOneFamily(t *testing.T) {
+func TestClusteredWilsonMatchesWilsonForSingletons(t *testing.T) {
 	singletons := []Cluster{{1, 1}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, {1, 1}}
 	got := ClusteredWilson(singletons)
 	want := Wilson(7, 7)
 	if got != want {
 		t.Fatalf("7 singleton families = %+v, want Wilson %+v", got, want)
 	}
+}
+
+func TestClusteredWilsonOneFamilyHasOneEffectiveUnit(t *testing.T) {
 	one := ClusteredWilson([]Cluster{{Passes: 18, N: 20}})
-	if one != Wilson(18, 20) {
-		t.Fatalf("one family = %+v, want Wilson %+v", one, Wilson(18, 20))
+	iid := Wilson(18, 20)
+	if one.Lo >= iid.Lo || one.Hi <= iid.Hi {
+		t.Fatalf("one family = %+v, want wider than iid Wilson %+v", one, iid)
+	}
+	if one.Lo >= 0.75 || one.Hi <= 0.75 {
+		t.Fatalf("one repeated family [%v, %v] should not establish a broader 0.75 gate", one.Lo, one.Hi)
+	}
+}
+
+func TestClusteredWilsonUnequalFamiliesNeverNarrowsIID(t *testing.T) {
+	clusters := []Cluster{{Passes: 1, N: 1}, {Passes: 7, N: 8}, {Passes: 2, N: 3}, {Passes: 15, N: 16}}
+	got := ClusteredWilson(clusters)
+	iid := Wilson(25, 28)
+	if got.Lo > iid.Lo || got.Hi < iid.Hi {
+		t.Fatalf("unequal clustered interval %+v narrowed iid %+v", got, iid)
+	}
+	if got.Lo < 0 || got.Hi > 1 || got.Lo > got.Hi {
+		t.Fatalf("invalid unequal clustered interval: %+v", got)
 	}
 }
 
@@ -146,16 +165,6 @@ func TestRatioRefusesErrorBarOnSingleObservation(t *testing.T) {
 	}
 	if ratio != 2 {
 		t.Fatalf("ratio = %v, want 2 (still reported, just without +/-)", ratio)
-	}
-}
-
-func TestMinDetectableEffectShrinksWithRepeats(t *testing.T) {
-	k1, k3 := MinDetectableEffect(6, 1), MinDetectableEffect(6, 3)
-	if k3 >= k1 {
-		t.Fatalf("repeats should shrink MDE: k1=%v k3=%v", k1, k3)
-	}
-	if k1 < 0.4 {
-		t.Fatalf("a 6-task battery cannot resolve small effects; got %v", k1)
 	}
 }
 
@@ -321,41 +330,6 @@ func TestFiellerRatioPins(t *testing.T) {
 	}
 	if _, _, _, ok := FiellerRatio(Summary{Mean: 5, SD: 1, N: 1}, Summary{Mean: 2, SD: 1, N: 5}); ok {
 		t.Fatal("single observation must refuse")
-	}
-}
-
-func TestSPRTBoundariesAndIncrements(t *testing.T) {
-	s, err := NewSPRT(0.65, 0.85)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !near(s.incS, 0.268264, 1e-5) || !near(s.incF, -0.847298, 1e-5) || !near(s.logA, 2.944439, 1e-5) {
-		t.Fatalf("increments/boundaries: %+v", s)
-	}
-	// A clean streak accepts H1 at exactly trial 11 (Wald pin), not before.
-	for i := 1; i <= 10; i++ {
-		if d := s.Add(true); d != SPRTContinue {
-			t.Fatalf("decided at %d passes, want continue through 10", i)
-		}
-	}
-	if d := s.Add(true); d != SPRTAcceptH1 {
-		t.Fatalf("11 straight passes must accept H1, got %v", d)
-	}
-	// A losing streak accepts H0 at exactly trial 4.
-	s2, _ := NewSPRT(0.65, 0.85)
-	for i := 1; i <= 3; i++ {
-		if d := s2.Add(false); d != SPRTContinue {
-			t.Fatalf("decided at %d failures, want continue through 3", i)
-		}
-	}
-	if d := s2.Add(false); d != SPRTAcceptH0 {
-		t.Fatalf("4 straight failures must accept H0, got %v", d)
-	}
-	if _, err := NewSPRT(0.8, 0.7); err == nil {
-		t.Fatal("p1 <= p0 must be rejected")
-	}
-	if g, err := GateSPRT(0.75); err != nil || g == nil {
-		t.Fatalf("GateSPRT(0.75): %v", err)
 	}
 }
 

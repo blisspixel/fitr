@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,7 +31,7 @@ import (
 	"github.com/blisspixel/fitr/internal/top"
 )
 
-const presentationSnapshotSchema = "fitr.presentation.snapshot.v1"
+const presentationSnapshotSchema = "fitr.presentation.snapshot.v2"
 
 // cmdTop is deliberately opt-in. Normal commands keep their line-oriented
 // stream contract and never take over the terminal.
@@ -369,7 +370,6 @@ func previewTopRun(args []string) (topRunPreview, error) {
 	_ = fs.String("display", "auto", "")
 	_ = fs.String("backend", "auto", "")
 	seedset := fs.String("seedset", "", "")
-	adaptive := fs.Bool("adaptive", false, "")
 	_ = fs.Bool("pull", false, "")
 	html := fs.Bool("html", false, "")
 	unsafeExec := fs.Bool("allow-unsafe-exec", false, "")
@@ -394,9 +394,6 @@ func previewTopRun(args []string) (topRunPreview, error) {
 	}
 	if *checks && *seedset == "" {
 		return topRunPreview{}, errors.New("--checks-only requires --seedset")
-	}
-	if *checks && *adaptive {
-		return topRunPreview{}, errors.New("--checks-only cannot use --adaptive")
 	}
 	if *checks && *html {
 		return topRunPreview{}, errors.New("--checks-only cannot use --html")
@@ -831,16 +828,44 @@ func presentTopRun(result *Result) top.Run {
 	if result.Profile == "default" {
 		warnings = append(warnings, "uncalibrated default profile")
 	}
-	clientDerived, cachedGated := false, false
+	clientDerived, cachedGated, cachedPrefill, gatedCacheUnknown, prefillCacheUnknown := false, false, false, false, false
 	for _, sample := range result.Speed {
 		clientDerived = clientDerived || sample.ClientDerived
 		cachedGated = cachedGated || sample.GatedTTFTContaminated()
+		cachedPrefill = cachedPrefill || sample.PrefillContaminated()
+		gatedCacheUnknown = gatedCacheUnknown || !sample.GatedCacheReceiptValid()
+		prefillCacheUnknown = prefillCacheUnknown || !sample.PrefillCacheReceiptValid()
 	}
 	if clientDerived {
 		warnings = append(warnings, "timings are client-derived wall-clock observations")
 	}
 	if cachedGated {
 		warnings = append(warnings, "the gated TTFT prompt was cache-contaminated")
+	}
+	if cachedPrefill {
+		warnings = append(warnings, "the prefill probe observed cached tokens and is excluded from uncached-prefill claims")
+	}
+	if gatedCacheUnknown && len(result.Speed) > 0 {
+		warnings = append(warnings, "the backend did not report gated TTFT cache state")
+	}
+	if prefillCacheUnknown && len(result.Speed) > 0 {
+		warnings = append(warnings, "the backend did not prove prefill cache state")
+	}
+	if result.TaskPlan.Memory && result.Memory.Outcome == eval.OutcomeSkipped {
+		reason := strings.TrimSpace(result.Memory.UnavailableReason)
+		if reason == "" {
+			reason = "the runtime supplied no allocation receipt"
+		}
+		warnings = append(warnings, "the requested 32K memory probe was unavailable: "+reason)
+	}
+	if result.Memory.ResidentGB > 0 {
+		switch {
+		case result.Memory.EffectiveCtx == nil:
+			warnings = append(warnings, "the requested 32K memory probe has no verified effective context")
+		case *result.Memory.EffectiveCtx != result.Memory.RequestedCtx:
+			warnings = append(warnings, fmt.Sprintf("the memory probe requested ctx=%d but the runtime reported ctx=%d",
+				result.Memory.RequestedCtx, *result.Memory.EffectiveCtx))
+		}
 	}
 	if result.Repeats < 3 {
 		warnings = append(warnings, "fewer than 3 repeats; this result is not rankable")
@@ -867,7 +892,6 @@ func presentTopRun(result *Result) top.Run {
 		}
 	}
 	config += configSb864.String()
-	meta := resultMeta(result, result.Profile)
 	modelLabel := presentationModelLabel(result.Model)
 	toolsBlocked := false
 	for need, verdict := range scorecard.Needs {
@@ -890,12 +914,17 @@ func presentTopRun(result *Result) top.Run {
 		Driver: result.Device.GPUDriver, Runtime: result.Device.Runtime,
 		Config: config, Profile: result.Profile, Level: result.Level, UseFor: scorecard.UseFor,
 		StartedAt: started, Duration: time.Duration(result.WallSeconds * float64(time.Second)),
-		Context: result.ContextSize(), Repeats: result.Repeats, Trials: meta.Trials, MDEpp: meta.MDEpp,
+		Context: result.ContextSize(), Repeats: result.Repeats,
 		DecodeMean: result.DecodeSum.Mean, DecodeSD: result.DecodeSum.SD,
 		PrefillMean: result.PrefillSum.Mean, TTFTMean: result.TTFTSum.Mean,
-		MemoryGB: result.Memory.ResidentGB, DecodeSeries: decodeSeries,
+		MemoryGB: verifiedResidentGB(result.Memory), DecodeSeries: decodeSeries,
 		Serves: serves, Warnings: warnings, Verdicts: verdicts, NextCommand: nextCommand,
 	}
+}
+
+func verifiedResidentGB(memory eval.MemoryResult) float64 {
+	resident, _ := memory.VerifiedAt(memoryProbeCtx)
+	return resident
 }
 
 func selectTopRun(snapshot top.Snapshot, candidate string) (top.Run, error) {
@@ -974,6 +1003,13 @@ func privacyID(value string) string {
 func presentationModelLabel(value string) string {
 	value = strings.TrimSpace(value)
 	lower := strings.ToLower(value)
+	if parsed, err := url.Parse(value); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		clean := strings.TrimSuffix(parsed.Path, "/")
+		if base := filepath.Base(clean); base != "." && base != "/" && base != "" {
+			return base
+		}
+		return "remote model"
+	}
 	isLocal := filepath.IsAbs(value) || strings.HasPrefix(value, "/") ||
 		strings.HasPrefix(value, "./") || strings.HasPrefix(value, "../") ||
 		strings.HasPrefix(value, `.\`) || strings.HasPrefix(value, `..\`) ||
@@ -991,7 +1027,8 @@ func presentationModelLabel(value string) string {
 }
 
 var (
-	presentationURLPattern          = regexp.MustCompile(`(?i)\b(?:https?|file)://[^\s]+`)
+	presentationURLPattern          = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s]+`)
+	presentationNetworkPathPattern  = regexp.MustCompile(`(^|[\s("'=])(?:\\\\|//)[^\r\n,;]+`)
 	presentationWindowsPathPattern  = regexp.MustCompile(`(?i)\b[A-Z]:[\\/][^\r\n,;]+`)
 	presentationUnixPathPattern     = regexp.MustCompile(`(^|[\s("'=])/(?:[^\r\n,;]+)`)
 	presentationRelativePathPattern = regexp.MustCompile(`(^|[\s("'=])\.{1,2}[\\/](?:[^\r\n,;]+)`)
@@ -1023,6 +1060,7 @@ func presentationError(err error) string {
 		message = strings.ReplaceAll(message, home, "<home>")
 	}
 	message = presentationURLPattern.ReplaceAllString(message, "<endpoint>")
+	message = presentationNetworkPathPattern.ReplaceAllString(message, "${1}<path>")
 	message = presentationWindowsPathPattern.ReplaceAllString(message, "<path>")
 	message = presentationUnixPathPattern.ReplaceAllString(message, "${1}<path>")
 	message = presentationRelativePathPattern.ReplaceAllString(message, "${1}<path>")

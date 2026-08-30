@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -74,7 +75,7 @@ func TestPreviewTopRunMatchesTrustCriticalValidation(t *testing.T) {
 		{"missing model", nil, false},
 		{"levels", []string{"model", "--quick", "--full"}, false},
 		{"checks seed", []string{"model", "--checks-only"}, false},
-		{"checks adaptive", []string{"model", "--checks-only", "--seedset", "pair", "--adaptive"}, false},
+		{"adaptive removed", []string{"model", "--adaptive"}, false},
 		{"checks html", []string{"model", "--checks-only", "--seedset", "pair", "--html"}, false},
 		{"bad repeats", []string{"model", "-k", "-1"}, false},
 	} {
@@ -235,6 +236,130 @@ func TestTopDisplayPublishesGeneratedTaskProgress(t *testing.T) {
 	}
 }
 
+func TestTopDisplayPublishesMetricsAndLifecycle(t *testing.T) {
+	sink, err := session.NewSink(session.Options{RunID: "metrics_run_1234"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Start(session.RunInfo{Model: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	display := &topDisplay{
+		ctx: context.Background(), sink: sink, events: make(chan top.Event, 4),
+		sequence: &atomic.Uint64{}, saved: true,
+	}
+	if got := display.RunID(); got != "metrics_run_1234" {
+		t.Fatalf("RunID() = %q", got)
+	}
+	display.Emit(nil)
+	display.Close()
+	display.LiveProgress(1, 2, "ignored without a phase")
+	display.LiveMemory(1)
+	display.Phase("speed", "measuring")
+	display.LiveProgress(1, 0, "ignored without a total")
+	display.LiveSpeed(eval.SpeedResult{
+		DecodeTPS: 12, PrefillTPS: 120, TTFT: 0.5,
+		GatedCachedTok: 8, GatedPromptTok: 10,
+	}, 1, 2)
+	display.LiveSpeed(eval.SpeedResult{DecodeTPS: 14, ClientDerived: true}, 2, 2)
+	display.LiveMemory(6)
+	display.LiveMemory(0)
+	display.Note("all good", "info")
+	display.Note("watch this", "warn")
+	display.Done("other", 0)
+	display.Done("speed", 0)
+
+	snapshot := sink.Snapshot()
+	if len(snapshot.Metrics) != 4 {
+		t.Fatalf("metrics = %+v", snapshot.Metrics)
+	}
+	if len(snapshot.Notices) != 2 || snapshot.Notices[1].Notice.Level != session.NoticeWarning {
+		t.Fatalf("notices = %+v", snapshot.Notices)
+	}
+	if display.currentPhase != "" {
+		t.Fatalf("current phase = %q", display.currentPhase)
+	}
+	if metricSource(eval.SpeedResult{}) != session.SourceServer ||
+		metricSource(eval.SpeedResult{ClientDerived: true}) != session.SourceClient {
+		t.Fatal("metric sources were not classified")
+	}
+}
+
+func TestTopDisplayPublishesFailuresAndFinishStates(t *testing.T) {
+	newDisplay := func(t *testing.T, id string) (*topDisplay, *session.Sink, chan top.Event) {
+		t.Helper()
+		sink, err := session.NewSink(session.Options{RunID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sink.Start(session.RunInfo{Model: "model"}); err != nil {
+			t.Fatal(err)
+		}
+		events := make(chan top.Event, 4)
+		return &topDisplay{ctx: context.Background(), sink: sink, events: events, sequence: &atomic.Uint64{}}, sink, events
+	}
+
+	display, sink, events := newDisplay(t, "failed_run_1234")
+	display.RunFailed(os.ErrPermission)
+	if snapshot := sink.Snapshot(); snapshot.State != session.StateFailed || snapshot.Failure == nil {
+		t.Fatalf("failed snapshot = %+v", snapshot)
+	}
+	if _, ok := (<-events).(top.LiveEvent); !ok {
+		t.Fatal("run failure did not emit a live event")
+	}
+
+	display, sink, events = newDisplay(t, "cancelled_run_1234")
+	display.finish(exitInterrupt, nil)
+	if snapshot := sink.Snapshot(); snapshot.State != session.StateCancelled {
+		t.Fatalf("cancelled snapshot = %+v", snapshot)
+	}
+	<-events
+
+	display, sink, events = newDisplay(t, "finish_failed_run_1234")
+	display.finish(exitError, nil)
+	if snapshot := sink.Snapshot(); snapshot.State != session.StateFailed {
+		t.Fatalf("finish failure snapshot = %+v", snapshot)
+	}
+	<-events
+}
+
+func TestRelaySessionEmitsLatestLiveSnapshotAndStops(t *testing.T) {
+	sink, err := session.NewSink(session.Options{RunID: "relay_run_1234"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Start(session.RunInfo{Model: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	subscription, err := sink.Subscribe(4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := make(chan top.Event, 4)
+	done := make(chan struct{})
+	go func() {
+		relaySession(ctx, subscription, events)
+		close(done)
+	}()
+	select {
+	case event := <-events:
+		if live, ok := event.(top.LiveEvent); !ok || live.Live.RunID != "relay_run_1234" {
+			t.Fatalf("relay event = %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relay did not emit the initial snapshot")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("relay did not stop after cancellation")
+	}
+}
+
 func TestTopDisplayRedactsLocalPathsFromLiveMessages(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FITR_RESULTS", dir)
@@ -262,6 +387,8 @@ func TestTopDisplayRedactsLocalPathsFromLiveMessages(t *testing.T) {
 		`/opt/private models/model.gguf`,
 		`../private/model.gguf`,
 		`https://localhost:11434/private`,
+		`ssh://private-user@private-host.internal/models`,
+		`\\private-fileserver\models\secret.gguf`,
 	} {
 		if got := presentationMessage("could not open " + secret); strings.Contains(got, "private") || strings.Contains(got, "localhost") {
 			t.Errorf("presentationMessage(%q) = %q", secret, got)
@@ -301,6 +428,20 @@ func TestTopSnapshotKeepsUnknownDevicesUnrankedAndShowsConfig(t *testing.T) {
 	}
 	if !strings.Contains(snapshot.History[1].Config, "kv_cache_type=q8_0") || !strings.Contains(snapshot.History[1].Config, "flash_attention=1") {
 		t.Fatalf("config = %q", snapshot.History[1].Config)
+	}
+}
+
+func TestTopSnapshotDisclosesUnavailableMemoryProbe(t *testing.T) {
+	result := mockResult("memory-unavailable", 10, .1, 100, 1, 1, 1, 1, 1)
+	result.TaskPlan.Memory = true
+	result.Memory = eval.MemoryResult{
+		Outcome: eval.OutcomeSkipped, RequestedCtx: memoryProbeCtx,
+		UnavailableReason: "runtime omitted resident bytes",
+	}
+	run := presentTopRun(result)
+	if !slices.Contains(run.Warnings,
+		"the requested 32K memory probe was unavailable: runtime omitted resident bytes") {
+		t.Fatalf("memory warning missing from %+v", run.Warnings)
 	}
 }
 

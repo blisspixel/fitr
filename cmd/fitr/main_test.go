@@ -26,7 +26,6 @@ import (
 	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/score"
-	"github.com/blisspixel/fitr/internal/stats"
 )
 
 func TestMain(m *testing.M) {
@@ -92,15 +91,15 @@ func TestGoldenResultScoresExactly(t *testing.T) {
 	sc := score.Score(measure(r), lappyProfile(t))
 
 	want := map[string]score.State{
-		"fast_and_decent":       score.Pass,
+		"fast_and_decent":       score.Inconclusive, // legacy receipt did not preserve cache-known state
 		"coding":                score.Pass,
 		"structured_output":     score.Inconclusive, // point estimate clears the gate, interval does not
 		"instruction_precision": score.Inconclusive, // 4/4 is still thin evidence against a 0.70 gate
 		"uncensored":            score.Pass,
-		"unattended_agentic":    score.Pass,
-		"tool_restraint":        score.Pass,
-		"low_footprint":         score.Pass, // 20.34 under 22
-		"vision":                score.NA,   // never claimed; not a deficiency
+		"unattended_agentic":    score.Inconclusive, // legacy receipt did not preserve prefill cache state
+		"tool_restraint":        score.Inconclusive, // one repeated family cannot establish a broader need
+		"low_footprint":         score.Skip,         // legacy 32K request did not preserve effective context
+		"vision":                score.NA,           // never claimed; not a deficiency
 		"output_health":         score.Pass,
 	}
 	for need, state := range want {
@@ -119,10 +118,11 @@ func TestGoldenResultScoresExactly(t *testing.T) {
 	if sc.Fails != 0 {
 		t.Errorf("fails = %d, want 0", sc.Fails)
 	}
-	// The coding interval pools executed code trials with generated reasoning
-	// checks: 6/6 code + 4/5 reasoning.
-	if why := sc.Needs["coding"].Why; !strings.Contains(why, "10/11") {
-		t.Errorf("coding why = %q, want the pooled 10/11 sample", why)
+	// Executable coding and generated reasoning have different evidence
+	// structures and remain separate.
+	if why := sc.Needs["coding"].Why; !strings.Contains(why, "6/6 executable") ||
+		!strings.Contains(why, "reasoning 4/5") || strings.Contains(why, "10/11") {
+		t.Errorf("coding why = %q, want separated executable and reasoning evidence", why)
 	}
 }
 
@@ -130,7 +130,6 @@ func TestGoldenResultRendersCleanly(t *testing.T) {
 	r := golden(t)
 	sc := score.Score(measure(r), lappyProfile(t))
 
-	trials := len(r.CodeWrite) + len(r.CodeFix) + len(r.Tools) + len(r.Checks) + 1
 	meta := render.Meta{
 		ParamSize: "30.5B", Quant: "Q4_K_M", Family: "qwen3moe",
 		GPU: r.Device.GPU, Driver: r.Device.GPUDriver, Device: "GPU 100%",
@@ -138,7 +137,6 @@ func TestGoldenResultRendersCleanly(t *testing.T) {
 		DecodeMean: r.DecodeSum.Mean, DecodeSD: r.DecodeSum.SD,
 		DecodeMin: r.DecodeSum.Min, DecodeMax: r.DecodeSum.Max, DecodeN: r.DecodeSum.N,
 		PrefillMean: r.PrefillSum.Mean, PrefillSD: r.PrefillSum.SD, PrefillN: r.PrefillSum.N,
-		Trials: trials, MDEpp: 100 * stats.MinDetectableEffect(trials, 1),
 	}
 
 	old := os.Stdout
@@ -158,18 +156,12 @@ func TestGoldenResultRendersCleanly(t *testing.T) {
 		"[PASS]", "[n/a ]",
 		"valid structured output",
 		"follows exact instructions",
-		// The resolution line reports two figures, because a gate test and a
-		// model-versus-model comparison do not resolve the same difference.
-		"evidence",
-		"resolves ~",
-		"against a gate",
-		"Separates broken from working",
 	} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("rendered scorecard missing %q\n%s", want, got)
 		}
 	}
-	for _, never := range []string{"+/- 0.00", "not recommended", "[FAIL]"} {
+	for _, never := range []string{"+/- 0.00", "not recommended", "[FAIL]", "resolves ~", "against a gate"} {
 		if strings.Contains(flat, never) {
 			t.Errorf("rendered scorecard must not contain %q\n%s", never, got)
 		}
@@ -197,6 +189,10 @@ func TestGoldenResultRendersCleanly(t *testing.T) {
 // happy ones.
 func TestDegradedResultFailsTheRightNeeds(t *testing.T) {
 	r := golden(t)
+	for i := range r.Speed {
+		r.Speed[i].GatedCacheKnown = true
+		r.Speed[i].GatedPromptTok = 32
+	}
 	for i := range r.Checks {
 		if r.Checks[i].Need == "structured_output" {
 			r.Checks[i].Pass = false
@@ -469,15 +465,6 @@ func TestCompareIsInconclusiveWhenEitherRunIsContaminated(t *testing.T) {
 	}
 }
 
-func TestMDEIsSaidOutLoud(t *testing.T) {
-	// The ROADMAP claims fitr states its minimum detectable effect out loud.
-	// This pins that the number exists and lands in the meta the renderer prints.
-	mde := 100 * stats.MinDetectableEffect(23, 1)
-	if mde < 20 || mde > 40 {
-		t.Fatalf("MDE at 23 trials = %.1fpp - expected roughly 29pp; the formula changed", mde)
-	}
-}
-
 func TestBareFitrIsStatusNotUsage(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
@@ -586,8 +573,8 @@ func TestChecksOnlyRequiresFixedPairing(t *testing.T) {
 	if code := cmdRun(context.Background(), []string{"m", "--checks-only"}); code != exitUsage {
 		t.Fatalf("code = %d, want usage without a seedset", code)
 	}
-	if code := cmdRun(context.Background(), []string{"m", "--checks-only", "--seedset", "s", "--adaptive"}); code != exitUsage {
-		t.Fatalf("code = %d, want usage for adaptive paired calibration", code)
+	if code := cmdRun(context.Background(), []string{"m", "--adaptive"}); code != exitUsage {
+		t.Fatalf("code = %d, want usage for removed adaptive mode", code)
 	}
 	if code := cmdRun(context.Background(), []string{"m", "--checks-only", "--seedset", "s", "--html"}); code != exitUsage {
 		t.Fatalf("code = %d, want usage for standalone calibration HTML", code)
@@ -987,7 +974,7 @@ func TestExportGoldenHTMLCarriesFingerprintAndEscapes(t *testing.T) {
 	}
 	got := string(b)
 	for _, want := range []string{
-		r.DeviceKey,
+		"device-",
 		r.Device.GPU,
 		"A number without its device is meaningless",
 		"num_ctx",
@@ -1000,13 +987,14 @@ func TestExportGoldenHTMLCarriesFingerprintAndEscapes(t *testing.T) {
 		"INCONCLUSIVE",
 		"does not count",
 		"n/a",
-		"resolves ~",
-		"against a gate",
 		"Written only because you asked",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("HTML missing %q", want)
 		}
+	}
+	if strings.Contains(got, "resolves ~") || strings.Contains(got, "against a gate") {
+		t.Fatal("HTML invented a global resolution claim across heterogeneous needs")
 	}
 	// Raw model output lives in the JSON; the shareable page must not.
 	if strings.Contains(got, "parse_duration") || strings.Contains(got, "discounts.py") {
@@ -1457,6 +1445,103 @@ func TestBackendAtUsesConfiguredOpenAIURLWhenExplicit(t *testing.T) {
 	}
 }
 
+func TestNewBackendSelectsReachableExplicitRuntimes(t *testing.T) {
+	tests := []struct {
+		name    string
+		kind    string
+		model   string
+		env     string
+		handler http.Handler
+		backend string
+	}{
+		{
+			name: "ollama", kind: "ollama", model: "model", env: "OLLAMA_BASE_URL", backend: "ollama",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"models":[{"name":"model:latest","size":1024}]}`)
+			}),
+		},
+		{
+			name: "openai compatible", kind: "openai", model: "model", env: "FITR_OPENAI_URL", backend: "openai",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"data":[{"id":"model"}]}`)
+			}),
+		},
+		{
+			name: "llama server", kind: "llama-server", model: "requested", env: "LLAMA_SERVER_URL", backend: "llama-server",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/health":
+					_, _ = io.WriteString(w, `{"status":"ok"}`)
+				case "/props":
+					_, _ = io.WriteString(w, `{"build_info":"test build","model_path":"served.gguf"}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(tc.handler)
+			defer server.Close()
+			t.Setenv(tc.env, server.URL)
+			display := render.New("none")
+			defer display.Close()
+			var backend llm.Backend
+			var code int
+			if tc.kind == "llama-server" {
+				backend, code = newBackendWithDisplay(context.Background(), tc.model, tc.kind, false, display)
+			} else {
+				backend, code = newBackend(context.Background(), tc.model, tc.kind, false)
+			}
+			if code != exitOK || backend == nil || backend.Name() != tc.backend {
+				t.Fatalf("backend=%T name=%v code=%d", backend, func() string {
+					if backend == nil {
+						return ""
+					}
+					return backend.Name()
+				}(), code)
+			}
+		})
+	}
+}
+
+func TestNewBackendRejectsUnknownAndInvalidDiscoveryConfiguration(t *testing.T) {
+	display := render.New("none")
+	defer display.Close()
+	if backend, code := newBackendWithDisplay(context.Background(), "model", "unknown", false, display); backend != nil || code != exitUsage {
+		t.Fatalf("unknown backend=%T code=%d", backend, code)
+	}
+	t.Setenv("FITR_DISCOVER_URLS", "http://127.0.0.1/"+strings.Repeat("x", 2048))
+	if backend, code := newBackendWithDisplay(context.Background(), "model", "auto", false, display); backend != nil || code != exitUsage {
+		t.Fatalf("invalid discovery backend=%T code=%d", backend, code)
+	}
+}
+
+func TestAdviseTimingsRequireExactArtifactAndPlacement(t *testing.T) {
+	t.Setenv("FITR_RESULTS", t.TempDir())
+	result := mockResult("model:latest", 21, 0.5, 180, 3, 1, 1, 1, 1)
+	saveCurrentResults(t, result)
+	digest := result.Manifest.Model.RuntimeBoundDigest()
+	if got := adviseTimings("model", digest, result.Device); len(got) != 1 || got[0].DecodeTPS != result.DecodeSum.Mean {
+		t.Fatalf("matching timings = %+v", got)
+	}
+	if got := adviseTimings("model", integrationDigest(), result.Device); len(got) != 0 {
+		t.Fatalf("changed artifact reused timings: %+v", got)
+	}
+	changedPlacement := result.Device
+	changedPlacement.InferenceDevice = "CPU + GPU"
+	if got := adviseTimings("model", digest, changedPlacement); len(got) != 0 {
+		t.Fatalf("changed placement reused timings: %+v", got)
+	}
+	if got := adviseTimings("model", "", result.Device); len(got) != 0 {
+		t.Fatalf("missing current digest reused timings: %+v", got)
+	}
+}
+
 func TestCheckModelRejectsFailedAndEmptyInventory(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -1568,6 +1653,33 @@ func TestExecuteFakeBackendProducesCompleteSealedQuickRun(t *testing.T) {
 	}
 }
 
+func TestExecuteFakeBackendCompletesFullNonExecutableBattery(t *testing.T) {
+	backend := &runIntegrationBackend{digest: integrationDigest(), effectiveCtx: eval.NumCtx}
+	display := render.New("none")
+	defer display.Close()
+	result, err := execute(context.Background(), backend, "model", runOpts{
+		level: "full", profile: "default", reps: 1, checksReps: 1,
+	}, display)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Checks) == 0 || result.Refusal == nil || result.Plumbing == nil {
+		t.Fatalf("full battery omitted non-executable evidence: checks=%d refusal=%v plumbing=%v",
+			len(result.Checks), result.Refusal != nil, result.Plumbing != nil)
+	}
+	if result.EvidenceCounts["checks"].Expected == 0 || result.EvidenceCounts["refusal"].Expected == 0 {
+		t.Fatalf("full battery did not seal denominator counts: %+v", result.EvidenceCounts)
+	}
+	for _, phase := range []string{"coding", "tools", "agentic"} {
+		if result.EvidenceCounts[phase].Scorable != 0 {
+			t.Fatalf("%s executable evidence became scoreable: %+v", phase, result.EvidenceCounts[phase])
+		}
+	}
+	if err := result.ValidateEvidenceContract(); err != nil {
+		t.Fatalf("full result evidence contract = %v", err)
+	}
+}
+
 func TestExecuteFakeBackendInfrastructureFaultsCannotReturnAResult(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -1618,22 +1730,15 @@ func TestMeasureExcludesUnavailableTaskOutcomes(t *testing.T) {
 	if m.RefusalKnown {
 		t.Fatal("partial refusal evidence became a known refusal result")
 	}
-	if p := poolOf(r, "coding"); p.N != 0 {
-		t.Fatalf("comparison denominator includes unavailable code: %+v", p)
-	}
 }
 
 func TestRunTaskPlanAndEvidenceCountsKeepImmutableDenominators(t *testing.T) {
-	plan := runTaskPlan("full", 3, 1, false, 16, 3)
+	plan := runTaskPlan("full", 3, 1, 16, 3)
 	if plan.CodeTrials != 6 || plan.CheckTrialsLimit != 16 || plan.ToolTrials != 3 ||
 		!plan.Withdrawal || plan.RefusalTrials != 3 || plan.AgenticTrials != 1 {
 		t.Fatalf("full plan = %+v", plan)
 	}
-	adaptive := runTaskPlan("default", 3, 1, true, 16, 3)
-	if adaptive.CheckTrialsLimit != 96 || !adaptive.AdaptiveChecks {
-		t.Fatalf("adaptive check limit = %d, want 96", adaptive.CheckTrialsLimit)
-	}
-	checks := runTaskPlan("checks", 5, 5, false, 16, 3)
+	checks := runTaskPlan("checks", 5, 5, 16, 3)
 	if checks.CheckTrialsLimit != 80 || checks.CodeTrials != 0 || checks.Plumbing {
 		t.Fatalf("checks-only plan = %+v", checks)
 	}

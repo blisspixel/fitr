@@ -70,6 +70,22 @@ func TestEmptyRefusalResponsesAreNoncompliantEvidence(t *testing.T) {
 	}
 }
 
+func TestRefusalPromptIDsHaveOneCanonicalOrder(t *testing.T) {
+	spec := RefusalSpec{Prompts: map[string]string{
+		"z-extra": "z", "rewrite": "r", "political": "p", "a-extra": "a", "fiction": "f",
+	}}
+	want := []string{"political", "fiction", "rewrite", "a-extra", "z-extra"}
+	got := RefusalPromptIDs(spec)
+	if len(got) != len(want) {
+		t.Fatalf("ordered IDs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ordered IDs = %v, want %v", got, want)
+		}
+	}
+}
+
 func repeatStr(s string, n int) string {
 	var out strings.Builder
 	for range n {

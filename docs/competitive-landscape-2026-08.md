@@ -1,12 +1,15 @@
 # Competitive landscape, August 2026
 
-Research pass on "what already exists" before committing roadmap effort.
-Findings that **contradict** earlier assumptions are listed first, because those
-are the ones that change what we build.
+Research pass on "what already exists" before committing roadmap effort. This
+document preserves the initial pass and the corrected conclusions that
+followed. Read **Current conclusions** for the current positioning; the initial
+pass remains as an audit trail of what changed.
 
-## Assumptions that turned out to be wrong
+## Initial research pass
 
-### 1. Device-aware refusal is not novel
+### Assumptions that turned out to be wrong
+
+#### 1. Device-aware refusal is not novel
 
 We believed refusing to rank across hardware fingerprints was the differentiator.
 It is an emerging consensus:
@@ -20,7 +23,7 @@ It is an emerging consensus:
 
 **We are joining a consensus, not founding one.** Lead with something else.
 
-### 2. Statistical rigor is table stakes, not an edge
+#### 2. Statistical rigor is table stakes, not an edge
 
 - `local-inference-lab/llm-inference-bench` (69*) - Wilson intervals **and**
   exact McNemar paired significance tests, plus live GPU temp / SM-util / watts
@@ -32,7 +35,7 @@ It is an emerging consensus:
 
 Keep the rigor. Stop selling it.
 
-### 3. Tool-calling plumbing is contested
+#### 3. Tool-calling plumbing is contested
 
 `SeraphimSerapis/tool-eval-bench` (296*, active) covers 69 deterministic
 scenarios across serving stacks, including a **Restraint & Refusal** category
@@ -47,14 +50,14 @@ denominator."*
 clean model score. We diagnose them.** Nobody turns "your chat template renders
 tool definitions wrong" into an actionable finding.
 
-### 4. k=3 is probably not enough
+#### 4. k=3 is probably not enough
 
 `MikeVeerman/tool-calling-benchmark` (122*) scores Action 40% / Restraint 30% /
 Wrong-Tool-Avoidance 30%, and concluded from 20 runs per prompt that
 **"3-run majority voting was inadequate."** This is a direct warning about our
 default. Either raise k, or state the limitation louder than we currently do.
 
-## What survives as genuinely ours
+### What remained differentiated in the initial pass
 
 In order of defensibility:
 
@@ -75,7 +78,7 @@ In order of defensibility:
 5. **Cross-vendor NPU.** MLPerf Client v2.0 (shipped 2026-08-18) covers
    Qualcomm / AMD XDNA2 / Intel NPU paths but publishes **no results database**.
 
-## Ideas worth stealing
+### Ideas worth stealing
 
 - **PocketPal's Glicko-2 pairwise matchups.** 10,989 submissions across 364
   devices. Only devices running the same model at the same config are compared;
@@ -88,7 +91,7 @@ In order of defensibility:
   traps that produce "confidently wrong measurements." Directly relevant to our
   own hard-won bugs (prompt-cache contamination, concurrent residency).
 
-## Vacancies
+### Vacancies
 
 - **LocalScore is dead.** Maintainer, publicly, three times: *"I have no time to
   maintain LocalScore... the version of llama.cpp distributed is over a year old
@@ -103,7 +106,7 @@ In order of defensibility:
 
 **The community's quality references for local, quantized models are all gone.**
 
-## The competition, sized
+### The competition, sized
 
 | Tool | Stars | Note |
 |---|---|---|
@@ -116,22 +119,22 @@ In order of defensibility:
 | `anubis-oss` | 200 | The statistical bar. |
 | `bench-loop` | 44 | Closest functional twin. |
 
-## Caveat on sourcing
+### Caveat on sourcing
 
 Reddit's API was blocked for both completed research agents, so r/LocalLLaMA
 sentiment is absent from this picture. HN and GitHub evidence stands on its own.
 
 ---
 
-# Final verdict (supersedes the sections above)
+## Current conclusions
 
 The research went through three rounds of self-correction. Where this section
 disagrees with anything above, this section is right. The earlier text is kept
 because the corrections are more informative than a clean answer would be.
 
-## Further corrections
+### Further corrections
 
-### Plumbing-vs-capability has more prior art than stated above
+#### Plumbing-vs-capability has more prior art than stated above
 
 The canonical metric predates all of this: **Aider's
 `percent_cases_well_formed`** - literally "did the model emit parseable edits,"
@@ -156,13 +159,13 @@ content-filter messages. Point it at a local vLLM or llama-server and
 
 That is the defensible version of the claim.
 
-### Refusal rate is not a differentiator
+#### Refusal rate is not a differentiator
 
 promptfoo ships an `is-refusal` assertion, Inspect counts refusals natively,
 Harbor has `AgentSafetyRefusalError`. Keep it as a **need axis** - it is one  - 
 but drop it from any novelty claim.
 
-### Statistics: split the verdict, do not drop it
+#### Statistics: split the verdict, do not drop it
 
 The earlier "drop statistical rigor entirely" was too blunt. Accurately:
 
@@ -179,7 +182,7 @@ The earlier "drop statistical rigor entirely" was too blunt. Accurately:
 **So: statistically-honest quality eval on local agentic tasks is genuinely
 underserved. Just never claim Wilson intervals as novel.**
 
-## The unexpected moat: local agentic eval is mechanically broken
+### The unexpected moat: local agentic eval is mechanically broken
 
 Getting any major agentic benchmark to run against a local model is a minefield.
 This is *why* nobody publishes local agentic numbers:
@@ -203,10 +206,12 @@ This is *why* nobody publishes local agentic numbers:
 > command, that alone is worth the project - independent of any scoring
 > innovation.
 
-**`fitr run <model> --full` already does this.** It is a shipped capability that
-was not recognised as a differentiator.
+`fitr run <model> --full` contains this 40-turn fixture, but the safe default
+records it as SKIP because its test runner is not isolated. Explicit unsafe
+execution can exercise it, but the outcome remains INCONCLUSIVE. The workflow
+is implemented and instrumented; it is not yet evidence-bearing capability.
 
-## More dead references
+### More dead references
 
 **LiveBench's public data is frozen at 2024-11-25** - 1,436 questions, all
 parquets `lastModified 2025-04-07`, README conceding *"not all questions for
@@ -221,14 +226,14 @@ updated Nov 2025), EQ-Bench 1-3, LocalScore.
 Live successors: **Terminal-Bench 3.0** (2026-07-23, 74 tasks, 510*) and
 **EQ-Bench 4** - the only self-runnable harness publishing 95% CIs.
 
-## Do not claim these
+### Do not claim these
 
 Prefill/decode separation · device fingerprinting and per-hardware leaderboards ·
 refusal rate · Wilson/bootstrap CIs as a concept · "speed + memory + quality in
 one command" (homebench, 2026-08-03) · well-formedness as a metric (Aider) ·
 typed parsing errors (Inspect AI).
 
-## Genuinely ours, final ordering
+### Differentiators not found elsewhere in this research
 
 1. **Repetition / looping detection.** Zero implementations. Two failed upstream
    llama.cpp PRs ([#22007](https://github.com/ggml-org/llama.cpp/pull/22007)
@@ -267,7 +272,7 @@ typed parsing errors (Inspect AI).
    default to `n=1` and compute error bars leaderboard-side.
 6. **Go static binary** and **cross-vendor NPU**.
 
-## Positioning, final form
+### Positioning, final form
 
 > `llmfit` estimates what fits, and benchmarks how fast.
 > Leaderboards rank what's smart on someone else's machine.

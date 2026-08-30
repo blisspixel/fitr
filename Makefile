@@ -4,7 +4,7 @@ BUILD_FLAGS := -trimpath
 CGO := 0
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: all build test vet fmt lint dist clean install spec-sync screenshots
+.PHONY: all build test coverage vet fmt fmt-check lint dist clean install spec-sync screenshots
 
 all: fmt vet test build
 
@@ -26,11 +26,20 @@ build:
 test:
 	go test ./... -count=1
 
+coverage:
+	sh scripts/check-coverage.sh 80
+
 vet:
 	go vet ./...
 
 fmt:
 	gofmt -l -w .
+
+fmt-check:
+	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+lint:
+	golangci-lint run ./...
 
 ## dist cross-compiles every supported target. No runtime, no interpreter,
 ## no package manager on the user's machine -- that is the whole argument.

@@ -65,8 +65,6 @@ type Run struct {
 	Duration     time.Duration `json:"duration"`
 	Context      int           `json:"context"`
 	Repeats      int           `json:"repeats"`
-	Trials       int           `json:"trials"`
-	MDEpp        float64       `json:"mde_pp"`
 	DecodeMean   float64       `json:"decode_mean"`
 	DecodeSD     float64       `json:"decode_sd"`
 	PrefillMean  float64       `json:"prefill_mean"`

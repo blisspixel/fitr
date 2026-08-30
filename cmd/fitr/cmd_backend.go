@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -310,6 +311,47 @@ func weightsFromTags(ctx context.Context, c llm.Backend, model string) int64 {
 		}
 	}
 	return 0
+}
+
+// verifiedModelArtifactDigest returns the exact runtime-bound artifact digest
+// for one served model. Empty is the fail-closed result for missing,
+// ambiguous, unverifiable, or conflicting identity evidence.
+func verifiedModelArtifactDigest(ctx context.Context, c llm.Backend, model string) string {
+	if c == nil || strings.TrimSpace(model) == "" {
+		return ""
+	}
+	tags, err := c.Tags(ctx)
+	if err != nil {
+		return ""
+	}
+	var found string
+	for _, tag := range tags {
+		if !modelref.SameServed(model, tag.Name) {
+			continue
+		}
+		digest := tag.Digest
+		if verifier, ok := c.(llm.ModelDigestVerifier); ok {
+			digest, err = verifier.VerifyModelDigest(tag.Name, tag.ReportedDigest)
+			if err != nil {
+				return ""
+			}
+		}
+		digest = strings.ToLower(strings.TrimSpace(digest))
+		encoded, ok := strings.CutPrefix(digest, "sha256:")
+		if !ok || len(encoded) != 64 {
+			return ""
+		}
+		if _, err := hex.DecodeString(encoded); err != nil {
+			return ""
+		}
+		if found != "" && found != digest {
+			return ""
+		}
+		if found == "" {
+			found = digest
+		}
+	}
+	return found
 }
 
 func resolveRunModel(ctx context.Context, b llm.Backend, requested string) (resolvedRunModel, error) {

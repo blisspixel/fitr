@@ -18,7 +18,7 @@ func sampleArtifact() Artifact {
 		Level:         "full",
 		Repeats:       3,
 		WallSeconds:   812.4,
-		Device: device.Fingerprint{
+		Device: NewShareDevice(device.Fingerprint{
 			Host: "lappy", OS: "windows", CPU: "AMD Ryzen 7 7840U",
 			RAMGb: 62, GPU: "AMD Radeon(TM) 780M",
 			GPUDriver: "32.0.31007.5012", GPUDriverDate: "2025-11-02",
@@ -28,8 +28,8 @@ func sampleArtifact() Artifact {
 				"OLLAMA_FLASH_ATTENTION": "1",
 				"OLLAMA_KV_CACHE_TYPE":   "f16",
 			},
-		},
-		DeviceKey: "lappy|AMD Radeon(TM) 780M|32.0.31007.5012|vulkan|0.32.10|1|f16",
+		}),
+		DeviceKey: ShareFingerprintID("lappy|AMD Radeon(TM) 780M|32.0.31007.5012|vulkan|0.32.10|1|f16"),
 		Profile:   "lappy",
 		Scorecard: score.Scorecard{
 			Model:   "qwen3<script>alert(1)</script>",
@@ -46,12 +46,11 @@ func sampleArtifact() Artifact {
 			NumCtx:  4096,
 			Repeats: 3, DecodeMean: 23.16, DecodeSD: 0.44, DecodeN: 3,
 			DecodeMin: 22.71, DecodeMax: 23.6, PrefillMean: 226.6, PrefillN: 3,
-			Trials: 23, MDEpp: 29,
 		},
 	}
 }
 
-func TestHTMLContainsFingerprintAndMDE(t *testing.T) {
+func TestHTMLContainsFingerprintAndNeedEvidence(t *testing.T) {
 	var buf bytes.Buffer
 	if err := WriteHTML(&buf, sampleArtifact()); err != nil {
 		t.Fatal(err)
@@ -59,7 +58,7 @@ func TestHTMLContainsFingerprintAndMDE(t *testing.T) {
 	got := buf.String()
 	for _, want := range []string{
 		"<!DOCTYPE html>",
-		"lappy|AMD Radeon(TM) 780M",
+		"device-",
 		"A number without its device is meaningless",
 		"Do not rank",
 		"vulkan",
@@ -67,12 +66,6 @@ func TestHTMLContainsFingerprintAndMDE(t *testing.T) {
 		"4096",
 		"OLLAMA_KV_CACHE_TYPE",
 		"request context",
-		// The resolution line names which claim each figure supports: the
-		// gate figure is a one-sample calculation and was previously printed
-		// beside a model-versus-model sentence, which quotes it for a claim
-		// it cannot back.
-		"resolves ~",
-		"against a gate",
 		"PASS",
 		"n/a",
 		"Not measured",
@@ -83,6 +76,9 @@ func TestHTMLContainsFingerprintAndMDE(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("HTML missing %q", want)
 		}
+	}
+	if strings.Contains(got, "resolves ~") || strings.Contains(got, "against a gate") {
+		t.Fatal("HTML invented a global resolution claim across heterogeneous needs")
 	}
 }
 
@@ -123,12 +119,19 @@ func TestHTMLDoesNotInventARankOrFailASkip(t *testing.T) {
 func TestHTMLOmitsHomePaths(t *testing.T) {
 	a := sampleArtifact()
 	a.Meta.SavedPath = `C:\Users\someone\.fitr\results\qwen3.json`
+	a.Device = NewShareDevice(device.Fingerprint{
+		Host: "private-host", OS: "windows", CPU: "cpu", GPU: "gpu",
+		Config: map[string]string{"OLLAMA_MODELS": `C:\Users\someone\.ollama\models`},
+	})
 	var buf bytes.Buffer
 	if err := WriteHTML(&buf, a); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(buf.String(), `Users\someone`) || strings.Contains(buf.String(), ".fitr") {
-		t.Fatal("shareable artifact must not leak the home-directory save path")
+	got := buf.String()
+	if strings.Contains(got, `Users\someone`) || strings.Contains(got, ".fitr") ||
+		strings.Contains(got, "lappy|") || strings.Contains(got, "private-host") ||
+		strings.Contains(got, "OLLAMA_MODELS") {
+		t.Fatal("shareable artifact leaked a hostname, raw fingerprint, or local path")
 	}
 }
 

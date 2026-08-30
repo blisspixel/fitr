@@ -1,10 +1,12 @@
 package render
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"io"
-	"sort"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -12,8 +14,9 @@ import (
 	"github.com/blisspixel/fitr/internal/score"
 )
 
-// Artifact is the self-contained shareable result. Opt-in only: results
-// carry a hardware fingerprint, so they are never written unless asked.
+// Artifact is the self-contained shareable result. Opt-in only: it carries an
+// allowlisted device view and opaque comparison ID, so it is never written
+// unless asked.
 type Artifact struct {
 	FitrVersion   string
 	SchemaVersion int
@@ -22,13 +25,102 @@ type Artifact struct {
 	Level         string
 	Repeats       int
 	WallSeconds   float64
-	Device        device.Fingerprint
+	Device        ShareDevice
 	DeviceKey     string
 	Profile       string
 	Scorecard     score.Scorecard
 	Meta          Meta
 	NextCommand   string
 	Contamination []string
+}
+
+// ShareDevice is an allowlisted hardware view. It deliberately cannot carry a
+// hostname, endpoint, local path, or arbitrary environment configuration.
+type ShareDevice struct {
+	OS              string            `json:"os,omitempty"`
+	CPU             string            `json:"cpu,omitempty"`
+	GPU             string            `json:"gpu,omitempty"`
+	GPUDriver       string            `json:"gpu_driver,omitempty"`
+	GPUDriverDate   string            `json:"gpu_driver_date,omitempty"`
+	Runtime         string            `json:"runtime,omitempty"`
+	InferenceDevice string            `json:"inference_device,omitempty"`
+	GPUBackend      string            `json:"gpu_backend,omitempty"`
+	RAMGb           float64           `json:"ram_gb,omitempty"`
+	Config          map[string]string `json:"config,omitempty"`
+}
+
+func NewShareDevice(fp device.Fingerprint) ShareDevice {
+	shared := ShareDevice{
+		OS: safeShareText(fp.OS), CPU: safeShareText(fp.CPU), RAMGb: fp.RAMGb,
+		GPU: safeShareText(fp.GPU), GPUDriver: safeShareText(fp.GPUDriver),
+		GPUDriverDate: safeShareText(fp.GPUDriverDate), Runtime: safeShareText(fp.Runtime),
+		InferenceDevice: safeShareText(fp.InferenceDevice), GPUBackend: safeShareText(fp.GPUBackend),
+		Config: map[string]string{},
+	}
+	for _, key := range []string{
+		"OLLAMA_CONTEXT_LENGTH", "OLLAMA_FLASH_ATTENTION", "OLLAMA_KV_CACHE_TYPE", "OLLAMA_NUM_PARALLEL",
+	} {
+		if value := safeShareConfig(key, fp.Config[key]); value != "" {
+			shared.Config[key] = value
+		}
+	}
+	return shared
+}
+
+var (
+	shareURIPattern         = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]{1,31}://`)
+	shareWindowsPathPattern = regexp.MustCompile(`(?i)(?:^|[\s="'])[A-Z]:[\\/]`)
+	shareUnixPathPattern    = regexp.MustCompile(`(?:^|[\s="'])/(?:[^/\s]+/|Users/|home/|tmp/)`)
+	shareNetworkPathPattern = regexp.MustCompile(`(?:^|[\s="'])(?:\\\\|//)[^\\/\s]+[\\/]`)
+	shareTokenPattern       = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,32}$`)
+	shareIntegerPattern     = regexp.MustCompile(`^[0-9]{1,10}$`)
+)
+
+func safeShareText(value string) string {
+	value = SingleLine(value)
+	if shareURIPattern.MatchString(value) || shareWindowsPathPattern.MatchString(value) ||
+		shareUnixPathPattern.MatchString(value) || shareNetworkPathPattern.MatchString(value) ||
+		strings.HasPrefix(value, "./") ||
+		strings.HasPrefix(value, "../") || strings.HasPrefix(value, `.\`) || strings.HasPrefix(value, `..\`) {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) > 160 {
+		value = string(runes[:160])
+	}
+	return value
+}
+
+func safeShareConfig(key, value string) string {
+	value = strings.TrimSpace(value)
+	switch key {
+	case "OLLAMA_CONTEXT_LENGTH", "OLLAMA_NUM_PARALLEL":
+		if shareIntegerPattern.MatchString(value) {
+			return value
+		}
+	case "OLLAMA_FLASH_ATTENTION":
+		switch strings.ToLower(value) {
+		case "0", "1", "false", "true":
+			return strings.ToLower(value)
+		}
+	case "OLLAMA_KV_CACHE_TYPE":
+		if shareTokenPattern.MatchString(value) {
+			return value
+		}
+	}
+	return ""
+}
+
+// NewShareMeta strips local-only identity duplicates from the generic render
+// metadata before it becomes part of a shareable artifact. Device identity is
+// carried only by the separately allowlisted ShareDevice.
+func NewShareMeta(meta Meta) Meta {
+	meta.ParamSize = safeShareText(meta.ParamSize)
+	meta.Quant = safeShareText(meta.Quant)
+	meta.Family = safeShareText(meta.Family)
+	meta.Profile = safeShareText(meta.Profile)
+	meta.GPU, meta.Driver, meta.Device, meta.SavedPath = "", "", "", ""
+	return meta
 }
 
 type htmlNeed struct {
@@ -46,7 +138,6 @@ type htmlData struct {
 	Profile       string
 	Uncalibrated  bool
 	DeviceKey     string
-	Host          string
 	OS            string
 	CPU           string
 	RAM           string
@@ -61,7 +152,6 @@ type htmlData struct {
 	Gaps          []htmlNeed
 	Decode        string
 	Prefill       string
-	MDE           string
 	RepeatsWarn   bool
 	Contamination []string
 	StartedAt     string
@@ -106,12 +196,11 @@ var artifactTmpl = template.Must(template.New("artifact").Parse(`<!DOCTYPE html>
 <p class="use">{{.UseFor}}</p>
 
 <div class="banner"><strong>A number without its device is meaningless.</strong>
-Do not rank this result against a different fingerprint. Change the GPU, driver, runtime, KV dtype, or request context and these numbers are void.</div>
+Do not rank this result against a different device/config ID. Change the GPU, driver, runtime, KV dtype, or request context and these numbers are void.</div>
 
-<h2>Fingerprint</h2>
+<h2>Device and configuration</h2>
 <table>
-<tr><th class="k">key</th><td>{{.DeviceKey}}</td></tr>
-<tr><th class="k">host</th><td>{{.Host}}</td></tr>
+<tr><th class="k">opaque ID</th><td>{{.DeviceKey}}</td></tr>
 <tr><th class="k">os</th><td>{{.OS}}</td></tr>
 <tr><th class="k">cpu</th><td>{{.CPU}}</td></tr>
 <tr><th class="k">ram</th><td>{{.RAM}}</td></tr>
@@ -140,17 +229,16 @@ Do not rank this result against a different fingerprint. Change the GPU, driver,
 </table>
 {{end}}
 
-{{if or .Decode .MDE}}
+{{if .Decode}}
 <h2>Sample</h2>
 <table>
 {{if .Decode}}<tr><th class="k">decode</th><td>{{.Decode}}</td></tr>{{end}}
 {{if .Prefill}}<tr><th class="k">prefill</th><td>{{.Prefill}}</td></tr>{{end}}
-{{if .MDE}}<tr><th class="k">resolution</th><td>{{.MDE}}</td></tr>{{end}}
 </table>
 {{end}}
 
 {{if .RepeatsWarn}}
-<p class="warn">Single-sample run - identical configs vary 10-20 pp; re-run with -k 3 before ranking against a close model.</p>
+<p class="warn">Single-sample run - one trial cannot establish a stable rate; re-run with -k 3 before comparing a close result.</p>
 {{end}}
 
 {{if .Contamination}}
@@ -162,7 +250,7 @@ Do not rank this result against a different fingerprint. Change the GPU, driver,
 {{end}}
 <footer>
 fitr {{.Version}} · schema {{.Schema}} · {{.Level}} · {{.StartedAt}}<br>
-Written only because you asked (fitr export / fitr run --html). Never uploaded. Contains a hardware fingerprint.
+Written only because you asked (fitr export / fitr run --html). Never uploaded. Contains an opaque device ID and allowlisted comparison configuration.
 </footer>
 </main>
 </body>
@@ -186,7 +274,6 @@ func htmlDataFrom(a Artifact) htmlData {
 		Profile:       a.Profile,
 		Uncalibrated:  a.Profile == "default",
 		DeviceKey:     a.DeviceKey,
-		Host:          a.Device.Host,
 		OS:            a.Device.OS,
 		CPU:           a.Device.CPU,
 		GPU:           a.Device.GPU,
@@ -233,17 +320,13 @@ func htmlDataFrom(a Artifact) htmlData {
 		d.Wall = fmt.Sprintf("%.0fs", a.WallSeconds)
 	}
 
-	keys := make([]string, 0, len(a.Device.Config))
-	for k := range a.Device.Config {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range []string{
+		"OLLAMA_CONTEXT_LENGTH", "OLLAMA_FLASH_ATTENTION", "OLLAMA_KV_CACHE_TYPE", "OLLAMA_NUM_PARALLEL",
+	} {
 		v := a.Device.Config[k]
-		if v == "" {
-			v = "(unset)"
+		if v != "" {
+			d.Config = append(d.Config, htmlKV{K: k, V: v})
 		}
-		d.Config = append(d.Config, htmlKV{K: k, V: v})
 	}
 
 	for _, k := range score.SortedNeeds(a.Scorecard.Needs) {
@@ -277,14 +360,15 @@ func htmlDataFrom(a Artifact) htmlData {
 	if a.Meta.PrefillN > 0 {
 		d.Prefill = stat(a.Meta.PrefillMean, a.Meta.PrefillSD, a.Meta.PrefillN, g)
 	}
-	if a.Meta.MDEpp > 0 {
-		d.MDE = fmt.Sprintf("%d binary trials - resolves ~%s against a gate", a.Meta.Trials, resolutionText(a.Meta.MDEpp))
-		if a.Meta.MDEDiffpp > 0 {
-			d.MDE += ", " + resolutionText(a.Meta.MDEDiffpp) + " between two models"
-		}
-		d.MDE += ". Separates broken from working, not good from slightly better"
-	}
 	return d
+}
+
+func ShareFingerprintID(deviceKey string) string {
+	if strings.TrimSpace(deviceKey) == "" {
+		return "unavailable"
+	}
+	sum := sha256.Sum256([]byte("fitr.share.device.v1\x00" + deviceKey))
+	return "device-" + hex.EncodeToString(sum[:8])
 }
 
 func htmlStateClass(s score.State) string {

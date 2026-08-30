@@ -49,7 +49,7 @@ func TestScorecardRowsNeverExceedTheRule(t *testing.T) {
 	}
 	d.Result(sc, Meta{
 		GPU: "NVIDIA GeForce RTX 4090", Driver: "32.0.16.1047", Device: "GPU 100%",
-		Profile: "desktop-4090", Repeats: 8, Trials: 190, MDEpp: 10, MDEDiffpp: 14,
+		Profile: "desktop-4090", Repeats: 8,
 		ShowsIntervals: true, DecodeMean: 23.16, DecodeSD: 0.44, DecodeN: 8,
 		DecodeSeries: []float64{22.7, 23.6, 23.1, 22.9, 23.4, 23.0, 23.3, 22.8},
 	})

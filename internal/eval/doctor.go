@@ -86,17 +86,17 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	}
 	add("real_token", "PASS", fmt.Sprintf("generated %d token(s), TTFT %.2fs, load %.1fs", m.EvalCount, m.TTFTSeconds, m.LoadSeconds))
 
-	// 2. Where does it actually compute? Partial offload quietly turns a GPU
-	// benchmark into a RAM-bandwidth benchmark.
+	// 2. Where did the runtime place it? Placement defines comparability, but
+	// does not by itself prove which subsystem limits performance.
 	if opts.Placement != nil {
 		place := opts.Placement(ctx)
 		switch {
 		case place == "GPU 100%":
 			add("placement", "PASS", place)
 		case strings.HasPrefix(place, "GPU "):
-			add("placement", "WARN", place+" - partial offload; decode is bound by system RAM bandwidth, not the GPU")
+			add("placement", "WARN", place+" - runtime reported partial accelerator placement; compare only with the same placement")
 		case place == "CPU":
-			add("placement", "WARN", "CPU - no offload; expect a fraction of the GPU numbers this model gets elsewhere")
+			add("placement", "WARN", "CPU - runtime reported no accelerator offload; compare only with CPU-only runs")
 		default:
 			add("placement", "SKIP", "could not determine placement")
 		}

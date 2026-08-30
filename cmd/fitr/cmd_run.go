@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -25,6 +24,8 @@ import (
 	"github.com/blisspixel/fitr/internal/score"
 	"github.com/blisspixel/fitr/internal/stats"
 )
+
+const memoryProbeCtx = 32768
 
 // ---------------------------------------------------------------- run
 func cmdRun(ctx context.Context, args []string) int {
@@ -51,8 +52,6 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	seedset := fs.String("seedset", "", "pin the generated-instance seed set; two runs sharing "+
 		"a seedset face IDENTICAL task instances, enabling a paired comparison")
-	adaptive := fs.Bool("adaptive", false, "repeat generated checks until each gated need is "+
-		"decided against its gate (Wald SPRT, alpha=beta=0.05) or 6 rounds pass")
 	pullFlag := fs.Bool("pull", false, "pull the model first if it is not installed "+
 		"(Ollama; supports hf.co/... and pasted Hugging Face URLs)")
 	htmlFlag := fs.Bool("html", false, "write a self-contained HTML artifact next to the JSON")
@@ -99,10 +98,6 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 	}
 	if *checksOnly && *seedset == "" {
 		reportError("--checks-only requires --seedset", "calibration pairs must face identical generated instances", "")
-		return exitUsage
-	}
-	if *checksOnly && *adaptive {
-		reportError("--checks-only cannot use --adaptive", "paired calibration needs both models to run every instance", "use a fixed -k value")
 		return exitUsage
 	}
 	if *checksOnly && *htmlFlag {
@@ -154,9 +149,9 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 	}
 	defer disp.Close()
 
-	// Check tasks generate a FRESH instance per repeat, so one pass per task is
-	// already a set of independent trials pooled per need. Repeats multiply
-	// wall-clock across ~16 tasks, so they follow -k only when asked.
+	// Check tasks generate a fresh instance per repeat. Outcomes within one
+	// family can remain correlated, so scoring clusters them by family. Repeats
+	// multiply wall-clock across all 22 specs and follow -k only when asked.
 	checksReps := 1
 	if *k > 0 || level == "checks" {
 		checksReps = *k
@@ -167,7 +162,7 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 
 	res, err := execute(ctx, c, model, runOpts{
 		level: level, profile: *profileName, seedSet: *seedset,
-		reps: reps, checksReps: checksReps, adaptive: *adaptive,
+		reps: reps, checksReps: checksReps,
 		numCtx: *ctxSize, allowUnsafeExec: *allowUnsafeExec,
 	}, disp)
 	if err != nil {
@@ -252,7 +247,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	disp render.Display) (*Result, error) {
 	level, profileName := opts.level, opts.profile
 	reps, checksReps := opts.reps, opts.checksReps
-	seedSet, adaptive := opts.seedSet, opts.adaptive
+	seedSet := opts.seedSet
 
 	// Exactly one eval per machine at a time. Two runs against one inference
 	// server contaminate each other, and the damage is not recoverable after
@@ -319,10 +314,6 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	if err != nil {
 		return nil, err
 	}
-	if adaptive && !hasAdaptiveGates(spec, prof, level) {
-		adaptive = false
-		disp.Note("adaptive checks requested, but this battery/profile has no rate gates; using the fixed repeat plan", "warn")
-	}
 	softwareBuild, err := buildinfo.BinarySHA256()
 	if err != nil {
 		return nil, fmt.Errorf("identify fitr executable: %w", err)
@@ -346,7 +337,7 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		Level:         level, Repeats: reps, NumCtx: reqCtx,
 		Device: fp, DeviceKey: fp.Key(), Profile: prof.Name, ModelMeta: info,
 		ExecutionPolicy: record.ExecutionDisabled,
-		TaskPlan:        runTaskPlan(level, reps, checksReps, adaptive, len(spec.Checks), len(spec.Refusal.Prompts)),
+		TaskPlan:        runTaskPlan(level, reps, checksReps, len(spec.Checks), len(spec.Refusal.Prompts)),
 	}
 	if opts.allowUnsafeExec {
 		res.ExecutionPolicy = record.ExecutionUnsafe
@@ -366,6 +357,18 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	} else {
 		disp.Note("seedset "+seedSet+" pinned - instances repeat across runs that share it; "+
 			"use a fresh one when you are not pairing runs", "")
+	}
+	if res.TaskPlan.CheckTrialsLimit > 0 {
+		res.TaskPlan.CheckPlanSHA256, err = record.FixedCheckPlanSHA256(spec.Checks, checksReps, res.SeedSet)
+		if err != nil {
+			return nil, fmt.Errorf("seal generated-check plan: %w", err)
+		}
+	}
+	if res.TaskPlan.RefusalTrials > 0 {
+		res.TaskPlan.RefusalPlanSHA256, err = record.FixedRefusalPlanSHA256(eval.RefusalPromptIDs(spec.Refusal))
+		if err != nil {
+			return nil, fmt.Errorf("seal refusal plan: %w", err)
+		}
 	}
 
 	// One model resident at a time is non-negotiable between phases. A model
@@ -459,13 +462,10 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	for _, conflict := range res.Device.IdentityConflicts() {
 		disp.Note("device identity: "+conflict, "warn")
 	}
-	// Doctor has always warned about partial offload; run did not, so a
-	// measurement taken with most of the model on the GPU and the rest in
-	// system RAM was saved looking like any other. The same 7B measured 179
-	// tok/s resident and 16 tok/s at GPU 65% on one machine -- an order of
-	// magnitude, with nothing said at the time. Placement is part of the
-	// comparability key, so such a run cannot be ranked against a resident
-	// one, but the operator should hear it while it is still worth acting on.
+	// Placement is part of the comparability key, so a partial or CPU-only run
+	// cannot be ranked against a fully accelerator-resident one. Say what the
+	// runtime reported without turning placement into an unsupported causal
+	// diagnosis.
 	if note := placementWarning(res.Device.InferenceDevice); note != "" {
 		disp.Note(note, "warn")
 	}
@@ -473,9 +473,9 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		disp.Note("using the UNCALIBRATED default profile - verdicts are rough; "+
 			"copy profiles/default.json and tune it for this box", "warn")
 	}
-	if device.IsDenseAndBig(info.Details.ParameterSize, info.Details.Family, prof) {
-		disp.Note("dense "+info.Details.ParameterSize+" model on a bandwidth-bound "+
-			"device - expect very low tok/s", "warn")
+	if device.DenseSizeHintExceeded(info.Details.ParameterSize, info.Details.Family, prof) {
+		disp.Note("dense "+info.Details.ParameterSize+" model exceeds this profile's interactive-size hint; "+
+			"measure decode before deciding whether it is suitable", "warn")
 	}
 
 	work, err := os.MkdirTemp("", "evalkit_")
@@ -537,102 +537,9 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 		return nil, err
 	}
 
-	// Generated checks: fresh instances per run, graded in pure Go. Skipped on
-	// --quick to keep the smoke test a smoke test.
-	//
-	// Adaptive mode replaces the fixed repeat count with Wald's SPRT per gated
-	// need: keep generating fresh instances until each pool's rate is decided
-	// against its gate at alpha=beta=0.05, or six rounds pass. Undecided at
-	// the cap is a real answer - the sample cannot separate the rate from the
-	// gate - and the scorecard will report INCONCLUSIVE rather than forcing a
-	// binary claim.
 	if level != "quick" && len(spec.Checks) > 0 {
-		rounds := checksReps
-		var sprts map[string]*stats.SPRT
-		adaptiveGates := map[string]float64{}
-		adaptiveLimits := map[string]int{}
-		adaptivePasses := map[string]int{}
-		detail := fmt.Sprintf("%d generated tasks", len(spec.Checks)*checksReps)
-		if adaptive {
-			rounds = 6
-			detail = "adaptive (SPRT until decided)"
-			present := map[string]bool{}
-			for _, cs := range spec.Checks {
-				present[cs.Need] = true
-			}
-			sprts = map[string]*stats.SPRT{}
-			for need := range present {
-				if minRate, ok := prof.Float(need, "pass_rate_min"); ok {
-					if s, err := stats.GateSPRT(minRate); err == nil {
-						sprts[need] = s
-						adaptiveGates[need] = minRate
-					}
-				}
-			}
-			for _, cs := range spec.Checks {
-				if _, ok := sprts[cs.Need]; ok {
-					adaptiveLimits[cs.Need] += rounds
-				}
-			}
-		}
-		roundsRun := 0
-		if err := step("checks", detail, func() error {
-			completed := 0
-			for round := range rounds {
-				roundsRun = round + 1
-				for _, cs := range spec.Checks {
-					// A need that has decided stops drawing trials.
-					//
-					// Without this the trial still ran and was appended to
-					// res.Checks, but the guard below withheld it from the
-					// test -- so the interval printed on the scorecard and the
-					// decision that stopped the run were computed from
-					// different samples of the same battery, and could
-					// disagree on the same screen. Skipping keeps one sample.
-					if s, ok := sprts[cs.Need]; ok && s.State() != stats.SPRTContinue {
-						continue
-					}
-					seed := eval.InstanceSeed(res.SeedSet, cs.ID, round)
-					o, err := eval.RunCheck(ctx, c, model, cs, seed)
-					if err != nil {
-						return err
-					}
-					res.Checks = append(res.Checks, o)
-					completed++
-					if live, ok := disp.(liveTelemetry); ok {
-						live.LiveProgress(completed, len(spec.Checks)*rounds,
-							fmt.Sprintf("%d of %d generated tasks", completed, len(spec.Checks)*rounds))
-					}
-					if s, ok := sprts[cs.Need]; ok && s.State() == stats.SPRTContinue {
-						s.Add(o.Pass)
-						if o.Pass {
-							adaptivePasses[cs.Need]++
-						}
-					}
-				}
-				if adaptive && allDecided(sprts) {
-					break
-				}
-			}
-			return nil
-		}); err != nil {
+		if err := measureGeneratedChecks(ctx, c, model, spec, res, checksReps, disp, step); err != nil {
 			return nil, err
-		}
-		if adaptive {
-			needs := make([]string, 0, len(sprts))
-			for need := range sprts {
-				needs = append(needs, need)
-			}
-			sort.Strings(needs)
-			for _, need := range needs {
-				decision, err := eval.CaptureAdaptiveDecision(need, adaptiveGates[need],
-					adaptiveLimits[need], adaptivePasses[need], sprts[need])
-				if err != nil {
-					return nil, fmt.Errorf("capture adaptive %s decision: %w", need, err)
-				}
-				res.AdaptiveDecisions = append(res.AdaptiveDecisions, decision)
-			}
-			disp.Note(adaptiveSummary(sprts, roundsRun, len(res.Checks)), "")
 		}
 	}
 
@@ -725,170 +632,12 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 
 // measure folds raw results into what the scorer needs.
 func measure(r *Result) score.Measured {
-	m := score.Measured{
-		Model: r.Model, Capabilities: r.ModelMeta.Capabilities,
-		Rep: r.Rep, Contamination: append([]string(nil), r.Contamination...),
-	}
-	if r.DecodeSum.N > 0 {
-		m.SpeedKnown = true
-		m.DecodeTPS, m.TTFT, m.PrefillTPS = r.DecodeSum.Mean, r.TTFTSum.Mean, r.PrefillSum.Mean
-		for _, s := range r.Speed {
-			if s.ColdTTFT > 0 && m.TTFTCold == 0 {
-				m.TTFTCold = s.ColdTTFT
-			}
-			if s.WarmTTFT > 0 && m.TTFTWarm == 0 {
-				m.TTFTWarm = s.WarmTTFT
-			}
-			if s.GatedTTFTContaminated() {
-				m.TTFTCacheContaminated = true
-			}
-			if s.ClientDerived {
-				m.TimingsClientDerived = true
-			}
-		}
-	}
-	if r.Memory.ResidentGB > 0 {
-		m.MemoryKnown, m.ResidentGB32K = true, r.Memory.ResidentGB
-	}
-	if len(r.CodeWrite)+len(r.CodeFix) > 0 {
-		var wOK, fOK []bool
-		for _, x := range r.CodeWrite {
-			if pass, measured := eval.MeasuredOutcome(x.Outcome, x.Pass); measured {
-				wOK = append(wOK, pass)
-			}
-		}
-		for _, x := range r.CodeFix {
-			if pass, measured := eval.MeasuredOutcome(x.Outcome, x.Pass); measured {
-				fOK = append(fOK, pass)
-			}
-		}
-		expected := r.TaskPlan.CodeTrials
-		if expected == 0 && r.SchemaVersion < 5 {
-			expected = r.Repeats * 2
-		}
-		m.CodeKnown = expected > 0 && len(wOK)+len(fOK) == expected
-		fw, ff := stats.Flakiness(wOK), stats.Flakiness(fOK)
-		m.CodeWritePass = fw.Passes*2 > fw.N
-		m.CodeFixPass = ff.Passes*2 > ff.N
-		m.CodeFlaky = fw.Flaky || ff.Flaky
-		m.CodePasses = fw.Passes + ff.Passes
-		m.CodeRepeats = fw.N + ff.N
-	}
-	for _, ck := range r.Checks {
-		pass, measured := eval.MeasuredOutcome(ck.Outcome, ck.Pass)
-		if !measured {
-			// A tool check the runtime declined because the model has no tool
-			// support is a capability fact worth reporting, not an empty pool.
-			if strings.Contains(ck.Detail, "does not support tools") {
-				m.ToolsUnsupported = true
-			}
-			continue
-		}
-		var pool *score.Pool
-		switch ck.Need {
-		case "structured_output":
-			pool = &m.Structured
-		case "instruction_precision":
-			pool = &m.Precision
-		case "reasoning":
-			pool = &m.Reasoning
-		case "tool_calling":
-			pool = &m.ToolCalling
-		case "tool_restraint":
-			pool = &m.ToolRestraintPool
-		default:
-			pool = &m.User
-		}
-		pool.Add(ck.Family, pass)
-	}
-	if r.Refusal != nil {
-		expected := r.TaskPlan.RefusalTrials
-		if expected == 0 && r.SchemaVersion < 5 {
-			expected = len(r.Refusal)
-		}
-		complete := expected > 0 && len(r.Refusal) == expected
-		refused := 0
-		for _, result := range r.Refusal {
-			outcome := result.Outcome
-			if outcome == "" {
-				switch result.Verdict {
-				case "answered":
-					outcome = eval.OutcomePass
-				case "partial", "refused", "empty":
-					outcome = eval.OutcomeFail
-				default:
-					complete = false
-				}
-			}
-			pass, measured := eval.MeasuredOutcome(outcome, false)
-			if !measured {
-				complete = false
-			} else if !pass {
-				refused++
-			}
-		}
-		m.RefusalKnown, m.RefusedCount = complete, refused
-	}
-	if len(r.Tools) > 0 {
-		passes, measured := 0, 0
-		for _, t := range r.Tools {
-			if pass, ok := eval.MeasuredOutcome(t.Outcome, t.Pass); ok {
-				measured++
-				if pass {
-					passes++
-				}
-			}
-		}
-		expected := r.TaskPlan.ToolTrials
-		if expected == 0 && r.SchemaVersion < 5 {
-			expected = r.Repeats
-		}
-		m.ToolsRan = measured > 0 && measured == expected
-		m.ToolsPass = m.ToolsRan && passes*2 > measured
-	}
-	if r.Agentic != nil {
-		if pass, measured := eval.MeasuredOutcome(r.Agentic.Outcome, r.Agentic.Pass); measured {
-			m.AgenticRan, m.AgenticPass = true, pass
-		}
-		m.AgenticMalformed = r.Agentic.Malformed
-		m.AgenticTurns = r.Agentic.Turns
-		m.AgenticCtxCeiling = r.Agentic.CtxCeiling
-		m.AgenticMaxPrompt = r.Agentic.MaxPromptTok
-		m.AgenticCompacted = r.Agentic.Compacted
-	}
-	if r.Withdrawal != nil {
-		if _, measured := eval.MeasuredOutcome(r.Withdrawal.Outcome, r.Withdrawal.Pass); measured {
-			m.WithdrawRan = true
-			m.WithdrawDeadCalls = r.Withdrawal.DeadCalls
-			m.WithdrawClean = r.Withdrawal.Ended == "clean_stop"
-		}
-	}
-	if r.Plumbing != nil {
-		m.PlumbingRan = r.Plumbing.Outcome != eval.OutcomeSkipped &&
-			r.Plumbing.Outcome != eval.OutcomeError
-		if r.Plumbing.Outcome == "" {
-			m.PlumbingRan = true
-		}
-		m.PlumbingHealthy = m.PlumbingRan && r.Plumbing.Healthy
-		m.PlumbingVerdict = r.Plumbing.Verdict
-		if rung, ok := r.Plumbing.Rungs["5_irrelevance"]; ok && m.PlumbingRan {
-			m.IrrelevanceRan, m.IrrelevancePass = true, rung.Pass
-			if !rung.Pass {
-				m.SpuriousCalls = 1
-			}
-		}
-	}
-	return m
+	return r.Measured()
 }
 
 func buildEvidenceCounts(r *Result) map[string]eval.OutcomeCounts {
 	counts := map[string]eval.OutcomeCounts{}
-	collect := func(expected int, values []eval.Outcome, fillSkipped bool) eval.OutcomeCounts {
-		if fillSkipped && len(values) < expected {
-			for len(values) < expected {
-				values = append(values, eval.OutcomeSkipped)
-			}
-		}
+	collect := func(expected int, values []eval.Outcome) eval.OutcomeCounts {
 		return eval.CountOutcomes(expected, values...)
 	}
 	legacy := func(outcome eval.Outcome, pass bool) eval.Outcome {
@@ -908,25 +657,25 @@ func buildEvidenceCounts(r *Result) map[string]eval.OutcomeCounts {
 	for _, result := range r.CodeFix {
 		code = append(code, legacy(result.Outcome, result.Pass))
 	}
-	counts["coding"] = collect(r.TaskPlan.CodeTrials, code, false)
+	counts["coding"] = collect(r.TaskPlan.CodeTrials, code)
 
 	var checks []eval.Outcome
 	for _, result := range r.Checks {
 		checks = append(checks, legacy(result.Outcome, result.Pass))
 	}
-	counts["checks"] = collect(r.TaskPlan.CheckTrialsLimit, checks, true)
+	counts["checks"] = collect(r.TaskPlan.CheckTrialsLimit, checks)
 
 	var tools []eval.Outcome
 	for _, result := range r.Tools {
 		tools = append(tools, legacy(result.Outcome, result.Pass))
 	}
-	counts["tools"] = collect(r.TaskPlan.ToolTrials, tools, false)
+	counts["tools"] = collect(r.TaskPlan.ToolTrials, tools)
 
 	var refusal []eval.Outcome
 	for _, result := range r.Refusal {
 		refusal = append(refusal, result.Outcome)
 	}
-	counts["refusal"] = collect(r.TaskPlan.RefusalTrials, refusal, false)
+	counts["refusal"] = collect(r.TaskPlan.RefusalTrials, refusal)
 
 	var plumbing []eval.Outcome
 	if r.Plumbing != nil {
@@ -936,7 +685,7 @@ func buildEvidenceCounts(r *Result) map[string]eval.OutcomeCounts {
 	if r.TaskPlan.Plumbing {
 		plumbingExpected = 1
 	}
-	counts["plumbing"] = collect(plumbingExpected, plumbing, false)
+	counts["plumbing"] = collect(plumbingExpected, plumbing)
 
 	var withdrawal []eval.Outcome
 	if r.Withdrawal != nil {
@@ -946,13 +695,13 @@ func buildEvidenceCounts(r *Result) map[string]eval.OutcomeCounts {
 	if r.TaskPlan.Withdrawal {
 		withdrawalExpected = 1
 	}
-	counts["withdrawal"] = collect(withdrawalExpected, withdrawal, false)
+	counts["withdrawal"] = collect(withdrawalExpected, withdrawal)
 
 	var agentic []eval.Outcome
 	if r.Agentic != nil {
 		agentic = append(agentic, legacy(r.Agentic.Outcome, r.Agentic.Pass))
 	}
-	counts["agentic"] = collect(r.TaskPlan.AgenticTrials, agentic, false)
+	counts["agentic"] = collect(r.TaskPlan.AgenticTrials, agentic)
 	return counts
 }
 
@@ -1053,21 +802,19 @@ func abandonedStepSummary(completed []string) string {
 	return "already completed and now discarded: " + strings.Join(completed, ", ")
 }
 
-// placementWarning describes a measurement that is not really being taken on
-// the accelerator it appears to be taken on. It mirrors the rule doctor
-// applies, so the two surfaces cannot drift into disagreeing about the same
-// machine. An empty string means placement is either fully offloaded or was
-// not observed, and an unobserved placement is not a fault to shout about.
+// placementWarning reports a non-resident placement without guessing why it
+// changes performance. It mirrors doctor so the two surfaces cannot disagree
+// about the same runtime receipt. An empty string means placement is fully
+// offloaded or was not observed.
 func placementWarning(placement string) string {
 	switch {
 	case placement == "" || placement == "GPU 100%" || placement == "unknown":
 		return ""
 	case placement == "CPU":
-		return "inference is running on the CPU with no offload; decode here is a fraction of " +
-			"what this model does on a GPU, and the number is only meaningful against other CPU runs"
+		return "runtime reported CPU-only placement with no offload; compare only with the same placement, or select the intended accelerator placement and re-run"
 	case strings.HasPrefix(placement, "GPU "):
-		return "partial offload (" + placement + "); the rest of the model is in system RAM, so decode " +
-			"measures RAM bandwidth rather than the GPU. Free VRAM and re-run for a resident measurement"
+		return "runtime reported partial offload (" + placement + "); compare only with " +
+			"the same placement, or free accelerator memory and re-run if full placement is the goal"
 	}
 	return ""
 }
@@ -1119,7 +866,7 @@ func measureSpeed(ctx context.Context, c llm.Backend, model string, spec *eval.S
 // measureMemory records the resident footprint at a fixed 32K window.
 func measureMemory(ctx context.Context, c llm.Backend, model string,
 	res *Result, disp render.Display) error {
-	m, err := eval.RunMemory(ctx, c, model, 32768)
+	m, err := eval.RunMemory(ctx, c, model, memoryProbeCtx)
 	res.Memory = m
 	if live, ok := disp.(liveTelemetry); ok && m.ResidentGB > 0 {
 		live.LiveMemory(m.ResidentGB)

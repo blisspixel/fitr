@@ -64,10 +64,13 @@ The order is deliberate:
 1. The `use for` statement.
 2. Independent need verdicts with explicit state tokens.
 3. Performance observations and repeat shapes.
-4. Uncertainty, minimum detectable effect, cache, repeat-count, and
-   contamination disclosures.
-5. Device, runtime, quant, context, and profile identity.
-6. The next useful command.
+4. The verified resident observation from the requested 32K load probe, when
+   the runtime confirms that effective context.
+5. Per-need uncertainty, family structure, cache, repeat-count, and
+   contamination disclosures. Unrelated needs are never combined into one
+   global resolution claim.
+6. Device, runtime, quant, context, and profile identity.
+7. The next useful command.
 
 Color never replaces `[PASS]`, `[FAIL]`, `[SKIP]`, `n/a`, or `[BLKD]`.
 
@@ -109,7 +112,7 @@ rules accept the pair. The UI states the exact mismatch when they do not.
 | `Space` | Pause Live display or mark a History baseline |
 | `c` | Compare the marked and selected History rows |
 | `r` | Reload saved evidence |
-| `?`, `F1` | Open contextual help |
+| `?`, `F1` | Open the help overlay |
 | `Ctrl+L` | Redraw the terminal |
 | `q` | Quit, with confirmation during an active run |
 | `Ctrl+C` | Cancel an active run and exit 130 |
@@ -156,7 +159,7 @@ a 0.4% wobble as a dramatic zigzag.
 The monitor consumes versioned, privacy-safe presentation data rather than
 mutable evaluator state.
 
-- Snapshot schema: `fitr.presentation.snapshot.v1`
+- Snapshot schema: `fitr.presentation.snapshot.v2`
 - Event schema: `fitr.presentation.event.v1`
 
 `top view --snapshot` includes the selected opaque run ID while retaining the
@@ -171,6 +174,10 @@ Every live event carries a run ID, monotonic sequence, and elapsed time. Events
 may carry phase names, bounded counts, severity, and measured metrics. They
 never contain prompts, raw responses, answer strings, hostnames, or local
 paths. A slow display cannot block or change measurement timing.
+
+The exported HTML surface follows the same disclosure boundary. It uses an
+opaque device ID and allowlisted comparison settings rather than the raw
+fingerprint, hostname, local paths, or arbitrary runtime configuration.
 
 The immutable reducer is the behavioral contract for both the terminal and
 later native clients. No client may recompute a verdict.

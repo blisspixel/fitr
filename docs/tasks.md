@@ -40,9 +40,11 @@ Three things follow from that design:
 1. There is no answer string in this repo to leak into training data. A
    static benchmark published on GitHub is future training data with a delay;
    a generated one is not.
-2. Every repeat is a genuinely independent trial, which is what the Wilson
-   intervals want. `-k 3` does not re-ask the same question three times; it
-   asks three different instantiations of the same family.
+2. Every repeat is a fresh generated instance. `-k 3` does not re-ask the same
+   question three times; it asks three different instantiations of the same
+   family. Outcomes from one family can still be correlated, so need-level
+   intervals remain family-clustered rather than treating every instance as
+   statistically independent.
 3. Each result records its seed, so any instance can be regenerated exactly,
    and two runs sharing `--seedset` face byte-identical instances - the basis
    for paired comparison (see [statistics.md](statistics.md)).
@@ -104,13 +106,15 @@ Two design notes:
 
 ## Tool withdrawal
 
-Restraint at rest is the plumbing irrelevance rung: no tool calls on an
-unrelated question. Restraint under *change* is what long agent sessions
-actually face. The withdrawal task lists a tool, lets the model use it, then
-drops it from the `tools` parameter mid-loop. The model is told what exists
-every turn; calling a tool that is no longer listed is a hallucinated
-capability. One grace call is tolerated (discovering the removal); persisting
-past the error fails `tool_restraint`.
+Restraint at rest is measured by the generated `tool_restraint` family: no tool
+calls on unrelated questions across fresh instances. The older plumbing
+irrelevance rung remains a diagnostic fallback only when that pooled family is
+unavailable; it does not override the pooled result. Restraint under *change*
+is what long agent sessions actually face. The withdrawal task lists a tool,
+lets the model use it, then drops it from the `tools` parameter mid-loop. The
+model is told what exists every turn; calling a tool that is no longer listed
+is a hallucinated capability. One grace call is tolerated while discovering
+the removal; persisting past the error fails `tool_restraint`.
 
 File tools accept one ordinary portable filename, not a path. Windows device
 names, NTFS alternate-stream syntax, separators, control characters, and other
@@ -147,3 +151,52 @@ limited to 1 MiB and a directory may contain at most 1024 JSON task files.
 User tasks may also use any generated family (`json_object`, `math_chain`,
 ...) with custom `params` - the same contamination-resistant machinery the
 built-ins use.
+
+## From tasks to bounded workloads
+
+A prompt and grader can prove one model primitive. Real work is a sequence of
+context acquisition, decisions, tool actions, state changes, verification,
+and exceptions. The pre-1.0 workload experiment treats that bounded workflow
+as another first-class evaluation unit without turning fitr into an agent
+orchestrator.
+
+A workflow contract must declare:
+
+- its intent and initial state;
+- available context and tools;
+- allowed and forbidden actions;
+- an explicit definition of done;
+- independent verification;
+- turn, attempt, time, and resource limits;
+- escalation conditions;
+- approval authority plus denial, timeout, and revocation behavior;
+- checkpoint and resume rules where state continuity is under test.
+
+The configuration identity expands with the experiment. In addition to model,
+artifact, quant, runtime, device, placement, and context, a comparable workflow
+receipt binds scenario and initial-state identity, workflow specification,
+tools and service versions, context provider and context-event manifest,
+permission profile, verifier environment, worker and harness builds, state and
+checkpoint lineage, sampling, cache, concurrency, retry, stopping, and
+data-boundary policies. A changed verifier or tool set is a different
+experiment, not fresh evidence for the old one.
+
+The worker does not own the evidence. A final message that says the task is
+complete is self-report, not a PASS. Deterministic assertions, independently
+observed final state, and separate verifier receipts can support core verdicts.
+Model-judged and self-reported outcomes remain explicitly weaker evidence.
+
+Current result records do not yet support time to valid result or validated
+work rate. Those metrics require sealed per-trial receipts for attempt start,
+attempt outcome, verifier result, acceptance time, retries, tool failures, and
+escalations. Aggregate pass rates and aggregate token timings cannot be joined
+after the fact without inventing evidence.
+
+The full evidence taxonomy, metric definitions, autonomy boundaries, and
+planned report are in [workload evidence](workload-evidence.md).
+
+fitr owns contract validation, immutable experiment identity, receipt sealing,
+verifier policy, and analysis. A bounded external runner owns execution and
+scheduling. The 0.11 experiment may use one fixed harness-owned workflow in a
+constrained fixture; arbitrary generated code and executable task JSON remain
+SKIP until the stronger cross-platform confinement contract passes.

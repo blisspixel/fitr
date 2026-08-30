@@ -426,7 +426,6 @@ type Result = record.Record
 type runOpts struct {
 	level, profile, seedSet string
 	reps, checksReps        int
-	adaptive                bool
 	numCtx                  int
 	allowUnsafeExec         bool
 }
@@ -443,7 +442,7 @@ type runFailureTelemetry interface{ RunFailed(error) }
 type runSaveTelemetry interface{ RunSaveStatus(bool, error) }
 type runIdentityTelemetry interface{ RunID() string }
 
-func runTaskPlan(level string, repeats, checkRepeats int, adaptive bool, checks, refusalPrompts int) record.TaskPlan {
+func runTaskPlan(level string, repeats, checkRepeats, checks, refusalPrompts int) record.TaskPlan {
 	plan := record.TaskPlan{}
 	if level != "checks" {
 		plan.SpeedSamples = repeats
@@ -453,12 +452,7 @@ func runTaskPlan(level string, repeats, checkRepeats int, adaptive bool, checks,
 		plan.ToolTrials = repeats
 	}
 	if level != "quick" {
-		rounds := checkRepeats
-		if adaptive {
-			rounds = 6
-		}
-		plan.CheckTrialsLimit = checks * rounds
-		plan.AdaptiveChecks = adaptive
+		plan.CheckTrialsLimit = checks * checkRepeats
 	}
 	if level != "quick" && level != "checks" {
 		plan.Withdrawal = true
@@ -468,55 +462,6 @@ func runTaskPlan(level string, repeats, checkRepeats int, adaptive bool, checks,
 		plan.AgenticTrials = 1
 	}
 	return plan
-}
-
-func hasAdaptiveGates(spec *eval.Spec, profile device.Profile, level string) bool {
-	if spec == nil || level == "quick" || len(spec.Checks) == 0 {
-		return false
-	}
-	for _, check := range spec.Checks {
-		if _, ok := profile.Float(check.Need, "pass_rate_min"); ok {
-			return true
-		}
-	}
-	return false
-}
-
-func allDecided(sprts map[string]*stats.SPRT) bool {
-	if len(sprts) == 0 {
-		return true
-	}
-	for _, s := range sprts {
-		if s.State() == stats.SPRTContinue {
-			return false
-		}
-	}
-	return true
-}
-
-// adaptiveSummary discloses the sequential decision in plain words: what was
-// decided, in how many trials, and what the sample could not separate.
-func adaptiveSummary(sprts map[string]*stats.SPRT, rounds, instances int) string {
-	if len(sprts) == 0 {
-		return fmt.Sprintf("adaptive: no gated pools to decide; ran %d round(s)", rounds)
-	}
-	var bits []string
-	for _, need := range []string{"structured_output", "instruction_precision", "user_tasks", "reasoning"} {
-		s, ok := sprts[need]
-		if !ok {
-			continue
-		}
-		switch s.State() {
-		case stats.SPRTAcceptH1:
-			bits = append(bits, fmt.Sprintf("%s decided above its gate in %d trials", need, s.N))
-		case stats.SPRTAcceptH0:
-			bits = append(bits, fmt.Sprintf("%s decided below its gate in %d trials", need, s.N))
-		default:
-			bits = append(bits, fmt.Sprintf("%s undecided after %d trials - the sample cannot separate it from the gate", need, s.N))
-		}
-	}
-	return fmt.Sprintf("adaptive: stopped after %d round(s), %d instances; %s",
-		rounds, instances, strings.Join(bits, "; "))
 }
 
 // ---------------------------------------------------------------- storage
@@ -608,6 +553,8 @@ func artifactFrom(r *Result) (render.Artifact, error) {
 		sc = score.ExcludeEvidence(sc, issue)
 	}
 	meta := resultMeta(r, prof.Name)
+	modelLabel := presentationModelLabel(r.Model)
+	sc.Model = modelLabel
 	toolsBlocked := false
 	for need, verdict := range sc.Needs {
 		if strings.Contains(need, "tool") && verdict.State == score.Blocked {
@@ -618,19 +565,27 @@ func artifactFrom(r *Result) (render.Artifact, error) {
 	return render.Artifact{
 		FitrVersion:   version,
 		SchemaVersion: r.SchemaVersion,
-		Model:         r.Model,
+		Model:         modelLabel,
 		StartedAt:     r.StartedAt,
 		Level:         r.Level,
 		Repeats:       r.Repeats,
 		WallSeconds:   r.WallSeconds,
-		Device:        r.Device,
-		DeviceKey:     r.DeviceKey,
+		Device:        render.NewShareDevice(r.Device),
+		DeviceKey:     render.ShareFingerprintID(r.DeviceKey),
 		Profile:       prof.Name,
 		Scorecard:     sc,
-		Meta:          meta,
-		NextCommand:   advise.ResultNext(r.Model, r.Repeats, r.ContextSize(), r.Level, toolsBlocked),
-		Contamination: r.Contamination,
+		Meta:          render.NewShareMeta(meta),
+		NextCommand:   advise.ResultNext(modelLabel, r.Repeats, r.ContextSize(), r.Level, toolsBlocked),
+		Contamination: presentationModelLabels(r.Contamination),
 	}, nil
+}
+
+func presentationModelLabels(models []string) []string {
+	out := make([]string, 0, len(models))
+	for _, model := range models {
+		out = append(out, presentationModelLabel(model))
+	}
+	return out
 }
 
 func resultMeta(r *Result, profile string) render.Meta {
@@ -649,8 +604,10 @@ func resultMeta(r *Result, profile string) render.Meta {
 		PrefillMean: r.PrefillSum.Mean, PrefillSD: r.PrefillSum.SD,
 		PrefillN: r.PrefillSum.N,
 		TTFTMean: r.TTFTSum.Mean, TTFTSD: r.TTFTSum.SD, TTFTN: r.TTFTSum.N,
-		ResidentGB:  r.Memory.ResidentGB,
 		Calibration: r.Level == "checks",
+	}
+	if resident, verified := r.Memory.VerifiedAt(memoryProbeCtx); verified {
+		meta.ResidentGB = resident
 	}
 	if r.DeviceV2 != nil {
 		meta.ContextState = string(r.DeviceV2.Context.State())
@@ -664,16 +621,6 @@ func resultMeta(r *Result, profile string) render.Meta {
 		meta.TTFTSeries = append(meta.TTFTSeries, sample.TTFT)
 	}
 	meta.FirstRunSlow, meta.FirstRunRatio = stats.FirstRunSlow(meta.DecodeSeries)
-	// State what this sample size CANNOT resolve, out loud, on every run.
-	trials := len(r.CodeWrite) + len(r.CodeFix) + len(r.Tools) + len(r.Checks)
-	if r.Agentic != nil {
-		trials++
-	}
-	if trials > 0 {
-		meta.Trials = trials
-		meta.MDEpp = 100 * stats.MinDetectableEffect(trials, 1)
-		meta.MDEDiffpp = 100 * stats.MinDetectableDifference(trials, 1)
-	}
 	// The caption explaining what a range is only earns its line when a range
 	// is actually on screen.
 	for _, v := range r.Scorecard.Needs {
@@ -863,10 +810,24 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 	if err != nil {
 		return advise.InventoryTable{}, nil, err
 	}
+	warnings := []string{}
 	installed := make([]advise.InstalledModel, 0, len(tags))
 	for _, tag := range tags {
+		digest := tag.Digest
+		if digest == "" && tag.ReportedDigest != "" {
+			if verifier, ok := b.(llm.ModelDigestVerifier); ok {
+				verified, verifyErr := verifier.VerifyModelDigest(tag.Name, tag.ReportedDigest)
+				if verifyErr != nil {
+					warnings = append(warnings, fmt.Sprintf(
+						"model %s artifact identity could not be verified: %v", tag.Name, verifyErr))
+				} else {
+					digest = verified
+				}
+			}
+		}
 		item := advise.InstalledModel{
-			Name: tag.Name, Size: tag.Size, Quant: tag.Details.QuantizationLevel, Path: tag.Path,
+			Name: tag.Name, Size: tag.Size, Quant: tag.Details.QuantizationLevel,
+			Path: tag.Path, ArtifactDigest: digest,
 		}
 		if tag.Path != "" {
 			if kvs, size, err := advise.OpenGGUF(tag.Path); err == nil {
@@ -898,7 +859,6 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 		}
 	}
 	var evidence []advise.InventoryEvidence
-	warnings := []string{}
 	stored, err := record.NewStore(resultsDir()).LoadCurrent()
 	if err != nil {
 		return advise.InventoryTable{}, nil, fmt.Errorf("load saved evidence: %w", err)
@@ -911,7 +871,7 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 	}
 	return advise.Join(advise.InventoryQuery{
 		Tags: installed, Loaded: loaded, Evidence: evidence,
-		CurrentKey: fp.Key(), HaveGB: fp.VRAMGb, HaveSrc: fp.VRAMSource,
+		Current: fp, CurrentKey: fp.Key(), HaveGB: fp.VRAMGb, HaveSrc: fp.VRAMSource,
 		Serving: serving,
 	}), warnings, nil
 }
@@ -922,27 +882,47 @@ func evidenceFromRecords(recs []*record.Record) []advise.InventoryEvidence {
 		if rec == nil {
 			continue
 		}
-		toolsBlocked := false
-		for need, verdict := range rec.Scorecard.Needs {
-			if strings.Contains(need, "tool") && verdict.State == score.Blocked {
-				toolsBlocked = true
-				break
-			}
-		}
-		out = append(out, advise.InventoryEvidence{
-			Model:          rec.Model,
-			DeviceKey:      rec.Device.Key(),
-			Level:          rec.Level,
-			IntegrityIssue: rec.EvidenceIntegrityIssue(),
-			Contaminated:   len(rec.Contamination) > 0,
-			Arch:           advise.ArchFromKVs(rec.ModelMeta.Info),
-			WeightsB:       rec.ModelMeta.Size,
-			NumCtx:         rec.ContextSize(),
-			Repeats:        rec.Repeats,
-			ToolsBlocked:   toolsBlocked,
-		})
+		out = append(out, inventoryEvidenceFromRecord(rec))
 	}
 	return out
+}
+
+func inventoryEvidenceFromRecord(rec *record.Record) advise.InventoryEvidence {
+	toolsBlocked := false
+	for need, verdict := range rec.Scorecard.Needs {
+		if strings.Contains(need, "tool") && verdict.State == score.Blocked {
+			toolsBlocked = true
+			break
+		}
+	}
+	artifactDigest := ""
+	if rec.Manifest != nil {
+		artifactDigest = rec.Manifest.Model.RuntimeBoundDigest()
+	}
+	comparableIssue := ""
+	numCtx := rec.ContextSize()
+	if rec.DeviceV2 == nil {
+		comparableIssue = "prior run has no verified effective-context receipt"
+	} else if _, err := rec.ComparableDeviceKey(); err != nil {
+		comparableIssue = "prior run is not comparable: " + err.Error()
+	} else if rec.DeviceV2.Context.EffectiveTokens != nil {
+		numCtx = *rec.DeviceV2.Context.EffectiveTokens
+	}
+	return advise.InventoryEvidence{
+		Model:           rec.Model,
+		ArtifactDigest:  artifactDigest,
+		Device:          rec.Device,
+		DeviceKey:       rec.Device.Key(),
+		ComparableIssue: comparableIssue,
+		Level:           rec.Level,
+		IntegrityIssue:  rec.EvidenceIntegrityIssue(),
+		Contaminated:    len(rec.Contamination) > 0,
+		Arch:            advise.ArchFromKVs(rec.ModelMeta.Info),
+		WeightsB:        rec.ModelMeta.Size,
+		NumCtx:          numCtx,
+		Repeats:         rec.Repeats,
+		ToolsBlocked:    toolsBlocked,
+	}
 }
 
 func servingCtxFromRunning(running []ollama.RunningModel, model string) (int, bool) {

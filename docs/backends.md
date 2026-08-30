@@ -58,8 +58,8 @@ across it.
 own log (authoritative over your shell's environment).
 
 **llama-server** is not just reach - it is measurement surface Ollama does
-not expose: per-request **cached-token counts** (the only honest way to
-separate a warm prefill from a cold one; the two differ by 70-200x), and a
+not expose: per-request **cached-token counts** (the evidence needed to
+separate loaded/uncached prompt processing from a prefix-cache hit), and a
 **capability probe** via `/props`, so tool and vision support is read from
 the endpoint, never guessed from the model's name. Resident-memory needs
 SKIP on llama-server - it does not report resident bytes, and a made-up

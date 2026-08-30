@@ -8,7 +8,6 @@ import (
 
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
-	"github.com/blisspixel/fitr/internal/stats"
 )
 
 func testRunProvenance(t *testing.T) RunProvenance {
@@ -163,16 +162,20 @@ func TestCanonicalPolicyHashesIgnoreMapInsertionOrder(t *testing.T) {
 	}
 }
 
-func TestAdaptiveDecisionPersistsAndRejectsDuplicateNeed(t *testing.T) {
-	test, _ := stats.GateSPRT(0.75)
-	test.Add(true)
-	decision, err := eval.CaptureAdaptiveDecision("structured_output", 0.75, 1, 1, test)
-	if err != nil {
-		t.Fatal(err)
+func TestLegacyAdaptiveDecisionPersistsButCurrentSchemaRejectsIt(t *testing.T) {
+	decision := eval.AdaptiveDecision{
+		Need: "structured_output", Method: eval.AdaptiveMethodWaldSPRT,
+		Gate: 0.75, NullRate: 0.65, AltRate: 0.85, Alpha: 0.05, Beta: 0.05,
+		MaxTrials: 1, Trials: 1, Passes: 1, Failures: 0, LogRatio: 0.2,
+		Decision: eval.AdaptiveInconclusive, StopReason: "trial_cap",
 	}
 	r := manifestRecord("model", "2026-08-21T12:00:00Z")
 	r.SchemaVersion = EvidenceSchemaVersion
 	r.AdaptiveDecisions = []eval.AdaptiveDecision{decision}
+	addTestFingerprintV2(t, r)
+	if err := r.AttachManifest(digestIdentity(t, "model", "model"), testRunProvenance(t)); err != nil {
+		t.Fatal(err)
+	}
 	b, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
@@ -184,8 +187,7 @@ func TestAdaptiveDecisionPersistsAndRejectsDuplicateNeed(t *testing.T) {
 	if len(decoded.AdaptiveDecisions) != 1 || decoded.AdaptiveDecisions[0] != decision {
 		t.Fatalf("adaptive receipt changed: %+v", decoded.AdaptiveDecisions)
 	}
-	if err := validateAdaptiveDecisions([]eval.AdaptiveDecision{decision, decision}); err == nil ||
-		!strings.Contains(err.Error(), "appears more than once") {
-		t.Fatalf("duplicate adaptive need error = %v", err)
+	if err := r.ValidateEvidenceContract(); err == nil || !strings.Contains(err.Error(), "fixed generated-check plan") {
+		t.Fatalf("current adaptive rejection = %v", err)
 	}
 }

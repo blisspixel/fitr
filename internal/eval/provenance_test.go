@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
-
-	"github.com/blisspixel/fitr/internal/stats"
 )
 
 func TestBuiltinHashesAreStableAndCoverVersionSeparately(t *testing.T) {
@@ -116,35 +114,27 @@ func TestBuiltinJSONDecoderRejectsUnknownFieldsAndTrailingData(t *testing.T) {
 	}
 }
 
-func TestAdaptiveDecisionCapturesBoundaryAndCap(t *testing.T) {
-	above, err := stats.GateSPRT(0.75)
+func TestLegacyWaldAdaptiveReceiptRemainsReadable(t *testing.T) {
+	receipt := AdaptiveDecision{
+		Need: "structured_output", Method: AdaptiveMethodWaldSPRT,
+		Gate: 0.75, NullRate: 0.65, AltRate: 0.85,
+		Alpha: 0.05, Beta: 0.05, MaxTrials: 1, Trials: 1,
+		Passes: 1, Failures: 0, LogRatio: 0.2,
+		Decision: AdaptiveInconclusive, StopReason: "trial_cap",
+	}
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("legacy Wald receipt became unreadable: %v", err)
+	}
+	b, err := json.Marshal(receipt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	passes := 0
-	for above.State() == stats.SPRTContinue && above.N < 100 {
-		above.Add(true)
-		passes++
-	}
-	receipt, err := CaptureAdaptiveDecision("structured_output", 0.75, 100, passes, above)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if receipt.Decision != AdaptiveAboveGate || receipt.StopReason != "upper_boundary" || receipt.Trials != passes {
-		t.Fatalf("boundary receipt = %+v", receipt)
-	}
-
-	capped, _ := stats.GateSPRT(0.75)
-	capped.Add(true)
-	inconclusive, err := CaptureAdaptiveDecision("structured_output", 0.75, 1, 1, capped)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inconclusive.Decision != AdaptiveInconclusive || inconclusive.StopReason != "trial_cap" {
-		t.Fatalf("cap receipt = %+v", inconclusive)
-	}
-	if _, err := CaptureAdaptiveDecision("structured_output", 0.75, 1, 2, capped); err == nil {
-		t.Fatal("accepted more passes than trials")
+	want := `{"need":"structured_output","method":"wald_sprt_v1","gate":0.75,` +
+		`"null_rate":0.65,"alternative_rate":0.85,"alpha":0.05,"beta":0.05,` +
+		`"max_trials":1,"trials":1,"passes":1,"failures":0,` +
+		`"log_likelihood_ratio":0.2,"decision":"inconclusive","stop_reason":"trial_cap"}`
+	if string(b) != want {
+		t.Fatalf("legacy Wald wire shape changed:\n got %s\nwant %s", b, want)
 	}
 }
 

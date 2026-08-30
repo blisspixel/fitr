@@ -11,7 +11,6 @@
 package stats
 
 import (
-	"fmt"
 	"math"
 	"sort"
 )
@@ -81,15 +80,18 @@ type Cluster struct {
 // families are clusters; pooling them as iid overstates n and can mint a
 // PASS that hides a dead family.
 //
-//	deff  = 1 + (m̄ - 1)ρ̂
+//	deff  = 1 + (((1 + CV_size^2)m̄) - 1)ρ̂
 //	n_eff = n / deff
 //
-// ρ̂ is the ANOVA intra-cluster correlation, floored at 0. When every
-// cluster has size 1, or there is only one cluster, the result equals
-// Wilson. The interval is never narrower than ordinary Wilson.
+// ρ̂ is the unequal-cluster ANOVA intra-cluster correlation, floored at
+// zero. The size-CV correction prevents a few large repeated families from
+// impersonating many independent families. A single family has one effective
+// unit because between-family variance is not identifiable. The interval is
+// never narrower than ordinary Wilson.
 func ClusteredWilson(clusters []Cluster) Interval {
 	var passes, n, groups int
 	equalSingletons := true
+	sizeSquares := 0.0
 	for _, c := range clusters {
 		if c.N <= 0 {
 			continue
@@ -97,6 +99,7 @@ func ClusteredWilson(clusters []Cluster) Interval {
 		groups++
 		passes += c.Passes
 		n += c.N
+		sizeSquares += float64(c.N * c.N)
 		if c.N != 1 {
 			equalSingletons = false
 		}
@@ -106,8 +109,13 @@ func ClusteredWilson(clusters []Cluster) Interval {
 	}
 	p := float64(passes) / float64(n)
 	iid := Wilson(passes, n)
-	if groups <= 1 || equalSingletons {
+	if equalSingletons {
 		return iid
+	}
+	if groups == 1 {
+		lo, hi := wilsonRate(p, 1)
+		return Interval{Point: round(p, 4), Lo: round(min(lo, iid.Lo), 4),
+			Hi: round(max(hi, iid.Hi), 4), N: n}
 	}
 
 	meanSize := float64(n) / float64(groups)
@@ -126,14 +134,30 @@ func ClusteredWilson(clusters []Cluster) Interval {
 	if n > groups {
 		msw = within / float64(n-groups)
 	}
+	// n0 is the effective cluster size in the unequal-size one-way random
+	// effects estimator. It equals meanSize when cluster sizes are equal.
+	n0 := (float64(n) - sizeSquares/float64(n)) / float64(groups-1)
 	rho := 1.0
-	if msb+(meanSize-1)*msw > 0 {
-		rho = (msb - msw) / (msb + (meanSize-1)*msw)
+	if denominator := msb + (n0-1)*msw; denominator > 0 {
+		rho = (msb - msw) / denominator
 	}
 	if rho < 0 {
 		rho = 0
 	}
-	deff := 1 + (meanSize-1)*rho
+	if rho > 1 {
+		rho = 1
+	}
+	sizeVariance := 0.0
+	for _, c := range clusters {
+		if c.N <= 0 {
+			continue
+		}
+		d := float64(c.N) - meanSize
+		sizeVariance += d * d
+	}
+	sizeVariance /= float64(groups)
+	sizeCV2 := sizeVariance / (meanSize * meanSize)
+	deff := 1 + ((1+sizeCV2)*meanSize-1)*rho
 	if deff < 1 {
 		deff = 1
 	}
@@ -141,8 +165,8 @@ func ClusteredWilson(clusters []Cluster) Interval {
 	if nEff > float64(n) {
 		nEff = float64(n)
 	}
-	if nEff < float64(groups) {
-		nEff = float64(groups)
+	if nEff < 1 {
+		nEff = 1
 	}
 	lo, hi := wilsonRate(p, nEff)
 	if lo > iid.Lo {
@@ -247,75 +271,6 @@ func FiellerRatio(a, b Summary) (lo, hi, ratio float64, ok bool) {
 	}
 	half := t / math.Abs(b.Mean) * math.Sqrt(v11*(1-g)+r*r*v22)
 	return round((r-half)/(1-g), 3), round((r+half)/(1-g), 3), round(r, 3), true
-}
-
-// ---------------------------------------------------------------- sequential
-// SPRTDecision is the three-way outcome of a sequential test. Undecided at a
-// truncation cap is a REAL answer - "this sample cannot separate the rate
-// from the gate" - not a failure to produce one.
-type SPRTDecision int
-
-const (
-	SPRTContinue SPRTDecision = iota
-	SPRTAcceptH1              // the rate is at or above the gate's upper hypothesis
-	SPRTAcceptH0              // the rate is at or below the gate's lower hypothesis
-)
-
-// SPRT is Wald's sequential probability ratio test (1945) for a binomial
-// rate: H0: p=p0 vs H1: p=p1, alpha=beta=0.05. Each trial moves a running
-// log-likelihood ratio; crossing ln(19) accepts H1, crossing -ln(19) accepts
-// H0, and in between the honest state is "keep sampling". Wald & Wolfowitz
-// (1948) proved no test with the same error rates needs fewer expected
-// trials. Precedent in exactly this shape: Stockfish's Fishtest has gated
-// every engine patch by truncated SPRT for over a decade.
-type SPRT struct {
-	incS, incF float64
-	logA, logB float64
-	LLR        float64
-	N          int
-}
-
-// NewSPRT builds a test of p0 vs p1 (0 < p0 < p1 < 1) at alpha=beta=0.05.
-func NewSPRT(p0, p1 float64) (*SPRT, error) {
-	if !(0 < p0 && p0 < p1 && p1 < 1) {
-		return nil, fmt.Errorf("SPRT needs 0 < p0 < p1 < 1, got %v, %v", p0, p1)
-	}
-	logA := math.Log(19) // ln((1-beta)/alpha) at 0.05/0.05
-	return &SPRT{
-		incS: math.Log(p1 / p0), incF: math.Log((1 - p1) / (1 - p0)),
-		logA: logA, logB: -logA,
-	}, nil
-}
-
-// GateSPRT centers a symmetric indifference region of half-width 0.10 on a
-// pass-rate gate, clamped inside (0.02, 0.98). Half-width 0.10 keeps the
-// worst-case expected sample near 38 trials; halving it would roughly
-// quadruple that (N ~ 1/delta²) and blow any reasonable run budget.
-func GateSPRT(gate float64) (*SPRT, error) {
-	p0 := math.Max(0.02, gate-0.10)
-	p1 := math.Min(0.98, gate+0.10)
-	return NewSPRT(p0, p1)
-}
-
-// Add folds in one trial and reports the state.
-func (s *SPRT) Add(pass bool) SPRTDecision {
-	if pass {
-		s.LLR += s.incS
-	} else {
-		s.LLR += s.incF
-	}
-	s.N++
-	return s.State()
-}
-
-func (s *SPRT) State() SPRTDecision {
-	switch {
-	case s.LLR >= s.logA:
-		return SPRTAcceptH1
-	case s.LLR <= s.logB:
-		return SPRTAcceptH0
-	}
-	return SPRTContinue
 }
 
 // ---------------------------------------------------------------- outliers
@@ -490,28 +445,6 @@ func FirstRunSlow(xs []float64) (slow bool, ratio float64) {
 	ratio = round(rest.Mean/first, 2)
 	// 1.25x is well outside the ~2% run-to-run spread a settled model shows.
 	return ratio >= 1.25, ratio
-}
-
-// MinDetectableEffect is a rough MDE for a binary eval (worst case p=0.5,
-// 80% power, alpha=0.05). Exposed so the tool can state what it CANNOT
-// resolve rather than implying precision it does not have.
-func MinDetectableEffect(items, repeats int) float64 {
-	n := max(items*max(1, repeats), 1)
-	return round(2.8*math.Sqrt(0.25/float64(n)), 3)
-}
-
-// MinDetectableDifference is the same rough calculation for comparing two
-// measured rates against each other rather than one rate against a gate. The
-// variance of a difference is the sum of two variances, so the resolution is
-// worse by a factor of sqrt(2): at 23 trials per arm this is about 41 points,
-// not the 29 that MinDetectableEffect reports for a gate test.
-//
-// Both numbers exist because fitr makes both kinds of claim, and a scorecard
-// that prints the gate figure next to the words "not good from slightly
-// better" is quoting the wrong one.
-func MinDetectableDifference(items, repeats int) float64 {
-	n := max(items*max(1, repeats), 1)
-	return round(2.8*math.Sqrt(0.5/float64(n)), 3)
 }
 
 // tCrit975 holds two-sided 95% Student-t critical values (t_{0.975,df}) for

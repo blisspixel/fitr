@@ -6,8 +6,9 @@ SAME model with the SAME config show 10-20 percentage-point swings (one
 tool-calling audit measured SD 5.4pp, spread 18.9pp). We saw it ourselves --
 the same coding task flipped pass/fail between runs on three different models.
 
-So: repeat each task K times, report an interval, and refuse to rank two models
-whose intervals overlap.
+So: repeat each task K times, report uncertainty per measured need, and refuse
+behavior winner claims without identical paired instances. The production Go
+instrument additionally clusters generated observations by task family.
 
 Below N~300 the CLT is the wrong tool. Wilson score intervals are the standard
 recommendation for binary pass/fail, and they behave correctly near p=0 and p=1
@@ -87,13 +88,3 @@ def flakiness(results) -> dict:
 def summarize_repeats(runs: list, key_path) -> dict:
     """Collect one numeric metric across repeats. key_path is a callable."""
     return mean_sd([key_path(r) for r in runs if r])
-
-
-def min_detectable_effect(n_items: int, k_repeats: int = 1) -> float:
-    """Rough MDE for a binary eval, worst case p=0.5, 80% power, alpha=0.05.
-
-    Included so the tool can tell the user what it CANNOT resolve, rather than
-    implying precision it does not have.
-    """
-    n_eff = max(1, n_items * max(1, k_repeats))
-    return round(2.8 * math.sqrt(0.25 / n_eff), 3)

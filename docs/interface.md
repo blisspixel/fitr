@@ -18,9 +18,10 @@ The default commands stay composable:
   first-class. Visual polish must never break pipes, logs, CI, or terminals
   without color and Unicode.
 
-The graphs show observations, not certainty. Confidence intervals, repeat
-counts, minimum detectable effects, and the refusal to rank across device
-fingerprints remain more important than visual density.
+The graphs show observations, not certainty. Per-need intervals, family and
+repeat counts, and the refusal to rank across device fingerprints remain more
+important than visual density. There is no global resolution statistic across
+unrelated needs.
 
 ## The opt-in full-screen TUI
 

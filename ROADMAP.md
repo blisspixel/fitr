@@ -1,6 +1,7 @@
 # Roadmap
 
-`fitr` answers one question: **is this local model any good on this machine?**
+`fitr` answers one question: **what local AI actually works for my workload on
+this machine, and what evidence proves it?**
 
 The product is the local decision loop, not a benchmark score:
 
@@ -14,18 +15,38 @@ the artifact, runtime, context, and device that produced them. Unsupported or
 uncertain facts remain visible without becoming rankings. Every negative fit
 verdict carries a remedy.
 
+The broader 1.0 thesis has seven evidence layers:
+
+| Layer | Question |
+|---|---|
+| FIT | Can this artifact, context, and placement run within the measured capacity? |
+| BEHAVIOR | Does it perform the required primitives correctly? |
+| PERFORMANCE | How long do load, prompt processing, first response, and generation take? |
+| EXPLAIN | Which observed constraint is most likely to matter, and how strong is that evidence? |
+| VALIDATED WORK | Does speed survive correctness checks, retries, and independent verification? |
+| TRADEOFFS | Which configurations are dominated, and which are genuine choices? |
+| COVERAGE | Which declared workloads have earned local trust, and which still need evidence or fallback? |
+
+There is no global score across these layers. A configuration can fit without
+being fast, be fast without being correct, or be reliable for one bounded
+workflow without earning unattended authority for another.
+
 The rationale and invariants live in [design](docs/design.md). Commands and
-flags live in [usage](docs/usage.md). Statistical methods live in
-[statistics](docs/statistics.md).
+flags live in [usage](docs/usage.md). Hardware decision evidence lives in
+[choosing hardware](docs/choosing-hardware.md). Bounded workflow and proof
+contracts live in [workload evidence](docs/workload-evidence.md). Statistical
+methods live in [statistics](docs/statistics.md).
 
 ## Status
 
 | Horizon | Release | Outcome |
 |---|---|---|
 | Shipped | 0.9.8 | Output that fits the terminal, and verdicts the renderer can lay out |
-| Now | 0.9.9 | Tool calls measured in the tool channel; then decomposition and the native matrix |
-| Then | 1.0 | A new user can install fitr and close the loop on a clean machine without reading source code |
-| Next | Trust C | Isolated executable evidence, stronger release provenance, and calibrated profile provenance |
+| Now | 0.9.9 | Evidence correctness, tool-channel behavior, internal decomposition, and the native matrix |
+| Then | 0.10 | Explain and choose: central analysis, capacity versus performance, calibration, context and quant experiments |
+| Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
+| Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
+| Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
 | Later | Candidate discovery | Find models worth measuring, then measure them; plus loop extensions |
 
 Progress is counted in releases, not dates. Each pre-1.0 release below states
@@ -292,38 +313,58 @@ every need the code does.
       This matters more than the bytes saved: an HTTP range body is an
       `io.Reader`, so discovery reuses the fuzz-hardened fit arithmetic instead
       of growing a second, weaker copy of it.
-- [ ] Finish the anytime-valid gate. `internal/stats/gate.go` implements the
-      Robbins beta-mixture e-process with property and vector tests, and
-      `cmd_run.go` still calls `stats.GateSPRT`. gate.go's own header records
-      why: SPRT certified a model sitting exactly on the gate 44% of the time
-      against a nominal 5%. So the method in use is the one this repo documents
-      as miscalibrated, `docs/statistics.md` section 6 still describes it, and
-      the replacement is built and unwired.
-
-      Two things move together with it. `GateEvidence.LowerBound` exists so the
-      stopping rule and the reported bound are the same arithmetic and cannot
-      contradict each other; today an adaptive run prints a fixed-sample
-      Rao-Scott Wilson interval computed on a stopping time, which is the same
-      class of error. And the process is one-sided -- it can certify "above the
-      gate" and cannot certify "below it" -- so a maintenance loop cannot state
-      a regression, only suspect one. The mirror process is a small addition to
-      gate.go and it is what turns "we can say it is good" into "we can say it
-      broke".
-
-      Changing the persisted adaptive receipt is a spec bump, which is why this
-      is a release item and not a patch.
-- [ ] Put the model artifact digest in the comparability key. `FingerprintV2`
-      seals host, OS, CPU, RAM, GPU, driver, backend, VRAM, runtime, placement,
-      config and context -- and not the weights. Tags are mutable, so an
-      `ollama pull` can replace what is behind `:latest` with the device key
-      unchanged. Joining measurements by model name is the wrong join, and it
-      is the highest-severity gap for anything that accumulates evidence over
-      time.
-- [ ] Say what went stale. `advise.evidenceUsable` is an exact key match and
-      `staleNote` says only "device or runtime changed since the last
-      measurement". `Fingerprint.Diff` already computes the field-level answer
-      and `incomparableNote` already renders it in `compare`. Wiring it into
-      the inventory path is small and self-contained.
+- [x] Remove the unsound adaptive verdict path from current runs. A second
+      statistical audit found that the sequential Bernoulli process and the
+      scorecard's clustered-family estimand did not match, and several specs
+      share a family. Current runs use fixed, sealed denominators and the
+      cluster-adjusted fixed-sample interval. Legacy Wald receipts remain
+      readable only in display-only schema-5 history.
+- [ ] Design adaptive sampling around an explicit stratified estimand before
+      exposing it again. The candidate protocol draws one fresh instance per
+      distinct family per complete round and applies an anytime-valid bounded
+      mean process to complete-round family averages. It must persist the
+      stratum plan, observed and scorable counts, skips, round boundaries,
+      stopping rule, and replay to the first crossed boundary.
+- [x] Bind inventory reuse to the model artifact without putting the digest in
+      the device comparability key. Different models still share a board block,
+      while a saved run is reusable only when the current runtime-bound digest
+      matches. Replacing the bytes behind `:latest` produces STALE, never
+      MEASURED.
+- [x] Say what went stale. Artifact changes, missing verified identity, stored
+      evidence integrity, contamination, and field-level fingerprint drift now
+      have distinct explanations and the same direct re-run remedy.
+- [x] Reuse performance evidence only when the artifact, effective context,
+      placement, device fields, runtime digest, and integrity all match. Advise
+      no longer attaches timing from a mutable tag or a superficially similar
+      device key.
+- [x] Make TTFT cache state evidence rather than an assumption. The probe nonce
+      now precedes the measured prompt, cache-known survives the evaluator and
+      score receipt, and unknown or cache-hit observations cannot prove the
+      uncached responsiveness gate. A prefill probe with unknown cache state
+      or any observed cache hit likewise cannot establish an uncached prefill
+      gate or comparison claim.
+- [x] Seal the memory probe's exact bytes and requested/effective context. The
+      low-footprint need is scored only when the runtime confirms the requested
+      32K allocation. Output labels the observation as the requested 32K load
+      probe instead of presenting it as a general memory number.
+- [x] Make explicit HTML export privacy-safe by construction. The share model
+      allowlists the comparison settings it needs and replaces the raw device
+      key with an opaque ID. Raw outputs, hostnames, local paths, and arbitrary
+      runtime configuration do not enter the artifact.
+- [x] Version the changed evidence contract. Result schema 6 and completion
+      receipt v2 bind replayable cache state and point-specific memory
+      receipts. Schema-5 records remain readable but are
+      display-only, so an older footprint or TTFT PASS cannot survive without
+      the evidence now required for that claim. The exact legacy Wald JSON
+      shape is retained and covered by a signed round-trip fixture.
+- [x] Seal the remaining current-run denominators and timing receipts. The
+      generated check schedule and exact refusal prompt IDs are digest-bound
+      before inference; a speed observation proves that first output occurred;
+      unplanned memory fields and missing planned evidence are rejected.
+- [x] Make paired behavior claims respect both terminal outcomes and family
+      clustering. SKIP and INCONCLUSIVE never become failures. Item flips stay
+      descriptive, while the exact test gives each generated family at most
+      one direction.
 - [ ] Decompose the run pipeline far enough to turn on the complexity gates.
       `execute` went from 571 lines to 463 by extracting the measurement
       phases, and `main.go` from 4,074 to 1,199, but `funlen`, `gocognit`,
@@ -334,16 +375,134 @@ every need the code does.
       still resting on automated tests alone.
 - [ ] Run the acceptance path on clean macOS and Linux installs.
 
-Exit criterion: the complexity linters are enabled with no suppressions in the
-run pipeline, and every backend row rests on a native run.
+Exit criterion: every evidence-correctness item above is complete, the
+complexity linters are enabled with no suppressions in the run pipeline, and
+every backend row rests on a native run.
 
-### 1.0 - clean-machine confidence
+### 0.10 - explain and choose
+
+The first two questions in a hardware decision are different: can the model
+fit, and how does it perform once it does? This release makes that separation
+structural and adds cautious explanation without turning vendor specifications
+or arithmetic proxies into measured facts.
+
+- [ ] Define one renderer-neutral analysis contract consumed by CLI, TUI, HTML,
+      and later clients. It owns performance, capacity, model shape, placement,
+      diagnoses, evidence gaps, and next actions. Clients render it and never
+      recompute a verdict or bottleneck.
+- [ ] Reorganize Result into PERFORMANCE and CAPACITY. Keep TTFT, prefill,
+      decode, and load separate from resident allocation, remaining capacity,
+      context, and placement. Preserve cold, loaded-uncached, and cache-hit
+      observations as distinct evidence when the backend can identify them.
+- [ ] Show dense versus MoE shape with total and active-per-token parameters
+      only when artifact metadata supports those facts. Do not infer either
+      from a model name.
+- [ ] Add conservative diagnoses with enumerated evidence and confidence.
+      Labels such as `consistent with memory-traffic pressure` are allowed;
+      an unmeasured claim such as `memory-bandwidth bound` is not. Every
+      diagnosis names contradictory or missing evidence and a useful next
+      experiment.
+- [ ] Make help selection-aware for TTFT, prefill, decode, resident memory,
+      placement, model shape, and verdict uncertainty. Explain what each fact
+      answers and what comparisons remain valid.
+- [ ] Score fitr's own capacity predictions. Store predicted weights plus KV
+      beside observed runtime allocation, accumulate residuals by architecture
+      and context, and publish uncertainty. A correction never enters a fit
+      verdict until its calibration and versioned provenance support that use.
+- [ ] Prototype a context sweep as its own experiment schema. Each point binds
+      requested/effective context, allocation, TTFT cache state, placement, and
+      comparable performance. One failed point does not fabricate later ones.
+- [ ] Prototype a quant and configuration frontier. Report dominance only when
+      one measured option is no worse on all declared dimensions and strictly
+      better on at least one. Otherwise show the tradeoff, not a winner.
+- [ ] Produce a device requirement brief from the user's declared workloads:
+      capacity window, interactive latency, prompt-processing demand,
+      sustained or concurrent regime, portability, software support, and
+      missing evidence. Vendor bandwidth, TOPS, prices, and power limits remain
+      labeled specifications rather than measurements.
+
+Exit criterion: every shipped explanation is generated centrally, cites its
+evidence, survives missing receipts without guesswork, and renders identically
+in meaning across CLI, TUI, and HTML. The device requirement brief is usable
+without turning specifications into measurements. Context and quant prototypes
+either earn a versioned command contract or remain clearly named experiments.
+
+### 0.11 - validated workload evidence
+
+The model is not always the largest useful evaluation unit. A bounded workflow
+can be measured when its authority, state, definition of done, and independent
+verifier are explicit. fitr evaluates that system; it does not become its work
+queue, scheduler, or organizational memory.
+
+- [ ] Add sealed per-trial receipts for scenario release, worker start/end,
+      model and tool intervals, verifier queue/start/end, verifier outcome,
+      independent acceptance, approval and escalation events, retries, and
+      terminal state. Analysis separates worker, tool, queue, verifier, and
+      human-wait time. Aggregate result files alone must never be reverse-joined
+      into a time-to-valid-result claim.
+- [ ] Define evidence classes: deterministic assertion, external system state,
+      independent verifier, harness state machine, heuristic, model judged,
+      self-reported, and none. Core workflow PASS and FAIL require an allowed
+      independent class; self-report never upgrades itself into proof.
+- [ ] Version a bounded workflow contract with intent, initial state, supplied
+      context, allowed tools, forbidden actions, definition of done, verifier,
+      budgets, approval authority, denial/timeout/revocation behavior,
+      escalation conditions, and optional checkpoint/resume rules.
+- [ ] Bind comparability to a workflow fingerprint covering the workflow spec,
+      scenario, seed, initial state, tools and service versions, context
+      provider and event manifest, verifier environment, permission profile,
+      state and checkpoint lineage, worker and harness builds, sampling, cache,
+      concurrency, retry, stopping, and data-boundary policy in addition to the
+      existing model and machine identity.
+- [ ] Report pass rate and attempt latency side by side. Add time to valid
+      result, attempts per accepted outcome, and validated work rate only when
+      their required receipts exist. Do not produce a global productivity
+      score or assign a monetary value to human time.
+- [ ] Add local workload coverage from user-declared task groups. A workload is
+      proven, unproven, blocked, inconclusive, or capacity-limited on this exact
+      configuration. The report states what still needs a fallback.
+- [ ] Prototype bounded-authority tests: recommend-only behavior, approval
+      gates, permission removal, ambiguity escalation, scope restraint, and
+      completion without authority expansion.
+- [ ] Prototype checkpoint and resume tests plus context-robustness cases for
+      distractors, stale versus current facts, late relevant facts, and excess
+      irrelevant context. Resume verification also rejects duplicated side
+      effects. Maximum context and effective context are different measurements.
+- [ ] Build the minimum isolated verifier/worker boundary required for any
+      executable workflow verdict. The 0.11 experiment may run one fixed,
+      harness-owned workflow in a constrained fixture. Arbitrary generated code
+      and executable user-task JSON remain SKIP until the stronger Trust C
+      boundary passes the native safety matrix.
+- [ ] Prototype sustained and concurrent operation as separate experiment
+      families. Soak measures performance drift and accepted work over time.
+      A soak reports validated-outcome drift only when an independently
+      verified bounded workload is part of the experiment. Serving tests
+      measure total and per-request throughput, accepted outcomes per exposure
+      wall time, and TTFT distributions at declared concurrency. Neither
+      contaminates `fitr run` or enters its rankings.
+- [ ] Keep data-boundary, energy, and economics claims evidence-based. Report
+      the endpoint and transport fitr observed without claiming to inspect the
+      runtime's egress. Energy requires a trustworthy named sensor. Economics
+      accepts user assumptions and never downloads prices or invents retained
+      cloud spend.
+
+Exit criterion: fitr can demonstrate one bounded workload with an explicit
+definition of done and independent verifier, report accepted outcomes without
+joining incompatible evidence, and state exactly how much autonomy that
+configuration has earned. Experimental operation modes keep distinct schemas
+and comparison domains.
+
+### 1.0 - proven local decision system
 
 - [ ] Run the complete acceptance path on clean Windows, macOS, and Linux
       installs.
 - [x] Review every command's first-run error and next-action text from a new
       user's perspective. Cross-platform command-contract tests pin successful
       help, exact positional arguments, numeric validation, and useful hints.
+- [ ] Complete the core 0.10 analysis contract and the core 0.11 workload
+      receipt, independent-proof, and coverage contracts. Optional experiment
+      commands need not all graduate, but their findings must be reflected in
+      the final CLI and schema decisions.
 - [ ] Cut a release candidate, verify all six binaries and checksums through
       both installers, then publish 1.0.
 
@@ -360,6 +519,11 @@ A new user can:
    and never restarts or mutates the server.
 5. Reopen and compare only evidence that is valid for the current device and
    runtime fingerprint.
+6. Read capacity and performance separately, understand what evidence supports
+   each diagnosis, and see the next experiment when the cause is uncertain.
+7. Evaluate at least one declared bounded workload against an independent
+   definition of done, then see which local work is proven and which still
+   needs evidence or fallback.
 
 The native and backend evidence matrix is tracked in
 [release acceptance](docs/release-acceptance.md).
@@ -373,7 +537,7 @@ The native and backend evidence matrix is tracked in
 | Run | Independent needs, explicit uncertainty, no generated-code execution by default. |
 | Apply | Prints a persistence recipe. It does not restart or mutate a server. |
 | Board and compare | Refuse cross-fingerprint or context-unverified rankings. |
-| Export | Opt-in, self-contained, fingerprint visible, raw model output omitted. |
+| Export | Opt-in and self-contained. Uses an opaque device ID and allowlisted comparison configuration; omits raw output, hostname, paths, raw fingerprint key, and arbitrary runtime configuration. |
 
 Backend identity details are in [backends](docs/backends.md). The task and
 execution-safety contract is in [tasks](docs/tasks.md). Doctor's measurement
@@ -383,14 +547,18 @@ preflight is in [doctor](docs/doctor.md).
 
 | Limitation | Consequence |
 |---|---|
-| About 23 binary trials per default run | Minimum detectable effect is about 29 percentage points. The default battery separates broken from working, not good from slightly better. |
+| 22 generated task specs across 16 families and five needs | Uncertainty is per need and cluster-aware. Unrelated outcomes are never combined into a global quality sample or resolution claim. Thin evidence remains INCONCLUSIVE. |
 | OpenAI-compatible timings are client-derived | Usage supplies token counts, but the generic protocol does not expose server timing receipts. |
 | Two device profiles | `lappy` is calibrated; `default` is explicitly uncalibrated. No hardware SKU gates are invented from names. |
 | Device detection is probe-derived | Vendor tools and OS inventories disagree about what a GPU is. The fingerprint is only as good as the probe, which is why device identity gets its own gate. |
-| Conventional attention uses weights plus KV by default | Compute buffers require `--load` or `--fit`. Hybrid recurrent models stay SKIP without a measured allocation. |
+| Conventional attention uses weights plus KV by default | `--load` or `--fit` can observe total allocation and derive an `other resident` remainder, which may include compute buffers and other overhead. It is not an independently measured buffer breakdown. Hybrid recurrent models stay SKIP without a measured allocation. |
 | Inventory comes from the serving runtime | There is no disk crawl or internet catalog. A llama-server exposes one model row. |
 | `--full` is a long agent loop | Executable coding evidence stays SKIP until the isolated worker exists. The default battery is the first real measurement. |
 | Scored inference is single-flight | Parallel prompts would contaminate throughput and context measurements. |
+| TTFT cache state may be unknown | The timing remains visible, but unknown or cache-hit TTFT cannot prove the uncached responsiveness gate. |
+| Low-footprint is a requested 32K load probe | It is scored only when the runtime confirms that effective context. Older receipts remain visible but cannot support the claim. |
+| Bottleneck explanations are hypotheses | A diagnosis cites observations and uncertainty. fitr does not turn a speed ratio or vendor bandwidth specification into a measured root cause. |
+| Validated throughput needs per-trial receipts | Aggregate pass rates and token timings cannot honestly yield time to valid result, accepted outcomes per hour, retries, or escalation cost. |
 
 These limits are part of the contract, not hidden release notes. More detail is
 in [design](docs/design.md), [statistics](docs/statistics.md), and
@@ -398,26 +566,18 @@ in [design](docs/design.md), [statistics](docs/statistics.md), and
 
 ## Next: Trust C
 
-Trust C strengthens what can become decision-grade evidence. It does not
-change the 1.0 product loop.
+Trust C strengthens provenance and generalizes the minimum safe execution
+boundary required by the 1.0 workload experiment.
 
-- [ ] Build a cross-platform isolated worker. Executable coding tasks remain
-      SKIP until confinement has the same testable guarantees on all six
-      release targets.
+- [ ] Harden the cross-platform isolated worker beyond the minimum bounded
+      verifier boundary. Executable coding tasks remain SKIP until confinement
+      has the same testable guarantees on all six release targets.
 - [ ] Add signed releases, SBOMs, and attestations.
 - [ ] Define calibrated profile provenance and community calibration tooling.
 - [ ] Add externally anchored share provenance and a trust-root workflow for
       decision-grade community evidence.
-- [ ] **Score fitr's own predictions.** Advise predicts weights plus KV and
-      then disclaims "compute buffers not included" on every verdict. Ollama
-      `/api/ps` reports what the server actually allocated. fitr already has
-      both numbers and has never compared them. Recording predicted against
-      observed turns a permanent disclaimer into a measured correction term,
-      per architecture and context, and every stored run is a free sample. An
-      evidence tool that keeps no evidence about its own accuracy is holding
-      itself to a lower standard than it holds a model to. The correction is
-      published as a measured residual with its own uncertainty, never folded
-      silently into the estimate.
+- [ ] Extend 0.10 measurement calibration into reviewable cross-device studies
+      and externally reproducible calibration artifacts.
 - [ ] Publish repeatability and test-retest studies. First measurements taken,
       on one host with a 7B model:
       | Condition | Decode CV | Note |
@@ -447,10 +607,10 @@ without reading the implementation.
 ## Later: candidate discovery
 
 Today fitr answers "is what I already have any good here?" The larger question
-is "what should I get?" -- and fitr is the only tool positioned to answer it,
-because it already owns the verifier. A candidate does not have to be trusted;
-it has to be pulled and measured. A name that does not exist fails at pull,
-loudly and cheaply.
+is "what should I get?" fitr is positioned to answer it with the same local
+verifier rather than an unmeasured ranking. A candidate does not have to be
+trusted; it has to be pulled and measured. A name that does not exist fails at
+pull, loudly and cheaply.
 
 The loop extends by one step at the front:
 
@@ -538,14 +698,15 @@ would spend the 1.0 polish budget on a second product.
 - [ ] **Opt-in recurring reevaluation.** Produce an OS-native scheduled plan
       only after explicit confirmation. Default to a dry run with network,
       disk, wall-time, thermal, and external-cost budgets.
-- [ ] **Report only what the instrument resolves.** At default settings a run
-      is about 25 binary trials, so the minimum detectable effect is about 28
-      percentage points: the battery cannot tell a model from its own
-      successor on quality, which is exactly the comparison this feature
-      invites. Throughput is a different instrument -- k=3 on one device
-      measured decode at a 1.6 percent coefficient of variation. So an
-      unattended report may state fit, memory, speed, and breakage, and must
-      not state that one model is smarter than another it cannot separate.
+- [ ] **Report only what the instrument resolves.** The default generated
+      battery spans 22 task specs, 16 families, and five independent needs.
+      Each need has its own interval and gate; there is no defensible global
+      quality denominator. Throughput is a different instrument: k=3 on one
+      device measured decode at a 1.6 percent coefficient of variation. An
+      unattended report may state fit, memory, speed, and established
+      breakage. It must never call one model globally smarter. Complete paired,
+      family-aware evidence may support only a scoped directional claim about
+      the declared need and families it actually separates.
 - [ ] **Spend background time on statistical power.** Wall-clock is the one
       resource a scheduled job has and an interactive user does not. Repeats
       that nobody would wait for are affordable overnight, and trials are what
@@ -624,9 +785,9 @@ These features must preserve the evidence contract.
 |---|---|
 | Community SKU profiles | Real measured gates are required. `fitr profiles new` already creates an explicitly uncalibrated local profile. |
 | Battery changes in `spec/` | Gate changes need lineage-verified pairs across at least two devices and two model families. |
-| `fitr tune` sweeps | Deferred for scope, not principle. See the tune milestone: restart orchestration is a capability fitr should have, and llama-bench still owns throughput-only sweeps. |
-| Parallel scored inference | Shared GPU work produces plausible but invalid timing data. |
-| Executable user tasks | Arbitrary code from JSON requires the isolated worker. |
+| Automatic server-mutating tune sweeps | Context and quant experiments begin in 0.10, but changing process-wide runtime settings still requires the explicit restart and restoration contract in the tune milestone. |
+| Parallel ordinary scored inference | Shared GPU work produces plausible but invalid timing data. A separate serving-test schema may measure declared concurrency without entering ordinary rankings. |
+| Arbitrary executable user tasks | The 0.11 bounded workflow prototype requires an isolated verifier boundary. Unrestricted code from task JSON remains out of scope. |
 | Long-context needle tests | They add depth coverage but do not block the core local decision loop. |
 | Public leaderboard | Cross-device ranking contradicts the product's evidence model. A shipped catalog is not this: it groups candidates by what fits, which is reproducible arithmetic, and never orders them by quality, which is not. |
 | LLM-as-judge correctness | Computed ground truth remains the default wherever mechanical grading is possible. |

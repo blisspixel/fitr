@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,9 @@ func manifestRecord(model, started string) *Record {
 	r.ExecutionPolicy = ExecutionDisabled
 	r.TaskPlan = TaskPlan{
 		SpeedSamples: 3, Memory: true, CodeTrials: 6, CheckTrialsLimit: 16,
-		Plumbing: true, ToolTrials: 3, Withdrawal: true, RefusalTrials: 3, AgenticTrials: 1,
+		CheckPlanSHA256: testArtifactDigest,
+		Plumbing:        true, ToolTrials: 3, Withdrawal: true, RefusalTrials: 3,
+		RefusalPlanSHA256: testArtifactDigest, AgenticTrials: 1,
 	}
 	return r
 }
@@ -57,6 +60,29 @@ func TestRunManifestSealsResolvedIdentityAndRejectsMutation(t *testing.T) {
 	r.Repeats++
 	if err := r.ValidateManifest(); err == nil || !strings.Contains(err.Error(), "repeats") {
 		t.Fatalf("mutated record validation = %v", err)
+	}
+}
+
+func TestCurrentManifestRequiresAnOrderedRefusalPlan(t *testing.T) {
+	r := manifestRecord("model", "2026-08-21T12:00:00Z")
+	r.SchemaVersion = EvidenceSchemaVersion
+	addTestFingerprintV2(t, r)
+	r.TaskPlan.RefusalPlanSHA256 = ""
+	if err := r.AttachManifest(digestIdentity(t, "model", "model"), testRunProvenance(t)); err == nil ||
+		!strings.Contains(err.Error(), "sealed refusal plan") {
+		t.Fatalf("missing refusal plan error = %v", err)
+	}
+
+	preferred, err := FixedRefusalPlanSHA256([]string{"political", "fiction", "rewrite"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reordered, err := FixedRefusalPlanSHA256([]string{"fiction", "political", "rewrite"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preferred == reordered {
+		t.Fatal("refusal-plan digest did not bind prompt order")
 	}
 }
 
@@ -179,9 +205,10 @@ func TestObservedLocalIdentityCannotRank(t *testing.T) {
 	r.TaskPlan = TaskPlan{CodeTrials: 1, CheckTrialsLimit: 1}
 	r.CodeWrite = []eval.ExecResult{{Outcome: eval.OutcomeInconclusive}}
 	r.Checks = []eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}}
+	normalizeCheckPlanForTest(t, r)
 	r.Rep = score.RepetitionMetrics("")
 	r.Density = score.InformationDensity("")
-	r.Scorecard = score.Scorecard{Model: r.Model, Profile: r.Profile, Needs: map[string]score.Verdict{}}
+	r.Scorecard = score.Score(r.Measured(), profile)
 	r.EvidenceCounts = map[string]eval.OutcomeCounts{
 		"coding": eval.CountOutcomes(1, eval.OutcomeInconclusive),
 		"checks": eval.CountOutcomes(1, eval.OutcomePass),
@@ -267,7 +294,7 @@ func TestSplitGGUFIdentityRejectsUnreasonableShardCountBeforeAllocation(t *testi
 	}
 }
 
-func TestSchemaFiveContractRejectsMissingAndScoreableExecutableEvidence(t *testing.T) {
+func TestCurrentSchemaContractRejectsMissingAndScoreableExecutableEvidence(t *testing.T) {
 	r := completedEvidenceRecord(t, []eval.ExecResult{{Pass: true, Outcome: eval.OutcomePass}},
 		[]eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}})
 	if err := r.ValidateEvidenceContract(); err == nil || !strings.Contains(err.Error(), "cannot be scoreable") {
@@ -276,7 +303,7 @@ func TestSchemaFiveContractRejectsMissingAndScoreableExecutableEvidence(t *testi
 	r = completedEvidenceRecord(t, []eval.ExecResult{{Outcome: eval.OutcomeInconclusive}},
 		[]eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}})
 	if err := r.ValidateEvidenceContract(); err != nil {
-		t.Fatalf("valid schema-5 contract: %v", err)
+		t.Fatalf("valid current-schema contract: %v", err)
 	}
 	r = completedEvidenceRecord(t, []eval.ExecResult{{Outcome: eval.OutcomeInconclusive}},
 		[]eval.CheckOutcome{{TaskID: "check", Outcome: eval.OutcomeError}})
@@ -292,9 +319,10 @@ func completedEvidenceRecord(t *testing.T, code []eval.ExecResult, checks []eval
 	r.SchemaVersion = EvidenceSchemaVersion
 	r.TaskPlan = TaskPlan{CodeTrials: len(code), CheckTrialsLimit: len(checks)}
 	r.CodeWrite, r.Checks = code, checks
+	normalizeCheckPlanForTest(t, r)
 	r.Rep = score.RepetitionMetrics("")
 	r.Density = score.InformationDensity("")
-	r.Scorecard = score.Scorecard{Model: r.Model, Profile: r.Profile, Needs: map[string]score.Verdict{}}
+	r.Scorecard = score.Score(r.Measured(), profile)
 	r.DecodeSum, r.TTFTSum, r.PrefillSum = stats.Summary{}, stats.Summary{}, stats.Summary{}
 	r.EvidenceCounts = map[string]eval.OutcomeCounts{
 		"coding": eval.CountOutcomes(len(code), outcomesForExec(code)...),
@@ -320,6 +348,45 @@ func completedEvidenceRecord(t *testing.T, code []eval.ExecResult, checks []eval
 		t.Fatal(err)
 	}
 	return r
+}
+
+// normalizeCheckPlanForTest gives synthetic current-schema observations the
+// complete identity a real generated check carries. Tests may still vary the
+// planned count independently to exercise missing and extra evidence paths.
+func normalizeCheckPlanForTest(t *testing.T, r *Record) {
+	t.Helper()
+	for i := range r.Checks {
+		if r.Checks[i].TaskID == "" {
+			r.Checks[i].TaskID = fmt.Sprintf("check-%02d", i)
+		}
+		if r.Checks[i].Family == "" {
+			r.Checks[i].Family = r.Checks[i].TaskID
+		}
+		if r.Checks[i].Need == "" {
+			r.Checks[i].Need = "structured_output"
+		}
+		if r.Checks[i].Origin == "" {
+			r.Checks[i].Origin = "builtin"
+		}
+	}
+	if r.TaskPlan.CheckTrialsLimit > 0 {
+		digest, err := ObservedCheckPlanSHA256(r.Checks)
+		if err != nil {
+			t.Fatalf("seal synthetic check plan: %v", err)
+		}
+		r.TaskPlan.CheckPlanSHA256 = digest
+	} else {
+		r.TaskPlan.CheckPlanSHA256 = ""
+	}
+	if r.TaskPlan.RefusalTrials > 0 {
+		digest, err := ObservedRefusalPlanSHA256(r.Refusal)
+		if err != nil {
+			t.Fatalf("seal synthetic refusal plan: %v", err)
+		}
+		r.TaskPlan.RefusalPlanSHA256 = digest
+	} else {
+		r.TaskPlan.RefusalPlanSHA256 = ""
+	}
 }
 
 func outcomesForExec(values []eval.ExecResult) []eval.Outcome {

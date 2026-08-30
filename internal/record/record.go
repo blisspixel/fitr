@@ -75,7 +75,7 @@ type Record struct {
 
 var validRunID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$`)
 
-const EvidenceSchemaVersion = 5
+const EvidenceSchemaVersion = 6
 
 // ContextSize returns the measured request context. It understands the legacy
 // device-key suffix used before num_ctx became a first-class result field.
@@ -144,7 +144,7 @@ func (r *Record) EnsureRunID() string {
 	return r.RunID
 }
 
-// ValidateEvidenceContract enforces the schema-5 denominator and execution
+// ValidateEvidenceContract enforces the current denominator and execution
 // invariants before a completed result is stored or consumed.
 func (r *Record) ValidateEvidenceContract() error {
 	if r == nil {
@@ -168,17 +168,20 @@ func (r *Record) ValidateEvidenceContract() error {
 	if err := r.TaskPlan.Validate(); err != nil {
 		return fmt.Errorf("task plan: %w", err)
 	}
-	if err := validateAdaptiveDecisions(r.AdaptiveDecisions); err != nil {
-		return err
+	if r.TaskPlan.AdaptiveChecks || len(r.AdaptiveDecisions) != 0 {
+		return errors.New("current evidence requires a fixed generated-check plan")
+	}
+	if r.TaskPlan.Memory && r.Memory.RequestedCtx <= 0 {
+		return errors.New("planned memory probe has no requested context")
+	}
+	if !r.TaskPlan.Memory && r.Memory != (eval.MemoryResult{}) {
+		return errors.New("unplanned memory probe contains evidence")
+	}
+	if err := r.Memory.ValidateReceipt(); err != nil {
+		return fmt.Errorf("memory receipt: %w", err)
 	}
 	if err := r.validateCompletedEvidence(); err != nil {
 		return err
-	}
-	if r.TaskPlan.AdaptiveChecks && len(r.AdaptiveDecisions) == 0 {
-		return errors.New("adaptive check plan has no persisted decisions")
-	}
-	if !r.TaskPlan.AdaptiveChecks && len(r.AdaptiveDecisions) != 0 {
-		return errors.New("fixed check plan contains adaptive decisions")
 	}
 	for i, result := range r.Tools {
 		if err := result.ValidateTerminationEvidence(); err != nil {
@@ -231,20 +234,6 @@ func (r *Record) ValidateEvidenceContract() error {
 	return nil
 }
 
-func validateAdaptiveDecisions(decisions []eval.AdaptiveDecision) error {
-	seen := map[string]bool{}
-	for i, decision := range decisions {
-		if err := decision.Validate(); err != nil {
-			return fmt.Errorf("adaptive decision %d: %w", i, err)
-		}
-		if seen[decision.Need] {
-			return fmt.Errorf("adaptive need %q appears more than once", decision.Need)
-		}
-		seen[decision.Need] = true
-	}
-	return nil
-}
-
 // EvidenceIntegrityIssue returns a presentation-safe reason a result cannot
 // participate in ranking claims. Legacy records remain readable but unverified.
 func (r *Record) EvidenceIntegrityIssue() string {
@@ -252,7 +241,7 @@ func (r *Record) EvidenceIntegrityIssue() string {
 		return "result is unavailable"
 	}
 	if r.SchemaVersion < EvidenceSchemaVersion {
-		return fmt.Sprintf("legacy schema %d has no sealed evidence contract", r.SchemaVersion)
+		return fmt.Sprintf("legacy schema %d uses an earlier evidence contract and is display-only", r.SchemaVersion)
 	}
 	if err := r.ValidateEvidenceContract(); err != nil {
 		return "invalid evidence contract: " + err.Error()

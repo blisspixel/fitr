@@ -6,7 +6,7 @@
   },
   "notes": [
     "Calibrated 2026-08-17/18 against measured models on this exact box.",
-    "iGPU shares system RAM, so decode is memory-bandwidth-bound and tracks ACTIVE params, not total.",
+    "On this measured box, decode tracked active parameter traffic more closely than total parameters. That is consistent with memory-traffic pressure, but does not prove a bottleneck.",
     "Observed: 30B MoE (~3B active) 24.8 tok/s > 8B dense 14.6 > 24B dense 4.5 > 27B dense 3.5."
   ],
   "gates": {
@@ -44,7 +44,7 @@
       "prefill_tps_min": 100.0,
       "malformed_tool_calls_max": 0,
       "requires_agentic_pass": true,
-      "why": "prefill dominates agent loops: every tool result re-processes a growing transcript"
+      "why": "Longer agent histories increase repeated prompt processing. This gate measures observed prefill rather than assuming it dominates every loop."
     },
     "always_on_capable": {
       "resident_gb_at_32k_max": 22.0,

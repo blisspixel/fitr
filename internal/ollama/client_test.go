@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -377,5 +378,80 @@ func TestModelStoreDirFollowsTheRuntime(t *testing.T) {
 	t.Setenv("OLLAMA_MODELS", "")
 	if got := modelStoreDir(); got == "" || !strings.Contains(got, ".ollama") {
 		t.Errorf("default model store = %q, want the runtime's own path", got)
+	}
+}
+
+func TestClientIdentityConstructionVersionAndAcceleration(t *testing.T) {
+	t.Setenv("OLLAMA_BASE_URL", "http://127.0.0.1:9999/")
+	c := New()
+	if c.Name() != "ollama" || c.URL() != "http://127.0.0.1:9999" {
+		t.Fatalf("client identity = %q %q", c.Name(), c.URL())
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/version" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `{"version":"0.99.1"}`)
+	}))
+	defer srv.Close()
+	c.BaseURL, c.HTTP = srv.URL, srv.Client()
+	if got := c.Version(context.Background()); got != "0.99.1" {
+		t.Fatalf("server version = %q", got)
+	}
+
+	if runtime.GOOS == "windows" {
+		root := t.TempDir()
+		t.Setenv("LOCALAPPDATA", root)
+		path := filepath.Join(root, "Ollama", "server.log")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("library=cpu\nlibrary=cuda\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Accel(context.Background()); got != "cuda" {
+			t.Fatalf("acceleration receipt = %q", got)
+		}
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := c.Accel(cancelled); got != "" {
+		t.Fatalf("cancelled acceleration probe = %q", got)
+	}
+}
+
+func TestNativeHTTPErrorIsBoundedAndStopAllUnloadsResidents(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Status:     "400 Bad Request",
+		Body:       io.NopCloser(strings.NewReader(`{"error":"model unavailable"}`)),
+	}
+	if err := nativeHTTPError(resp); err == nil || !strings.Contains(err.Error(), "model unavailable") {
+		t.Fatalf("native HTTP error = %v", err)
+	}
+
+	resident := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ps":
+			if resident {
+				fmt.Fprint(w, `{"models":[{"name":"model","size":1024,"size_vram":1024}]}`)
+			} else {
+				fmt.Fprint(w, `{"models":[]}`)
+			}
+		case "/api/generate":
+			resident = false
+			fmt.Fprint(w, `{}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+	left, err := c.StopAll(context.Background())
+	if err != nil || len(left) != 0 || resident {
+		t.Fatalf("StopAll = %v, %v, resident=%v", left, err, resident)
 	}
 }

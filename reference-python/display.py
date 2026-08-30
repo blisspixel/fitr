@@ -91,7 +91,7 @@ GLYPH = {
     "dash": "-",
     "pm": "±" if _U else "+/-",
     "ell": "…" if _U else "...",
-    "range": "–" if _U else "-",
+    "range": "-",
 }
 
 # Model output is UNTRUSTED input to your terminal. Inspect added escape

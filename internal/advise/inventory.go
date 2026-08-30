@@ -2,9 +2,12 @@ package advise
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/blisspixel/fitr/internal/device"
 )
 
 // Inventory states are plain text. Color must never carry them alone.
@@ -20,27 +23,31 @@ const maxInventoryRows = 100
 // InstalledModel is one entry from the serving runtime's installed list.
 // Size 0 means the runtime did not report a file size.
 type InstalledModel struct {
-	Name      string
-	Size      int64
-	Quant     string
-	Path      string // GGUF path when the runtime exposed one; never crawled
-	Arch      Arch   // zero unless the caller already has architecture
-	ResidentB int64  // live PS allocation when the process is loaded; 0 unknown
+	Name           string
+	Size           int64
+	Quant          string
+	Path           string // GGUF path when the runtime exposed one; never crawled
+	ArtifactDigest string // verified runtime-bound SHA-256; empty is unmeasured
+	Arch           Arch   // zero unless the caller already has architecture
+	ResidentB      int64  // live PS allocation when the process is loaded; 0 unknown
 }
 
 // InventoryEvidence is the saved-run facts inventory needs. Callers map
 // records; this package does not import the store.
 type InventoryEvidence struct {
-	Model          string
-	DeviceKey      string // Fingerprint.Key: same box, not a ranking key
-	Level          string
-	IntegrityIssue string
-	Contaminated   bool
-	Arch           Arch
-	WeightsB       int64
-	NumCtx         int
-	Repeats        int
-	ToolsBlocked   bool
+	Model           string
+	ArtifactDigest  string
+	Device          device.Fingerprint
+	DeviceKey       string // Fingerprint.Key: same box, not a ranking key
+	ComparableIssue string // missing or invalid v2 context/placement receipt
+	Level           string
+	IntegrityIssue  string
+	Contaminated    bool
+	Arch            Arch
+	WeightsB        int64
+	NumCtx          int
+	Repeats         int
+	ToolsBlocked    bool
 }
 
 // InventoryQuery is everything Join needs. Tags are the runtime's list, not
@@ -49,6 +56,7 @@ type InventoryQuery struct {
 	Tags       []InstalledModel
 	Loaded     []string
 	Evidence   []InventoryEvidence
+	Current    device.Fingerprint
 	CurrentKey string
 	HaveGB     float64
 	HaveSrc    string
@@ -125,7 +133,7 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 		Quant:  tag.Quant,
 		Loaded: isLoaded,
 	}
-	ev := matchEvidence(tag.Name, evidence)
+	ev := matchEvidence(tag, evidence, q)
 	weightsExceed := memoryBudgetTrusted(q.HaveSrc) && q.HaveGB > 0 && tag.Size > 0 &&
 		float64(tag.Size) > q.HaveGB*GiB
 
@@ -133,7 +141,7 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 	row.ServingCtx = serving
 	row.ServingKnown = servingKnown
 	switch {
-	case ev != nil && evidenceUsable(*ev, q.CurrentKey):
+	case ev != nil && evidenceUsable(tag, *ev, q):
 		row.State = StateMeasured
 		row.MeasuredCtx = ev.NumCtx
 		row.Next = MeasuredNext(tag.Name, ev.Repeats, ev.NumCtx, ev.Level, ev.ToolsBlocked, serving, servingKnown)
@@ -145,7 +153,7 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 	case ev != nil:
 		row.State = StateStale
 		row.Next = "fitr run " + shellModel(tag.Name)
-		row.Note = staleNote(*ev, q.CurrentKey)
+		row.Note = staleNote(tag, *ev, q)
 	case isLoaded && weightsExceed:
 		// Same rule as advise: a running process beats a budget reading.
 		row.State = StateUnproven
@@ -159,7 +167,11 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 		row.State = StateUnproven
 		row.Next = "fitr advise " + shellModel(tag.Name)
 	}
-	attachFit(&row, tag, ev, q)
+	fitEvidence := ev
+	if fitEvidence != nil && !evidenceUsable(tag, *fitEvidence, q) {
+		fitEvidence = nil
+	}
+	attachFit(&row, tag, fitEvidence, q)
 	row.Ctx = compactCtxPair(row.MeasuredCtx, row.ServingCtx, row.ServingKnown)
 	return row
 }
@@ -251,36 +263,116 @@ func applyNote(measured, serving int, known bool) string {
 // SameModel is the inventory name match, including :latest aliases.
 func SameModel(a, b string) bool { return sameInventoryModel(a, b) }
 
-func evidenceUsable(ev InventoryEvidence, currentKey string) bool {
-	if ev.IntegrityIssue != "" || ev.Contaminated {
+func evidenceUsable(tag InstalledModel, ev InventoryEvidence, q InventoryQuery) bool {
+	if ev.IntegrityIssue != "" || ev.ComparableIssue != "" || ev.Contaminated {
 		return false
 	}
-	if currentKey == "" || ev.DeviceKey == "" {
+	if q.CurrentKey == "" || ev.DeviceKey == "" || ev.DeviceKey != q.CurrentKey {
 		return false
 	}
-	return ev.DeviceKey == currentKey
+	if len(ev.Device.Diff(q.Current)) != 0 {
+		return false
+	}
+	currentDigest, currentOK := normalizedArtifactDigest(tag.ArtifactDigest)
+	savedDigest, savedOK := normalizedArtifactDigest(ev.ArtifactDigest)
+	return currentOK && savedOK && currentDigest == savedDigest
 }
 
-func staleNote(ev InventoryEvidence, currentKey string) string {
+// EvidenceReusable is the single fail-closed rule for attaching saved
+// measurements to a currently served artifact. Presentation surfaces must not
+// reimplement a looser model-name or legacy-device-key join.
+func EvidenceReusable(tag InstalledModel, ev InventoryEvidence, q InventoryQuery) bool {
+	return evidenceUsable(tag, ev, q)
+}
+
+func staleNote(tag InstalledModel, ev InventoryEvidence, q InventoryQuery) string {
+	currentDigest, currentOK := normalizedArtifactDigest(tag.ArtifactDigest)
+	savedDigest, savedOK := normalizedArtifactDigest(ev.ArtifactDigest)
 	switch {
 	case ev.IntegrityIssue != "":
 		return ev.IntegrityIssue
+	case ev.ComparableIssue != "":
+		return ev.ComparableIssue
 	case ev.Contaminated:
 		return "prior run was contaminated by a resident model"
-	case ev.DeviceKey != currentKey:
+	case !savedOK:
+		return "prior run has no verified runtime-bound model artifact digest"
+	case !currentOK:
+		return "runtime did not provide a verified model artifact digest"
+	case savedDigest != currentDigest:
+		return "model artifact changed since the last measurement"
+	case ev.DeviceKey != q.CurrentKey:
+		if fields := fingerprintChanges(ev.Device, q.Current); fields != "" {
+			return fields + " changed since the last measurement"
+		}
 		return "device or runtime changed since the last measurement"
 	default:
 		return "saved evidence cannot be used"
 	}
 }
 
-func matchEvidence(name string, evidence []InventoryEvidence) *InventoryEvidence {
+func matchEvidence(tag InstalledModel, evidence []InventoryEvidence, q InventoryQuery) *InventoryEvidence {
+	// A reusable receipt always wins. Selecting a stale candidate first and
+	// rejecting it later can hide a valid run that appears later in history.
 	for i := range evidence {
-		if sameInventoryModel(name, evidence[i].Model) {
+		if sameInventoryModel(tag.Name, evidence[i].Model) && evidenceUsable(tag, evidence[i], q) {
 			return &evidence[i]
 		}
 	}
-	return nil
+	// Nothing is reusable. Pick the most relevant stale receipt only so the
+	// row can explain why it must be remeasured; it must not feed projections.
+	best, bestScore := -1, -1
+	for i := range evidence {
+		if !sameInventoryModel(tag.Name, evidence[i].Model) {
+			continue
+		}
+		score := 0
+		currentDigest, currentOK := normalizedArtifactDigest(tag.ArtifactDigest)
+		savedDigest, savedOK := normalizedArtifactDigest(evidence[i].ArtifactDigest)
+		if currentOK && savedOK && currentDigest == savedDigest {
+			score += 4
+		}
+		if q.CurrentKey != "" && evidence[i].DeviceKey == q.CurrentKey {
+			score += 2
+		}
+		if evidence[i].IntegrityIssue == "" && evidence[i].ComparableIssue == "" && !evidence[i].Contaminated {
+			score++
+		}
+		if score > bestScore {
+			best, bestScore = i, score
+		}
+	}
+	if best < 0 {
+		return nil
+	}
+	return &evidence[best]
+}
+
+var artifactDigestPattern = regexp.MustCompile(`(?i)^sha256:[0-9a-f]{64}$`)
+
+func normalizedArtifactDigest(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if len(value) == 64 {
+		value = "sha256:" + value
+	}
+	return value, artifactDigestPattern.MatchString(value)
+}
+
+func fingerprintChanges(saved, current device.Fingerprint) string {
+	if saved.Key() == "||||||" || current.Key() == "||||||" {
+		return ""
+	}
+	diffs := saved.Diff(current)
+	if len(diffs) == 0 {
+		return ""
+	}
+	fields := make([]string, 0, len(diffs))
+	for _, diff := range diffs {
+		name := strings.ReplaceAll(diff[0], "_", " ")
+		name = strings.TrimPrefix(name, "config.")
+		fields = append(fields, name)
+	}
+	return strings.Join(fields, ", ")
 }
 
 func loadedMatch(loaded map[string]bool, name string) bool {

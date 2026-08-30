@@ -285,9 +285,15 @@ func (f Fingerprint) Diff(o Fingerprint) [][3]string {
 		}
 	}
 	add("host", f.Host, o.Host)
+	add("os", f.OS, o.OS)
+	add("cpu", f.CPU, o.CPU)
+	add("ram_gb", strconv.FormatFloat(f.RAMGb, 'g', -1, 64), strconv.FormatFloat(o.RAMGb, 'g', -1, 64))
 	add("gpu", f.GPU, o.GPU)
 	add("gpu_driver", f.GPUDriver, o.GPUDriver)
+	add("gpu_driver_date", f.GPUDriverDate, o.GPUDriverDate)
 	add("gpu_backend", f.GPUBackend, o.GPUBackend)
+	add("vram_gb", strconv.FormatFloat(f.VRAMGb, 'g', -1, 64), strconv.FormatFloat(o.VRAMGb, 'g', -1, 64))
+	add("vram_source", f.VRAMSource, o.VRAMSource)
 	add("runtime", f.Runtime, o.Runtime)
 	add("inference_device", f.InferenceDevice, o.InferenceDevice)
 	keys := map[string]bool{}
@@ -652,10 +658,10 @@ func submatch(pattern, s string) string {
 	return ""
 }
 
-// IsDenseAndBig is a hint, never a gate: a dense model above the profile's
-// limit will crawl on a bandwidth-bound device. Decode speed tracks ACTIVE
-// parameters, so a 30B MoE (~3B active) outruns an 8B dense model.
-func IsDenseAndBig(paramSize, family string, p Profile) bool {
+// DenseSizeHintExceeded checks a profile-authored interactive-size hint. It is
+// not a bottleneck diagnosis or a throughput prediction. MoE total parameters
+// do not carry the same interpretation, so this dense-only hint excludes them.
+func DenseSizeHintExceeded(paramSize, family string, p Profile) bool {
 	limRaw, ok := p.Hints["dense_param_b_interactive_max"]
 	if !ok {
 		return false

@@ -66,7 +66,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 	model := normalizeModelRef(raw)
 
 	in := advise.Input{Model: model, Ctx: *ctxSize}
-	fpKey := ""
+	currentFP := device.Fingerprint{}
 	if *backend != "" && *backend != "auto" {
 		in.Backend = *backend
 	}
@@ -77,7 +77,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		fp := device.Detect(ctx, nil)
 		in.HaveGB = fp.VRAMGb
 		in.HaveSrc = fp.VRAMSource
-		fpKey = fp.Key()
+		currentFP = fp
 	}
 	if kv := os.Getenv("OLLAMA_KV_CACHE_TYPE"); kv != "" {
 		if n, ok := advise.KVElemBytes(kv); ok {
@@ -110,10 +110,10 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 		in.Backend = c.Name()
 		fp := device.Detect(ctx, c)
+		currentFP = fp
 		if free, ok := device.AvailableVRAM(ctx); ok {
 			in.FreeGB = free
 		}
-		fpKey = fp.Key()
 		if *vram < 0 {
 			in.HaveGB = fp.VRAMGb
 			in.HaveSrc = fp.VRAMSource
@@ -221,7 +221,7 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		}
 	}
 
-	in.Timings = adviseTimings(in.Model, fpKey)
+	in.Timings = adviseTimings(in.Model, verifiedModelArtifactDigest(ctx, c, model), currentFP)
 	rep := advise.Evaluate(in)
 	switch render.Resolve(*mode) {
 	case "json":
@@ -395,8 +395,8 @@ func cmdTune(ctx context.Context, args []string) int {
 	return exitOK
 }
 
-func adviseTimings(model, deviceKey string) []advise.SavedTiming {
-	if model == "" {
+func adviseTimings(model, artifactDigest string, current device.Fingerprint) []advise.SavedTiming {
+	if model == "" || artifactDigest == "" || current.Key() == "||||||" {
 		return nil
 	}
 	stored, err := record.NewStore(resultsDir()).LoadCurrent()
@@ -408,13 +408,15 @@ func adviseTimings(model, deviceKey string) []advise.SavedTiming {
 		if rec == nil || !modelref.SameServed(model, rec.Model) {
 			continue
 		}
-		if rec.EvidenceIntegrityIssue() != "" || len(rec.Contamination) > 0 {
+		evidence := inventoryEvidenceFromRecord(rec)
+		if !advise.EvidenceReusable(
+			advise.InstalledModel{Name: model, ArtifactDigest: artifactDigest},
+			evidence,
+			advise.InventoryQuery{Current: current, CurrentKey: current.Key()},
+		) {
 			continue
 		}
-		if deviceKey != "" && rec.Device.Key() != deviceKey {
-			continue
-		}
-		ctxN := rec.ContextSize()
+		ctxN := evidence.NumCtx
 		if ctxN <= 0 {
 			continue
 		}

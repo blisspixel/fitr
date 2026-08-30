@@ -32,13 +32,13 @@ func TestContextFitLlamaTable(t *testing.T) {
 	if tble == nil || len(tble.Points) < 4 {
 		t.Fatalf("table = %+v", tble)
 	}
-	if !strings.Contains(tble.Note, "buffers") {
-		t.Fatalf("must disclose unmeasured buffers: %q", tble.Note)
+	if !strings.Contains(tble.Note, "other runtime allocation") {
+		t.Fatalf("must disclose unmeasured runtime allocation: %q", tble.Note)
 	}
 	var saw8k, saw32k FitPoint
 	for _, p := range tble.Points {
-		if p.BuffersKnown {
-			t.Fatalf("buffers must be n/a without --load/--fit: %+v", p)
+		if p.OtherKnown {
+			t.Fatalf("other resident must be n/a without --load/--fit: %+v", p)
 		}
 		if p.WeightsGB != 5.0 {
 			t.Fatalf("weights must be constant: %+v", p)
@@ -115,7 +115,7 @@ func TestContextFitHybridSingleMeasuredPoint(t *testing.T) {
 	if len(tble.Points) != 1 || tble.Points[0].Ctx != 8192 {
 		t.Fatalf("hybrid measured table = %+v", tble.Points)
 	}
-	if tble.Points[0].Tier != Compatible || !tble.Points[0].BuffersKnown {
+	if tble.Points[0].Tier != Compatible || !tble.Points[0].OtherKnown {
 		t.Fatalf("hybrid point = %+v", tble.Points[0])
 	}
 }
@@ -135,11 +135,11 @@ func TestContextFitBuffersOnlyAtMeasuredCtx(t *testing.T) {
 			at16 = p
 		}
 	}
-	if !at8.BuffersKnown || at8.BuffersGB <= 0 {
-		t.Fatalf("8k should include measured buffers: %+v", at8)
+	if !at8.OtherKnown || at8.OtherGB <= 0 {
+		t.Fatalf("8k should include derived other resident: %+v", at8)
 	}
-	if at16.BuffersKnown {
-		t.Fatalf("16k must not invent buffers from an 8k resident: %+v", at16)
+	if at16.OtherKnown {
+		t.Fatalf("16k must not invent other resident from an 8k allocation: %+v", at16)
 	}
 }
 

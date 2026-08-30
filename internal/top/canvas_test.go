@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRenderResponsiveAndClipped(t *testing.T) {
@@ -226,5 +227,110 @@ func TestIncompatibleComparisonShowsNoDelta(t *testing.T) {
 	plain := Render(state, DefaultGlyphs(true)).Plain()
 	if !strings.Contains(plain, "NOT COMPARABLE") || !strings.Contains(plain, comparison.Reason) || strings.Contains(plain, "delta") {
 		t.Fatalf("incompatible comparison rendered incorrectly:\n%s", plain)
+	}
+}
+
+func TestRenderCoversEveryFullSizeSurface(t *testing.T) {
+	snapshot := testSnapshot()
+	snapshot.History[0].Context = 16384
+	snapshot.History[0].Driver = "driver"
+	snapshot.History[0].Runtime = "runtime"
+	snapshot.History[0].Config = "f16"
+	snapshot.History[0].Profile = "default"
+	snapshot.History[0].UseFor = "structured output"
+	snapshot.History[0].PrefillMean = 120
+	snapshot.History[0].TTFTMean = 0.5
+	snapshot.History[0].MemoryGB = 6
+	snapshot.History[0].Warnings = []string{"thin evidence"}
+	snapshot.History[0].NextCommand = "fitr apply alpha:8b"
+	snapshot.History[0].Verdicts = []Verdict{
+		{Need: "a", Label: "passes", State: "PASS", Why: "established"},
+		{Need: "b", State: "FAIL", Why: "missed"},
+		{Need: "c", State: "INCONCLUSIVE", Why: "thin"},
+		{Need: "d", State: "SKIP", Why: "not measured"},
+		{Need: "e", State: "N/A", Why: "unsupported"},
+		{Need: "f", State: "BLKD", Why: "blocked"},
+	}
+	snapshot.Board[0].Runs[0] = snapshot.History[0]
+	snapshot.Live = Live{
+		Completed: true, Saved: true, Model: "alpha:8b", Phase: "done", Detail: "complete",
+		StartedAt: snapshot.UpdatedAt.Add(-time.Minute), UpdatedAt: snapshot.UpdatedAt,
+		CompletedSteps: 4, TotalSteps: 4, Placement: "GPU 100%",
+		Decode: 12, Prefill: 120, TTFT: 0.5, MemoryGB: 6,
+		DecodeSeries: []float64{10, 12, 14}, PrefillSeries: []float64{100, 120, 140},
+		TTFTSeries: []float64{0.4, 0.5, 0.6}, Warnings: []string{"watch thermals"},
+		Phases: []LivePhase{{Name: "speed", State: "completed", Completed: 3, Total: 3}},
+	}
+
+	for _, tc := range []struct {
+		name string
+		view View
+		want string
+	}{
+		{"live", ViewLive, "COMPLETE"},
+		{"result", ViewResult, "verdicts"},
+		{"board", ViewBoard, "comparable group"},
+		{"history", ViewHistory, "HISTORY"},
+		{"inventory", ViewInventory, "installed models"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := NewState(snapshot)
+			state.View, state.Width, state.Height = tc.view, 140, 40
+			state.Selected[ViewResult] = "a"
+			plain := Render(state, DefaultGlyphs(false)).Plain()
+			if !strings.Contains(plain, tc.want) {
+				t.Fatalf("%s render missing %q:\n%s", tc.name, tc.want, plain)
+			}
+		})
+	}
+
+	state := NewState(snapshot)
+	state.Help, state.Width, state.Height = true, 100, 30
+	if plain := Render(state, DefaultGlyphs(true)).Plain(); !strings.Contains(plain, "Ctrl+L") {
+		t.Fatalf("help render missing keys:\n%s", plain)
+	}
+}
+
+func TestRenderCompatibleComparisonAndFooterModes(t *testing.T) {
+	state := NewState(testSnapshot())
+	state.View, state.Width, state.Height = ViewHistory, 100, 24
+	state.Comparison = &Comparison{
+		Compatible: true, Reason: "same conditions", BaselineModel: "a", SelectedModel: "b",
+		DecodeA: 10, DecodeB: 12, DecodeDiff: 2,
+		PrefillA: 100, PrefillB: 120, MemoryA: 5, MemoryB: 6,
+	}
+	plain := Render(state, DefaultGlyphs(true)).Plain()
+	for _, want := range []string{"COMPARABLE", "prefill", "memory", "+2.00"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("comparison missing %q:\n%s", want, plain)
+		}
+	}
+
+	state.Comparison = nil
+	state.EditingFilter, state.Filter = true, "alpha"
+	if plain = Render(state, DefaultGlyphs(true)).Plain(); !strings.Contains(plain, "Enter apply") {
+		t.Fatalf("filter footer missing:\n%s", plain)
+	}
+	state.EditingFilter, state.Error = false, "reload failed"
+	if plain = Render(state, DefaultGlyphs(true)).Plain(); !strings.Contains(plain, "error:reload failed") {
+		t.Fatalf("error footer missing:\n%s", plain)
+	}
+}
+
+func TestTinyRenderStatesAndEmptyFilters(t *testing.T) {
+	for _, view := range []View{ViewResult, ViewBoard, ViewHistory, ViewInventory} {
+		state := NewState(testSnapshot())
+		state.View, state.Width, state.Height = view, 40, 5
+		_ = Render(state, DefaultGlyphs(true)).Plain()
+	}
+	state := NewState(testSnapshot())
+	state.Width, state.Height, state.Help = 40, 5, true
+	if plain := Render(state, DefaultGlyphs(true)).Plain(); !strings.Contains(plain, "? close") {
+		t.Fatalf("tiny help missing:\n%s", plain)
+	}
+	state = NewState(Snapshot{})
+	state.View, state.Width, state.Height, state.Filter = ViewHistory, 80, 20, "missing"
+	if plain := Render(state, DefaultGlyphs(true)).Plain(); !strings.Contains(plain, "match \"missing\"") {
+		t.Fatalf("empty filter message missing:\n%s", plain)
 	}
 }

@@ -83,12 +83,12 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 }
 
 func shotTop(context.Context) (string, error) {
-	a := mockResult("qwen3:30b-q4", 23.16, .44, 226.64, 3.10, 6, 6, 14, 16)
+	a := mockResult("qwen3:30b-q4", 23.16, .44, 226.64, 3.10, 6, 6, 20, 22)
 	a.ModelMeta.Details.ParameterSize = "30.5B"
 	a.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
 	a.Memory.ResidentGB = 20.34
 	a.Scorecard.Serves = []string{"fast_and_decent", "coding", "structured_output"}
-	b := mockResult("llama3.1:8b", 14.61, .52, 148.20, 4.70, 4, 6, 5, 16)
+	b := mockResult("llama3.1:8b", 14.61, .52, 148.20, 4.70, 4, 6, 12, 22)
 	b.ModelMeta.Details.ParameterSize = "8.0B"
 	b.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
 	b.Memory.ResidentGB = 5.10
@@ -202,34 +202,36 @@ func shotRun(ctx context.Context) (string, error) {
 	if err := json.Unmarshal(b, &res); err != nil {
 		return "", err
 	}
-	prof, err := device.SelectProfile("lappy", res.Device)
+	// The frozen golden record predates the fixed 22-spec plan. Rebuild its
+	// generated-check evidence from the current embedded spec so the command in
+	// the screenshot is reproducible by today's default full-run semantics.
+	spec, err := eval.LoadSpec()
 	if err != nil {
 		return "", err
 	}
-	sc := score.Score(measure(&res), prof)
-	trials := len(res.CodeWrite) + len(res.CodeFix) + len(res.Tools) + len(res.Checks) + 1
-	meta := render.Meta{
-		ParamSize: res.ModelMeta.Details.ParameterSize, Quant: res.ModelMeta.Details.QuantizationLevel,
-		Family: res.ModelMeta.Details.Family, GPU: res.Device.GPU, Driver: res.Device.GPUDriver,
-		Device: res.Device.InferenceDevice, Profile: res.Profile,
-		StartedAt: res.StartedAt, Level: res.Level, WallSeconds: res.WallSeconds,
-		NumCtx: resultNumCtx(&res), Repeats: res.Repeats,
-		DecodeMean: res.DecodeSum.Mean, DecodeSD: res.DecodeSum.SD,
-		DecodeMin: res.DecodeSum.Min, DecodeMax: res.DecodeSum.Max, DecodeN: res.DecodeSum.N,
-		PrefillMean: res.PrefillSum.Mean, PrefillSD: res.PrefillSum.SD, PrefillN: res.PrefillSum.N,
-		TTFTMean: res.TTFTSum.Mean, TTFTSD: res.TTFTSum.SD, TTFTN: res.TTFTSum.N,
-		ResidentGB: res.Memory.ResidentGB,
-		Trials:     trials, MDEpp: 100 * stats.MinDetectableEffect(trials, 1),
-		MDEDiffpp: 100 * stats.MinDetectableDifference(trials, 1),
+	failures := map[string]bool{
+		"json_object_nested": true,
+		"math_chain_noise":   true,
+		"tool_call_strict":   true,
 	}
-	for _, sample := range res.Speed {
-		meta.DecodeSeries = append(meta.DecodeSeries, sample.DecodeTPS)
-		meta.PrefillSeries = append(meta.PrefillSeries, sample.PrefillTPS)
-		meta.TTFTSeries = append(meta.TTFTSeries, sample.TTFT)
+	res.Checks = make([]eval.CheckOutcome, 0, len(spec.Checks))
+	for _, check := range spec.Checks {
+		pass := !failures[check.ID]
+		res.Checks = append(res.Checks, eval.CheckOutcome{
+			TaskID: check.ID, Family: check.Family, Need: check.Need, Origin: check.Origin,
+			Seed: eval.InstanceSeed(res.SeedSet, check.ID, 0), Pass: pass, Outcome: mockBinaryOutcome(pass),
+		})
+	}
+	if err := prepareMockEvidence(&res); err != nil {
+		return "", err
+	}
+	artifact, err := artifactFrom(&res)
+	if err != nil {
+		return "", err
 	}
 	pre := "$ fitr run qwen3-coder:30b --full --pull\n\n"
 	disp := render.New("rich")
-	disp.Result(sc, meta)
+	disp.Result(artifact.Scorecard, resultMeta(&res, artifact.Profile))
 	return pre, nil
 }
 
@@ -298,8 +300,8 @@ func shotCompare(ctx context.Context) (string, error) {
 	os.Setenv("FITR_RESULTS", dir)
 	defer os.Unsetenv("FITR_RESULTS")
 
-	a := mockResult("qwen3-coder:30b", 23.16, 0.44, 226.64, 3.10, 6, 6, 14, 16)
-	b := mockResult("llama3.1:8b", 14.61, 0.52, 148.20, 4.70, 4, 6, 5, 16)
+	a := mockResult("qwen3-coder:30b", 23.16, 0.44, 226.64, 3.10, 6, 6, 20, 22)
+	b := mockResult("llama3.1:8b", 14.61, 0.52, 148.20, 4.70, 4, 6, 12, 22)
 	for _, r := range []*Result{a, b} {
 		if _, err := save(r); err != nil {
 			return "", err
@@ -323,12 +325,12 @@ func shotBoard(ctx context.Context) (string, error) {
 	defer os.Unsetenv("FITR_RESULTS")
 
 	cur := device.Detect(ctx, probeBackend(ctx))
-	a := mockResult("qwen3:30b-q4", 23.16, 0.44, 226.64, 3.10, 6, 6, 14, 16)
+	a := mockResult("qwen3:30b-q4", 23.16, 0.44, 226.64, 3.10, 6, 6, 20, 22)
 	a.ModelMeta.Details.ParameterSize = "30.5B"
 	a.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
 	a.Memory.ResidentGB = 20.34
 	a.Scorecard.Serves = []string{"fast_and_decent", "coding", "structured_output"}
-	b := mockResult("llama3.1:8b", 14.61, 0.52, 148.20, 4.70, 4, 6, 5, 16)
+	b := mockResult("llama3.1:8b", 14.61, 0.52, 148.20, 4.70, 4, 6, 12, 22)
 	b.ModelMeta.Details.ParameterSize = "8.0B"
 	b.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
 	b.Memory.ResidentGB = 5.10
@@ -369,7 +371,7 @@ func goldenResultPath() string {
 
 // mockResult fabricates a plausible stored result for the compare screenshot.
 // The first checksN-checksPass generated checks fail, so two models sharing a
-// seedset produce clean discordant sets for the McNemar demo.
+// seedset produce clean discordant families for the paired exact demo.
 func mockResult(model string, dec, decSD, pre, preSD float64, codePass, codeN, checksPass, checksN int) *Result {
 	r := &Result{
 		SchemaVersion: 4, Model: model, StartedAt: "2026-08-19T09:00:00Z",
@@ -403,7 +405,8 @@ func mockResult(model string, dec, decSD, pre, preSD float64, codePass, codeN, c
 	for i := range checksN {
 		pass := i >= checksN-checksPass
 		r.Checks = append(r.Checks, eval.CheckOutcome{
-			TaskID: fmt.Sprintf("task%02d", i), Need: needs[i%len(needs)], Origin: "builtin",
+			TaskID: fmt.Sprintf("task%02d", i), Family: fmt.Sprintf("family%02d", i),
+			Need: needs[i%len(needs)], Origin: "builtin",
 			Seed: uint64(1000 + i), Pass: pass, Outcome: mockBinaryOutcome(pass),
 		})
 	}
@@ -450,7 +453,7 @@ func prepareMockEvidence(r *Result) error {
 	if r.SeedSet == "" {
 		r.SeedSet = "mock-seedset-v1"
 	}
-	r.SchemaVersion = 5
+	r.SchemaVersion = record.EvidenceSchemaVersion
 	r.ExecutionPolicy = record.ExecutionDisabled
 	r.TaskPlan = record.TaskPlan{
 		SpeedSamples:     len(r.Speed),
@@ -462,6 +465,27 @@ func prepareMockEvidence(r *Result) error {
 		Withdrawal:       r.Withdrawal != nil,
 		RefusalTrials:    len(r.Refusal),
 		AgenticTrials:    boolInt(r.Agentic != nil),
+	}
+	for i := range r.Checks {
+		if r.Checks[i].TaskID == "" {
+			r.Checks[i].TaskID = fmt.Sprintf("mock-check-%02d", i)
+		}
+		if r.Checks[i].Family == "" {
+			r.Checks[i].Family = r.Checks[i].TaskID
+		}
+		if r.Checks[i].Need == "" {
+			r.Checks[i].Need = "user_tasks"
+		}
+		if r.Checks[i].Origin == "" {
+			r.Checks[i].Origin = "builtin"
+		}
+	}
+	if r.TaskPlan.CheckTrialsLimit > 0 {
+		checkPlanSHA256, err := record.ObservedCheckPlanSHA256(r.Checks)
+		if err != nil {
+			return err
+		}
+		r.TaskPlan.CheckPlanSHA256 = checkPlanSHA256
 	}
 
 	coding := make([]eval.Outcome, 0, r.TaskPlan.CodeTrials)
@@ -492,6 +516,13 @@ func prepareMockEvidence(r *Result) error {
 			r.Refusal[key] = verdict
 		}
 		refusal = append(refusal, verdict.Outcome)
+	}
+	if r.TaskPlan.RefusalTrials > 0 {
+		refusalPlanSHA256, err := record.ObservedRefusalPlanSHA256(r.Refusal)
+		if err != nil {
+			return err
+		}
+		r.TaskPlan.RefusalPlanSHA256 = refusalPlanSHA256
 	}
 	plumbing := []eval.Outcome{}
 	if r.Plumbing != nil {
@@ -526,6 +557,38 @@ func prepareMockEvidence(r *Result) error {
 		decode = append(decode, sample.DecodeTPS)
 		ttft = append(ttft, sample.TTFT)
 		prefill = append(prefill, sample.PrefillTPS)
+	}
+	for i := range r.Speed {
+		r.Speed[i].FirstOutputObserved = true
+		r.Speed[i].GatedCacheKnown = true
+		r.Speed[i].PrefillCacheKnown = true
+		if r.Speed[i].GatedPromptTok == 0 && r.Speed[i].GatedCachedTok == 0 {
+			r.Speed[i].GatedPromptTok = 1
+		}
+		if r.Speed[i].PromptTok == 0 && r.Speed[i].CachedPromptTok == 0 {
+			r.Speed[i].PromptTok = 1
+		}
+		if r.Speed[i].ColdTTFT > 0 && r.Speed[i].ColdLoad <= 0.1 {
+			r.Speed[i].ColdLoad = r.Speed[i].ColdTTFT
+		}
+		if r.Speed[i].WarmTTFT > 0 {
+			r.Speed[i].WarmCacheKnown = true
+			r.Speed[i].WarmCachedTok = 1
+		}
+	}
+	if r.Memory.ResidentGB > 0 {
+		r.Memory.Outcome = eval.OutcomePass
+		r.Memory.UnavailableReason = ""
+		r.Memory.RequestedCtx = memoryProbeCtx
+		effectiveMemoryCtx := memoryProbeCtx
+		r.Memory.EffectiveCtx = &effectiveMemoryCtx
+		r.Memory.ResidentBytes = int64(r.Memory.ResidentGB * advise.GiB)
+		r.Memory.AcceleratorBytes = r.Memory.ResidentBytes * int64(r.Memory.PctOnGPU) / 100
+		r.Memory.PctOnGPU = int(100 * float64(r.Memory.AcceleratorBytes) / float64(r.Memory.ResidentBytes))
+	} else {
+		r.Memory.Outcome = eval.OutcomeSkipped
+		r.Memory.RequestedCtx = memoryProbeCtx
+		r.Memory.UnavailableReason = "demo runtime did not report a resident allocation"
 	}
 	r.DecodeSum, r.TTFTSum, r.PrefillSum = stats.MeanSD(decode), stats.MeanSD(ttft), stats.MeanSD(prefill)
 	longest := ""

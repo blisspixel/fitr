@@ -1,4 +1,6 @@
-# distillr - local (Ollama) provider: 3 bugs + 1 config trap
+# distillr local-provider and output-quality case study
+
+## Part 1 - Local (Ollama) provider: 3 bugs + 1 config trap
 
 **Found:** 2026-08-17 · **distillr** v0.19.56 (installed from `main`) · **Ollama** 0.32.14
 **Env:** Windows 11, Python 3.12.10, AMD Radeon 780M (Vulkan), models in `C:\models`
@@ -13,7 +15,7 @@ discovery on fresh installs** -> **#4 is a silent perf trap.**
 
 ---
 
-## #1 - `/api/tags` parse rejects Ollama's `capabilities` field (BLOCKER)
+### #1 - `/api/tags` parse rejects Ollama's `capabilities` field (BLOCKER)
 
 **File:** `distill/llm/providers/_ollama_registry.py` -> `_bounded_model()`
 
@@ -72,7 +74,7 @@ stack-trace hunt.
 
 ---
 
-## #2 - `_is_thinking_model` prefix match hits `qwen3-coder*` (HTTP 400)
+### #2 - `_is_thinking_model` prefix match hits `qwen3-coder*` (HTTP 400)
 
 **File:** `distill/llm/providers/_ollama_metadata.py` -> `_is_thinking_model()`
 
@@ -117,7 +119,7 @@ Belt-and-braces: treat a 400 containing `does not support thinking` as retryable
 
 ---
 
-## #3 - `check_hostname` passed to `HTTPSConnection` breaks on Python 3.12
+### #3 - `check_hostname` passed to `HTTPSConnection` breaks on Python 3.12
 
 **File:** `distill/ingestors/net.py` -> `_DeadlineHTTPSHandler.https_open()`
 
@@ -154,7 +156,7 @@ isn't the first thing the user sees.
 
 ---
 
-## #4 - per-workload model vars silently fall back to a different local model
+### #4 - per-workload model vars silently fall back to a different local model
 
 **Not a crash - a performance trap.**
 
@@ -182,7 +184,7 @@ and configurable.
 
 ---
 
-## Verification
+### Verification
 
 With #1-#3 patched locally, the full local pipeline runs green at **$0.00**:
 
@@ -211,7 +213,7 @@ structured call.
 
 ---
 
-# Part 2 - Output quality review (local run, qwen3-coder:30b)
+## Part 2 - Output quality review (local run, qwen3-coder:30b)
 
 Corpus: 2 topics, 7 videos ingested (1 skipped, no transcript), full analyse ->
 channel-synthesis -> topic-synthesis -> corpus-synthesis chain. Total run cost
@@ -225,7 +227,7 @@ positions to named channels. No repetition loops, no truncation, no JSON leakage
 prose, no refusals. Provenance metadata (`model`, `prompt_id`, `temperature: 0.0`) is
 recorded in every artifact - that made this review possible.
 
-## #5 - Claim verifier: number-word blindness produces 100% false positives (HIGH)
+### #5 - Claim verifier: number-word blindness produces 100% false positives (HIGH)
 
 **Component:** `*_Verify.json` numeric claim checker (schema_version 3, `mode: warn`)
 
@@ -265,7 +267,7 @@ that single guard would have suppressed all 18 false positives here.
 **Test case:** the transcript above is an ideal fixture - one source, four spelled-out
 formats, zero numerals.
 
-## #6 - Corpus synthesis asserts a time-series it cannot have (MEDIUM)
+### #6 - Corpus synthesis asserts a time-series it cannot have (MEDIUM)
 
 `pokemon_market_Corpus_Synthesis.md` -> section **"What Changed In The Overall Topic Story"**:
 
@@ -282,7 +284,7 @@ unconditionally. Suggest suppressing it on first synthesis (no previous version 
 compare), or constraining it to the corpus's own date range and requiring per-claim source
 attribution like the "Strongest Signals" section already does.
 
-## #7 - Inconsistent attribution rigor between synthesis sections (LOW)
+### #7 - Inconsistent attribution rigor between synthesis sections (LOW)
 
 Same document, two standards:
 
@@ -296,7 +298,7 @@ already knows how to demand named support in one section; applying the same requ
 the consensus section would remove the inflation. Small models over-generalise to
 "all sources agree" - a template that requires naming supporters resists that.
 
-## #8 - Provenance is lost between layers (MEDIUM, feature request)
+### #8 - Provenance is lost between layers (MEDIUM, feature request)
 
 Insights carry `url`, `source_id`, `upload_date`. The syntheses - the artifacts you
 actually read and query - carry **none of it**. The corpus synthesis cites *"Pika Fun
@@ -306,7 +308,7 @@ exists one layer down but there's no path to it from the claim.
 For a corpus meant to be browsed in Obsidian and queried over MCP, synthesis-level claims
 should carry at least the source id/url, ideally a timestamp anchor.
 
-## Also worth knowing
+### Also worth knowing
 
 - **`num_ctx` varies by stage.** `ollama ps` showed **4096** during ingest and **41487**
   during report on the same model. If the ingest tier default is 4096, long transcripts are
@@ -318,7 +320,7 @@ should carry at least the source id/url, ideally a timestamp anchor.
 - **Cost accounting on local routes reads `~$0.0000` with real token counts** - correct,
   and the `no-metered` guard held throughout with cloud keys absent from the environment.
 
-## #9 - `report` destroys the whole report when the writer echoes a section title (HIGH)
+### #9 - `report` destroys the whole report when the writer echoes a section title (HIGH)
 
 **File:** `distill/pipeline/report/assembly.py` -> `audit_assembled_report()`
 (from `report/accordion.py::run_sequential_report`, ~line 346)
@@ -378,7 +380,7 @@ read.
 
 ---
 
-# Part 3 - Report quality + validation guidance
+## Part 3 - Report quality + validation guidance
 
 Two reports, same pipeline, same model (`qwen3-coder:30b`), same day. One is good. The
 other is 2x longer and materially worse - and **every existing audit passed on both**.
@@ -403,7 +405,7 @@ in the finished report.
 citation resolution all validated. `audit_assembled_report` will reject a report for a
 duplicated *heading* but happily ship one that is 25% duplicated *content*.
 
-## Cheap deterministic gates worth adding
+### Cheap deterministic gates worth adding
 
 None of these need a model call. All are computable on the assembled report in
 milliseconds, and each one would have caught something real in this run.
@@ -420,7 +422,7 @@ milliseconds, and each one would have caught something real in this run.
    ran lines 173-1185 of 1,461) is worth a warning.
 5. **Echoed-title strip.** See #9 - removes both a crash and a cosmetic duplicate.
 
-## Testing guidance
+### Testing guidance
 
 **Run the same topic 3x and diff.** Non-determinism is where both real bugs surfaced: the
 heading echo (#9) alternated between `##` and `###` across runs, and the table loop appeared

@@ -404,20 +404,18 @@ func TestFormatVRAMDoesNotPrintZeroAsAReading(t *testing.T) {
 	}
 }
 
-func TestIsDenseAndBigIgnoresMoE(t *testing.T) {
+func TestDenseSizeHintExceededIgnoresMoE(t *testing.T) {
 	p := Profile{Hints: map[string]any{"dense_param_b_interactive_max": 20.0}}
-	if !IsDenseAndBig("27B", "llama", p) {
-		t.Fatal("a dense 27B should be flagged on a bandwidth-bound device")
+	if !DenseSizeHintExceeded("27B", "llama", p) {
+		t.Fatal("a dense 27B should exceed the profile's 20B hint")
 	}
-	// Decode tracks ACTIVE parameters: a 30B MoE (~3B active) outruns an 8B
-	// dense model, so total size alone must not trigger the warning.
-	if IsDenseAndBig("30.5B", "qwen3moe", p) {
+	if DenseSizeHintExceeded("30.5B", "qwen3moe", p) {
 		t.Fatal("MoE must not be flagged by total parameter count")
 	}
-	if IsDenseAndBig("8.0B", "llama", p) {
+	if DenseSizeHintExceeded("8.0B", "llama", p) {
 		t.Fatal("a small dense model is fine")
 	}
-	if IsDenseAndBig("27B", "llama", Profile{}) {
+	if DenseSizeHintExceeded("27B", "llama", Profile{}) {
 		t.Fatal("no hint in profile means no opinion")
 	}
 }

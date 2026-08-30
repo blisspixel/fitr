@@ -4,7 +4,7 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-08-24.
+Last updated: 2026-08-30.
 
 ## Automated gates
 
@@ -14,7 +14,7 @@ Last updated: 2026-08-24.
 | Backend wire contract | Mock HTTP servers cover discovery, generation, chat and tool calls, timing receipts, artifact identity, effective context, authentication, redirects, bounded responses, and error redaction. |
 | Evidence contract | Tests cover runtime-bound model identity, context verification, device fingerprints, immutable history, signed completion records, contamination, and comparison refusal. |
 | Release binary smoke | The built Linux binary must pass global and subcommand help, then reject a malformed command with exit 2 and a useful hint. |
-| Installer smoke | Windows, macOS, and Linux runners download the latest public release, bind the native asset to its exact checksum entry, and validate its version command. |
+| Installer smoke | Windows, macOS, and Linux runners install locally served candidate artifacts, bind the native asset to its exact checksum entry, and validate its version command. |
 | Release quality | Formatting, vet, unit tests, race detection, cross-compilation, reproducible Linux build comparison, static ELF verification, size limits, vulnerability scanning, fuzz smoke tests, and installer syntax checks must all pass. |
 
 ## Native operating-system matrix
@@ -25,7 +25,7 @@ below claimed a passing loop while `advise` returned SKIP for every Ollama
 model, because the recorded path never called `advise`. A partial path is
 recorded as partial.
 
-| Operating system | Clean install | Bare inventory | Advise | Isolated live loop | Reopen and apply | Status |
+| Operating system | Clean install | Bare inventory | Advise | Live loop with isolated results | Reopen and apply | Status |
 |---|---:|---:|---:|---:|---:|---|
 | Windows amd64 (host A) | Pending final clean VM | Pass | Pass | Pass with Ollama, all documented commands | Pass | Pass on a used host |
 | Windows amd64 (host B, 0.9.6) | Pending final clean VM | Pass | Failed: SKIP for every model | Recorded pass, advise not exercised | Pass | Superseded |
@@ -114,9 +114,10 @@ contract already says.
    contract working.
 3. Resolve every blocker without weakening an identity, context, contamination,
    or comparison gate.
-4. Run the full release workflow on a release-candidate tag.
-5. Verify all six downloaded binaries and `SHA256SUMS` through both installers
-   before promoting 1.0.
+4. Run the full release workflow on the intended release tag.
+5. Verify that all six binaries appear exactly once in `SHA256SUMS`, then run
+   the POSIX installer against candidate artifacts on Linux and macOS and the
+   PowerShell installer against the Windows candidate before promoting 1.0.
 
 Backend receipt requirements and failure semantics are defined in
 [backends](backends.md). The product-level exit criteria remain in the

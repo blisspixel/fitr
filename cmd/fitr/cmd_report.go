@@ -289,7 +289,7 @@ func cmdBoard(ctx context.Context, args []string) int {
 				Model: r.Model, ParamSize: r.ModelMeta.Details.ParameterSize,
 				Quant:      r.ModelMeta.Details.QuantizationLevel,
 				DecodeMean: r.DecodeSum.Mean, DecodeSD: r.DecodeSum.SD,
-				PrefillMean: r.PrefillSum.Mean, ResidentGB: r.Memory.ResidentGB,
+				PrefillMean: r.PrefillSum.Mean, ResidentGB: verifiedResidentGB(r.Memory),
 				DecodeSeries: decodes, Repeats: r.Repeats, Serves: codes,
 			})
 		}
@@ -462,12 +462,20 @@ func cmdCompare(ctx context.Context, args []string) int {
 	// denominator not separated from zero), the ratio prints without an
 	// interval and therefore without a verdict.
 	for _, p := range []struct {
-		label string
-		x, y  stats.Summary
+		label       string
+		x, y        stats.Summary
+		claimable   bool
+		unclaimable string
 	}{
-		{"decode tok/s", a.DecodeSum, b.DecodeSum},
-		{"prefill tok/s", a.PrefillSum, b.PrefillSum},
+		{label: "decode tok/s", x: a.DecodeSum, y: b.DecodeSum, claimable: true},
+		{label: "prefill tok/s", x: a.PrefillSum, y: b.PrefillSum,
+			claimable:   comparableUncachedPrefill(a) && comparableUncachedPrefill(b),
+			unclaimable: "descriptive only - uncached prefill not proven"},
 	} {
+		if !p.claimable {
+			fmt.Printf("  %-21s %7.2f vs %7.2f  %s\n", p.label, p.x.Mean, p.y.Mean, p.unclaimable)
+			continue
+		}
 		lo, hi, ratio, ok := stats.FiellerRatio(p.x, p.y)
 		if ok {
 			verdict := "cannot separate"
@@ -486,50 +494,43 @@ func cmdCompare(ctx context.Context, args []string) int {
 	}
 	fmt.Println()
 
-	// Pass rates: the Newcombe difference interval is the sole arbiter. A
-	// difference is claimed if and only if the interval excludes zero.
-	for _, need := range []string{"coding", "structured_output", "instruction_precision", "user_tasks"} {
-		pa, pb := poolOf(a, need), poolOf(b, need)
-		if pa.N == 0 || pb.N == 0 {
-			continue
-		}
-		lo, hi, ok := stats.NewcombeDiff(pa.Passes, pa.N, pb.Passes, pb.N)
-		if !ok {
-			continue
-		}
-		d := float64(pa.Passes)/float64(pa.N) - float64(pb.Passes)/float64(pb.N)
-		verdict := "cannot separate"
-		if lo > 0 {
-			verdict = "first is better"
-		} else if hi < 0 {
-			verdict = "second is better"
-		}
-		fmt.Printf("  %-21s %d/%d vs %d/%d  %+.2f [%+.2f..%+.2f]  %s\n",
-			need, pa.Passes, pa.N, pb.Passes, pb.N, d, lo, hi, verdict)
-	}
-
-	// Paired analysis: when both runs faced IDENTICAL generated instances,
-	// the item-level flips carry far more information than the two rates.
-	fmt.Println()
+	// Paired analysis: identical instances make item flips descriptive. A
+	// significance claim aggregates those instances to one direction per
+	// generated family because repeats inside a family are clustered.
 	if a.SeedSet != "" && a.SeedSet == b.SeedSet {
 		pairedCompare(a, b)
 	} else if len(a.Checks) > 0 && len(b.Checks) > 0 {
-		fmt.Println("  unpaired: the runs faced different generated instances.")
-		fmt.Printf("  for a sharper paired test:  fitr run <model> --seedset shared1  (both models)\n")
+		fmt.Println("  behavior  no winner claim: generated task families are clustered and")
+		fmt.Println("            these runs faced different instances.")
+		fmt.Println("  pair with fitr run <model> --seedset shared1  (both models)")
 	}
 
-	fmt.Println("\n  note  a difference is claimed only when its 95% interval excludes zero;")
-	fmt.Println("        \"cannot separate\" is a real answer, not a missing one.")
+	fmt.Println("\n  note  throughput uses 95% intervals. Behavior differences require")
+	fmt.Println("        a complete identical plan and a per-need family-level exact test.")
 	return exitOK
+}
+
+// comparableUncachedPrefill requires every persisted probe to carry an
+// explicit zero-cache receipt. Unknown or partial cache state can remain
+// visible descriptively but cannot support a throughput winner claim.
+func comparableUncachedPrefill(r *Result) bool {
+	if r == nil || len(r.Speed) == 0 {
+		return false
+	}
+	for _, sample := range r.Speed {
+		if !sample.PrefillCacheReceiptValid() || sample.CachedPromptTok != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // pairedHang aligns the paired block's wrapped text under its own label.
 const pairedHang = 11
 
-// pairedCompare runs McNemar's exact test on instances both models faced.
-// Concordant instances carry no information about the difference; only the
-// flips decide, and with fewer than six of them no split can reach p<0.05 -
-// which is reported as exactly that, never as a near-miss.
+// pairedCompare reports item flips, then runs a separate exact sign test for
+// each need after every family contributes at most one direction. A claim
+// requires both sealed plans to match and every planned pair to be scorable.
 func pairedCompare(a, b *Result) {
 	flips := eval.PairFlips(a.Checks, b.Checks)
 	if flips.Shared == 0 {
@@ -549,57 +550,62 @@ func pairedCompare(a, b *Result) {
 	if line, ok := quantDamageLine(a, b, flips); ok {
 		fmt.Println("  " + terminalText(line))
 	}
-	switch flips.AOnly + flips.BOnly {
-	case 0:
+	if !completePairedPlan(a, b, flips) {
+		render.Field(os.Stdout, "  behavior", pairedHang, fmt.Sprintf(
+			"descriptive only: %d scorable shared instance(s); the sealed paired plan was incomplete or differed",
+			flips.Shared), width)
+		return
+	}
+	if flips.AOnly+flips.BOnly == 0 {
 		fmt.Println("  identical outcomes on every shared instance - no evidence of any difference.")
-	default:
-		pExact, pMid, separable := stats.McNemarExact(flips.AOnly, flips.BOnly)
+		return
+	}
+	anyDirection := false
+	for _, stratum := range eval.NeedDirections(a.Checks, b.Checks) {
+		discordantFamilies := stratum.AOnly + stratum.BOnly
+		if discordantFamilies == 0 {
+			continue
+		}
+		anyDirection = true
+		label := stratum.Need
+		if named := score.NeedLabel[stratum.Need]; named != "" {
+			label = named
+		}
+		code := stratum.Need
+		if named := score.NeedCode[stratum.Need]; named != "" {
+			code = named
+		}
+		pExact, pMid, separable := stats.McNemarExact(stratum.AOnly, stratum.BOnly)
 		if !separable {
-			fmt.Printf("  %d discordant instance(s) - too few to separate at alpha=0.05 regardless of split.\n",
-				flips.AOnly+flips.BOnly)
-			return
+			render.Field(os.Stdout, "  "+terminalText(code), pairedHang,
+				fmt.Sprintf("%d discordant family direction(s); too few to separate at alpha=0.05",
+					discordantFamilies), width)
+			continue
 		}
 		winner := a.Model
-		if flips.BOnly > flips.AOnly {
+		if stratum.BOnly > stratum.AOnly {
 			winner = b.Model
 		}
 		if pExact < 0.05 {
-			fmt.Printf("  %s wins the flips (McNemar exact p=%.3f, mid-p %.3f)\n", terminalText(winner), pExact, pMid)
+			render.Field(os.Stdout, "  "+terminalText(code), pairedHang,
+				fmt.Sprintf("%s separates %s family directions (exact sign p=%.3f, mid-p %.3f)",
+					terminalText(winner), terminalText(label), pExact, pMid), width)
 		} else {
-			fmt.Printf("  ~ the flips do not separate them (McNemar exact p=%.3f, mid-p %.3f)\n", pExact, pMid)
+			render.Field(os.Stdout, "  "+terminalText(code), pairedHang,
+				fmt.Sprintf("family directions do not separate them (exact sign p=%.3f, mid-p %.3f)",
+					pExact, pMid), width)
 		}
+	}
+	if !anyDirection {
+		fmt.Println("  item flips cancel within every need and family - no claimable direction.")
 	}
 }
 
-// poolOf rebuilds the per-need trial pools from a stored result. coding pools
-// the executed code tasks with the generated reasoning checks, mirroring the
-// scorecard.
-func poolOf(r *Result, need string) (p score.Pool) {
-	if need == "coding" {
-		for _, x := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
-			pass, measured := eval.MeasuredOutcome(x.Outcome, x.Pass)
-			if !measured {
-				continue
-			}
-			p.N++
-			if pass {
-				p.Passes++
-			}
-		}
+func completePairedPlan(a, b *Result, flips eval.FlipReport) bool {
+	if a == nil || b == nil || a.TaskPlan.CheckTrialsLimit <= 0 ||
+		a.TaskPlan.CheckTrialsLimit != b.TaskPlan.CheckTrialsLimit ||
+		a.TaskPlan.CheckPlanSHA256 == "" || a.TaskPlan.CheckPlanSHA256 != b.TaskPlan.CheckPlanSHA256 {
+		return false
 	}
-	for _, ck := range r.Checks {
-		match := ck.Need == need || (need == "coding" && ck.Need == "reasoning")
-		if !match {
-			continue
-		}
-		pass, measured := eval.MeasuredOutcome(ck.Outcome, ck.Pass)
-		if !measured {
-			continue
-		}
-		p.N++
-		if pass {
-			p.Passes++
-		}
-	}
-	return p
+	return flips.Shared == a.TaskPlan.CheckTrialsLimit
 }

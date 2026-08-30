@@ -323,16 +323,20 @@ func InformationDensity(text string) Density {
 // ---------------------------------------------------------------- inputs
 // FamilyPool is one generated-check family's trials inside a need.
 type FamilyPool struct {
-	Family string `json:"family"`
-	Passes int    `json:"passes"`
-	N      int    `json:"n"`
+	Family     string `json:"family"`
+	Passes     int    `json:"passes"`
+	N          int    `json:"n"`
+	Planned    int    `json:"planned,omitempty"`
+	Unscorable int    `json:"unscorable,omitempty"`
 }
 
 // Pool is a set of pooled binary trials feeding one need.
 type Pool struct {
-	Passes   int          `json:"passes"`
-	N        int          `json:"n"`
-	Families []FamilyPool `json:"families,omitempty"`
+	Passes     int          `json:"passes"`
+	N          int          `json:"n"`
+	Planned    int          `json:"planned,omitempty"`
+	Unscorable int          `json:"unscorable,omitempty"`
+	Families   []FamilyPool `json:"families,omitempty"`
 }
 
 func (p Pool) rate() float64 { return float64(p.Passes) / float64(p.N) }
@@ -342,6 +346,7 @@ func (p *Pool) Add(family string, pass bool) {
 		return
 	}
 	p.N++
+	p.Planned++
 	if pass {
 		p.Passes++
 	}
@@ -352,17 +357,41 @@ func (p *Pool) Add(family string, pass bool) {
 	for i := range p.Families {
 		if p.Families[i].Family == family {
 			p.Families[i].N++
+			p.Families[i].Planned++
 			if pass {
 				p.Families[i].Passes++
 			}
 			return
 		}
 	}
-	fp := FamilyPool{Family: family, N: 1}
+	fp := FamilyPool{Family: family, N: 1, Planned: 1}
 	if pass {
 		fp.Passes = 1
 	}
 	p.Families = append(p.Families, fp)
+}
+
+// AddUnscorable records a planned terminal observation that cannot enter a
+// numerator or denominator. Keeping it in the pool prevents informative
+// missingness from turning an easy observed subset into PASS.
+func (p *Pool) AddUnscorable(family string) {
+	if p == nil {
+		return
+	}
+	p.Planned++
+	p.Unscorable++
+	family = strings.TrimSpace(family)
+	if family == "" {
+		family = "unspecified"
+	}
+	for i := range p.Families {
+		if p.Families[i].Family == family {
+			p.Families[i].Planned++
+			p.Families[i].Unscorable++
+			return
+		}
+	}
+	p.Families = append(p.Families, FamilyPool{Family: family, Planned: 1, Unscorable: 1})
 }
 
 func (p Pool) clusters() []stats.Cluster {
@@ -397,6 +426,16 @@ type Measured struct {
 	// TTFTCacheContaminated is true when the gated TTFT prompt was mostly
 	// served from cache - the number would be a warm-prefix figure.
 	TTFTCacheContaminated bool
+	// TTFTCacheKnown distinguishes a verified cache miss from a backend that
+	// cannot report cache state. Unknown cache state cannot establish the
+	// loaded/uncached latency gate.
+	TTFTCacheKnown bool
+	// PrefillCacheKnown requires a valid cache receipt for every long-prompt
+	// sample. PrefillCacheContaminated records any positive cache hit. Unknown
+	// or contaminated timings stay visible but cannot prove an uncached-prefill
+	// dependent need.
+	PrefillCacheKnown        bool
+	PrefillCacheContaminated bool
 	// TimingsClientDerived is true when decode/TTFT came from wall-clock on
 	// the client (OpenAI-compat). The number is still gated; the label is
 	// the honesty (design rule 6).
@@ -407,11 +446,13 @@ type Measured struct {
 
 	CodeWritePass, CodeFixPass bool
 	CodePasses, CodeRepeats    int
+	CodePlanned                bool
 	CodeKnown                  bool
 	CodeFlaky                  bool
 
-	// Pools of binary check-task trials, one per need they feed. Repeats of
-	// one family are independent generated instances; families are clusters.
+	// Pools of binary check-task trials, one per need they feed. Repeats of one
+	// family are fresh generated instances, not independent evidence; families
+	// are clusters.
 	// Need-level intervals use Rao-Scott Wilson, not iid Wilson on the pool.
 	Structured Pool
 	Precision  Pool
@@ -435,6 +476,7 @@ type Measured struct {
 	RefusedCount int
 	RefusalKnown bool
 
+	AgenticPlanned          bool
 	AgenticRan, AgenticPass bool
 	AgenticMalformed        int
 	AgenticTurns            int
@@ -486,13 +528,24 @@ func Score(m Measured, p device.Profile) Scorecard {
 		// A cache-hit TTFT is not a new-question measurement. Judging it
 		// would let a warm-prefix figure wear a cold-prompt badge (usually
 		// a false PASS). Exclude it from the gate and say so.
-		ok := m.DecodeTPS >= tpsMin
-		detail := []string{fmt.Sprintf("TTFT %.2fs loaded/uncached (need <=%.1f)", m.TTFT, ttftMax)}
+		decodeOK := m.DecodeTPS >= tpsMin
+		verdictState := state(decodeOK && m.TTFT <= ttftMax)
+		detail := []string{fmt.Sprintf("TTFT %.2fs loaded/cache state unknown (need <=%.1f)", m.TTFT, ttftMax)}
 		note := ""
-		if m.TTFTCacheContaminated {
-			note = "gated TTFT was a cache hit - not a new-question number, excluded from the gate"
-		} else {
-			ok = ok && m.TTFT <= ttftMax
+		switch {
+		case !m.TTFTCacheKnown:
+			note = "backend did not provide a cache receipt; loaded/uncached TTFT is unproven"
+			if decodeOK {
+				verdictState = Inconclusive
+			}
+		case m.TTFTCacheContaminated:
+			detail[0] = fmt.Sprintf("TTFT %.2fs loaded/partial cache hit (need <=%.1f)", m.TTFT, ttftMax)
+			note = "gated TTFT included cached prompt tokens - not an explicit miss, excluded from the gate"
+			if decodeOK {
+				verdictState = Inconclusive
+			}
+		default:
+			detail[0] = fmt.Sprintf("TTFT %.2fs loaded/uncached (need <=%.1f)", m.TTFT, ttftMax)
 		}
 		if m.TTFTCold > 0 {
 			detail = append(detail, fmt.Sprintf("cold start %.1fs", m.TTFTCold))
@@ -503,38 +556,44 @@ func Score(m Measured, p device.Profile) Scorecard {
 		if m.TimingsClientDerived {
 			note = joinNote(note, "client-derived wall-clock (not server timings)")
 		}
-		n["fast_and_decent"] = newVerdict(state(ok),
+		n["fast_and_decent"] = newVerdict(verdictState,
 			fmt.Sprintf("%.2f tok/s", m.DecodeTPS),
 			fmt.Sprintf("need >=%.1f", tpsMin), detail, note)
 	}
 
-	// --- coding. The gate is the executed code tasks; generated reasoning
-	// checks pool into the same interval (each instance is an independent
-	// trial) so the number rests on more than six observations.
+	// --- coding. The gate is the executed code tasks. Generated reasoning is
+	// shown separately because it has its own clustered family structure and
+	// cannot manufacture precision for the executable write/fix contract.
 	if !m.CodeKnown {
 		v := skipped("executable coding not measured")
+		if m.CodePlanned {
+			v = skipped("scheduled coding task was skipped; isolated execution is unavailable")
+		}
 		if m.Reasoning.N > 0 {
-			wi := stats.Wilson(m.Reasoning.Passes, m.Reasoning.N)
-			v = newVerdict(Skip, "not measured", "", nil, fmt.Sprintf(
-				"reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
-				m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi))
+			wi := stats.ClusteredWilson(m.Reasoning.clusters())
+			note := fmt.Sprintf("reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
+				m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi)
+			if m.CodePlanned {
+				note = joinNote("scheduled coding task was skipped because isolated execution is unavailable", note)
+			}
+			v = newVerdict(Skip, "not measured", "", nil, note)
 		}
 		n["coding"] = v
 	} else {
 		ok := m.CodeWritePass && m.CodeFixPass
 		measure := "write+fix"
+		if m.CodeRepeats > 0 {
+			measure = fmt.Sprintf("%d/%d executable", m.CodePasses, m.CodeRepeats)
+		}
 		detail := []string{fmt.Sprintf("write=%v, fix=%v", m.CodeWritePass, m.CodeFixPass)}
 		note := ""
-		if pooledN := m.CodeRepeats + m.Reasoning.N; pooledN > 1 {
-			wi := stats.Wilson(m.CodePasses+m.Reasoning.Passes, pooledN)
-			measure = fmt.Sprintf("%d/%d passes [%.2f-%.2f]",
-				m.CodePasses+m.Reasoning.Passes, pooledN, wi.Lo, wi.Hi)
-			if m.Reasoning.N > 0 {
-				detail = append(detail, fmt.Sprintf("incl. reasoning %d/%d", m.Reasoning.Passes, m.Reasoning.N))
-			}
-			if m.CodeFlaky {
-				note = "FLAKY - the same task passed on some repeats and failed on others"
-			}
+		if m.Reasoning.N > 0 {
+			wi := stats.ClusteredWilson(m.Reasoning.clusters())
+			detail = append(detail, fmt.Sprintf("reasoning %d/%d [%.2f-%.2f] observed separately",
+				m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi))
+		}
+		if m.CodeFlaky {
+			note = "FLAKY - the same task passed on some repeats and failed on others"
 		}
 		n["coding"] = newVerdict(state(ok), measure, "", detail, note)
 	}
@@ -570,20 +629,27 @@ func Score(m Measured, p device.Profile) Scorecard {
 	// --- user tasks: only present on runs that had any. The default criterion
 	// is all-must-pass -- they are the user's own requirements -- unless the
 	// profile sets a rate.
-	if m.User.N > 0 {
-		wi := stats.Wilson(m.User.Passes, m.User.N)
-		measure := fmt.Sprintf("%d/%d passed [%.2f-%.2f]", m.User.Passes, m.User.N, wi.Lo, wi.Hi)
-		if minRate, ok := p.Float("user_tasks", "pass_rate_min"); ok {
-			verdictState, note := state(m.User.rate() >= minRate), ""
-			if gateInsideInterval(wi.Lo, wi.Hi, minRate) {
-				verdictState = Inconclusive
-				note = undecidedWhy(wi.Lo, wi.Hi, minRate)
-			}
-			n["user_tasks"] = newVerdict(verdictState, measure,
-				fmt.Sprintf("need >=%.2f", minRate), nil, note)
+	if m.User.N > 0 || m.User.Planned > 0 {
+		if _, configuredRate := p.Float("user_tasks", "pass_rate_min"); configuredRate {
+			n["user_tasks"] = poolVerdict(m.User, p, "user_tasks", "passed")
+		} else if m.User.N == 0 {
+			n["user_tasks"] = newVerdict(Inconclusive, fmt.Sprintf("0/%d scorable", m.User.Planned),
+				"all must pass", familyBreakdown(m.User.Families),
+				"planned user-task evidence was unavailable; no outcome enters a denominator")
 		} else {
+			wi := stats.ClusteredWilson(m.User.clusters())
+			measure := fmt.Sprintf("%d/%d passed [%.2f-%.2f]", m.User.Passes, m.User.N, wi.Lo, wi.Hi)
 			n["user_tasks"] = newVerdict(state(m.User.Passes == m.User.N), measure,
-				"all must pass", nil, "default criterion: these are your own requirements; set a user_tasks gate to loosen")
+				"all must pass", familyBreakdown(m.User.Families),
+				"default criterion: these are your own requirements; set a user_tasks gate to loosen")
+			if m.User.Planned > m.User.N {
+				v := n["user_tasks"]
+				v.State = Inconclusive
+				v.Note = joinNote(v.Note, fmt.Sprintf(
+					"%d of %d planned user-task observations were not scorable", m.User.Planned-m.User.N, m.User.Planned))
+				v.Why = v.compose()
+				n["user_tasks"] = v
+			}
 		}
 	}
 
@@ -615,6 +681,9 @@ func Score(m Measured, p device.Profile) Scorecard {
 		n["unattended_agentic"] = blocked(
 			"tool plumbing failed before capability could be judged: " +
 				m.PlumbingVerdict + " -- fix template/parser, then re-run")
+	case !m.AgenticRan && m.AgenticPlanned:
+		n["unattended_agentic"] = skipped(
+			"scheduled long-horizon task was skipped; isolated execution is unavailable")
 	case !m.AgenticRan && m.ToolsRan:
 		n["unattended_agentic"] = skipped(fmt.Sprintf(
 			"only the 4-call proxy ran (tools=%v); use --full for the long-horizon verdict",
@@ -628,20 +697,29 @@ func Score(m Measured, p device.Profile) Scorecard {
 			break
 		}
 		bmax, _ := p.Float("unattended_agentic", "malformed_tool_calls_max")
-		ok2 := m.PrefillTPS >= pmin && float64(m.AgenticMalformed) <= bmax && m.AgenticPass
+		behaviorOK := float64(m.AgenticMalformed) <= bmax && m.AgenticPass
 		detail := []string{
 			fmt.Sprintf("unattended pass=%v in %d turns", m.AgenticPass, m.AgenticTurns),
 			fmt.Sprintf("malformed=%d", m.AgenticMalformed),
 		}
 		note := ""
 		if m.AgenticCtxCeiling && !m.AgenticCompacted {
-			ok2 = false
+			behaviorOK = false
 			note = fmt.Sprintf("transcript peaked at %d tokens and never shrank - filled the window with no compaction",
 				m.AgenticMaxPrompt)
 		} else if m.AgenticCtxCeiling {
 			note = fmt.Sprintf("transcript peaked at %d tokens then compacted", m.AgenticMaxPrompt)
 		}
-		n["unattended_agentic"] = newVerdict(state(ok2),
+		verdictState := state(behaviorOK && m.PrefillTPS >= pmin)
+		if (!m.PrefillCacheKnown || m.PrefillCacheContaminated) && behaviorOK {
+			verdictState = Inconclusive
+			if !m.PrefillCacheKnown {
+				note = joinNote(note, "prefill cache state was not proven; the uncached prompt-processing gate is unproven")
+			} else {
+				note = joinNote(note, "prefill probe observed cached tokens; the uncached prompt-processing gate is unproven")
+			}
+		}
+		n["unattended_agentic"] = newVerdict(verdictState,
 			fmt.Sprintf("prefill %.1f tok/s", m.PrefillTPS),
 			fmt.Sprintf("need >=%.0f", pmin), detail, note)
 	}
@@ -784,7 +862,7 @@ func ExcludeEvidence(sc Scorecard, reason string) Scorecard {
 
 	needs := make(map[string]Verdict, len(sc.Needs))
 	for need, verdict := range sc.Needs {
-		if verdict.State == Pass || verdict.State == Fail {
+		if verdict.State != Skip && verdict.State != NA {
 			verdict.State = Inconclusive
 			verdict = verdict.withNote(detail)
 		}
@@ -831,15 +909,25 @@ func ExcludeContamination(sc Scorecard, models []string) Scorecard {
 // families are clustered: iid Wilson overstates n and can hide a dead family.
 // When the gate sits inside the interval, the verdict says so.
 func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
-	if pool.N == 0 {
+	planned := pool.Planned
+	if planned == 0 {
+		planned = pool.N
+	}
+	if planned == 0 {
 		return skipped("not measured")
+	}
+	if pool.N == 0 {
+		return newVerdict(Inconclusive, fmt.Sprintf("0/%d scorable", planned), "",
+			familyBreakdown(pool.Families),
+			"planned evidence was unavailable; no outcome enters a denominator")
 	}
 	minRate, ok := p.Float(gate, "pass_rate_min")
 	if !ok {
 		return skipped("no " + gate + " gate in profile")
 	}
 	wi := stats.ClusteredWilson(pool.clusters())
-	verdictState, note := state(pool.rate() >= minRate), ""
+	note := ""
+	verdictState := state(pool.rate() >= minRate)
 	if gateInsideInterval(wi.Lo, wi.Hi, minRate) {
 		verdictState = Inconclusive
 		note = undecidedWhy(wi.Lo, wi.Hi, minRate)
@@ -848,6 +936,17 @@ func poolVerdict(pool Pool, p device.Profile, gate, verb string) Verdict {
 		verdictState = Inconclusive
 		note = joinNote(note, "undecided: family "+dead+" is established below the bar, so the "+
 			"pooled rate is hiding it. Not thin evidence: look at that family")
+	}
+	if planned > pool.N {
+		verdictState = Inconclusive
+		note = joinNote(note, fmt.Sprintf(
+			"%d of %d planned observations were not scorable; missing evidence cannot establish this need",
+			planned-pool.N, planned))
+	}
+	if countPlannedFamilies(pool.Families) < 2 && planned > 1 {
+		verdictState = Inconclusive
+		note = joinNote(note,
+			"one check family establishes only within-family behavior, not the broader need")
 	}
 	return newVerdict(verdictState,
 		fmt.Sprintf("%d/%d %s [%.2f-%.2f]", pool.Passes, pool.N, verb, wi.Lo, wi.Hi),
@@ -862,9 +961,23 @@ func familyBreakdown(families []FamilyPool) []string {
 	sort.Slice(names, func(i, j int) bool { return names[i].Family < names[j].Family })
 	parts := make([]string, 0, len(names))
 	for _, f := range names {
-		parts = append(parts, fmt.Sprintf("%s %d/%d", f.Family, f.Passes, f.N))
+		part := fmt.Sprintf("%s %d/%d", f.Family, f.Passes, f.N)
+		if f.Unscorable > 0 {
+			part += fmt.Sprintf(" (%d unavailable)", f.Unscorable)
+		}
+		parts = append(parts, part)
 	}
 	return parts
+}
+
+func countPlannedFamilies(families []FamilyPool) int {
+	n := 0
+	for _, family := range families {
+		if family.Planned > 0 || family.N > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 func joinNote(existing, extra string) string {
@@ -883,8 +996,7 @@ func establishedFamilyBelowGate(families []FamilyPool, gate float64) string {
 		if f.N < 3 {
 			continue
 		}
-		wi := stats.Wilson(f.Passes, f.N)
-		if wi.Hi < gate {
+		if stats.Wilson(f.Passes, f.N).Hi < gate {
 			return f.Family
 		}
 	}

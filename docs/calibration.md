@@ -47,8 +47,9 @@ fitr calibrate \
 Five repeats are the command default and an exploratory campaign floor, not
 enough evidence to review a task. Use `-k 10` to meet the controlled-pair sample
 floor, but do not treat an unsigned exported pair as authenticated evidence.
-Both sides must use the same fixed `-k`. Adaptive stopping is rejected in this
-mode because it can make the two models see different instances.
+Current runs use a fixed `-k`, and both sides must use the same value. Any
+future adaptive protocol remains ineligible here unless it guarantees that the
+two models see the same declared instances under a compatible stopping rule.
 
 `fitr calibrate` rejects results when any of these controls differ:
 

@@ -259,9 +259,6 @@ type Meta struct {
 	TTFTSeries               []float64
 	FirstRunSlow             bool
 	FirstRunRatio            float64
-	Trials                   int
-	MDEpp                    float64
-	MDEDiffpp                float64
 	ShowsIntervals           bool
 	SavedPath                string
 	Calibration              bool
@@ -492,7 +489,7 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 		d.verdictRow(w, score.NeedLabel[k], v, width)
 	}
 
-	if m.DecodeN > 0 || m.PrefillN > 0 || m.TTFTN > 0 || m.ResidentGB > 0 {
+	if m.DecodeN > 0 || m.PrefillN > 0 || m.TTFTN > 0 {
 		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "performance"))
 		if m.DecodeN > 0 {
 			d.perfRow(w, "decode", "tok/s", m.DecodeMean, m.DecodeSD, m.DecodeN,
@@ -505,39 +502,21 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 		if m.TTFTN > 0 {
 			d.perfRow(w, "TTFT", "s", m.TTFTMean, m.TTFTSD, m.TTFTN, m.TTFTSeries, 0, 0, width)
 		}
-		if m.ResidentGB > 0 {
-			fmt.Fprintf(w, "  %-8s %.2f GB resident\n", "memory", m.ResidentGB)
-		}
 		if m.FirstRunSlow {
 			d.footer(w, fmt.Sprintf("! first decode repeat was %.1fx slower than the settled repeats",
 				m.FirstRunRatio), width, 2, 4, d.pal.Warn)
 		}
 	}
-	// Say what this sample CANNOT resolve. An honest gap beats implied precision.
-	if m.MDEpp > 0 {
-		// Two figures, because fitr makes two kinds of claim. The gate figure
-		// is a one-sample calculation and was printed on its own beside the
-		// words "not good from slightly better", which is a model-versus-model
-		// sentence quoting a number that cannot support it. A difference of
-		// two rates carries both variances, so it resolves worse by sqrt(2).
-		line := fmt.Sprintf("evidence  %s %s %d trials, resolves ~%s against a gate",
-			resolutionBand(m.MDEpp), d.g.Dash, m.Trials, resolutionText(m.MDEpp))
-		if m.MDEDiffpp > 0 {
-			line += ", " + resolutionText(m.MDEDiffpp) + " between two models"
-		}
-		// The plain-English version of the same fact, for the reader who is
-		// not going to convert percentage points into a decision.
-		line += ". Separates broken from working, not good from slightly better"
+	if m.ResidentGB > 0 {
+		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "capacity"))
+		fmt.Fprintf(w, "  %-8s %.2f GB after requested 32K load probe\n", "resident", m.ResidentGB)
+	}
+	// Each need carries its own clustered interval. Combining heterogeneous
+	// endpoints into one global MDE would invent a denominator no verdict uses.
+	if m.ShowsIntervals {
 		fmt.Fprintln(w)
-		d.footer(w, line, width, 0, evidenceHang, d.pal.Muted)
-		// Name what the ranges are, and both things they are not. Readers
-		// reliably take an interval for the spread of scores they will see, or
-		// for the tool's confidence in the model, and neither is what it says.
-		if m.ShowsIntervals {
-			d.footer(w, "ranges are what this run pins the true rate to. They are not the spread of "+
-				"scores you will see, and not how sure fitr is that the model is good",
-				width, evidenceHang, evidenceHang, d.pal.Muted)
-		}
+		d.footer(w, "ranges belong to each need. fitr never combines unrelated outcomes into one score or resolution claim",
+			width, 0, evidenceHang, d.pal.Muted)
 	}
 	if m.Repeats < 3 {
 		warning := "! single-sample run - identical configs vary 10-20pp between runs; " +
@@ -705,17 +684,6 @@ func (noneDisplay) Result(score.Scorecard, Meta) {}
 func (noneDisplay) Emit(any)                     {}
 func (noneDisplay) Close()                       {}
 
-// resolutionText renders a minimum detectable effect. Percentage points cannot
-// exceed 100, so a calculation that lands above it has not found a wide
-// threshold; it has found that this sample resolves nothing. Printing "~114pp"
-// states an impossible quantity where the honest answer is a sentence.
-func resolutionText(pp float64) string {
-	if pp >= 100 {
-		return "nothing"
-	}
-	return fmt.Sprintf("%.0fpp", pp)
-}
-
 // stateTag is the fixed-width form of a verdict for the scorecard column.
 //
 // The stored state stays "INCONCLUSIVE", because it is persisted in saved
@@ -732,33 +700,4 @@ func stateTag(s score.State) string {
 		return "????"
 	}
 	return string(s)
-}
-
-// resolutionBand names how much this run can resolve, so the reader gets an
-// at-a-glance signal without having to interpret a percentage.
-//
-// The word never appears without its number on the same line, which is the
-// whole design constraint: a verbal probability alone transmits its intended
-// meaning to about 40% of readers, a word beside its number to about 72%, and
-// the number alone to about 75%. The word is the convenience; the number is
-// the message. If one of them has to go, the word goes.
-//
-// The scale is GRADE's certainty ladder rather than an invented one, and it
-// describes the RUN, not the model. That distinction is load-bearing: a
-// qualitative low-confidence label attached to a subject gets absorbed as bad
-// news about that subject, which is precisely how "we could not tell" ends up
-// reading as "it failed".
-func resolutionBand(mdePP float64) string {
-	switch {
-	case mdePP <= 0:
-		return "unknown"
-	case mdePP <= 10:
-		return "high"
-	case mdePP <= 20:
-		return "moderate"
-	case mdePP <= 40:
-		return "low"
-	default:
-		return "very low"
-	}
 }

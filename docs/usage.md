@@ -54,10 +54,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.9.8" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.9.8" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.9.8" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.9.8" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.9.9" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.9.9" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.9.9" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.9.9" alt="fitr top (demo data)" width="820">
 
 ### Disk
 
@@ -98,6 +98,12 @@ NVIDIA card. Everything else is written from the platform's documented
 interfaces and covered by tests that do not need the hardware. Treat the
 unexercised rows as untested rather than as working.
 
+Hardware choice is not a single speed ranking. Capacity, prompt processing,
+generation, first-response latency, model behavior, placement, and intended
+workload answer different questions. See [Choosing hardware with fitr](choosing-hardware.md)
+for the current evidence boundary and the planned context, quant, sustained,
+and serving experiments.
+
 ### Memory budget by platform
 
 `fitr` reports the memory a model may actually use, not the memory installed.
@@ -132,8 +138,8 @@ that will not load.
 | `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
-| `fitr view [model\|result.json]` | reopen the newest or selected saved result as a terminal data view |
-| `fitr board [--current]` | compare everything, grouped by device |
+| `fitr view [model\|result.json] [--display MODE] [--full]` | reopen a saved result; `--full` emits the complete sealed record only with JSON display |
+| `fitr board [--current] [--display MODE] [--full]` | compare by device; `--full` emits complete sealed records only with JSON display |
 | `fitr top [--view VIEW]` | open the keyboard-first Live, Result, Board, History, and Inventory monitor |
 | `fitr top view [model\|result.json]` | open a selected saved result in the monitor |
 | `fitr top run <model> [run flags]` | run the same evaluator with structured live progress |
@@ -149,7 +155,7 @@ that will not load.
 | Level | Runs | ~Time |
 |---|---|---|
 | `--quick` | speed, memory, plumbing; executable tasks recorded as SKIP | minutes; smoke-test the stack |
-| *(default)* | + 16 generated checks, refusal, safe tool withdrawal | many minutes; first real measurement |
+| *(default)* | + all 22 generated checks across 16 families, refusal, safe tool withdrawal | many minutes; first real measurement |
 | `--full` | + long-horizon agent task, SKIP while execution is disabled | tens of minutes; coding still unproven |
 | `--checks-only` | generated checks only; requires `--seedset`, defaults to 5 repeats | model-dependent |
 
@@ -159,20 +165,17 @@ Ctrl-C is safe (exit 130).
 
 ## Flags worth knowing
 
-- `-k N` repeats the noisy tasks N times (default 3, 1 with `--quick`, 5 with
-  `--checks-only`). A single run is not a measurement: identical configs vary
-  10-20 pp.
-- `--adaptive` replaces the fixed check-repeat count with a sequential test:
-  keep generating fresh instances until each gated need is decided against
-  its gate, or report that the sample cannot separate it. See
-  [statistics.md](statistics.md).
+- `-k N` explicitly sets the repeat count for noisy tasks and generated-check
+  rounds. Without it, standard and full runs use three speed and classic-task
+  repeats but one complete generated-check round; quick uses one, and
+  checks-only uses five. A single observation is not a measurement: identical
+  configs vary 10-20 pp.
 - `--seedset NAME` pins the generated-instance set. Two runs sharing a
   seedset face identical instances, which upgrades `fitr compare` to a
   paired test. Fresh instances per run remain the default.
 - `--checks-only` is the efficient battery-calibration level. It requires a
-  seedset and uses five fixed repeats by default. It cannot be combined with
-  adaptive stopping because both sides of a pair must see every instance. See
-  [calibration.md](calibration.md).
+  seedset and uses five fixed repeats by default. Both sides of a pair see
+  every declared instance. See [calibration.md](calibration.md).
 - `--lineage PATH` (`fitr calibrate`) attaches a `fitr.lineage.same-base.v1`
   receipt from a `fitr.lineage.conversion.v1` manifest that names both
   runtime-bound artifact digests and one base revision. Family names are not
@@ -186,7 +189,8 @@ Ctrl-C is safe (exit 130).
   runtime did not verify. `fitr apply` then prints the command to persist that
   setting; fitr never restarts the server.
 - `--load` (advise) loads an Ollama model and reads `/api/ps` so fit includes
-  the live resident allocation and compute buffers. `--fit` runs
+  the live resident allocation, including runtime-managed memory beyond
+  modeled weights and KV. `--fit` runs
   `llama-fit-params` on a GGUF when that binary is on PATH and uses its dummy
   allocation. The weights+KV estimate is the default for conventional
   attention and is labeled as such. Hybrid recurrent architectures stay SKIP
@@ -205,8 +209,14 @@ Ctrl-C is safe (exit 130).
   max from GGUF metadata.
 - `--html` (run) writes a self-contained HTML scorecard next to the JSON.
   Off unless you pass it. `fitr export <model> [--out PATH]` does the same
-  from a saved result. The page carries the hardware fingerprint; do not
-  rank it against another device. Never uploaded.
+  from a saved result. The page carries an opaque device ID and only the
+  allowlisted configuration needed to interpret the result. It omits raw model
+  output, hostnames, local paths, the raw fingerprint key, and arbitrary
+  runtime configuration. It is never uploaded automatically.
+- `--full` with `fitr view --display json` or `fitr board --display json`
+  emits the complete sealed local record instead of presentation JSON. Full
+  records can contain raw model output, hostname, and device details; keep
+  them local unless you have reviewed them.
 
 ## Output modes and exit codes
 
@@ -217,7 +227,8 @@ exit 2, and do not begin runtime discovery or modify stored evidence.
 ```bash
 fitr run m --display json    # NDJSON on stdout, nothing else
 fitr view                    # newest saved result, with repeat-shape graphs on a rich terminal
-fitr view m --display json   # full saved result JSON
+fitr view m --display json   # privacy-safe presentation scorecard JSON
+fitr view m --display json --full  # complete sealed local record; may contain sensitive data
 fitr run m -q                # results only     -v  detail, no progress
 NO_COLOR=1 fitr board        # honored (empty string means unset)
 FITR_ASCII=1 fitr board      # force ASCII glyphs
@@ -283,11 +294,43 @@ to a `measured` state. `fitr top history` shows the file-level details needed
 to repair or remove it.
 
 A named `fitr advise` prints a context-fit table at 2k / 4k / 8k / 16k / 32k
-and the architecture max: weights, KV, buffers, need, and headroom.
-Buffers are `n/a` until `--load` or `--fit` measured that exact window.
+and the architecture max: weights, KV, other resident allocation, need, and
+remaining capacity. The non-weight, non-KV part is `n/a` until `--load` or
+`--fit` measured that exact window.
 Decode/prefill appear only from a saved run at that ctx. Hybrid recurrent
 models skip the algebraic table until a measurement exists. The suggested
 row is the largest window that still fits when the requested one does not.
+
+## Reading performance and capacity
+
+Performance and capacity are deliberately separate. A model may fit and still
+generate slowly, process long prompts quickly while streaming slowly, or have
+good warm responsiveness while paying a large cold-load cost.
+
+- **Load** is the runtime's model-load observation when available.
+- **TTFT** is wall time from request start to the first non-empty streamed
+  chunk. Its cache state is reported separately. Unknown or cache-hit TTFT
+  remains an observation but cannot prove the uncached responsiveness gate.
+- **Prefill** describes input-token processing and matters for long prompts,
+  retrieval, and repeated agent histories. A gate or comparison requires an
+  explicit zero-cache receipt for every sample; unknown state or any positive
+  cached-token count remains descriptive only.
+- **Decode** describes generated-token streaming after prompt processing.
+- **Resident** is observed loaded allocation when the runtime reports it.
+- **Weights** and **KV** are derived from artifact metadata. The remainder of
+  observed resident allocation is labeled as other resident memory, not as a
+  directly measured compute-buffer component.
+
+The footprint check requests a 32K load probe. It is scored only when the
+runtime receipt confirms that the effective context is exactly 32K. If the
+runtime clamps or does not report the effective context, the raw receipt is
+retained, but Result and Board do not present its allocation as verified 32K
+capacity and the need is SKIP.
+
+Current output does not claim a hardware bottleneck. Evidence-backed limiter
+diagnoses, context sweeps, quant tradeoff frontiers, sustained runs, and
+concurrent serving tests are planned as distinct experiment types so their
+measurements cannot contaminate an ordinary scored run.
 
 ## Cores
 
@@ -310,8 +353,9 @@ verdict: **compatible**, **low memory** (`try num_ctx=4096 -> fits in 19.4 GB`),
 or **incompatible**. Negative tiers carry the flag that fixes them.
 
 If the model is already loaded, the number is the server's own resident
-bytes (measured, compute buffers included). Otherwise it is **weights + KV**
-from GGUF architecture, and compute buffers are excluded and said so. A
+bytes. The non-weight, non-KV part is a derived remainder, not an independently
+measured compute-buffer component. Otherwise it is **weights + KV** from GGUF
+architecture, and other runtime allocation is excluded and said so. A
 running process that exceeds the VRAM *reading* is SKIP, not Incompatible -
 the budget is the suspect number. MoE decode class uses *active* parameters,
 not total.
@@ -326,6 +370,12 @@ SKIP, never a guess, when GPU memory was not measured, weights are unknown,
 or architecture metadata is missing. `--vram-gb N` supplies a budget; a GPU
 name is never turned into a VRAM number. There is no catalog of models to
 pick from - advise answers "does THIS fit", not "what exists".
+
+User task families can show whether a configuration handles representative
+work, but current aggregate records cannot honestly produce time to valid
+result or accepted outcomes per hour. Those require sealed per-trial timing,
+attempt, verifier, retry, and escalation receipts. See
+[Workload evidence and bounded workflows](workload-evidence.md).
 
 ## Apply
 

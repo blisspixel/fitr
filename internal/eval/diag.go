@@ -2,7 +2,9 @@ package eval
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -71,26 +73,44 @@ func ScoreRefusal(key, text string, markers []string) string {
 	return "answered"
 }
 
+// OrderedRefusalIDs returns the protocol order for refusal prompt IDs. The
+// three built-in prompts retain their historical order; extension prompts are
+// sorted so a map iteration can never change the sealed schedule.
+func OrderedRefusalIDs(ids []string) []string {
+	preferred := []string{"political", "fiction", "rewrite"}
+	present := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		present[id] = true
+	}
+	out := make([]string, 0, len(present))
+	for _, id := range preferred {
+		if present[id] {
+			out = append(out, id)
+			delete(present, id)
+		}
+	}
+	extra := make([]string, 0, len(present))
+	for id := range present {
+		extra = append(extra, id)
+	}
+	sort.Strings(extra)
+	return append(out, extra...)
+}
+
+// RefusalPromptIDs returns the exact prompt schedule RunRefusal will execute.
+func RefusalPromptIDs(spec RefusalSpec) []string {
+	ids := make([]string, 0, len(spec.Prompts))
+	for id := range spec.Prompts {
+		ids = append(ids, id)
+	}
+	return OrderedRefusalIDs(ids)
+}
+
 func RunRefusal(ctx context.Context, c llm.Backend, model string, spec RefusalSpec) (map[string]RefusalVerdict, int, error) {
 	out := map[string]RefusalVerdict{}
 	refused := 0
 	samp := ollama.Deterministic(spec.NumPredict, numCtx(ctx))
-	// Stable order so runs are comparable and the display never reshuffles.
-	keys := []string{"political", "fiction", "rewrite"}
-	var extra []string
-	for k := range spec.Prompts {
-		found := false
-		for _, kk := range keys {
-			if kk == k {
-				found = true
-			}
-		}
-		if !found {
-			extra = append(extra, k)
-		}
-	}
-	sort.Strings(extra)
-	keys = append(keys, extra...)
+	keys := RefusalPromptIDs(spec)
 	for _, k := range keys {
 		prompt, ok := spec.Prompts[k]
 		if !ok {
@@ -256,10 +276,78 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 
 // ---------------------------------------------------------------- memory
 type MemoryResult struct {
-	DiskGB     float64 `json:"disk_gb"`
-	ResidentGB float64 `json:"resident_gb_at_32k"`
-	PctOnGPU   int     `json:"pct_on_gpu"`
-	LoadS      float64 `json:"load_s"`
+	Outcome           Outcome `json:"outcome,omitempty"`
+	UnavailableReason string  `json:"unavailable_reason,omitempty"`
+	DiskGB            float64 `json:"disk_gb"`
+	ResidentGB        float64 `json:"resident_gb_at_32k"`
+	PctOnGPU          int     `json:"pct_on_gpu"`
+	LoadS             float64 `json:"load_s"`
+	RequestedCtx      int     `json:"requested_ctx,omitempty"`
+	EffectiveCtx      *int    `json:"effective_ctx,omitempty"`
+	ResidentBytes     int64   `json:"resident_bytes,omitempty"`
+	AcceleratorBytes  int64   `json:"accelerator_bytes,omitempty"`
+}
+
+// ValidateReceipt checks the point-specific facts added to new memory probes.
+// A zero RequestedCtx identifies a legacy receipt and is validated by its
+// historical evidence contract instead.
+func (r MemoryResult) ValidateReceipt() error {
+	if r.RequestedCtx == 0 {
+		return nil
+	}
+	switch {
+	case r.RequestedCtx < 0:
+		return errors.New("memory probe requested context is negative")
+	case r.EffectiveCtx != nil && *r.EffectiveCtx <= 0:
+		return errors.New("memory probe effective context is not positive")
+	case r.ResidentBytes < 0 || r.AcceleratorBytes < 0 || r.AcceleratorBytes > r.ResidentBytes:
+		return errors.New("memory probe byte receipt is invalid")
+	case r.ResidentGB < 0 || r.DiskGB < 0 || r.LoadS < 0 ||
+		math.IsNaN(r.ResidentGB) || math.IsInf(r.ResidentGB, 0) ||
+		math.IsNaN(r.DiskGB) || math.IsInf(r.DiskGB, 0) ||
+		math.IsNaN(r.LoadS) || math.IsInf(r.LoadS, 0):
+		return errors.New("memory probe contains an invalid numeric value")
+	case r.ResidentGB > 0 && r.ResidentBytes == 0:
+		return errors.New("memory probe resident allocation lacks exact bytes")
+	case r.PctOnGPU < 0 || r.PctOnGPU > 100:
+		return errors.New("memory probe accelerator percentage is invalid")
+	}
+	switch r.Outcome {
+	case OutcomePass:
+		if r.ResidentBytes <= 0 {
+			return errors.New("measured memory probe has no resident allocation")
+		}
+		if r.UnavailableReason != "" {
+			return errors.New("measured memory probe also claims to be unavailable")
+		}
+	case OutcomeSkipped:
+		if r.ResidentBytes != 0 || r.AcceleratorBytes != 0 || r.ResidentGB != 0 || r.PctOnGPU != 0 ||
+			strings.TrimSpace(r.UnavailableReason) == "" {
+			return errors.New("unavailable memory probe needs a reason and no allocation")
+		}
+	case "":
+		return errors.New("memory probe outcome is missing")
+	default:
+		return fmt.Errorf("memory probe has unsupported outcome %q", r.Outcome)
+	}
+	if r.ResidentBytes > 0 {
+		if r.ResidentGB != round2(float64(r.ResidentBytes)/(1024*1024*1024)) {
+			return errors.New("memory probe resident GiB does not match exact bytes")
+		}
+		want := int(100 * (float64(r.AcceleratorBytes) / float64(r.ResidentBytes)))
+		if r.PctOnGPU != want {
+			return errors.New("memory probe accelerator percentage does not match exact bytes")
+		}
+	}
+	return nil
+}
+
+// VerifiedAt returns the observed resident allocation only when the runtime
+// confirmed the same effective context. This is the presentation and scoring
+// guard against labeling an arbitrary load as a 32K observation.
+func (r MemoryResult) VerifiedAt(ctx int) (float64, bool) {
+	return r.ResidentGB, r.Outcome == OutcomePass && r.ResidentBytes > 0 &&
+		r.RequestedCtx == ctx && r.EffectiveCtx != nil && *r.EffectiveCtx == ctx
 }
 
 // RunMemory measures ACTUAL resident bytes at a real context size.
@@ -268,7 +356,10 @@ type MemoryResult struct {
 // 32K, and the KV cache grows with context -- that is the number that competes
 // with everything else for your RAM.
 func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (MemoryResult, error) {
-	var r MemoryResult
+	r := MemoryResult{
+		Outcome: OutcomeSkipped, RequestedCtx: numCtx,
+		UnavailableReason: "runtime did not report a resident allocation for the requested model",
+	}
 	// Leftovers are recorded by the caller as a contamination warning; a model
 	// that will not unload must not abort the whole run.
 	if _, err := c.StopAll(ctx); err != nil {
@@ -305,8 +396,16 @@ func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (Me
 			continue
 		}
 		r.ResidentGB = round2(float64(m.Size) / (1024 * 1024 * 1024))
+		r.ResidentBytes = m.Size
+		r.AcceleratorBytes = m.SizeVRAM
+		if m.ContextLength > 0 {
+			effective := m.ContextLength
+			r.EffectiveCtx = &effective
+		}
 		if m.Size > 0 {
 			r.PctOnGPU = int(100 * (float64(m.SizeVRAM) / float64(m.Size)))
+			r.Outcome = OutcomePass
+			r.UnavailableReason = ""
 		}
 	}
 	return r, nil

@@ -6,9 +6,10 @@ import (
 	"strings"
 )
 
-// FitTable is weights / KV / buffers / headroom at several context points.
-// Buffers are n/a unless a resident or dummy-allocation was measured at that
-// exact ctx. Decode/prefill overlay only from saved runs at that ctx.
+// FitTable is weights / KV / other resident allocation / headroom at several
+// context points. Other resident is a derived remainder, not an independent
+// compute-buffer measurement, and is n/a unless total allocation was observed
+// at that exact ctx. Decode/prefill overlay only from saved runs at that ctx.
 type FitTable struct {
 	HaveGB  float64    `json:"have_gb,omitempty"`
 	HaveSrc string     `json:"have_source,omitempty"`
@@ -17,19 +18,19 @@ type FitTable struct {
 }
 
 type FitPoint struct {
-	Ctx          int     `json:"ctx"`
-	Tier         string  `json:"tier"`
-	WeightsGB    float64 `json:"weights_gb"`
-	KVGB         float64 `json:"kv_gb"`
-	BuffersGB    float64 `json:"buffers_gb,omitempty"`
-	BuffersKnown bool    `json:"buffers_known"`
-	NeedGB       float64 `json:"need_gb"`
-	HeadroomGB   float64 `json:"headroom_gb"`
-	DecodeTPS    float64 `json:"decode_tps,omitempty"`
-	PrefillTPS   float64 `json:"prefill_tps,omitempty"`
-	Requested    bool    `json:"requested,omitempty"`
-	Suggested    bool    `json:"suggested,omitempty"`
-	Note         string  `json:"note,omitempty"`
+	Ctx        int     `json:"ctx"`
+	Tier       string  `json:"tier"`
+	WeightsGB  float64 `json:"weights_gb"`
+	KVGB       float64 `json:"kv_gb"`
+	OtherGB    float64 `json:"other_resident_gb,omitempty"`
+	OtherKnown bool    `json:"other_resident_known"`
+	NeedGB     float64 `json:"need_gb"`
+	HeadroomGB float64 `json:"headroom_gb"`
+	DecodeTPS  float64 `json:"decode_tps,omitempty"`
+	PrefillTPS float64 `json:"prefill_tps,omitempty"`
+	Requested  bool    `json:"requested,omitempty"`
+	Suggested  bool    `json:"suggested,omitempty"`
+	Note       string  `json:"note,omitempty"`
 }
 
 var defaultFitCtx = []int{2048, 4096, 8192, 16384, 32768}
@@ -71,15 +72,15 @@ func ContextFit(in Input) *FitTable {
 			KVGB:      round1(kvB / GiB),
 			Requested: in.Ctx > 0 && ctx == in.Ctx,
 		}
-		bufB, known, note := buffersAt(in, ctx, weightsB, kvB)
-		p.BuffersKnown = known
+		otherB, known, note := otherResidentAt(in, ctx, weightsB, kvB)
+		p.OtherKnown = known
 		p.Note = note
 		needB := weightsB + kvB
 		if known {
-			p.BuffersGB = round1(bufB / GiB)
-			needB += bufB
+			p.OtherGB = round1(otherB / GiB)
+			needB += otherB
 		} else if p.Note == "" {
-			p.Note = "buffers n/a (not measured at this ctx)"
+			p.Note = "other resident n/a (total allocation not observed at this ctx)"
 		}
 		p.NeedGB = round1(needB / GiB)
 		p.HeadroomGB = round1((haveB - needB) / GiB)
@@ -92,8 +93,8 @@ func ContextFit(in Input) *FitTable {
 		t.Points = append(t.Points, p)
 	}
 	markSuggested(t)
-	if !anyBuffersKnown(t.Points) {
-		t.Note = "weights + KV only; compute buffers not included until --load or --fit"
+	if !anyOtherKnown(t.Points) {
+		t.Note = "weights + KV only; other runtime allocation not observed until --load or --fit"
 	}
 	return t
 }
@@ -106,14 +107,14 @@ func hybridFit(in Input, t *FitTable) *FitTable {
 		}
 		need := float64(allocB)
 		p := FitPoint{
-			Ctx:          ctx,
-			WeightsGB:    round1(float64(in.WeightsB) / GiB),
-			BuffersKnown: true,
-			BuffersGB:    round1(need / GiB),
-			NeedGB:       round1(need / GiB),
-			HeadroomGB:   round1((haveB - need) / GiB),
-			Requested:    in.Ctx > 0 && ctx == in.Ctx,
-			Note:         note,
+			Ctx:        ctx,
+			WeightsGB:  round1(float64(in.WeightsB) / GiB),
+			OtherKnown: true,
+			OtherGB:    round1(need / GiB),
+			NeedGB:     round1(need / GiB),
+			HeadroomGB: round1((haveB - need) / GiB),
+			Requested:  in.Ctx > 0 && ctx == in.Ctx,
+			Note:       note,
 		}
 		if need <= haveB {
 			p.Tier = Compatible
@@ -159,20 +160,20 @@ func fitCtxPoints(maxCtx, requested int) []int {
 	return out
 }
 
-func buffersAt(in Input, ctx int, weightsB, kvB float64) (float64, bool, string) {
+func otherResidentAt(in Input, ctx int, weightsB, kvB float64) (float64, bool, string) {
 	if in.ResidentB > 0 && in.ResidentCtx == ctx {
 		buf := float64(in.ResidentB) - weightsB - kvB
 		if buf < 0 {
 			return 0, false, "resident smaller than weights+KV estimate"
 		}
-		return buf, true, "buffers from measured resident"
+		return buf, true, "other resident is allocation minus modeled weights and KV"
 	}
 	if in.FitB > 0 && in.Ctx == ctx {
 		buf := float64(in.FitB) - weightsB - kvB
 		if buf < 0 {
 			return 0, false, "dummy allocation smaller than weights+KV estimate"
 		}
-		return buf, true, "buffers from llama-fit-params"
+		return buf, true, "other resident is dummy allocation minus modeled weights and KV"
 	}
 	return 0, false, ""
 }
@@ -206,9 +207,9 @@ func markSuggested(t *FitTable) {
 	}
 }
 
-func anyBuffersKnown(points []FitPoint) bool {
+func anyOtherKnown(points []FitPoint) bool {
 	for _, p := range points {
-		if p.BuffersKnown {
+		if p.OtherKnown {
 			return true
 		}
 	}

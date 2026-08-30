@@ -15,6 +15,71 @@ func TestPairFlipsDropsUnsharedInstances(t *testing.T) {
 	}
 }
 
+func TestPairFlipsDropsUnscorablePairs(t *testing.T) {
+	a := []CheckOutcome{
+		{TaskID: "pass", Seed: 1, Outcome: OutcomePass, Pass: true},
+		{TaskID: "skip-left", Seed: 2, Outcome: OutcomeSkipped},
+		{TaskID: "skip-right", Seed: 3, Outcome: OutcomePass, Pass: true},
+	}
+	b := []CheckOutcome{
+		{TaskID: "pass", Seed: 1, Outcome: OutcomeFail},
+		{TaskID: "skip-left", Seed: 2, Outcome: OutcomePass, Pass: true},
+		{TaskID: "skip-right", Seed: 3, Outcome: OutcomeInconclusive},
+	}
+	r := PairFlips(a, b)
+	if r.Shared != 1 || r.AOnly != 1 || r.BOnly != 0 {
+		t.Fatalf("unscorable observations became failures: %+v", r)
+	}
+	stats := ItemStats(a, b)
+	if len(stats) != 1 || stats[0].TaskID != "pass" || stats[0].Shared != 1 {
+		t.Fatalf("item statistics retained unscorable pairs: %+v", stats)
+	}
+}
+
+func TestFamilyDirectionsGiveEachFamilyOneSign(t *testing.T) {
+	var a, b []CheckOutcome
+	for seed := uint64(1); seed <= 8; seed++ {
+		a = append(a, CheckOutcome{TaskID: "repeated", Family: "one", Seed: seed, Outcome: OutcomePass, Pass: true})
+		b = append(b, CheckOutcome{TaskID: "repeated", Family: "one", Seed: seed, Outcome: OutcomeFail})
+	}
+	a = append(a, CheckOutcome{TaskID: "other", Family: "two", Seed: 1, Outcome: OutcomeFail})
+	b = append(b, CheckOutcome{TaskID: "other", Family: "two", Seed: 1, Outcome: OutcomePass, Pass: true})
+
+	items := PairFlips(a, b)
+	if items.AOnly != 8 || items.BOnly != 1 {
+		t.Fatalf("item directions = %+v", items)
+	}
+	byNeed := NeedDirections(a, b)
+	if len(byNeed) != 1 {
+		t.Fatalf("need strata = %+v", byNeed)
+	}
+	families := byNeed[0].FamilyDirectionReport
+	if families.Shared != 2 || families.AOnly != 1 || families.BOnly != 1 || families.Agree != 0 {
+		t.Fatalf("families must contribute one direction each: %+v", families)
+	}
+}
+
+func TestNeedDirectionsDoNotPoolUnrelatedQuestions(t *testing.T) {
+	a := []CheckOutcome{
+		{TaskID: "json", Family: "json", Need: "structured", Seed: 1, Outcome: OutcomePass, Pass: true},
+		{TaskID: "tool", Family: "tool", Need: "tools", Seed: 1, Outcome: OutcomeFail},
+	}
+	b := []CheckOutcome{
+		{TaskID: "json", Family: "json", Need: "structured", Seed: 1, Outcome: OutcomeFail},
+		{TaskID: "tool", Family: "tool", Need: "tools", Seed: 1, Outcome: OutcomePass, Pass: true},
+	}
+	byNeed := NeedDirections(a, b)
+	if len(byNeed) != 2 {
+		t.Fatalf("need strata = %+v", byNeed)
+	}
+	if byNeed[0].Need != "structured" || byNeed[0].AOnly != 1 || byNeed[0].BOnly != 0 {
+		t.Fatalf("structured direction = %+v", byNeed[0])
+	}
+	if byNeed[1].Need != "tools" || byNeed[1].AOnly != 0 || byNeed[1].BOnly != 1 {
+		t.Fatalf("tool direction = %+v", byNeed[1])
+	}
+}
+
 func TestEqualAccuracyCanHideFlips(t *testing.T) {
 	// Both 2/4. A fails the items B passes and vice versa.
 	a := []CheckOutcome{

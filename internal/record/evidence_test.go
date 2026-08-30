@@ -1,6 +1,9 @@
 package record
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +23,7 @@ func TestCompletionRejectsTamperedRawOutcomeCountsSummaryAndReceipt(t *testing.T
 		{"raw outcome", func(r *Record) { r.Checks[0].Outcome = eval.OutcomeFail }, "pass flag"},
 		{"counts", func(r *Record) { c := r.EvidenceCounts["checks"]; c.Passed++; r.EvidenceCounts["checks"] = c }, "counts"},
 		{"summary", func(r *Record) { r.DecodeSum.Mean = 999 }, "speed summaries"},
-		{"scorecard", func(r *Record) { r.Scorecard.Passes++ }, "receipt"},
+		{"scorecard", func(r *Record) { r.Scorecard.Passes++ }, "persisted scorecard"},
 		{"completion signature", func(r *Record) { r.Completion.Signature = strings.Repeat("A", len(r.Completion.Signature)) }, "signature"},
 		{"legacy device", func(r *Record) { r.Device.GPU = "forged-gpu" }, "legacy device"},
 		{"resealed manifest", func(r *Record) {
@@ -81,6 +84,11 @@ func TestOriginalProfileAndProvenanceCompatibility(t *testing.T) {
 	changed.SpecSHA256 = "sha256:" + strings.Repeat("f", 64)
 	if err := a.Manifest.Provenance.CompatibilityError(changed); err == nil || !strings.Contains(err.Error(), "effective spec") {
 		t.Fatalf("provenance mismatch = %v", err)
+	}
+	changed = *b.Manifest.Provenance
+	changed.BackendProtocol = BackendProtocolOpenAICompatible
+	if err := a.Manifest.Provenance.CompatibilityError(changed); err == nil || !strings.Contains(err.Error(), "backend protocol") {
+		t.Fatalf("backend protocol mismatch = %v", err)
 	}
 }
 
@@ -155,19 +163,20 @@ func TestArtifactStemResistsSanitizationAndLongPrefixCollisions(t *testing.T) {
 }
 
 func TestCompleteEvidenceRequiresExactProfileSnapshot(t *testing.T) {
+	profile := device.Profile{Name: "default", Description: "original", Gates: map[string]device.Gate{}}
 	r := manifestRecord("model", "2026-08-21T12:00:00Z")
 	r.SchemaVersion = EvidenceSchemaVersion
 	r.TaskPlan = TaskPlan{CheckTrialsLimit: 1}
 	r.Checks = []eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}}
+	normalizeCheckPlanForTest(t, r)
 	r.EvidenceCounts = map[string]eval.OutcomeCounts{
 		"coding": eval.CountOutcomes(0), "checks": eval.CountOutcomes(1, eval.OutcomePass),
 		"tools": eval.CountOutcomes(0), "refusal": eval.CountOutcomes(0), "plumbing": eval.CountOutcomes(0),
 		"withdrawal": eval.CountOutcomes(0), "agentic": eval.CountOutcomes(0),
 	}
 	r.Rep = score.RepetitionMetrics("")
-	r.Scorecard = score.Scorecard{Model: r.Model, Profile: r.Profile, Needs: map[string]score.Verdict{}}
+	r.Scorecard = score.Score(r.Measured(), profile)
 	addTestFingerprintV2(t, r)
-	profile := device.Profile{Name: "default", Description: "original", Gates: map[string]device.Gate{}}
 	hashes, err := eval.BuiltinHashes()
 	if err != nil {
 		t.Fatal(err)
@@ -182,5 +191,118 @@ func TestCompleteEvidenceRequiresExactProfileSnapshot(t *testing.T) {
 	profile.Description = "forged"
 	if err := r.CompleteEvidence(profile); err == nil || !strings.Contains(err.Error(), "differs from provenance") {
 		t.Fatalf("forged profile completion error = %v", err)
+	}
+}
+
+func TestLegacySchemaFiveWireShapeKeepsCompletionSignatureValid(t *testing.T) {
+	profile := device.Profile{Name: "default", Description: "test", Gates: map[string]device.Gate{}}
+	r := manifestRecord("model", "2026-08-21T12:00:00Z")
+	r.SchemaVersion = 5
+	r.TaskPlan = TaskPlan{CheckTrialsLimit: 1}
+	r.Checks = []eval.CheckOutcome{{
+		TaskID: "check", Family: "static", Need: "structured_output",
+		Pass: true, Outcome: eval.OutcomePass,
+	}}
+	normalizeCheckPlanForTest(t, r)
+	r.AdaptiveDecisions = []eval.AdaptiveDecision{{
+		Need: "structured_output", Method: eval.AdaptiveMethodWaldSPRT,
+		Gate: 0.75, NullRate: 0.65, AltRate: 0.85, Alpha: 0.05, Beta: 0.05,
+		MaxTrials: 1, Trials: 1, Passes: 1, Failures: 0, LogRatio: 0.2,
+		Decision: eval.AdaptiveInconclusive, StopReason: "trial_cap",
+	}}
+	r.Memory = eval.MemoryResult{DiskGB: 4.2, ResidentGB: 5.1, PctOnGPU: 100, LoadS: 1.3}
+	r.Rep = score.RepetitionMetrics("")
+	r.Density = score.InformationDensity("")
+	r.Scorecard = score.Scorecard{Model: r.Model, Profile: r.Profile, Needs: map[string]score.Verdict{}}
+	r.EvidenceCounts = map[string]eval.OutcomeCounts{
+		"coding": eval.CountOutcomes(0), "checks": eval.CountOutcomes(1, eval.OutcomePass),
+		"tools": eval.CountOutcomes(0), "refusal": eval.CountOutcomes(0),
+		"plumbing": eval.CountOutcomes(0), "withdrawal": eval.CountOutcomes(0),
+		"agentic": eval.CountOutcomes(0),
+	}
+	addTestFingerprintV2(t, r)
+	hashes, err := eval.BuiltinHashes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	provenance, err := NewRunProvenance(hashes.TaskSetSHA256, hashes.SpecSHA256, profile,
+		CurrentScoringPolicy(), testSoftwareReceipt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AttachManifest(digestIdentity(t, "model", "model"), provenance); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := r.completedEvidenceJSON(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Completion = &CompletionReceipt{
+		Schema: LegacyCompletionReceiptSchema, EvidenceSHA256: digestBytes("fitr.completed-evidence.v1", payload),
+		Signature: base64.RawStdEncoding.EncodeToString(ed25519.Sign(r.completionPrivateKey, payload)),
+		Profile:   profile,
+	}
+	r.completionPrivateKey = nil
+
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"requested_ctx", "effective_ctx", "resident_bytes", "accelerator_bytes"} {
+		if strings.Contains(string(b), field) {
+			t.Fatalf("legacy memory JSON gained %q: %s", field, b)
+		}
+	}
+	var decoded Record
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := decoded.completedEvidenceJSON(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey, err := base64.RawStdEncoding.DecodeString(decoded.Manifest.CompletionPublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature, err := base64.RawStdEncoding.DecodeString(decoded.Completion.Signature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(publicKey), replayed, signature) {
+		t.Fatal("legacy schema-5 completion signature no longer verifies after round trip")
+	}
+	if issue := decoded.EvidenceIntegrityIssue(); !strings.Contains(issue, "display-only") {
+		t.Fatalf("legacy schema-5 evidence issue = %q", issue)
+	}
+}
+
+func TestFrozenV098SchemaFiveSignatureStillVerifies(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "schema5-signed-v0.9.8.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeRecord(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.SchemaVersion != 5 || decoded.Completion == nil || decoded.Manifest == nil {
+		t.Fatalf("frozen record identity = schema %d, completion=%v, manifest=%v",
+			decoded.SchemaVersion, decoded.Completion != nil, decoded.Manifest != nil)
+	}
+	replayed, err := decoded.completedEvidenceJSON(decoded.Completion.Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey, err := base64.RawStdEncoding.DecodeString(decoded.Manifest.CompletionPublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature, err := base64.RawStdEncoding.DecodeString(decoded.Completion.Signature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(publicKey), replayed, signature) {
+		t.Fatal("schema-6 reader changed the signed schema-5 wire payload emitted by v0.9.8")
 	}
 }

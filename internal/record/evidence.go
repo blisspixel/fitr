@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 
@@ -19,7 +20,10 @@ import (
 	"github.com/blisspixel/fitr/internal/stats"
 )
 
-const CompletionReceiptSchema = "fitr.evidence.completion.v1"
+const (
+	LegacyCompletionReceiptSchema = "fitr.evidence.completion.v1"
+	CompletionReceiptSchema       = "fitr.evidence.completion.v2"
+)
 
 // CompletionReceipt binds everything learned after the immutable run manifest
 // was sealed. Profile is the exact effective profile, not a mutable name lookup.
@@ -58,7 +62,7 @@ type completedEvidencePayload struct {
 	Profile           device.Profile                 `json:"profile"`
 }
 
-// CompleteEvidence seals a finished schema-5 run. It must be called exactly
+// CompleteEvidence seals a finished current-schema run. It must be called exactly
 // once after derived summaries and Scorecard are final, and before Store.Save.
 func (r *Record) CompleteEvidence(profile device.Profile) error {
 	if r == nil {
@@ -68,7 +72,7 @@ func (r *Record) CompleteEvidence(profile device.Profile) error {
 		return errors.New("evidence is already completed")
 	}
 	if r.SchemaVersion != EvidenceSchemaVersion || r.Manifest == nil || r.Manifest.Schema != RunManifestSchema {
-		return errors.New("completion requires a schema-5 reproducibility manifest")
+		return fmt.Errorf("completion requires a schema-%d reproducibility manifest", EvidenceSchemaVersion)
 	}
 	if len(r.completionPrivateKey) != ed25519.PrivateKeySize {
 		return errors.New("completion signing key is unavailable")
@@ -83,11 +87,14 @@ func (r *Record) CompleteEvidence(profile device.Profile) error {
 	if err := r.validateProfileSnapshot(profileCopy); err != nil {
 		return err
 	}
+	if err := r.validateScorecard(profileCopy); err != nil {
+		return err
+	}
 	payload, err := r.completedEvidenceJSON(profileCopy)
 	if err != nil {
 		return err
 	}
-	digest := digestBytes("fitr.completed-evidence.v1", payload)
+	digest := digestBytes("fitr.completed-evidence.v2", payload)
 	r.Completion = &CompletionReceipt{
 		Schema: CompletionReceiptSchema, EvidenceSHA256: digest,
 		Signature: base64.RawStdEncoding.EncodeToString(ed25519.Sign(r.completionPrivateKey, payload)),
@@ -111,11 +118,14 @@ func (r *Record) validateCompletedEvidence() error {
 	if err := r.validateProfileSnapshot(c.Profile); err != nil {
 		return err
 	}
+	if err := r.validateScorecard(c.Profile); err != nil {
+		return err
+	}
 	payload, err := r.completedEvidenceJSON(c.Profile)
 	if err != nil {
 		return err
 	}
-	want := digestBytes("fitr.completed-evidence.v1", payload)
+	want := digestBytes("fitr.completed-evidence.v2", payload)
 	if !sha256Digest.MatchString(c.EvidenceSHA256) || subtle.ConstantTimeCompare([]byte(want), []byte(strings.ToLower(c.EvidenceSHA256))) != 1 {
 		return errors.New("completed evidence does not match its receipt")
 	}
@@ -147,6 +157,14 @@ func (r *Record) validateProfileSnapshot(profile device.Profile) error {
 	return nil
 }
 
+func (r *Record) validateScorecard(profile device.Profile) error {
+	expected := score.Score(r.Measured(), profile)
+	if !reflect.DeepEqual(expected, r.Scorecard) {
+		return errors.New("persisted scorecard does not match sealed raw evidence and profile")
+	}
+	return nil
+}
+
 func (r *Record) completedEvidenceJSON(profile device.Profile) ([]byte, error) {
 	manifestSHA256 := ""
 	if r.Manifest != nil {
@@ -165,8 +183,35 @@ func (r *Record) completedEvidenceJSON(profile device.Profile) ([]byte, error) {
 }
 
 func (r *Record) validateDerivedEvidence() error {
+	if r.WallSeconds < 0 || math.IsNaN(r.WallSeconds) || math.IsInf(r.WallSeconds, 0) {
+		return errors.New("run wall time is not a finite non-negative measurement")
+	}
 	if err := r.validateExecutorEvidence(); err != nil {
 		return err
+	}
+	if len(r.Checks) != r.TaskPlan.CheckTrialsLimit {
+		return fmt.Errorf("check observations %d do not match planned %d", len(r.Checks), r.TaskPlan.CheckTrialsLimit)
+	}
+	if r.TaskPlan.CheckTrialsLimit > 0 {
+		observedPlan, err := ObservedCheckPlanSHA256(r.Checks)
+		if err != nil {
+			return err
+		}
+		if observedPlan != r.TaskPlan.CheckPlanSHA256 {
+			return errors.New("generated-check observations do not match the sealed plan")
+		}
+	}
+	if len(r.Refusal) != r.TaskPlan.RefusalTrials {
+		return fmt.Errorf("refusal observations %d do not match planned %d", len(r.Refusal), r.TaskPlan.RefusalTrials)
+	}
+	if r.TaskPlan.RefusalTrials > 0 {
+		observedPlan, err := ObservedRefusalPlanSHA256(r.Refusal)
+		if err != nil {
+			return err
+		}
+		if observedPlan != r.TaskPlan.RefusalPlanSHA256 {
+			return errors.New("refusal observations do not match the sealed plan")
+		}
 	}
 	counts, err := r.recomputeOutcomeCounts()
 	if err != nil {
@@ -180,9 +225,43 @@ func (r *Record) validateDerivedEvidence() error {
 	}
 	decode, ttft, prefill := make([]float64, 0, len(r.Speed)), make([]float64, 0, len(r.Speed)), make([]float64, 0, len(r.Speed))
 	for i, sample := range r.Speed {
-		if sample.DecodeTPS < 0 || sample.TTFT < 0 || sample.PrefillTPS < 0 || sample.PromptTok < 0 ||
-			sample.CachedPromptTok < 0 || sample.GatedCachedTok < 0 || sample.GatedPromptTok < 0 {
+		measurements := []float64{
+			sample.DecodeTPS, sample.TTFT, sample.ColdTTFT, sample.ColdLoad,
+			sample.WarmTTFT, sample.PrefillTPS,
+		}
+		for _, measurement := range measurements {
+			if math.IsNaN(measurement) || math.IsInf(measurement, 0) {
+				return fmt.Errorf("speed observation %d contains a non-finite measurement", i)
+			}
+		}
+		if sample.DecodeTPS < 0 || sample.TTFT < 0 || sample.ColdTTFT < 0 || sample.ColdLoad < 0 ||
+			sample.WarmTTFT < 0 || sample.PrefillTPS < 0 || sample.PromptTok < 0 ||
+			sample.CachedPromptTok < 0 || sample.GatedCachedTok < 0 || sample.GatedPromptTok < 0 ||
+			sample.WarmPromptTok < 0 || sample.WarmCachedTok < 0 {
 			return fmt.Errorf("speed observation %d contains a negative measurement", i)
+		}
+		if !sample.FirstOutputObserved {
+			return fmt.Errorf("speed observation %d has no first-output receipt", i)
+		}
+		if sample.ColdTTFT > 0 && sample.ColdLoad <= 0.1 {
+			return fmt.Errorf("speed observation %d labels cold TTFT without a cold-load receipt", i)
+		}
+		if sample.GatedCacheKnown && !sample.GatedCacheReceiptValid() {
+			return fmt.Errorf("speed observation %d has an empty gated cache receipt", i)
+		}
+		if sample.PrefillCacheKnown && !sample.PrefillCacheReceiptValid() {
+			return fmt.Errorf("speed observation %d has an empty prefill cache receipt", i)
+		}
+		if sample.WarmCacheKnown && !sample.WarmCacheReceiptValid() {
+			return fmt.Errorf("speed observation %d has an invalid warm cache receipt", i)
+		}
+		if sample.WarmTTFT > 0 && !sample.WarmCacheReceiptValid() {
+			return fmt.Errorf("speed observation %d labels warm TTFT without a cache-hit receipt", i)
+		}
+		if !sample.GatedCacheKnown && sample.GatedCachedTok != 0 ||
+			!sample.PrefillCacheKnown && sample.CachedPromptTok != 0 ||
+			!sample.WarmCacheKnown && sample.WarmCachedTok != 0 {
+			return fmt.Errorf("speed observation %d has cached tokens without a cache receipt", i)
 		}
 		decode, ttft, prefill = append(decode, sample.DecodeTPS), append(ttft, sample.TTFT), append(prefill, sample.PrefillTPS)
 	}
@@ -288,16 +367,13 @@ func (r *Record) validateExecutorEvidence() error {
 }
 
 func (r *Record) recomputeOutcomeCounts() (map[string]eval.OutcomeCounts, error) {
-	collect := func(phase string, expected int, values []eval.Outcome, fill bool) (eval.OutcomeCounts, error) {
+	collect := func(phase string, expected int, values []eval.Outcome) (eval.OutcomeCounts, error) {
 		for _, value := range values {
 			switch value {
 			case eval.OutcomePass, eval.OutcomeFail, eval.OutcomeInconclusive, eval.OutcomeError, eval.OutcomeSkipped:
 			default:
 				return eval.OutcomeCounts{}, fmt.Errorf("%s contains unknown outcome %q", phase, value)
 			}
-		}
-		if fill && len(values) < expected {
-			values = append(values, repeatOutcomes(eval.OutcomeSkipped, expected-len(values))...)
 		}
 		return eval.CountOutcomes(expected, values...), nil
 	}
@@ -349,15 +425,14 @@ func (r *Record) recomputeOutcomeCounts() (map[string]eval.OutcomeCounts, error)
 		name     string
 		expected int
 		values   []eval.Outcome
-		fill     bool
 	}{
-		{"coding", r.TaskPlan.CodeTrials, coding, false}, {"checks", r.TaskPlan.CheckTrialsLimit, checks, true},
-		{"tools", r.TaskPlan.ToolTrials, tools, false}, {"refusal", r.TaskPlan.RefusalTrials, refusal, false},
-		{"plumbing", boolCount(r.TaskPlan.Plumbing), plumbing, false}, {"withdrawal", boolCount(r.TaskPlan.Withdrawal), withdrawal, false},
-		{"agentic", r.TaskPlan.AgenticTrials, agentic, false},
+		{"coding", r.TaskPlan.CodeTrials, coding}, {"checks", r.TaskPlan.CheckTrialsLimit, checks},
+		{"tools", r.TaskPlan.ToolTrials, tools}, {"refusal", r.TaskPlan.RefusalTrials, refusal},
+		{"plumbing", boolCount(r.TaskPlan.Plumbing), plumbing}, {"withdrawal", boolCount(r.TaskPlan.Withdrawal), withdrawal},
+		{"agentic", r.TaskPlan.AgenticTrials, agentic},
 	}
 	for _, phase := range phases {
-		counts, err := collect(phase.name, phase.expected, phase.values, phase.fill)
+		counts, err := collect(phase.name, phase.expected, phase.values)
 		if err != nil {
 			return nil, err
 		}
@@ -371,14 +446,6 @@ func validatePassFlag(label string, outcome eval.Outcome, pass bool) error {
 		return fmt.Errorf("%s outcome disagrees with pass flag", label)
 	}
 	return nil
-}
-
-func repeatOutcomes(value eval.Outcome, n int) []eval.Outcome {
-	out := make([]eval.Outcome, n)
-	for i := range out {
-		out[i] = value
-	}
-	return out
 }
 
 func cloneProfile(profile device.Profile) (device.Profile, error) {

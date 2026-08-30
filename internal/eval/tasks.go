@@ -32,33 +32,69 @@ type SpeedResult struct {
 	//   ColdTTFT  - first question of the day: load + prefill + first token.
 	//   WarmTTFT  - same prompt sent again; prefix cache hit. Only filled
 	//               when the backend returns a real cache receipt.
-	TTFT       float64 `json:"ttft_s"`
-	ColdTTFT   float64 `json:"cold_ttft_s,omitempty"`
-	WarmTTFT   float64 `json:"warm_ttft_s,omitempty"`
-	PrefillTPS float64 `json:"prefill_tps"`
-	PromptTok  int     `json:"prompt_tokens"`
+	TTFT           float64 `json:"ttft_s"`
+	ColdTTFT       float64 `json:"cold_ttft_s,omitempty"`
+	ColdLoad       float64 `json:"cold_load_s,omitempty"`
+	WarmTTFT       float64 `json:"warm_ttft_s,omitempty"`
+	WarmPromptTok  int     `json:"warm_prompt_tokens,omitempty"`
+	WarmCachedTok  int     `json:"warm_cached_tokens,omitempty"`
+	WarmCacheKnown bool    `json:"warm_cache_known,omitempty"`
+	PrefillTPS     float64 `json:"prefill_tps"`
+	PromptTok      int     `json:"prompt_tokens"`
+	// FirstOutputObserved distinguishes a sub-millisecond TTFT rounded to zero
+	// from a stream that never produced a non-empty output chunk.
+	FirstOutputObserved bool `json:"first_output_observed,omitempty"`
 	// CachedPromptTok is how much of the PREFILL probe's prompt was served
 	// from cache. The nonce exists to make this zero; a nonzero value on a
 	// backend that reports it means the prefill figure is partly fiction, and
 	// the run says so instead of quietly publishing it.
-	CachedPromptTok int `json:"cached_prompt_tokens,omitempty"`
-	// GatedCachedTok is how much of the GATED TTFT prompt was cached. If this
-	// is a large fraction of GatedPromptTok, the gated number is a warm-prefix
-	// figure wearing a cold-prompt badge. Never compared to the prefill
-	// prompt: those lengths differ by 10-30x and the check would never fire.
-	GatedCachedTok int  `json:"gated_cached_tokens,omitempty"`
-	GatedPromptTok int  `json:"gated_prompt_tokens,omitempty"`
-	Truncated      bool `json:"truncated"`
+	CachedPromptTok   int  `json:"cached_prompt_tokens,omitempty"`
+	PrefillCacheKnown bool `json:"prefill_cache_known,omitempty"`
+	// GatedCachedTok is how much of the GATED TTFT prompt was cached. Any
+	// positive value makes this a partial-hit latency rather than the explicit
+	// cache miss required by the loaded/uncached gate.
+	GatedCachedTok  int  `json:"gated_cached_tokens,omitempty"`
+	GatedPromptTok  int  `json:"gated_prompt_tokens,omitempty"`
+	GatedCacheKnown bool `json:"gated_cache_known,omitempty"`
+	Truncated       bool `json:"truncated"`
 	// ClientDerived is copied from the backend: OpenAI-compat timings are
 	// wall-clock estimates, not server counters.
 	ClientDerived bool `json:"client_derived,omitempty"`
 }
 
-// GatedTTFTContaminated is true when most of the gated TTFT prompt was a
-// cache hit. The threshold is 20% uncached (cached*5 >= prompt): a real
-// new-question prefill is not 80%+ cached.
+// GatedTTFTContaminated is true for every known partial or full cache hit. A
+// loaded/uncached latency gate requires an explicit miss, not a tolerance that
+// silently relabels 1-79% cached prompts as uncached.
 func (s SpeedResult) GatedTTFTContaminated() bool {
-	return s.GatedPromptTok > 0 && s.GatedCachedTok*5 >= s.GatedPromptTok
+	return s.GatedCacheReceiptValid() && s.GatedCachedTok > 0
+}
+
+// GatedCacheReceiptValid proves that the runtime classified at least one
+// prompt token. A known zero/zero receipt is not evidence of a cache miss.
+func (s SpeedResult) GatedCacheReceiptValid() bool {
+	return s.GatedCacheKnown && validCacheReceipt(s.GatedPromptTok, s.GatedCachedTok)
+}
+
+// PrefillCacheReceiptValid applies the same positive-denominator rule to the
+// long-prompt receipt.
+func (s SpeedResult) PrefillCacheReceiptValid() bool {
+	return s.PrefillCacheKnown && validCacheReceipt(s.PromptTok, s.CachedPromptTok)
+}
+
+// WarmCacheReceiptValid proves a classified cache hit for the replayed prompt.
+func (s SpeedResult) WarmCacheReceiptValid() bool {
+	return s.WarmCacheKnown && validCacheReceipt(s.WarmPromptTok, s.WarmCachedTok) && s.WarmCachedTok > 0
+}
+
+// PrefillContaminated is true for every known partial or full cache hit. An
+// uncached prefill measurement requires an explicit miss, just like gated
+// loaded TTFT.
+func (s SpeedResult) PrefillContaminated() bool {
+	return s.PrefillCacheReceiptValid() && s.CachedPromptTok > 0
+}
+
+func validCacheReceipt(uncached, cached int) bool {
+	return uncached >= 0 && cached >= 0 && (uncached > 0 || cached > 0)
 }
 
 // RunSpeed measures decode and prefill.
@@ -80,22 +116,25 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 	if err != nil {
 		return out, err
 	}
-	if m0.LoadSeconds > 0.1 {
+	out.ColdLoad = m0.LoadSeconds
+	if out.ColdLoad > 0.1 {
 		out.ColdTTFT = m0.TTFTSeconds
 	}
 	samp := ollama.Deterministic(s.Speed.Decode.NumPredict, numCtx(ctx))
 	tag := ""
 	if nonce != "" {
-		tag = "  <!-- run " + nonce + " -->"
+		tag = "<!-- run " + nonce + " -->\n"
 	}
-	decodePrompt := s.Speed.Decode.Prompt + tag
-	_, m1, err := c.Generate(ctx, model, decodePrompt, samp)
+	decodePrompt := tag + s.Speed.Decode.Prompt
+	text, m1, err := c.Generate(ctx, model, decodePrompt, samp)
 	if err != nil {
 		return out, err
 	}
 	out.DecodeTPS, out.TTFT = m1.DecodeTPS, m1.TTFTSeconds
+	out.FirstOutputObserved = text != ""
 	out.ClientDerived = m1.ClientDerived
 	out.GatedPromptTok = m1.PromptTokens
+	out.GatedCacheKnown = m1.CacheKnown
 	if m1.CacheKnown {
 		out.GatedCachedTok = m1.CachedTokens
 	}
@@ -111,7 +150,12 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 		if err != nil {
 			return out, err
 		}
-		if m1w.CachedTokens > 0 {
+		out.WarmPromptTok = m1w.PromptTokens
+		out.WarmCacheKnown = m1w.CacheKnown
+		if m1w.CacheKnown {
+			out.WarmCachedTok = m1w.CachedTokens
+		}
+		if m1w.CacheKnown && m1w.CachedTokens > 0 {
 			out.WarmTTFT = m1w.TTFTSeconds
 		}
 	}
@@ -122,7 +166,10 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 		return out, err
 	}
 	out.PrefillTPS, out.PromptTok = m2.PrefillTPS, m2.PromptTokens
-	out.CachedPromptTok = m2.CachedTokens
+	out.PrefillCacheKnown = m2.CacheKnown
+	if m2.CacheKnown {
+		out.CachedPromptTok = m2.CachedTokens
+	}
 	return out, nil
 }
 

@@ -5,3 +5,5 @@ evalkit.exe
 /fitr
 fitr.exe
 *.test
+coverage*.out
+.tmp/

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-
-	"github.com/blisspixel/fitr/internal/stats"
 )
 
 const AdaptiveMethodWaldSPRT = "wald_sprt_v1"
@@ -19,9 +17,9 @@ const (
 	AdaptiveInconclusive AdaptiveDecisionState = "inconclusive"
 )
 
-// AdaptiveDecision is the persisted receipt for one sequentially sampled
-// capability pool. It records both the decision and every parameter needed to
-// reproduce why sampling stopped.
+// AdaptiveDecision is the legacy schema-5 receipt for sequentially sampled
+// checks. Current runs use fixed denominators and never create one. The type
+// remains readable so existing local history does not become undecodable.
 type AdaptiveDecision struct {
 	Need       string                `json:"need"`
 	Method     string                `json:"method"`
@@ -37,34 +35,6 @@ type AdaptiveDecision struct {
 	LogRatio   float64               `json:"log_likelihood_ratio"`
 	Decision   AdaptiveDecisionState `json:"decision"`
 	StopReason string                `json:"stop_reason"`
-}
-
-// CaptureAdaptiveDecision snapshots the GateSPRT policy used by fitr. Passes
-// is explicit because SPRT deliberately exposes only its aggregate trial
-// count and likelihood ratio.
-func CaptureAdaptiveDecision(need string, gate float64, maxTrials, passes int, test *stats.SPRT) (AdaptiveDecision, error) {
-	if test == nil {
-		return AdaptiveDecision{}, errors.New("adaptive decision has no sequential test")
-	}
-	d := AdaptiveDecision{
-		Need: strings.TrimSpace(need), Method: AdaptiveMethodWaldSPRT,
-		Gate: gate, NullRate: math.Max(0.02, gate-0.10),
-		AltRate: math.Min(0.98, gate+0.10), Alpha: 0.05, Beta: 0.05,
-		MaxTrials: maxTrials, Trials: test.N, Passes: passes,
-		Failures: test.N - passes, LogRatio: test.LLR,
-	}
-	switch test.State() {
-	case stats.SPRTAcceptH1:
-		d.Decision, d.StopReason = AdaptiveAboveGate, "upper_boundary"
-	case stats.SPRTAcceptH0:
-		d.Decision, d.StopReason = AdaptiveBelowGate, "lower_boundary"
-	default:
-		d.Decision, d.StopReason = AdaptiveInconclusive, "trial_cap"
-	}
-	if err := d.Validate(); err != nil {
-		return AdaptiveDecision{}, err
-	}
-	return d, nil
 }
 
 func (d AdaptiveDecision) Validate() error {

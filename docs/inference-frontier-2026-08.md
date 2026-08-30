@@ -14,7 +14,7 @@ Ranked by how badly each invalidates results, not by effort to fix.
 | # | Dated assumption | 2026 reality |
 |---|---|---|
 | 1 | tok/s is a property of the model | It is a property of **speculative-decoding config**. llama.cpp has 10 backends behind `--spec-type`. Muse Glimmer + DFlash: **74.9 -> 233.4 tok/s (3.1x)**, identical output. A decode number without spec-type and acceptance rate is meaningless. |
-| 2 | One TTFT number | Warm-prefix vs cold TTFT differ by **70-200x** (41 s -> 0.2 s, Strix Halo, 16k prompt). Every runtime now has a RAM-backed prefix cache **on by default**. Blending them is the single biggest measurement error available. |
+| 2 | One TTFT number | Loaded/uncached and prefix-cache-hit TTFT differed by **70-200x** in the cited Strix Halo 16k-prompt case (41 s -> 0.2 s). Runtime-unloaded latency is a third protocol. Blending these states can dominate the reported number. |
 | 3 | "Thinking" is a boolean | Graded `reasoning_effort` everywhere, with **mutually incompatible vocabularies** (`low/medium/xhigh` Qwen, `low/high/max` DeepSeek and Kimi, `no_think/low/high` Hunyuan, `enabled/adaptive/disabled` MiniMax). Kimi K3 **cannot** disable thinking. |
 | 4 | Reasoning content is cosmetic | Kimi K3 and Poolside Laguna **require** `reasoning_content` round-tripped across turns or they degrade. llama.cpp has `--reasoning-preserve` and a `supports_preserve_reasoning` capability flag. FitR now preserves it across turns. |
 | 5 | Ollama is the local runtime | llama-server is a strict superset: `/v1/responses`, Anthropic `/v1/messages`, router mode, built-in tools, an MCP stdio client, Prometheus spec-decode counters, per-slot state. |
@@ -61,8 +61,9 @@ reproducible tool calls.
    case: Qwen3.8-27B on an 8 GB RTX 5070 Laptop at 32k with `-ngl 20` passes
    `/health` and produces **zero tokens** -- it fits in VRAM with no room to
    compute.
-3. **Split cold and warm TTFT** using `timings.cache_n` /
+3. **Split loaded/uncached and prefix-cache-hit TTFT** using `timings.cache_n` /
    `usage.prompt_tokens_details.cached_tokens`, never wall-clock ordering.
+   Record runtime-unloaded latency separately with load and residency evidence.
 4. **Record the resolved config, not the requested one.** `-fa auto` resolves
    differently per backend; llama.cpp `--fit` is **on by default** and silently
    mutates `-ngl` / `-c` / `-ncmoe` per machine.
@@ -78,11 +79,11 @@ reproducible tool calls.
 | Current | Change to |
 |---|---|
 | decode tok/s | + spec-type, **draft acceptance rate and per-position alpha_k**, at 3 or more context depths |
-| TTFT | **cold / warm / time-to-first-answer token** (post-thinking) |
-| prefill tok/s | + measured-vs-roofline efficiency. **Prefill is compute-bound; decode is bandwidth-bound** |
+| TTFT | **runtime-unloaded / loaded-uncached / prefix-cache-hit / time-to-first-answer token** (post-thinking) |
+| prefill tok/s | + measured-vs-roofline efficiency. Prefill and decode stress different resources; counters or controlled interventions are required before classifying either bottleneck. |
 | resident memory at 32K | + peak RSS across the run; note SWA/hybrid models break linear KV scaling |
 | coding tasks | + **tokens-to-correct-answer** |
-| 40-turn agentic | + A/B on preserved reasoning and tool selection under **10-25 tools** (MCP-Atlas shape); the 80% compaction watchdog is already implemented |
+| 40-turn agentic | + A/B on preserved reasoning and tool selection under **10-25 tools** (MCP-Atlas shape); observed prompt-token contraction is already recorded, but it is not yet a compaction receipt |
 | degeneracy | + **overthinking-error rate** (correct answer reached in an intermediate step, then lost) and truncation rate |
 | refusal | + **prompt-injection resistance** (`strongreject` ships in Harbor) |
 | - | **new:** schema adherence - free-form vs `json_schema` vs `structural_tag`, reporting valid rate, semantic accuracy, tok/s, and **grammar compile time separately** |
@@ -114,7 +115,7 @@ empty-context number overstates real use by roughly a quarter.
 Same audience as Ollama, strictly larger API surface, and it uniquely provides
 what Ollama cannot:
 
-- `timings.cache_n` -- prefix-cache hit rate, so cold and warm TTFT can be separated
+- `timings.cache_n` -- prefix-cache hit rate, so loaded/uncached and prefix-cache-hit TTFT can be separated
 - `/props.chat_template_caps` -- a real capability probe
 - `/metrics` -- Prometheus spec-decode counters
 - `logprobs`, `tool_choice`, GBNF and `json_schema`

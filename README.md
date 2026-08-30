@@ -2,8 +2,11 @@
 
 [![CI](https://github.com/blisspixel/fitr/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/fitr/actions/workflows/ci.yml)
 
-**fitr tells you which local models actually run well on your machine, and what
-settings to use.**
+**The fitr thesis is to determine what local AI actually works for your
+workload on this machine, what evidence proves it, and which configuration
+gives the best validated outcome.** FIT, behavior, and burst performance ship
+today; validated-work, tradeoff, explanation, and coverage contracts are the
+pre-1.0 direction.
 
 You have a GPU with a fixed amount of VRAM. New open models come out every
 week, and it is never obvious which ones will fit, how much context you can
@@ -15,9 +18,11 @@ So you either spend an evening testing by hand every time something drops, or
 you keep running whatever you set up months ago and hope it is still a good
 choice.
 
-fitr does that testing for you. Point it at Ollama or llama.cpp and it lists
-the models you already have, works out which ones fit in your VRAM and at what
-context length, measures how each actually performs here, and tells you the
+fitr does that testing for you. Point it at Ollama, llama-server, or a supported
+OpenAI-compatible endpoint and it lists the models already served. When the
+runtime exposes the required artifact and allocation evidence, fitr works out
+which ones fit within the measured or configured memory budget and at what
+context length. It measures how each actually performs here and tells you the
 exact setting to change when one does not fit.
 
 > `llmfit` estimates what fits, and benchmarks how fast. Leaderboards rank what
@@ -26,9 +31,13 @@ exact setting to change when one does not fit.
 > that still writes clean prose but emits malformed tool calls, the parser that
 > swallows them, the loop your GPU triggers and nobody else's does.
 
-<img src="docs/assets/inventory.svg?v=0.9.8" alt="fitr inventory (demo data)" width="820">
+<img src="docs/assets/inventory.svg?v=0.9.9" alt="fitr inventory (demo data)" width="820">
 
 ## Install
+
+The full loop needs a supported runtime that is running with at least one
+installed model. Backend identity requirements and limits are documented in
+[backends](docs/backends.md).
 
 macOS / Linux:
 
@@ -43,8 +52,10 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
 One command, then it runs. No Python, no venv, no CUDA wrangling, nothing to
-keep up to date. No telemetry either: fitr only ever talks to the runtime you
-point it at. Installers verify the download against its published checksum.
+keep up to date. fitr sends no telemetry. Installed-model evaluation talks only
+to the endpoint you selected; network access otherwise occurs only for an
+explicit install, pull, or remote endpoint. Installers verify the download
+against its published checksum.
 Pinning, relocating and building from source are in
 [install](docs/usage.md#install).
 
@@ -61,15 +72,41 @@ fitr board                    # compare only runs this device can honestly compa
 Every row ends in the one thing to do next, so there is never a question of
 what to run.
 
-**Does it fit, and what do I change if not.** Weights, KV cache and headroom at
-each context length, with a flag and a resulting number on every negative
-verdict.
+The product is organized around evidence, not a composite score:
 
-<img src="docs/assets/advise.svg?v=0.9.8" alt="fitr advise (demo data)" width="820">
+- **FIT:** can the artifact, context, and placement live within this machine's
+  measured or configured memory budget?
+- **BEHAVIOR:** does it produce correct structured output, follow instructions,
+  call tools through the real tool channel, and avoid degeneration?
+- **PERFORMANCE:** how long do load, prompt processing, first response, and
+  generation take in this configuration?
+- **EXPLAIN:** which observed constraint is most likely to matter, with the
+  evidence and uncertainty behind that diagnosis?
+- **VALIDATED WORK:** does raw speed survive contact with correctness, retries,
+  and independent verification?
+- **TRADEOFFS:** which context, quant, or model configuration is dominated, and
+  which alternatives remain genuine choices?
+- **COVERAGE:** which declared workloads have earned local trust, and which
+  still require evidence or a fallback?
 
-**What it actually does here.** Speed, memory, structured output, instruction
-following, refusal, tool use, all graded in Go against computed answers, never by
-another model's opinion.
+FIT, behavior, and burst performance are measured today. The remaining layers
+are the pre-1.0 direction, with their evidence contracts specified before
+their CLI shape is frozen. See the [roadmap](ROADMAP.md) for the boundary
+between shipped behavior and planned experiments.
+
+**Does it fit, and what do I change if not.** Artifact bytes, derived KV cache,
+and remaining capacity at each context length, with evidence labels and a flag
+plus resulting number on every negative verdict.
+
+<img src="docs/assets/advise.svg?v=0.9.9" alt="fitr advise (demo data)" width="820">
+
+**What it actually does here.** Load, first-response, prompt-processing, and
+generation timings are observed from the selected runtime. Resident allocation
+is observed when the runtime reports it; KV and remaining-capacity parts are
+labeled as derived. Structured output, instruction following, and tool use are
+graded mechanically against computed or declarative answers. Refusal uses a
+disclosed deterministic classifier. Another model's opinion never supplies a
+core verdict.
 
 Tool calls are measured **in the tool channel**, not as text. The most common
 local tool failure is not bad JSON: it is a perfectly well-formed call that
@@ -78,7 +115,7 @@ template or a tool-call parser did not fire. An agent harness reads that as
 silence. fitr names it, and separates it from a model that genuinely cannot
 call tools.
 
-<img src="docs/assets/run.svg?v=0.9.8" alt="fitr run scorecard (demo data)" width="820">
+<img src="docs/assets/run.svg?v=0.9.9" alt="fitr run scorecard (demo data)" width="820">
 
 ## What it refuses to do
 
@@ -91,6 +128,11 @@ This is the part that makes the rest worth trusting.
   INCONCLUSIVE is a real answer.
 - **It will not call an unmeasured model good.** Unmeasured is a candidate,
   never a recommendation.
+- **It will not reuse evidence across changed weights.** Reuse requires a
+  runtime-bound artifact digest. If a pull replaces the bytes behind a mutable
+  tag, inventory marks the prior run stale and asks for a new measurement. A
+  runtime that supplies only an observed local-file hash leaves the result
+  display-only.
 - **It will not touch your server.** `apply` prints a recipe; it never restarts
   or mutates a running runtime.
 - **It will not run generated code by default**, and it says so rather than
@@ -98,13 +140,17 @@ This is the part that makes the rest worth trusting.
 
 ## Local, and yours
 
-Everything happens on your machine. No account, no sign-in, no telemetry, no
-upload. fitr only ever talks to the runtime you point it at, and it works the
-same with the network unplugged. Sharing a result is an explicit command, and
-the artifact it writes leaves out the raw model output.
+Evidence stays on your machine. No fitr account, sign-in, telemetry, or
+automatic upload is involved. Evaluation of an installed model can run with
+the network unplugged when its selected runtime is local. Sharing a result is
+an explicit command. The exported artifact leaves out raw model output,
+hostnames, local paths, the raw fingerprint key, and arbitrary runtime
+configuration; it carries an opaque device ID and an allowlisted comparison
+configuration instead.
 
-It also has no opinion about which models you should run. Whatever your runtime
-serves is what fitr measures, and how often a model refuses is a first-class
+fitr imposes no editorial or content-policy preference on which models you
+should run. It measures whatever your runtime serves and reports which declared
+needs each configuration supports. How often a model refuses is a first-class
 need in the battery (`no filtering / low refusal`) rather than an awkward
 footnote, because whether a model will actually answer you is a property of
 that model on your hardware, and worth knowing before you commit to it.
@@ -116,19 +162,23 @@ Apache 2.0, and the evidence stays where it was produced.
 **Start here.** [design](docs/design.md) for what a result means and why, then
 [usage](docs/usage.md) for every command, flag and output mode.
 
-**Going deeper.** [statistics](docs/statistics.md) (methods and rejected
-alternatives), [tasks](docs/tasks.md) (the battery, and adding your own without
-forking), [backends](docs/backends.md) (Ollama, llama-server,
-OpenAI-compatible), [doctor](docs/doctor.md) (can this box be measured fairly
-at all), [calibration](docs/calibration.md) (paired-quant protocol),
-[TUI](docs/tui.md) (the opt-in monitor and its privacy contract).
+**Going deeper.** [choosing hardware](docs/choosing-hardware.md) (capacity,
+performance, workload fit, and honest buying evidence), [workload evidence](docs/workload-evidence.md)
+(bounded workflows, independent proof, and validated work),
+[statistics](docs/statistics.md) (methods and rejected alternatives),
+[tasks](docs/tasks.md) (the battery, and adding your own without forking),
+[backends](docs/backends.md) (Ollama, llama-server, OpenAI-compatible),
+[doctor](docs/doctor.md) (can this box be measured fairly at all),
+[calibration](docs/calibration.md) (paired-quant protocol), and [TUI](docs/tui.md)
+(the opt-in monitor and its privacy contract).
 
 **Project.** [roadmap](ROADMAP.md), [release
 acceptance](docs/release-acceptance.md), [retonr](docs/retonr.md) (optional
 sister project; fitr works without it).
 
 Screenshots use demo data and regenerate from the real printers via
-`make screenshots`.
+`make screenshots`. They reflect current `main` and may be ahead of the latest
+stable release.
 
 ## License
 

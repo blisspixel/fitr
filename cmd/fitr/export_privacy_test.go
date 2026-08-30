@@ -10,6 +10,7 @@ import (
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
+	"github.com/blisspixel/fitr/internal/score"
 )
 
 // The export contract is "opt-in, self-contained, fingerprint visible, raw
@@ -22,9 +23,15 @@ import (
 // test that cannot fail.
 func TestExportedArtifactCarriesNoRawModelOutput(t *testing.T) {
 	const canary = "CANARY-RAW-MODEL-OUTPUT-9d4f2a"
+	const privateHost = "PRIVATE-HOST-7f31"
+	const privatePath = `C:\Users\private-user\.ollama\models`
+	const privateURL = "https://token@private.example.internal/models/secret-model.gguf"
+	const privateUNC = `\\private-fileserver\models\secret.gguf`
+	const privateSSH = "ssh://private-user@private-host.internal/models"
 	r := &Result{
-		Model:   "probe:1b",
-		Profile: "default",
+		Model:     privateURL,
+		Profile:   "default",
+		Scorecard: score.Scorecard{Model: privateURL},
 		CodeWrite: []eval.ExecResult{{
 			Pass: false, Detail: "generated code was not executed",
 			Raw: "def solve():\n    # " + canary + "\n    return 1\n",
@@ -34,7 +41,14 @@ func TestExportedArtifactCarriesNoRawModelOutput(t *testing.T) {
 			Raw: canary + " second occurrence",
 		}},
 	}
-	r.Device.Host, r.Device.OS, r.Device.GPU = "testhost", "linux", "TEST GPU"
+	r.Device.Host, r.Device.OS, r.Device.GPU = privateHost, "linux", "TEST GPU"
+	r.Device.CPU, r.Device.GPUDriver = privateSSH, privateUNC
+	r.Device.Runtime, r.Device.InferenceDevice = privateURL, privatePath
+	r.Device.Config = map[string]string{
+		"OLLAMA_MODELS":         privatePath,
+		"OLLAMA_KV_CACHE_TYPE":  "token=" + privatePath,
+		"OLLAMA_CONTEXT_LENGTH": "8192",
+	}
 
 	// Half one: the raw text really is in the stored evidence.
 	stored, err := json.Marshal(r)
@@ -54,11 +68,19 @@ func TestExportedArtifactCarriesNoRawModelOutput(t *testing.T) {
 	if err := render.WriteHTML(&html, a); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(html.String(), canary) {
-		t.Fatalf("exported HTML contains raw model output (%q)", canary)
+	for _, secret := range []string{canary, privateHost, privatePath, privateURL, privateUNC, privateSSH,
+		"private.example.internal", "private-fileserver", "private-host.internal", "private-user"} {
+		if strings.Contains(html.String(), secret) {
+			t.Fatalf("exported HTML contains private value %q", secret)
+		}
 	}
-	if encoded, err := json.Marshal(a); err == nil && strings.Contains(string(encoded), canary) {
-		t.Fatal("the export artifact structure carries raw model output")
+	if encoded, err := json.Marshal(a); err == nil {
+		for _, secret := range []string{canary, privateHost, privatePath, privateURL, privateUNC, privateSSH,
+			"private.example.internal", "private-fileserver", "private-host.internal", "private-user"} {
+			if strings.Contains(string(encoded), secret) {
+				t.Fatalf("the export artifact structure carries private value %q", secret)
+			}
+		}
 	}
 
 	evPath := filepath.Join(t.TempDir(), record.ArtifactStem(r.Model)+".retonr.json")

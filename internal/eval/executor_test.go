@@ -227,6 +227,111 @@ func TestPreflightVersionFailureOccursBeforeModelOutput(t *testing.T) {
 	}
 }
 
+func TestRunExecExercisesBothExtractionStrategies(t *testing.T) {
+	t.Setenv("FITR_EXECUTOR_HELPER", "1")
+	path := installHelperPython(t, t.TempDir())
+	spec, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("code block", func(t *testing.T) {
+		candidate := spec.CodeWrite
+		candidate.Runner[0] = path
+		candidate.PassIfStdoutContains = "PASS_TOKEN"
+		backend := &fakeBackend{genTexts: []string{"```python\ndef parse_duration(value):\n    return 1\n```"}}
+		dir := t.TempDir()
+		result, err := RunExec(WithUnsafeExecution(context.Background()), backend, "model", candidate, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Pass || result.Outcome != OutcomeInconclusive || result.Verifier == nil || result.File != "solution.py" {
+			t.Fatalf("result = %+v", result)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "solution.py")); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("filename block is constrained", func(t *testing.T) {
+		candidate := spec.CodeFix
+		candidate.Runner[0] = path
+		candidate.PassIfStdoutContains = "PASS_TOKEN"
+		backend := &fakeBackend{genTexts: []string{"```python ../outside.py\ndef percent_off(amount, pct):\n    return amount\n```"}}
+		dir := t.TempDir()
+		result, err := RunExec(WithUnsafeExecution(context.Background()), backend, "model", candidate, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Pass || result.File != "discounts.py" || result.Outcome != OutcomeInconclusive {
+			t.Fatalf("result = %+v", result)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "outside.py")); !os.IsNotExist(err) {
+			t.Fatalf("undeclared file escaped extraction policy: %v", err)
+		}
+	})
+}
+
+func TestRunExecReportsGenerationExtractionAndFixtureFailures(t *testing.T) {
+	t.Setenv("FITR_EXECUTOR_HELPER", "1")
+	path := installHelperPython(t, t.TempDir())
+	spec, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := spec.CodeWrite
+	candidate.Runner[0] = path
+
+	t.Run("generation", func(t *testing.T) {
+		backend := &fakeBackend{generateErr: errors.New("connection reset")}
+		result, err := RunExec(WithUnsafeExecution(context.Background()), backend, "model", candidate, t.TempDir())
+		var failureErr *Failure
+		if !errors.As(err, &failureErr) || failureErr.Kind != FailureTransport || result.Outcome != OutcomeError {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	})
+
+	t.Run("no code", func(t *testing.T) {
+		backend := &fakeBackend{genTexts: []string{"an explanation without executable content"}}
+		result, err := RunExec(WithUnsafeExecution(context.Background()), backend, "model", candidate, t.TempDir())
+		if err != nil || result.Outcome != OutcomeInconclusive || !strings.Contains(result.Detail, "no executable code") {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	})
+
+	t.Run("fixture directory", func(t *testing.T) {
+		blocked := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(blocked, []byte("occupied"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		backend := &fakeBackend{genTexts: []string{"```python\ndef parse_duration(value):\n    return 1\n```"}}
+		result, err := RunExec(WithUnsafeExecution(context.Background()), backend, "model", candidate, blocked)
+		var failureErr *Failure
+		if !errors.As(err, &failureErr) || failureErr.Kind != FailureFixtureIO || result.Outcome != OutcomeError {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	})
+}
+
+func TestExtractCodeAndEditablePolicy(t *testing.T) {
+	if got := extractCode("def answer():\n    return 42", ""); !strings.Contains(got, "return 42") {
+		t.Fatalf("plain code = %q", got)
+	}
+	if got := extractCode("prose only", ""); got != "" {
+		t.Fatalf("prose extracted as code: %q", got)
+	}
+	text := "```python\nshort = 1\n```\n```python\ndef chosen():\n    return 42\n```"
+	if got := extractCode(text, "chosen"); !strings.Contains(got, "def chosen") {
+		t.Fatalf("preferred block = %q", got)
+	}
+	if got := extractCode(text, "missing"); !strings.Contains(got, "def chosen") {
+		t.Fatalf("longest block = %q", got)
+	}
+	if !allowed("anything.py", nil) || !allowed("safe.py", []string{"safe.py"}) || allowed("other.py", []string{"safe.py"}) {
+		t.Fatal("editable file policy mismatch")
+	}
+}
+
 func TestToolLoopPersistsEveryVerifierInterpreterReceipt(t *testing.T) {
 	t.Setenv("FITR_EXECUTOR_HELPER", "1")
 	path := installHelperPython(t, t.TempDir())

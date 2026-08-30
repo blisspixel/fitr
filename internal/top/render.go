@@ -248,10 +248,8 @@ func renderResult(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(metricSpans("TTFT", run.TTFTMean, "s", nil, glyphs)...)
 	}
 	if run.MemoryGB > 0 {
-		w.line(Span{Text: "memory     ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GB", run.MemoryGB), Role: RoleDefault})
-	}
-	if run.Trials > 0 {
-		w.line(Span{Text: "resolution ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%d trials; minimum detectable effect about %.0f pp", run.Trials, run.MDEpp), Role: RoleWarning})
+		w.line(Span{Text: "capacity", Role: RoleHeader})
+		w.line(Span{Text: "resident   ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GB after requested 32K load probe", run.MemoryGB), Role: RoleDefault})
 	}
 	for _, warning := range run.Warnings {
 		if !w.line(Span{Text: "warning    ", Role: RoleWarning}, Span{Text: warning, Role: RoleDefault}) {

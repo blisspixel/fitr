@@ -44,7 +44,7 @@
       "prefill_tps_min": 100.0,
       "malformed_tool_calls_max": 0,
       "requires_agentic_pass": true,
-      "why": "prefill dominates agent loops"
+      "why": "Longer agent histories increase repeated prompt processing. This gate measures observed prefill rather than assuming it dominates every loop."
     },
     "always_on_capable": {
       "resident_gb_at_32k_max": 24.0,

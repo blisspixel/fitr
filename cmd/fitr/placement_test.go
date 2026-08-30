@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// Partial offload is, in the project's own words, a RAM benchmark wearing a
-// GPU badge. Doctor said so; run did not, and a run is where the number that
-// gets saved is produced.
+// Placement changes comparability. The warning reports the runtime receipt
+// without inventing a hardware bottleneck from placement alone.
 func TestPlacementWarningSpeaksUpOnlyWhenItShould(t *testing.T) {
 	for _, tc := range []struct {
 		placement string

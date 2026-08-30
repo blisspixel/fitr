@@ -4,7 +4,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/blisspixel/fitr/internal/device"
 )
+
+var inventoryTestDigest = "sha256:" + strings.Repeat("a", 64)
+var inventoryOtherDigest = "sha256:" + strings.Repeat("b", 64)
 
 func TestJoinUnprovenWhenNoEvidence(t *testing.T) {
 	table := Join(InventoryQuery{
@@ -21,9 +26,12 @@ func TestJoinUnprovenWhenNoEvidence(t *testing.T) {
 
 func TestJoinMeasuredNonDefaultCtxAsksApply(t *testing.T) {
 	table := Join(InventoryQuery{
-		Tags:       []InstalledModel{{Name: "m"}},
+		Tags:       []InstalledModel{{Name: "m", ArtifactDigest: inventoryTestDigest}},
 		CurrentKey: "k",
-		Evidence:   []InventoryEvidence{{Model: "m", DeviceKey: "k", Level: "default", NumCtx: 16384, Repeats: 3}},
+		Evidence: []InventoryEvidence{{
+			Model: "m", ArtifactDigest: inventoryTestDigest, DeviceKey: "k",
+			Level: "default", NumCtx: 16384, Repeats: 3,
+		}},
 	})
 	row := table.Rows[0]
 	if row.State != StateMeasured || row.Next != "fitr apply m" {
@@ -36,10 +44,13 @@ func TestJoinMeasuredNonDefaultCtxAsksApply(t *testing.T) {
 
 func TestJoinMeasuredServingMatchViews(t *testing.T) {
 	table := Join(InventoryQuery{
-		Tags:       []InstalledModel{{Name: "m"}},
+		Tags:       []InstalledModel{{Name: "m", ArtifactDigest: inventoryTestDigest}},
 		CurrentKey: "k",
 		Serving:    map[string]int{"m": 16384},
-		Evidence:   []InventoryEvidence{{Model: "m", DeviceKey: "k", Level: "default", NumCtx: 16384, Repeats: 3}},
+		Evidence: []InventoryEvidence{{
+			Model: "m", ArtifactDigest: inventoryTestDigest, DeviceKey: "k",
+			Level: "default", NumCtx: 16384, Repeats: 3,
+		}},
 	})
 	row := table.Rows[0]
 	if row.Next != "fitr view m" {
@@ -52,10 +63,13 @@ func TestJoinMeasuredServingMatchViews(t *testing.T) {
 
 func TestJoinServingDiffersShowsPair(t *testing.T) {
 	table := Join(InventoryQuery{
-		Tags:       []InstalledModel{{Name: "m"}},
+		Tags:       []InstalledModel{{Name: "m", ArtifactDigest: inventoryTestDigest}},
 		CurrentKey: "k",
 		Serving:    map[string]int{"m": 8192},
-		Evidence:   []InventoryEvidence{{Model: "m", DeviceKey: "k", Level: "default", NumCtx: 16384, Repeats: 3}},
+		Evidence: []InventoryEvidence{{
+			Model: "m", ArtifactDigest: inventoryTestDigest, DeviceKey: "k",
+			Level: "default", NumCtx: 16384, Repeats: 3,
+		}},
 	})
 	row := table.Rows[0]
 	if row.Next != "fitr apply m" || row.Ctx != "16k/8k" {
@@ -79,10 +93,11 @@ func TestJoinAttachesWindowsWhenArchitectureKnown(t *testing.T) {
 
 func TestJoinMeasuredSameDevice(t *testing.T) {
 	table := Join(InventoryQuery{
-		Tags:       []InstalledModel{{Name: "qwen3:8b", Size: 5 << 30}},
+		Tags:       []InstalledModel{{Name: "qwen3:8b", Size: 5 << 30, ArtifactDigest: inventoryTestDigest}},
 		CurrentKey: "box|gpu",
 		Evidence: []InventoryEvidence{{
-			Model: "qwen3:8b", DeviceKey: "box|gpu", Level: "default",
+			Model: "qwen3:8b", ArtifactDigest: inventoryTestDigest,
+			DeviceKey: "box|gpu", Level: "default",
 		}},
 	})
 	row := table.Rows[0]
@@ -93,9 +108,11 @@ func TestJoinMeasuredSameDevice(t *testing.T) {
 
 func TestJoinQuickMeasurementAsksForDefaultRun(t *testing.T) {
 	table := Join(InventoryQuery{
-		Tags:       []InstalledModel{{Name: "m"}},
+		Tags:       []InstalledModel{{Name: "m", ArtifactDigest: inventoryTestDigest}},
 		CurrentKey: "k",
-		Evidence:   []InventoryEvidence{{Model: "m", DeviceKey: "k", Level: "quick"}},
+		Evidence: []InventoryEvidence{{
+			Model: "m", ArtifactDigest: inventoryTestDigest, DeviceKey: "k", Level: "quick",
+		}},
 	})
 	row := table.Rows[0]
 	if row.State != StateMeasured || row.Next != "fitr run m" {
@@ -108,13 +125,159 @@ func TestJoinQuickMeasurementAsksForDefaultRun(t *testing.T) {
 
 func TestJoinStaleOnFingerprintChange(t *testing.T) {
 	table := Join(InventoryQuery{
-		Tags:       []InstalledModel{{Name: "m"}},
+		Tags:       []InstalledModel{{Name: "m", ArtifactDigest: inventoryTestDigest}},
 		CurrentKey: "new-runtime",
-		Evidence:   []InventoryEvidence{{Model: "m", DeviceKey: "old-runtime", Level: "full"}},
+		Evidence: []InventoryEvidence{{
+			Model: "m", ArtifactDigest: inventoryTestDigest, DeviceKey: "old-runtime", Level: "full",
+		}},
 	})
 	row := table.Rows[0]
 	if row.State != StateStale || row.Next != "fitr run m" {
 		t.Fatalf("stale fingerprint = %+v", row)
+	}
+}
+
+func TestJoinStaleWhenMutableTagChangesArtifact(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags: []InstalledModel{{
+			Name: "qwen3:8b", ArtifactDigest: inventoryOtherDigest,
+		}},
+		CurrentKey: "k",
+		Evidence: []InventoryEvidence{{
+			Model: "qwen3:8b:latest", ArtifactDigest: inventoryTestDigest,
+			DeviceKey: "k", Level: "full",
+		}},
+	})
+	row := table.Rows[0]
+	if row.State != StateStale || !strings.Contains(row.Note, "model artifact changed") {
+		t.Fatalf("changed mutable tag = %+v", row)
+	}
+	if row.Next != "fitr run qwen3:8b" {
+		t.Fatalf("changed artifact next = %q", row.Next)
+	}
+}
+
+func TestJoinMissingOrMalformedCurrentDigestFailsClosed(t *testing.T) {
+	for _, digest := range []string{"", "sha256:not-a-digest"} {
+		table := Join(InventoryQuery{
+			Tags:       []InstalledModel{{Name: "m", ArtifactDigest: digest}},
+			CurrentKey: "k",
+			Evidence: []InventoryEvidence{{
+				Model: "m", ArtifactDigest: inventoryTestDigest, DeviceKey: "k", Level: "full",
+			}},
+		})
+		row := table.Rows[0]
+		if row.State != StateStale || !strings.Contains(row.Note, "verified model artifact digest") {
+			t.Fatalf("digest %q did not fail closed: %+v", digest, row)
+		}
+	}
+}
+
+func TestJoinLegacyEvidenceWithoutArtifactDigestFailsClosed(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:       []InstalledModel{{Name: "m", ArtifactDigest: inventoryTestDigest}},
+		CurrentKey: "k",
+		Evidence:   []InventoryEvidence{{Model: "m", DeviceKey: "k", Level: "full"}},
+	})
+	row := table.Rows[0]
+	if row.State != StateStale || !strings.Contains(row.Note, "prior run has no verified") {
+		t.Fatalf("legacy evidence = %+v", row)
+	}
+}
+
+func TestJoinSelectsMatchingArtifactFromMultipleSavedRuns(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:       []InstalledModel{{Name: "m", ArtifactDigest: inventoryTestDigest}},
+		CurrentKey: "k",
+		Evidence: []InventoryEvidence{
+			{Model: "m", ArtifactDigest: inventoryOtherDigest, DeviceKey: "k", Level: "full"},
+			{Model: "m:latest", ArtifactDigest: inventoryTestDigest, DeviceKey: "k", Level: "full"},
+		},
+	})
+	if row := table.Rows[0]; row.State != StateMeasured {
+		t.Fatalf("matching saved artifact was not selected: %+v", row)
+	}
+}
+
+func TestJoinSelectsReusableEvidenceBeforeAStaleTie(t *testing.T) {
+	current := device.Fingerprint{Host: "box", OS: "linux", CPU: "cpu", GPU: "gpu", Runtime: "runtime", Config: map[string]string{}}
+	stale := current
+	stale.OS = "windows"
+	table := Join(InventoryQuery{
+		Tags:    []InstalledModel{{Name: "m", ArtifactDigest: inventoryTestDigest}},
+		Current: current, CurrentKey: current.Key(),
+		Evidence: []InventoryEvidence{
+			{Model: "m", ArtifactDigest: inventoryTestDigest, Device: stale, DeviceKey: current.Key(), Level: "full"},
+			{Model: "m", ArtifactDigest: inventoryTestDigest, Device: current, DeviceKey: current.Key(), Level: "full"},
+		},
+	})
+	if row := table.Rows[0]; row.State != StateMeasured {
+		t.Fatalf("reusable evidence lost to stale tie: %+v", row)
+	}
+}
+
+func TestStaleEvidenceCannotChangeCurrentFitProjection(t *testing.T) {
+	current := device.Fingerprint{Host: "box", OS: "linux", Config: map[string]string{}}
+	table := Join(InventoryQuery{
+		Tags:    []InstalledModel{{Name: "m", Size: 5 * GiB, ArtifactDigest: inventoryOtherDigest}},
+		Current: current, CurrentKey: current.Key(), HaveGB: 8, HaveSrc: "nvidia-smi",
+		Evidence: []InventoryEvidence{{
+			Model: "m", ArtifactDigest: inventoryTestDigest, Device: current, DeviceKey: current.Key(),
+			WeightsB: 40 * GiB, Arch: llama8B(), NumCtx: 32768, Level: "full",
+		}},
+	})
+	row := table.Rows[0]
+	if row.State != StateStale {
+		t.Fatalf("changed artifact was not stale: %+v", row)
+	}
+	if row.Fit == Incompatible {
+		t.Fatalf("stale 40 GiB metadata contaminated the current 5 GiB projection: %+v", row)
+	}
+}
+
+func TestEvidenceReuseRejectsAllPerformanceRelevantDeviceDrift(t *testing.T) {
+	base := device.Fingerprint{
+		Host: "box", OS: "linux", CPU: "cpu", RAMGb: 32, GPU: "gpu",
+		GPUDriver: "1", GPUDriverDate: "today", GPUBackend: "cuda",
+		VRAMGb: 16, VRAMSource: "nvidia-smi", Runtime: "runtime",
+		InferenceDevice: "GPU 100%", Config: map[string]string{},
+	}
+	tag := InstalledModel{Name: "m", ArtifactDigest: inventoryTestDigest}
+	for _, mutate := range []func(*device.Fingerprint){
+		func(f *device.Fingerprint) { f.OS = "windows" },
+		func(f *device.Fingerprint) { f.CPU = "other" },
+		func(f *device.Fingerprint) { f.RAMGb = 64 },
+		func(f *device.Fingerprint) { f.VRAMGb = 24 },
+		func(f *device.Fingerprint) { f.GPUDriverDate = "tomorrow" },
+	} {
+		changed := base
+		changed.Config = map[string]string{}
+		mutate(&changed)
+		ev := InventoryEvidence{
+			Model: "m", ArtifactDigest: inventoryTestDigest, Device: base, DeviceKey: base.Key(),
+		}
+		if EvidenceReusable(tag, ev, InventoryQuery{Current: changed, CurrentKey: changed.Key()}) {
+			t.Fatalf("device drift was reusable: saved=%+v current=%+v", base, changed)
+		}
+	}
+}
+
+func TestJoinNamesFingerprintFieldsThatChanged(t *testing.T) {
+	saved := device.Fingerprint{Host: "box", GPU: "gpu", Runtime: "ollama 1", Config: map[string]string{}}
+	current := saved
+	current.Runtime = "ollama 2"
+	table := Join(InventoryQuery{
+		Tags:       []InstalledModel{{Name: "m", ArtifactDigest: inventoryTestDigest}},
+		Current:    current,
+		CurrentKey: current.Key(),
+		Evidence: []InventoryEvidence{{
+			Model: "m", ArtifactDigest: inventoryTestDigest,
+			Device: saved, DeviceKey: saved.Key(), Level: "full",
+		}},
+	})
+	row := table.Rows[0]
+	if row.State != StateStale || !strings.Contains(row.Note, "runtime changed") {
+		t.Fatalf("precise stale note = %+v", row)
 	}
 }
 
@@ -244,10 +407,14 @@ func TestServingOfExactConflictStaysUnknown(t *testing.T) {
 
 func TestJoinMeasuredEvenWhenWeightsExceedVRAM(t *testing.T) {
 	table := Join(InventoryQuery{
-		Tags:       []InstalledModel{{Name: "cpu-offload", Size: 40 * GiB}},
+		Tags: []InstalledModel{{
+			Name: "cpu-offload", Size: 40 * GiB, ArtifactDigest: inventoryTestDigest,
+		}},
 		CurrentKey: "k",
 		HaveGB:     16,
-		Evidence:   []InventoryEvidence{{Model: "cpu-offload", DeviceKey: "k", Level: "full"}},
+		Evidence: []InventoryEvidence{{
+			Model: "cpu-offload", ArtifactDigest: inventoryTestDigest, DeviceKey: "k", Level: "full",
+		}},
 	})
 	if table.Rows[0].State != StateMeasured {
 		t.Fatalf("a successful measurement is measured, not incompatible: %+v", table.Rows[0])
@@ -258,15 +425,15 @@ func TestJoinSortsMeasuredBeforeUnprovenAndNeverRanksQuality(t *testing.T) {
 	table := Join(InventoryQuery{
 		Tags: []InstalledModel{
 			{Name: "zeta-unproven"},
-			{Name: "alpha-measured"},
-			{Name: "mid-stale"},
+			{Name: "alpha-measured", ArtifactDigest: inventoryTestDigest},
+			{Name: "mid-stale", ArtifactDigest: inventoryTestDigest},
 			{Name: "zzz-incompatible", Size: 40 * GiB},
 		},
 		CurrentKey: "k",
 		HaveGB:     8, HaveSrc: "nvidia-smi",
 		Evidence: []InventoryEvidence{
-			{Model: "alpha-measured", DeviceKey: "k", Level: "full"},
-			{Model: "mid-stale", DeviceKey: "old", Level: "full"},
+			{Model: "alpha-measured", ArtifactDigest: inventoryTestDigest, DeviceKey: "k", Level: "full"},
+			{Model: "mid-stale", ArtifactDigest: inventoryTestDigest, DeviceKey: "old", Level: "full"},
 		},
 	})
 	got := make([]string, len(table.Rows))
@@ -286,9 +453,12 @@ func TestJoinSortsMeasuredBeforeUnprovenAndNeverRanksQuality(t *testing.T) {
 
 func TestJoinLatestAliasMatchesEvidence(t *testing.T) {
 	table := Join(InventoryQuery{
-		Tags:       []InstalledModel{{Name: "qwen3:8b"}},
+		Tags:       []InstalledModel{{Name: "qwen3:8b", ArtifactDigest: inventoryTestDigest}},
 		CurrentKey: "k",
-		Evidence:   []InventoryEvidence{{Model: "qwen3:8b:latest", DeviceKey: "k", Level: "full"}},
+		Evidence: []InventoryEvidence{{
+			Model: "qwen3:8b:latest", ArtifactDigest: inventoryTestDigest,
+			DeviceKey: "k", Level: "full",
+		}},
 	})
 	if table.Rows[0].State != StateMeasured {
 		t.Fatalf(":latest alias should match: %+v", table.Rows[0])
@@ -335,11 +505,14 @@ func TestJoinLoadedFirstWithinState(t *testing.T) {
 
 func TestJoinFitTierFromSavedArchitecture(t *testing.T) {
 	table := Join(InventoryQuery{
-		Tags:       []InstalledModel{{Name: "llama3.1:8b", Size: 5 * GiB}},
+		Tags: []InstalledModel{{
+			Name: "llama3.1:8b", Size: 5 * GiB, ArtifactDigest: inventoryTestDigest,
+		}},
 		CurrentKey: "k",
 		HaveGB:     8, HaveSrc: "nvidia-smi",
 		Evidence: []InventoryEvidence{{
-			Model: "llama3.1:8b", DeviceKey: "k", Level: "default",
+			Model: "llama3.1:8b", ArtifactDigest: inventoryTestDigest,
+			DeviceKey: "k", Level: "default",
 			Arch: llama8B(), WeightsB: 5 * GiB, NumCtx: 8192,
 		}},
 	})
@@ -349,6 +522,31 @@ func TestJoinFitTierFromSavedArchitecture(t *testing.T) {
 	}
 	if row.Next != "fitr view llama3.1:8b" {
 		t.Fatalf("measured next stays view: %q", row.Next)
+	}
+}
+
+func TestEvidenceReusableRejectsPlacementAndComparabilityChanges(t *testing.T) {
+	current := device.Fingerprint{
+		Host: "box", GPU: "gpu", GPUDriver: "driver", GPUBackend: "cuda",
+		Runtime: "runtime", InferenceDevice: "GPU 100%", Config: map[string]string{},
+	}
+	tag := InstalledModel{Name: "model", ArtifactDigest: inventoryTestDigest}
+	evidence := InventoryEvidence{
+		Model: "model", ArtifactDigest: inventoryTestDigest,
+		Device: current, DeviceKey: current.Key(),
+	}
+	query := InventoryQuery{Current: current, CurrentKey: current.Key()}
+	if !EvidenceReusable(tag, evidence, query) {
+		t.Fatal("exact artifact and placement should be reusable")
+	}
+	evidence.Device.InferenceDevice = "CPU + GPU"
+	if EvidenceReusable(tag, evidence, query) {
+		t.Fatal("changed placement reused saved evidence")
+	}
+	evidence.Device = current
+	evidence.ComparableIssue = "effective context is unverified"
+	if EvidenceReusable(tag, evidence, query) {
+		t.Fatal("unverified effective context reused saved evidence")
 	}
 }
 

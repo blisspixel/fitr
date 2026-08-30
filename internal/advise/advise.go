@@ -7,8 +7,9 @@
 // LM Studio / llmfit do not.
 //
 // Fit prefers an observed resident size (Ollama /api/ps) over the weights+KV
-// estimate. Observation includes compute buffers; the estimate does not and
-// says so. llama.cpp --fit dummy allocation is still the missing gold
+// estimate. Observation includes runtime-managed allocation beyond modeled
+// weights and KV; the estimate does not and says so. llama.cpp --fit dummy
+// allocation is still the missing gold
 // standard. When a required input is missing the verdict is SKIP, never a
 // fabricated GB number. Decode-speed class tracks *active* parameters, so a
 // 30B MoE (~3B active) is not treated as a 30B dense model.
@@ -473,7 +474,7 @@ func evaluateCore(in Input) Report {
 			if r.Source == "" {
 				r.Source = "observed resident"
 			}
-			r.Gaps = append(r.Gaps, "resident includes compute buffers (measured, not estimated)")
+			r.Gaps = append(r.Gaps, "resident is total runtime allocation; its non-weight, non-KV remainder is derived")
 			if !in.Arch.KVReady() {
 				r.Gaps = append(r.Gaps, "other context lengths not sized (no GGUF architecture)")
 			}
@@ -495,7 +496,7 @@ func evaluateCore(in Input) Report {
 		r.Tier = Skip
 		r.Why = "hybrid recurrent architecture cannot be safely projected from weights plus a conventional KV cache"
 		r.Hint = "use --load at the requested context with Ollama, or --fit with llama-fit-params"
-		r.Gaps = append(r.Gaps, "recurrent state and runtime buffers were not measured")
+		r.Gaps = append(r.Gaps, "recurrent state and other runtime allocation were not measured")
 		return r
 	}
 
@@ -504,7 +505,7 @@ func evaluateCore(in Input) Report {
 		if in.FitSrc != "" {
 			r.Source = in.FitSrc
 		}
-		r.Gaps = append(r.Gaps, "dummy allocation (includes compute buffers)")
+		r.Gaps = append(r.Gaps, "dummy allocation includes runtime-managed memory beyond weights and modeled KV")
 		fits := float64(in.FitB) <= haveB && !in.FitCannot
 		if fits {
 			r.Tier = Compatible
@@ -559,8 +560,8 @@ func evaluateCore(in Input) Report {
 	if float64(in.WeightsB) > haveB {
 		r.Tier = Incompatible
 		r.Why = fmt.Sprintf("weights alone are %s GB; %s GB available", trim1(r.WeightsGB), trim1(r.HaveGB))
-		r.Remedy = "try a smaller quant, or CPU offload (decode then tracks RAM bandwidth; doctor flags partial GPU offload)"
-		r.Gaps = append(r.Gaps, "compute buffers not included")
+		r.Remedy = "try a smaller quant, or runtime-supported partial/CPU placement; performance is a separate measurement and placement must match for comparison"
+		r.Gaps = append(r.Gaps, "other runtime allocation not included")
 		return r
 	}
 
@@ -609,7 +610,7 @@ func evaluateCore(in Input) Report {
 	r.KVGB = round1(kvB / GiB)
 	needB := float64(in.WeightsB) + kvB
 	r.NeedGB = round1(needB / GiB)
-	r.Gaps = append(r.Gaps, "weights + KV only; compute buffers not included")
+	r.Gaps = append(r.Gaps, "weights + KV only; other runtime allocation not included")
 
 	flag := ContextFlag(in.Backend)
 	if needB <= haveB {
@@ -750,7 +751,7 @@ func fitPresentation(t FitTable) render.ContextFit {
 	for _, p := range t.Points {
 		out.Points = append(out.Points, render.ContextFitPoint{
 			Ctx: p.Ctx, Tier: p.Tier, WeightsGB: p.WeightsGB, KVGB: p.KVGB,
-			BuffersGB: p.BuffersGB, BuffersKnown: p.BuffersKnown,
+			OtherGB: p.OtherGB, OtherKnown: p.OtherKnown,
 			NeedGB: p.NeedGB, HeadroomGB: p.HeadroomGB,
 			DecodeTPS: p.DecodeTPS, PrefillTPS: p.PrefillTPS,
 			Requested: p.Requested, Suggested: p.Suggested, Note: p.Note,

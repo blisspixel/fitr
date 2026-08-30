@@ -2,6 +2,7 @@ package score
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -54,6 +55,7 @@ func good() Measured {
 	return Measured{
 		Model: "test:1b", Capabilities: []string{"completion", "tools"},
 		DecodeTPS: 30, TTFT: 0.5, PrefillTPS: 200, SpeedKnown: true,
+		TTFTCacheKnown: true, PrefillCacheKnown: true,
 		ResidentGB32K: 5, MemoryKnown: true,
 		CodeWritePass: true, CodeFixPass: true, CodeKnown: true,
 		Rep: RepetitionMetrics(clean),
@@ -156,6 +158,13 @@ func TestPooledNeedsScoreAgainstRateGates(t *testing.T) {
 	m := good()
 	m.Structured = Pool{Passes: 20, N: 20}
 	m.Precision = Pool{Passes: 0, N: 20}
+	for i := range 20 {
+		family := fmt.Sprintf("case-%02d", i)
+		m.Structured.Families = append(m.Structured.Families,
+			FamilyPool{Family: family, Passes: 1, N: 1})
+		m.Precision.Families = append(m.Precision.Families,
+			FamilyPool{Family: family, N: 1})
+	}
 	sc := Score(m, lappy(t))
 	if sc.Needs["structured_output"].State != Pass {
 		t.Fatalf("structured_output = %v, want PASS", sc.Needs["structured_output"].State)
@@ -182,6 +191,20 @@ func TestReasoningObservedWhenCodingSkipped(t *testing.T) {
 	}
 	if slices.Contains(sc.Serves, "coding") {
 		t.Fatalf("unrun coding became a served need: %+v", sc)
+	}
+}
+
+func TestScheduledExecutableTasksNameIsolationBoundary(t *testing.T) {
+	m := good()
+	m.CodeKnown = false
+	m.CodePlanned = true
+	m.AgenticPlanned = true
+	sc := Score(m, lappy(t))
+	if v := sc.Needs["coding"]; v.State != Skip || !strings.Contains(v.Why, "isolated execution") {
+		t.Fatalf("scheduled coding skip = %+v", v)
+	}
+	if v := sc.Needs["unattended_agentic"]; v.State != Skip || !strings.Contains(v.Why, "isolated execution") {
+		t.Fatalf("scheduled agentic skip = %+v", v)
 	}
 }
 
@@ -232,6 +255,18 @@ func TestPooledGateInsideWilsonIntervalIsInconclusive(t *testing.T) {
 	}
 }
 
+func TestUnscorablePlannedCheckCannotEstablishNeed(t *testing.T) {
+	m := good()
+	for i := range 20 {
+		m.Structured.Add(fmt.Sprintf("family-%02d", i), true)
+	}
+	m.Structured.AddUnscorable("blocked-family")
+	verdict := Score(m, lappy(t)).Needs["structured_output"]
+	if verdict.State != Inconclusive || !strings.Contains(verdict.Why, "not scorable") {
+		t.Fatalf("missing planned evidence established a need: %+v", verdict)
+	}
+}
+
 func TestUnmeasuredPoolsSkip(t *testing.T) {
 	sc := Score(good(), lappy(t))
 	for _, need := range []string{"structured_output", "instruction_precision"} {
@@ -262,6 +297,20 @@ func TestUserTasksDefaultToAllMustPass(t *testing.T) {
 	}
 }
 
+func TestDefaultUserTaskIntervalRespectsRepeatedFamilyClustering(t *testing.T) {
+	var user Pool
+	for range 20 {
+		user.Add("same-workflow", true)
+	}
+	verdict := Score(Measured{Model: "test", User: user}, lappy(t)).Needs["user_tasks"]
+	if verdict.State != Pass {
+		t.Fatalf("finite all-must-pass contract = %+v", verdict)
+	}
+	if !strings.Contains(verdict.Measure, "[0.21-1.00]") {
+		t.Fatalf("one repeated family printed iid precision: %+v", verdict)
+	}
+}
+
 func TestConfiguredUserTaskRateUsesWilsonInconclusive(t *testing.T) {
 	m := Measured{Model: "test", User: Pool{Passes: 7, N: 7}}
 	profile := device.Profile{Name: "test", Gates: map[string]device.Gate{
@@ -278,14 +327,42 @@ func TestConfiguredUserTaskRateUsesWilsonInconclusive(t *testing.T) {
 	}
 }
 
-func TestReasoningPoolWidensTheCodingSample(t *testing.T) {
+func TestConfiguredUserTaskRateDoesNotTreatOneRepeatedFamilyAsIndependent(t *testing.T) {
+	var user Pool
+	for range 20 {
+		user.Add("same-workflow", true)
+	}
+	profile := device.Profile{Name: "test", Gates: map[string]device.Gate{
+		"user_tasks": {"pass_rate_min": 0.75},
+	}}
+	verdict := Score(Measured{Model: "test", User: user}, profile).Needs["user_tasks"]
+	if verdict.State != Inconclusive || !strings.Contains(verdict.Why, "one check family") {
+		t.Fatalf("repeated one-family tasks established a broad rate: %+v", verdict)
+	}
+}
+
+func TestPoolVerdictDeadFamilyRemainsConservative(t *testing.T) {
+	profile := device.Profile{Name: "fixed", Gates: map[string]device.Gate{
+		"structured_output": {"pass_rate_min": 0.75},
+	}}
+	pooled := Pool{Passes: 18, N: 20, Families: []FamilyPool{
+		{Family: "strong", Passes: 18, N: 18},
+		{Family: "dead", Passes: 0, N: 2},
+	}}
+	if verdict := poolVerdict(pooled, profile, "structured_output", "valid"); verdict.State == Pass {
+		t.Fatalf("thin pooled evidence passed unexpectedly: %+v", verdict)
+	}
+}
+
+func TestReasoningPoolStaysSeparateFromExecutableCoding(t *testing.T) {
 	m := good()
 	m.CodePasses, m.CodeRepeats = 6, 6
 	m.Reasoning = Pool{Passes: 4, N: 5}
 	sc := Score(m, lappy(t))
 	why := sc.Needs["coding"].Why
-	if !strings.Contains(why, "10/11") || !strings.Contains(why, "reasoning 4/5") {
-		t.Fatalf("coding why must pool reasoning trials into the interval, got %q", why)
+	if !strings.Contains(why, "6/6 executable") || !strings.Contains(why, "reasoning 4/5") ||
+		!strings.Contains(why, "observed separately") || strings.Contains(why, "10/11") {
+		t.Fatalf("coding must keep executable and clustered reasoning evidence separate, got %q", why)
 	}
 }
 
@@ -340,6 +417,32 @@ func TestContextCeilingWithoutCompactionFailsUnattended(t *testing.T) {
 	}
 }
 
+func TestCachedPrefillCannotEstablishUnattendedPass(t *testing.T) {
+	m := good()
+	m.AgenticRan, m.AgenticPass, m.AgenticTurns = true, true, 12
+	m.PrefillCacheContaminated = true
+	v := Score(m, lappy(t)).Needs["unattended_agentic"]
+	if v.State != Inconclusive || !strings.Contains(v.Why, "cached tokens") {
+		t.Fatalf("cached prefill verdict = %+v", v)
+	}
+
+	m.AgenticPass = false
+	v = Score(m, lappy(t)).Needs["unattended_agentic"]
+	if v.State != Fail {
+		t.Fatalf("independent agent failure was hidden by cache caveat: %+v", v)
+	}
+}
+
+func TestUnknownPrefillCacheStateCannotEstablishUnattendedPass(t *testing.T) {
+	m := good()
+	m.AgenticRan, m.AgenticPass, m.AgenticTurns = true, true, 12
+	m.PrefillCacheKnown = false
+	v := Score(m, lappy(t)).Needs["unattended_agentic"]
+	if v.State != Inconclusive || !strings.Contains(v.Why, "not proven") {
+		t.Fatalf("unknown prefill-cache verdict = %+v", v)
+	}
+}
+
 func TestContextCeilingWithCompactionIsDisclosedNotFailed(t *testing.T) {
 	m := good()
 	m.PlumbingRan, m.PlumbingHealthy = true, true
@@ -383,13 +486,28 @@ func TestContaminatedTTFTIsExcludedFromTheGate(t *testing.T) {
 	if !strings.Contains(why, "cache hit") || !strings.Contains(why, "excluded") {
 		t.Fatalf("contaminated TTFT must be labeled and excluded: %q", why)
 	}
-	if sc.Needs["fast_and_decent"].State != Pass {
-		t.Fatal("decode still passed; excluding TTFT must not invent a FAIL")
+	if sc.Needs["fast_and_decent"].State != Inconclusive {
+		t.Fatal("a cache-hit TTFT cannot establish a loaded/uncached PASS")
 	}
 	m.DecodeTPS = 1 // below the lappy fast_chat gate
 	sc = Score(m, lappy(t))
 	if sc.Needs["fast_and_decent"].State != Fail {
 		t.Fatal("decode still has to clear its own gate")
+	}
+}
+
+func TestUnknownTTFTCacheStateCannotEstablishFastChatPass(t *testing.T) {
+	m := good()
+	m.TTFTCacheKnown = false
+	sc := Score(m, lappy(t))
+	verdict := sc.Needs["fast_and_decent"]
+	if verdict.State != Inconclusive || !strings.Contains(verdict.Why, "cache receipt") ||
+		!strings.Contains(verdict.Why, "unproven") {
+		t.Fatalf("unknown cache verdict = %+v", verdict)
+	}
+	m.DecodeTPS = 1
+	if verdict = Score(m, lappy(t)).Needs["fast_and_decent"]; verdict.State != Fail {
+		t.Fatalf("known decode failure became %v", verdict.State)
 	}
 }
 
