@@ -56,8 +56,8 @@ recorded as partial.
 |---|---:|---:|---:|---:|---:|---|
 | Windows amd64 (host A) | Pending final clean VM | Pass | Pass | Pass with Ollama, all documented commands | Pass | Pass on a used host |
 | Windows amd64 (host B, 0.9.6) | Pending final clean VM | Pass | Failed: SKIP for every model | Recorded pass, advise not exercised | Pass | Superseded |
-| macOS arm64 | Pending | Pending | Pending | Pending | Pending | Pending |
-| Linux amd64 | Pending | Pending | Pending | Pending | Pending | Pending |
+| macOS arm64 | Pass, checksum-verified candidate | Pass | Pass with supplied 8 GB planning budget | Pass with llama-server; ranking refusal expected | Pass | Pass on clean ephemeral runner |
+| Linux amd64 | Pass, checksum-verified candidate | Pass | Pass with supplied 8 GB planning budget | Pass with llama-server; ranking refusal expected | Pass | Pass on clean ephemeral runner |
 
 Rows must also record environment depth, not only the operating system: shell
 and probe tooling version, serving-runtime version, GPU vendor, and driver. A
@@ -94,6 +94,43 @@ effective tokens, complete speed, resident-memory and tool-plumbing checks,
 save and reopen a schema 5 result, and produce a non-mutating apply recipe. It
 left no model resident and did not read or modify existing user evidence.
 
+### macOS arm64, clean candidate
+
+Environment: macOS 26.5.2 arm64, Darwin 25.5.0, Bash 3.2.57, Apple M1
+(Virtual) with 3 logical CPUs, and 7.0 GB system RAM. `fitr device` identified
+the Apple processor as the GPU fallback rather than printing the `arm64`
+architecture string, and kept the unavailable driver explicitly `unknown`.
+
+The [native acceptance run 33331095501](https://github.com/blisspixel/fitr/actions/runs/33331095501)
+tested commit `4bea4986f13fc1dd3e08f96a0ff23231268b7ebe` with fitr 0.9.9 and
+llama-server b10700 (`bebc9350e`). The checksum-verifying installer installed
+the candidate built by the workflow. Two independently hashed SmolLM2 GGUFs
+then completed the recorded loop at an exact 8192-token server context.
+
+Advise used an explicit 8 GB operator planning budget and labeled it as
+`--vram-gb`; the live run did not turn that input into measured resident
+memory. Both schema-6 result files passed structural validation, including
+the native protocol, exact effective context, first-output receipt, uncached
+decode and prefill receipts, and positive cache reuse on replay. Board and
+Compare refused ranking because llama-server could not bind the readable file
+hash to the served runtime artifact. That refusal is the expected identity
+contract. The dedicated server process and listener were gone at completion.
+
+### Linux amd64, clean candidate
+
+Environment: Ubuntu 24.04.4 LTS amd64, Linux 6.17.0-1022-azure, Bash 5.2.21,
+AMD EPYC 7763 with 4 logical CPUs, 15.6 GB system RAM, and no measured GPU or
+driver. The same [native acceptance run 33331095501](https://github.com/blisspixel/fitr/actions/runs/33331095501)
+installed and exercised the exact candidate, llama-server build, context, and
+two model hashes used by the macOS row.
+
+Inventory, advice, both measured runs, apply, Doctor, Diag, Device, View,
+Export, and `top --snapshot` produced their recorded artifacts. The schema-6
+and cache validation, expected Board and Compare refusals, and exact listener
+cleanup all passed. The 8 GB advice budget was operator supplied; live resident
+memory remained SKIP because the runtime supplied no matching allocation
+receipt.
+
 ## Live backend matrix
 
 A backend row and an operating-system row prove different things. An operating
@@ -114,7 +151,7 @@ its model, so its probe wall time is not an unloaded-runtime measurement.
 | Backend | Discovery and inventory | Positive measured run | Identity gate | Context gate | Status |
 |---|---:|---:|---:|---:|---|
 | Ollama | Pass on two Windows hosts | Pass | Runtime digest pass | `/api/ps.context_length` pass | Pass on native hosts |
-| llama-server | Automated only | Pending native run | Observed file hash remains unrankable | Automated `/props` receipt | Pending |
+| llama-server | Pass on clean Linux amd64 and macOS arm64 | Pass on both native runners | Observed file hash remains unrankable; Board and Compare refuse | Exact `/props` receipt at 8192 | Pass for measurement; ranking unavailable by design |
 | Generic OpenAI-compatible | Pass against Ollama's compatibility route, 14 of 14 models listed | Blocked, not pending: see below | Both refusal modes pass live | Unknown remains unrankable by design | Partial by design |
 
 Against Ollama's compatibility route the generic backend listed every served
@@ -148,7 +185,8 @@ contract already says.
 0. Every command in the README's everyday loop table appears in the recorded
    path for each row, with its observed output.
 1. Finish the clean-install rows on all supported operating systems.
-2. Complete a positive native run for llama-server. A generic
+2. Complete a positive native run for llama-server. Completed on clean Linux
+   amd64 and macOS arm64 in run 33331095501. A generic
    OpenAI-compatible endpoint cannot supply the documented receipts through
    the standard schema, so that row closes as "usable for inventory,
    unrankable for evidence" unless a conforming endpoint appears; it does not
@@ -160,6 +198,11 @@ contract already says.
 5. Verify that all six binaries appear exactly once in `SHA256SUMS`, then run
    the POSIX installer against candidate artifacts on Linux and macOS and the
    PowerShell installer against the Windows candidate before promoting 1.0.
+
+The release workflow requires successful aggregate CI and native acceptance
+for the exact tagged commit. It also uses the same checksum-manifest target as
+aggregate CI and native acceptance, so candidate and release asset sets cannot
+silently diverge.
 
 Backend receipt requirements and failure semantics are defined in
 [backends](backends.md). The product-level exit criteria remain in the

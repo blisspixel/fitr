@@ -215,10 +215,12 @@ clean install on each operating system.
       names the knob per backend, stays silent when the cache is already
       quantized or the runtime exposes no knob, and says that the dtype is
       part of the device fingerprint so the result must be re-measured.
-- [ ] Complete positive native runs for llama-server and a generic
-      OpenAI-compatible endpoint against the documented identity and context
-      gates.
-- [ ] Resolve every release-blocking defect found by the matrix while keeping
+- [x] Complete a positive native run for llama-server and exercise the generic
+      OpenAI-compatible route against the documented identity and context
+      gates. The standard OpenAI schema cannot supply artifact identity, so
+      that route remains usable for inventory and unrankable for evidence by
+      design rather than becoming a false positive run.
+- [x] Resolve every release-blocking defect found by the matrix while keeping
       cross-platform CI, race detector, vulnerability scan, fuzz smoke tests,
       distribution build, and installer syntax checks green.
 
@@ -393,13 +395,21 @@ every need the code does.
       refusals, schema-6 cache receipts, exact context, memory SKIP, and
       listener cleanup, then uploads hashes, `/props`, logs, command
       transcripts, and result files for review.
-- [ ] Complete a positive native run for llama-server, the one backend row
+- [x] Complete a positive native run for llama-server, the one backend row
       still resting on automated tests alone.
-- [ ] Run the acceptance path on clean macOS and Linux installs.
+- [x] Run the acceptance path on clean macOS and Linux installs. The exact
+      candidate, environment, hashes, command transcripts, and expected
+      evidence refusals are recorded in
+      [release acceptance](docs/release-acceptance.md).
+- [x] Make release publication require passing aggregate CI and native
+      acceptance for the exact tagged main commit, and generate the candidate,
+      CI, and release checksum manifest through one target.
 
 Exit criterion: every evidence-correctness item above is complete, the
 complexity linters are enabled with no suppressions in the run pipeline, and
-every backend row rests on a native run.
+every rankable backend row rests on a native run. A protocol that cannot bind
+artifact identity remains explicitly unrankable instead of blocking on a
+receipt its schema cannot carry.
 
 ### 0.10 - explain and choose
 

@@ -48,6 +48,22 @@ jobs:
               --jq '.total_count'
           )"
           test "$passing_runs" -ge 1
+      - name: require passing native acceptance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          passing_runs="$(
+            gh api --method GET "repos/${GH_REPO}/actions/workflows/native-acceptance.yml/runs" \
+              -f branch=main \
+              -f event=workflow_dispatch \
+              -f status=success \
+              -f head_sha="${GITHUB_SHA}" \
+              -f per_page=100 \
+              --jq '.total_count'
+          )"
+          test "$passing_runs" -ge 1
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test ./... -count=1
@@ -117,25 +133,7 @@ jobs:
           test "$status" -eq 2
           grep -F "hint: fitr device" <<<"$diagnostic"
       - name: checksums
-        shell: bash
-        run: |
-          cd dist
-          sha256sum fitr-* LICENSE NOTICE THIRD_PARTY_NOTICES.md > SHA256SUMS
-          assets=(
-            fitr-linux-amd64
-            fitr-linux-arm64
-            fitr-darwin-amd64
-            fitr-darwin-arm64
-            fitr-windows-amd64.exe
-            fitr-windows-arm64.exe
-            LICENSE
-            NOTICE
-            THIRD_PARTY_NOTICES.md
-          )
-          test "$(wc -l < SHA256SUMS | tr -d ' ')" -eq "${#assets[@]}"
-          for asset in "${assets[@]}"; do
-            test "$(awk -v asset="$asset" '$2 == asset || $2 == "*" asset { count++ } END { print count + 0 }' SHA256SUMS)" -eq 1
-          done
+        run: make dist-checksums
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-candidate

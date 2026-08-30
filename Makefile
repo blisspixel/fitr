@@ -3,6 +3,16 @@ LDFLAGS := -s -w
 BUILD_FLAGS := -trimpath
 CGO := 0
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
+DIST_ASSETS := \
+	fitr-linux-amd64 \
+	fitr-linux-arm64 \
+	fitr-darwin-amd64 \
+	fitr-darwin-arm64 \
+	fitr-windows-amd64.exe \
+	fitr-windows-arm64.exe \
+	LICENSE \
+	NOTICE \
+	THIRD_PARTY_NOTICES.md
 
 .PHONY: all build test coverage vet fmt fmt-check lint dist dist-checksums clean install spec-sync screenshots
 
@@ -59,8 +69,8 @@ dist:
 ## Keep the manifest in one target so release, CI, and native acceptance cannot
 ## silently publish different candidate sets.
 dist-checksums:
-	@cd dist && sha256sum fitr-* LICENSE NOTICE THIRD_PARTY_NOTICES.md > SHA256SUMS
-	@test "$$(wc -l < dist/SHA256SUMS | tr -d ' ')" -eq 9
+	@cd dist && sha256sum $(DIST_ASSETS) > SHA256SUMS
+	@test "$$(wc -l < dist/SHA256SUMS | tr -d ' ')" -eq "$$(printf '%s\n' $(DIST_ASSETS) | wc -l | tr -d ' ')"
 
 install: build
 	CGO_ENABLED=$(CGO) go install $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" ./cmd/fitr

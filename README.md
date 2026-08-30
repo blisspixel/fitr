@@ -1,6 +1,7 @@
 # fitr
 
 [![CI](https://github.com/blisspixel/fitr/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/fitr/actions/workflows/ci.yml)
+[![Native acceptance](https://github.com/blisspixel/fitr/actions/workflows/native-acceptance.yml/badge.svg)](https://github.com/blisspixel/fitr/actions/workflows/native-acceptance.yml)
 
 **The fitr thesis is to determine what local AI actually works for your
 workload on this machine, what evidence proves it, and which configuration
@@ -59,6 +60,9 @@ explicit install, pull, or remote endpoint. Installers verify the download
 against its published checksum.
 Pinning, relocating and building from source are in
 [install](docs/usage.md#install).
+Candidate releases are also installed through that checksum-verifying path and
+run against a pinned native llama-server on clean Linux and macOS runners. The
+reviewable receipts are tracked in [release acceptance](docs/release-acceptance.md).
 
 ## The loop
 
