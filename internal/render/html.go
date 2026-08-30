@@ -152,6 +152,8 @@ type htmlData struct {
 	Gaps          []htmlNeed
 	Decode        string
 	Prefill       string
+	TTFT          string
+	Resident      string
 	RepeatsWarn   bool
 	Contamination []string
 	StartedAt     string
@@ -229,11 +231,19 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 </table>
 {{end}}
 
-{{if .Decode}}
-<h2>Sample</h2>
+{{if or .Decode .Prefill .TTFT}}
+<h2>Performance</h2>
 <table>
 {{if .Decode}}<tr><th class="k">decode</th><td>{{.Decode}}</td></tr>{{end}}
 {{if .Prefill}}<tr><th class="k">prefill</th><td>{{.Prefill}}</td></tr>{{end}}
+{{if .TTFT}}<tr><th class="k">TTFT</th><td>{{.TTFT}}</td></tr>{{end}}
+</table>
+{{end}}
+
+{{if .Resident}}
+<h2>Capacity</h2>
+<table>
+<tr><th class="k">resident</th><td>{{.Resident}}</td></tr>
 </table>
 {{end}}
 
@@ -275,7 +285,8 @@ func htmlDataFrom(a Artifact) htmlData {
 	}
 	d.Config = htmlConfig(a.Device)
 	d.Needs, d.Gaps = htmlNeeds(a.Scorecard)
-	d.Decode, d.Prefill = htmlPerformance(a.Meta, g)
+	d.Decode, d.Prefill, d.TTFT = htmlPerformance(a.Meta, g)
+	d.Resident = htmlCapacity(a.Meta)
 	return d
 }
 
@@ -381,17 +392,27 @@ func htmlNeeds(card score.Scorecard) (needs, gaps []htmlNeed) {
 	return needs, gaps
 }
 
-func htmlPerformance(meta Meta, g glyphs) (decode, prefill string) {
+func htmlPerformance(meta Meta, g glyphs) (decode, prefill, ttft string) {
 	if meta.DecodeN > 0 {
-		decode = stat(meta.DecodeMean, meta.DecodeSD, meta.DecodeN, g)
+		decode = stat(meta.DecodeMean, meta.DecodeSD, meta.DecodeN, g) + " tok/s"
 		if meta.DecodeMin > 0 || meta.DecodeMax > 0 {
-			decode += fmt.Sprintf(" min %.2f, max %.2f", meta.DecodeMin, meta.DecodeMax)
+			decode += fmt.Sprintf("; min %.2f, max %.2f", meta.DecodeMin, meta.DecodeMax)
 		}
 	}
 	if meta.PrefillN > 0 {
-		prefill = stat(meta.PrefillMean, meta.PrefillSD, meta.PrefillN, g)
+		prefill = stat(meta.PrefillMean, meta.PrefillSD, meta.PrefillN, g) + " tok/s"
 	}
-	return decode, prefill
+	if meta.TTFTN > 0 {
+		ttft = stat(meta.TTFTMean, meta.TTFTSD, meta.TTFTN, g) + " s"
+	}
+	return decode, prefill, ttft
+}
+
+func htmlCapacity(meta Meta) string {
+	if meta.ResidentGB <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.2f GB after requested 32K load probe", meta.ResidentGB)
 }
 
 func ShareFingerprintID(deviceKey string) string {

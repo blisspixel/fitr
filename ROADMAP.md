@@ -420,6 +420,9 @@ receipt its schema cannot carry.
 - [x] Give PowerShell automation an explicit `FITR_NO_PATH=1` mode that leaves
       the persistent user `PATH` unchanged while keeping fitr available to the
       current host. Candidate CI and release installation assert that contract.
+- [x] Bring HTML export to the CLI and TUI's existing performance and capacity
+      split. It now includes TTFT, units, and verified requested-32K resident
+      allocation without inventing headroom or a bottleneck diagnosis.
 - [ ] Land the smallest renderer-neutral analysis contract needed to group
       performance, capacity, evidence gaps, and next actions without letting a
       CLI, TUI, or HTML client recompute the conclusion.

@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"html"
 	"strings"
 	"testing"
 
@@ -45,8 +46,76 @@ func sampleArtifact() Artifact {
 			ParamSize: "30.5B", Quant: "Q4_K_M", Family: "qwen3moe",
 			NumCtx:  4096,
 			Repeats: 3, DecodeMean: 23.16, DecodeSD: 0.44, DecodeN: 3,
-			DecodeMin: 22.71, DecodeMax: 23.6, PrefillMean: 226.6, PrefillN: 3,
+			DecodeMin: 22.71, DecodeMax: 23.6,
+			PrefillMean: 226.6, PrefillSD: 3.41, PrefillN: 3,
+			TTFTMean: 0.89, TTFTSD: 0.03, TTFTN: 3,
+			ResidentGB: 20.34,
 		},
+	}
+}
+
+func TestHTMLSeparatesPerformanceAndVerifiedCapacity(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteHTML(&buf, sampleArtifact()); err != nil {
+		t.Fatal(err)
+	}
+	got := html.UnescapeString(buf.String())
+	for _, want := range []string{
+		"<h2>Performance</h2>",
+		"decode</th><td>23.16 +/-0.44 (CV 1.9%, n=3) tok/s; min 22.71, max 23.60",
+		"prefill</th><td>226.60 +/-3.41 (CV 1.5%, n=3) tok/s",
+		"TTFT</th><td>0.89 +/-0.03 (CV 3.4%, n=3) s",
+		"<h2>Capacity</h2>",
+		"resident</th><td>20.34 GB after requested 32K load probe",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("HTML missing %q", want)
+		}
+	}
+	if strings.Contains(got, "<h2>Sample</h2>") {
+		t.Fatal("HTML retained the ambiguous sample heading")
+	}
+}
+
+func TestHTMLPerformanceDoesNotRequireDecode(t *testing.T) {
+	a := sampleArtifact()
+	a.Meta.DecodeN = 0
+	var buf bytes.Buffer
+	if err := WriteHTML(&buf, a); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "<h2>Performance</h2>") ||
+		!strings.Contains(got, "prefill</th>") || !strings.Contains(got, "TTFT</th>") {
+		t.Fatal("prefill and TTFT observations must remain visible without decode")
+	}
+	if strings.Contains(got, "decode</th>") {
+		t.Fatal("HTML rendered an unavailable decode observation")
+	}
+}
+
+func TestHTMLCapacityAndPerformanceAreIndependent(t *testing.T) {
+	a := sampleArtifact()
+	a.Meta.DecodeN, a.Meta.PrefillN, a.Meta.TTFTN = 0, 0, 0
+	var buf bytes.Buffer
+	if err := WriteHTML(&buf, a); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "<h2>Performance</h2>") {
+		t.Fatal("HTML rendered a performance section without observations")
+	}
+	if !strings.Contains(got, "<h2>Capacity</h2>") {
+		t.Fatal("verified capacity must remain visible without performance observations")
+	}
+
+	a.Meta.ResidentGB = 0
+	buf.Reset()
+	if err := WriteHTML(&buf, a); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "<h2>Capacity</h2>") {
+		t.Fatal("HTML rendered capacity without a verified resident observation")
 	}
 }
 
