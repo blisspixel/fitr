@@ -433,15 +433,17 @@ func TestTopSnapshotKeepsUnknownDevicesUnrankedAndShowsConfig(t *testing.T) {
 
 func TestTopSnapshotDisclosesUnavailableMemoryProbe(t *testing.T) {
 	result := mockResult("memory-unavailable", 10, .1, 100, 1, 1, 1, 1, 1)
-	result.TaskPlan.Memory = true
-	result.Memory = eval.MemoryResult{
-		Outcome: eval.OutcomeSkipped, RequestedCtx: memoryProbeCtx,
-		UnavailableReason: "runtime omitted resident bytes",
-	}
 	run := presentTopRun(result)
 	if !slices.Contains(run.Warnings,
-		"the requested 32K memory probe was unavailable: runtime omitted resident bytes") {
+		"the runtime did not provide an exact resident allocation") {
 		t.Fatalf("memory warning missing from %+v", run.Warnings)
+	}
+}
+
+func TestTopSnapshotUsesCentralSemanticNextAction(t *testing.T) {
+	run := presentTopRun(mockResult("measured", 10, .1, 100, 1, 1, 1, 1, 1))
+	if run.NextCommand != "fitr board" {
+		t.Fatalf("next command = %q, want central comparison action", run.NextCommand)
 	}
 }
 

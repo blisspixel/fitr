@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/calibration"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
@@ -37,6 +38,27 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+func TestAnalysisActionCommandSubstitutesAndQuotesOnlyTheModel(t *testing.T) {
+	action := analysis.Action{Argv: []string{
+		"fitr", "run", analysis.CurrentModelPlaceholder, "-k", "3",
+	}}
+	if got := analysisActionCommand(action, "local model"); got != `fitr run "local model" -k 3` {
+		t.Fatalf("command = %q", got)
+	}
+	if action.Argv[2] != analysis.CurrentModelPlaceholder {
+		t.Fatal("rendering mutated the semantic action template")
+	}
+}
+
+func TestCurrentInvalidEvidenceDoesNotProjectRawPerformance(t *testing.T) {
+	result := mockResult("tampered", 10, .1, 100, 1, 1, 1, 1, 1)
+	result.DecodeSum.Mean = 999
+	meta := resultMeta(result, result.Profile)
+	if meta.Analysis != nil || meta.DecodeMean != 0 || meta.DecodeN != 0 || len(meta.DecodeSeries) != 0 {
+		t.Fatalf("invalid current evidence reached presentation: %+v", meta)
+	}
 }
 
 // The golden corpus: a frozen, realistic full-run result. measure() -> Score()

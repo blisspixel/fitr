@@ -156,6 +156,23 @@ prints "not recommended."
 
 ## Known limits
 
+Current schema-6 results have one derived analysis boundary. After the sealed
+record, completion receipt, profile, summaries, and scorecard validate,
+`fitr.analysis.run.v1` projects requested and effective context, decode,
+prefill, TTFT, exact-context resident bytes, typed evidence gaps, direct
+receipt-state diagnoses, and a semantic next action. CLI, TUI, Board, and HTML
+consume that projection; the compatibility JSON shapes remain unchanged.
+
+The analysis is rebuilt from the record and is never written into schema 6 as
+new evidence. Its estimates use pointers so an observed zero is not confused
+with absence. Units, acquisition source, claim support, and
+`available`/`descriptive_only`/`unavailable` status are explicit. Cache hits,
+unknown cache state, resident-model contamination, or an artifact not bound to
+the serving runtime remove the affected support claim without deleting the
+observation. Schema 6 has no sealed usable-capacity policy, so the report
+always blocks headroom and fit claims even when resident bytes and a device
+memory value both exist.
+
 - **Small, heterogeneous battery.** The default battery has 22 generated task
   specs across 16 families and five measured needs. Each need has its own
   count, cluster structure, gate, and interval. Thin evidence stays

@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/atomicfile"
 	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/calibration"
@@ -573,6 +574,13 @@ func artifactFrom(r *Result) (render.Artifact, error) {
 			break
 		}
 	}
+	nextCommand := advise.ResultNext(modelLabel, r.Repeats, r.ContextSize(), r.Level, toolsBlocked)
+	if meta.Analysis != nil {
+		nextCommand = ""
+		if len(meta.Analysis.NextActions) > 0 {
+			nextCommand = analysisActionCommand(meta.Analysis.NextActions[0], modelLabel)
+		}
+	}
 	return render.Artifact{
 		FitrVersion:   version,
 		SchemaVersion: r.SchemaVersion,
@@ -586,7 +594,7 @@ func artifactFrom(r *Result) (render.Artifact, error) {
 		Profile:       prof.Name,
 		Scorecard:     sc,
 		Meta:          render.NewShareMeta(meta),
-		NextCommand:   advise.ResultNext(modelLabel, r.Repeats, r.ContextSize(), r.Level, toolsBlocked),
+		NextCommand:   nextCommand,
 		Contamination: presentationModelLabels(r.Contamination),
 	}, nil
 }
@@ -607,18 +615,33 @@ func resultMeta(r *Result, profile string) render.Meta {
 		GPU:       r.Device.GPU, Driver: r.Device.GPUDriver,
 		Device: r.Device.InferenceDevice, Profile: profile,
 		StartedAt: r.StartedAt, Level: r.Level, WallSeconds: r.WallSeconds,
-		NumCtx:     resultNumCtx(r),
-		Repeats:    r.Repeats,
-		DecodeMean: r.DecodeSum.Mean, DecodeSD: r.DecodeSum.SD,
-		DecodeMin: r.DecodeSum.Min, DecodeMax: r.DecodeSum.Max,
-		DecodeN:     r.DecodeSum.N,
-		PrefillMean: r.PrefillSum.Mean, PrefillSD: r.PrefillSum.SD,
-		PrefillN: r.PrefillSum.N,
-		TTFTMean: r.TTFTSum.Mean, TTFTSD: r.TTFTSum.SD, TTFTN: r.TTFTSum.N,
+		NumCtx:      resultNumCtx(r),
+		Repeats:     r.Repeats,
 		Calibration: r.Level == "checks",
 	}
+	if report, err := analysis.FromRecord(r); err == nil {
+		meta.Analysis = &report
+	} else if r.SchemaVersion < record.EvidenceSchemaVersion {
+		populateLegacyResultMeta(&meta, r)
+	}
+	// The caption explaining what a range is only earns its line when a range
+	// is actually on screen.
+	for _, v := range r.Scorecard.Needs {
+		if strings.Contains(v.Why, "[") && strings.Contains(v.Why, "-") {
+			meta.ShowsIntervals = true
+			break
+		}
+	}
+	return render.ResolvedMeta(meta)
+}
+
+func populateLegacyResultMeta(meta *render.Meta, r *Result) {
+	meta.DecodeMean, meta.DecodeSD = r.DecodeSum.Mean, r.DecodeSum.SD
+	meta.DecodeMin, meta.DecodeMax, meta.DecodeN = r.DecodeSum.Min, r.DecodeSum.Max, r.DecodeSum.N
+	meta.PrefillMean, meta.PrefillSD, meta.PrefillN = r.PrefillSum.Mean, r.PrefillSum.SD, r.PrefillSum.N
+	meta.TTFTMean, meta.TTFTSD, meta.TTFTN = r.TTFTSum.Mean, r.TTFTSum.SD, r.TTFTSum.N
 	if resident, verified := r.Memory.VerifiedAt(memoryProbeCtx); verified {
-		meta.ResidentGB = resident
+		meta.ResidentGB, meta.ResidentContext = resident, memoryProbeCtx
 	}
 	if r.DeviceV2 != nil {
 		meta.ContextState = string(r.DeviceV2.Context.State())
@@ -632,15 +655,20 @@ func resultMeta(r *Result, profile string) render.Meta {
 		meta.TTFTSeries = append(meta.TTFTSeries, sample.TTFT)
 	}
 	meta.FirstRunSlow, meta.FirstRunRatio = stats.FirstRunSlow(meta.DecodeSeries)
-	// The caption explaining what a range is only earns its line when a range
-	// is actually on screen.
-	for _, v := range r.Scorecard.Needs {
-		if strings.Contains(v.Why, "[") && strings.Contains(v.Why, "-") {
-			meta.ShowsIntervals = true
-			break
+}
+
+func analysisActionCommand(action analysis.Action, model string) string {
+	args := make([]string, 0, len(action.Argv))
+	for _, arg := range action.Argv {
+		if arg == analysis.CurrentModelPlaceholder {
+			arg = model
 		}
+		if strings.ContainsAny(arg, " \t\"'\\") {
+			arg = strconv.Quote(arg)
+		}
+		args = append(args, arg)
 	}
-	return meta
+	return strings.Join(args, " ")
 }
 
 // writeHTMLArtifact is a no-op unless the caller asked. dest "auto" writes

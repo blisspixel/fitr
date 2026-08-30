@@ -23,6 +23,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/score"
 )
 
@@ -237,6 +238,7 @@ type Display interface {
 
 // Meta is the context a scorecard needs to be interpretable at all.
 type Meta struct {
+	Analysis                 *analysis.Report `json:"-"`
 	ParamSize, Quant, Family string
 	GPU, Driver, Device      string
 	Profile                  string
@@ -254,6 +256,7 @@ type Meta struct {
 	TTFTMean, TTFTSD         float64
 	TTFTN                    int
 	ResidentGB               float64
+	ResidentContext          int `json:"-"`
 	DecodeSeries             []float64
 	PrefillSeries            []float64
 	TTFTSeries               []float64
@@ -262,6 +265,66 @@ type Meta struct {
 	ShowsIntervals           bool
 	SavedPath                string
 	Calibration              bool
+}
+
+// resolvedMeta keeps legacy presentation fields readable while making a
+// validated current report the sole owner of performance, context, and
+// resident-capacity facts. Analysis is derived after the sealed record passes
+// its evidence contract; renderers only project its values.
+func resolvedMeta(meta Meta) Meta {
+	if meta.Analysis == nil {
+		return meta
+	}
+	report := meta.Analysis
+	meta.NumCtx = report.Context.Requested
+	meta.EffectiveCtx = 0
+	if report.Context.Effective != nil {
+		meta.EffectiveCtx = *report.Context.Effective
+	}
+	meta.ContextState = report.Context.State
+	applyPerformanceObservation(&meta.DecodeMean, &meta.DecodeSD, &meta.DecodeMin,
+		&meta.DecodeMax, &meta.DecodeN, &meta.DecodeSeries, report.Performance.DecodeTPS)
+	applyPerformanceObservation(&meta.PrefillMean, &meta.PrefillSD, nil,
+		nil, &meta.PrefillN, &meta.PrefillSeries, report.Performance.PrefillTPS)
+	applyPerformanceObservation(&meta.TTFTMean, &meta.TTFTSD, nil,
+		nil, &meta.TTFTN, &meta.TTFTSeries, report.Performance.TTFTSeconds)
+	meta.FirstRunSlow = report.Performance.DecodeTPS.FirstRunSlow
+	meta.FirstRunRatio = report.Performance.DecodeTPS.FirstRunRatio
+	meta.ResidentGB, meta.ResidentContext = 0, 0
+	if resident := report.Capacity.Resident; resident != nil && resident.Estimate != nil {
+		meta.ResidentGB = float64(*resident.Estimate) / (1024 * 1024 * 1024)
+		meta.ResidentContext = resident.RequestedContext
+	}
+	return meta
+}
+
+// ResolvedMeta projects a derived analysis into the compatibility fields used
+// by existing clients. The Analysis pointer remains attached and is omitted
+// from the frozen presentation JSON shape.
+func ResolvedMeta(meta Meta) Meta { return resolvedMeta(meta) }
+
+func applyPerformanceObservation(mean, sd, minValue, maxValue *float64, n *int,
+	series *[]float64, observation analysis.PerformanceObservation) {
+	*mean, *sd, *n = 0, 0, observation.SampleCount
+	*series = append((*series)[:0], observation.Samples...)
+	if observation.Estimate != nil {
+		*mean = *observation.Estimate
+	}
+	if observation.SD != nil {
+		*sd = *observation.SD
+	}
+	if minValue != nil {
+		*minValue = 0
+		if observation.Min != nil {
+			*minValue = *observation.Min
+		}
+	}
+	if maxValue != nil {
+		*maxValue = 0
+		if observation.Max != nil {
+			*maxValue = *observation.Max
+		}
+	}
 }
 
 func Resolve(mode string) string {
@@ -438,6 +501,7 @@ func (d *textDisplay) continuation(w io.Writer, text string, width int, style st
 }
 
 func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
+	m = resolvedMeta(m)
 	w := d.out
 	width := Width()
 	rule := strings.Repeat("-", width)
@@ -535,8 +599,16 @@ func (d *textDisplay) resultPerformance(w io.Writer, m Meta, width int) {
 func (d *textDisplay) resultCapacity(w io.Writer, m Meta) {
 	if m.ResidentGB > 0 {
 		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "capacity"))
-		fmt.Fprintf(w, "  %-8s %.2f GB after requested 32K load probe\n", "resident", m.ResidentGB)
+		fmt.Fprintf(w, "  %-8s %.2f GB after requested %s load probe\n", "resident", m.ResidentGB,
+			residentContextLabel(m.ResidentContext))
 	}
+}
+
+func residentContextLabel(ctx int) string {
+	if ctx <= 0 || ctx == 32768 {
+		return "32K"
+	}
+	return fmt.Sprintf("%d-token", ctx)
 }
 
 func (d *textDisplay) resultEvidenceNotes(w io.Writer, m Meta, width int) {
@@ -645,8 +717,11 @@ func stat(mean, sd float64, n int, g glyphs) string {
 	if n == 0 {
 		return "n/a"
 	}
-	if n < 2 || sd == 0 {
+	if n < 2 {
 		return fmt.Sprintf("%.2f (abs, n=1)", mean)
+	}
+	if sd == 0 {
+		return fmt.Sprintf("%.2f (identical, n=%d)", mean, n)
 	}
 	if mean != 0 {
 		return fmt.Sprintf("%.2f %s%.2f (CV %.1f%%, n=%d)", mean, g.PM, sd, 100*sd/mean, n)
@@ -677,6 +752,7 @@ func (d *jsonDisplay) Done(name string, seconds float64) {
 	d.emit(map[string]any{"event": "phase_done", "name": name, "seconds": seconds})
 }
 func (d *jsonDisplay) Result(sc score.Scorecard, m Meta) {
+	m = resolvedMeta(m)
 	states := map[string]string{}
 	for k, v := range sc.Needs {
 		states[k] = string(v.State)

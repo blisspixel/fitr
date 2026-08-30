@@ -150,6 +150,7 @@ type htmlData struct {
 	Config        []htmlKV
 	Needs         []htmlNeed
 	Gaps          []htmlNeed
+	EvidenceGaps  []htmlKV
 	Decode        string
 	Prefill       string
 	TTFT          string
@@ -231,6 +232,15 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 </table>
 {{end}}
 
+{{if .EvidenceGaps}}
+<h2>Evidence limits</h2>
+<table>
+{{range .EvidenceGaps}}
+<tr><th class="k">{{.K}}</th><td>{{.V}}</td></tr>
+{{end}}
+</table>
+{{end}}
+
 {{if or .Decode .Prefill .TTFT}}
 <h2>Performance</h2>
 <table>
@@ -276,6 +286,7 @@ func WriteHTML(w io.Writer, a Artifact) error {
 
 func htmlDataFrom(a Artifact) htmlData {
 	g := glyphs{" | ", "-", "+/-", "..."}
+	a.Meta = resolvedMeta(a.Meta)
 	d := baseHTMLData(a)
 	d.NumCtx = htmlContext(a.Meta)
 	d.RAM = htmlRAM(a.Device.RAMGb)
@@ -285,6 +296,11 @@ func htmlDataFrom(a Artifact) htmlData {
 	}
 	d.Config = htmlConfig(a.Device)
 	d.Needs, d.Gaps = htmlNeeds(a.Scorecard)
+	if a.Meta.Analysis != nil {
+		for _, gap := range a.Meta.Analysis.Gaps {
+			d.EvidenceGaps = append(d.EvidenceGaps, htmlKV{K: string(gap.Code), V: gap.Message})
+		}
+	}
 	d.Decode, d.Prefill, d.TTFT = htmlPerformance(a.Meta, g)
 	d.Resident = htmlCapacity(a.Meta)
 	return d
@@ -412,7 +428,8 @@ func htmlCapacity(meta Meta) string {
 	if meta.ResidentGB <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("%.2f GB after requested 32K load probe", meta.ResidentGB)
+	return fmt.Sprintf("%.2f GB after requested %s load probe", meta.ResidentGB,
+		residentContextLabel(meta.ResidentContext))
 }
 
 func ShareFingerprintID(deviceKey string) string {

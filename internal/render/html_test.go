@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/score"
 )
@@ -116,6 +117,28 @@ func TestHTMLCapacityAndPerformanceAreIndependent(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "<h2>Capacity</h2>") {
 		t.Fatal("HTML rendered capacity without a verified resident observation")
+	}
+}
+
+func TestHTMLRendersCentralEvidenceGapCodes(t *testing.T) {
+	a := sampleArtifact()
+	a.Meta.Analysis = &analysis.Report{Gaps: []analysis.EvidenceGap{{
+		Code:    analysis.GapCapacityPolicyUnsealed,
+		Message: "resident bytes cannot establish headroom or fit",
+	}}}
+	var buf bytes.Buffer
+	if err := WriteHTML(&buf, a); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"<h2>Evidence limits</h2>",
+		"capacity.policy_unsealed",
+		"resident bytes cannot establish headroom or fit",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("HTML missing central evidence limit %q", want)
+		}
 	}
 }
 

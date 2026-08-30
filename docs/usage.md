@@ -19,7 +19,7 @@ destination is not on `PATH`; the PowerShell installer adds its destination to
 the user `PATH`. Set `FITR_NO_PATH=1` to leave the persistent user `PATH`
 unchanged during automation or an isolated install. The current PowerShell host
 can still invoke fitr immediately. The default evidence path needs no Go,
-Python, or venv. Pin a release with `FITR_VERSION=v0.9.9`; relocate with
+Python, or venv. Pin a release with `FITR_VERSION=v0.9.10`; relocate with
 `FITR_BIN`.
 
 Both installers bind the downloaded binary to the exact asset entry in the
@@ -250,7 +250,10 @@ Ctrl-C is safe (exit 130).
   from a saved result. The page carries an opaque device ID and only the
   allowlisted configuration needed to interpret the result. It omits raw model
   output, hostnames, local paths, the raw fingerprint key, and arbitrary
-  runtime configuration. It is never uploaded automatically.
+  runtime configuration. Performance and capacity are separate sections;
+  decode and prefill carry `tok/s`, TTFT carries seconds, and resident memory
+  appears only for a verified requested-32K allocation receipt. It is never
+  uploaded automatically.
 - `--full` with `fitr view --display json` or `fitr board --display json`
   emits the complete sealed local record instead of presentation JSON. Full
   records can contain raw model output, hostname, and device details; keep

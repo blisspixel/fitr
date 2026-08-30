@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/modelref"
@@ -816,6 +818,14 @@ func presentTopRun(result *Result) top.Run {
 	modelLabel := presentationModelLabel(result.Model)
 	deviceID, hardwareID := topDeviceIDs(result)
 	toolsBlocked := topToolsBlocked(scorecard)
+	meta := resultMeta(result, result.Profile)
+	nextCommand := advise.ResultNext(modelLabel, result.Repeats, result.ContextSize(), result.Level, toolsBlocked)
+	if meta.Analysis != nil {
+		nextCommand = ""
+		if len(meta.Analysis.NextActions) > 0 {
+			nextCommand = analysisActionCommand(meta.Analysis.NextActions[0], modelLabel)
+		}
+	}
 	return top.Run{
 		ID: result.StableRunID(), Model: modelLabel,
 		Family: result.ModelMeta.Details.Family, ParamSize: result.ModelMeta.Details.ParameterSize,
@@ -824,12 +834,12 @@ func presentTopRun(result *Result) top.Run {
 		Driver: result.Device.GPUDriver, Runtime: result.Device.Runtime,
 		Config: topRunConfig(result), Profile: result.Profile, Level: result.Level, UseFor: scorecard.UseFor,
 		StartedAt: started, Duration: time.Duration(result.WallSeconds * float64(time.Second)),
-		Context: result.ContextSize(), Repeats: result.Repeats,
-		DecodeMean: result.DecodeSum.Mean, DecodeSD: result.DecodeSum.SD,
-		PrefillMean: result.PrefillSum.Mean, TTFTMean: result.TTFTSum.Mean,
-		MemoryGB: verifiedResidentGB(result.Memory), DecodeSeries: topDecodeSeries(result),
+		Context: meta.NumCtx, Repeats: result.Repeats,
+		DecodeMean: meta.DecodeMean, DecodeSD: meta.DecodeSD,
+		PrefillMean: meta.PrefillMean, TTFTMean: meta.TTFTMean,
+		MemoryGB: meta.ResidentGB, DecodeSeries: slices.Clone(meta.DecodeSeries),
 		Serves: topServes(scorecard), Warnings: topWarnings(result), Verdicts: topVerdicts(scorecard),
-		NextCommand: advise.ResultNext(modelLabel, result.Repeats, result.ContextSize(), result.Level, toolsBlocked),
+		NextCommand: nextCommand,
 	}
 }
 
@@ -885,10 +895,44 @@ func topWarnings(result *Result) []string {
 	if result.Profile == "default" {
 		warnings = append(warnings, "uncalibrated default profile")
 	}
-	warnings = append(warnings, topTimingWarnings(result)...)
-	warnings = append(warnings, topMemoryWarnings(result)...)
-	if result.Repeats < 3 {
-		warnings = append(warnings, "fewer than 3 repeats; this result is not rankable")
+	meta := resultMeta(result, result.Profile)
+	if meta.Analysis != nil {
+		warnings = append(warnings, topAnalysisWarnings(meta.Analysis)...)
+	} else if result.SchemaVersion < record.EvidenceSchemaVersion {
+		warnings = append(warnings, topTimingWarnings(result)...)
+		warnings = append(warnings, topMemoryWarnings(result)...)
+		if result.Repeats < 3 {
+			warnings = append(warnings, "fewer than 3 repeats; this result is not rankable")
+		}
+	}
+	return warnings
+}
+
+func topAnalysisWarnings(report *analysis.Report) []string {
+	var warnings []string
+	for _, observation := range []analysis.PerformanceObservation{
+		report.Performance.DecodeTPS, report.Performance.PrefillTPS,
+	} {
+		if observation.Acquisition == analysis.AcquisitionClientDerived ||
+			observation.Acquisition == analysis.AcquisitionMixed {
+			warnings = append(warnings, "timings include client-derived wall-clock observations")
+			break
+		}
+	}
+	visible := map[analysis.GapCode]bool{
+		analysis.GapPrefillCacheUnknown:       true,
+		analysis.GapPrefillCacheHit:           true,
+		analysis.GapTTFTCacheUnknown:          true,
+		analysis.GapTTFTCacheHit:              true,
+		analysis.GapPerformanceSampleCountLow: true,
+		analysis.GapResidentUnavailable:       true,
+		analysis.GapResidentContextUnverified: true,
+		analysis.GapResidentContextAdjusted:   true,
+	}
+	for _, gap := range report.Gaps {
+		if visible[gap.Code] {
+			warnings = append(warnings, gap.Message)
+		}
 	}
 	return warnings
 }
@@ -942,14 +986,6 @@ func topMemoryWarnings(result *Result) []string {
 	return warnings
 }
 
-func topDecodeSeries(result *Result) []float64 {
-	decodeSeries := make([]float64, 0, len(result.Speed))
-	for _, sample := range result.Speed {
-		decodeSeries = append(decodeSeries, sample.DecodeTPS)
-	}
-	return decodeSeries
-}
-
 func topRunConfig(result *Result) string {
 	config := fmt.Sprintf("ctx requested=%d", result.ContextSize())
 	if result.DeviceV2 != nil {
@@ -986,11 +1022,6 @@ func topDeviceIDs(result *Result) (deviceID, hardwareID string) {
 		hardwareID = privacyID(eval.HardwareKey(result.Device.Key()))
 	}
 	return deviceID, hardwareID
-}
-
-func verifiedResidentGB(memory eval.MemoryResult) float64 {
-	resident, _ := memory.VerifiedAt(memoryProbeCtx)
-	return resident
 }
 
 func selectTopRun(snapshot top.Snapshot, candidate string) (top.Run, error) {

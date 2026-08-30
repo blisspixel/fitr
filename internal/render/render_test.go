@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/score"
 )
 
@@ -152,6 +153,10 @@ func TestStatNeverPrintsFabricatedZeroSigma(t *testing.T) {
 	if !strings.Contains(multi, "+/-0.44") {
 		t.Fatalf("n=3 should carry its spread, got %q", multi)
 	}
+	identical := stat(23.16, 0, 3, g)
+	if identical != "23.16 (identical, n=3)" {
+		t.Fatalf("zero spread across repeats must retain its denominator, got %q", identical)
+	}
 }
 
 func TestStatHandlesNoData(t *testing.T) {
@@ -260,6 +265,45 @@ func TestScorecardSeparatesRequestedAndEffectiveContext(t *testing.T) {
 	})
 	if got := buf.String(); !strings.Contains(got, "8192 requested -> 4096 effective (adjusted)") {
 		t.Fatalf("effective context is hidden:\n%s", got)
+	}
+}
+
+func TestScorecardProjectsValidatedAnalysisInsteadOfLegacyFields(t *testing.T) {
+	decode, prefill, ttft := 23.16, 226.6, 0.89
+	sd, minValue, maxValue := 0.44, 22.71, 23.6
+	effective, resident := 4096, int64(20*1024*1024*1024)
+	meta := Meta{
+		DecodeMean: 999,
+		Analysis: &analysis.Report{
+			Context: analysis.Context{Requested: 8192, Effective: &effective, State: "adjusted"},
+			Performance: analysis.Performance{
+				DecodeTPS: analysis.PerformanceObservation{Estimate: &decode, SD: &sd, Min: &minValue, Max: &maxValue,
+					SampleCount: 3, Samples: []float64{22.71, 23.17, 23.6}},
+				PrefillTPS:  analysis.PerformanceObservation{Estimate: &prefill, SampleCount: 3},
+				TTFTSeconds: analysis.PerformanceObservation{Estimate: &ttft, SampleCount: 3},
+			},
+			Capacity: analysis.Capacity{Resident: &analysis.ResidentObservation{
+				Estimate: &resident, RequestedContext: 32768,
+			}},
+		},
+	}
+	var buf strings.Builder
+	d := &textDisplay{out: &buf, err: &buf, pal: palette{}, g: glyphs{" | ", "-", "+/-", "..."}}
+	d.Result(score.Scorecard{Model: "m"}, meta)
+	got := buf.String()
+	for _, want := range []string{
+		"8192 requested -> 4096 effective (adjusted)",
+		"23.16 +/-0.44 (CV 1.9%, n=3) tok/s",
+		"226.60 (identical, n=3) tok/s",
+		"0.89 (identical, n=3) s",
+		"20.00 GB after requested 32K load probe",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("analysis-backed scorecard missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "999") {
+		t.Fatal("renderer trusted a stale compatibility field over validated analysis")
 	}
 }
 

@@ -423,9 +423,11 @@ receipt its schema cannot carry.
 - [x] Bring HTML export to the CLI and TUI's existing performance and capacity
       split. It now includes TTFT, units, and verified requested-32K resident
       allocation without inventing headroom or a bottleneck diagnosis.
-- [ ] Land the smallest renderer-neutral analysis contract needed to group
+- [x] Land the smallest renderer-neutral analysis contract needed to group
       performance, capacity, evidence gaps, and next actions without letting a
-      CLI, TUI, or HTML client recompute the conclusion.
+      CLI, TUI, or HTML client recompute the conclusion. The v1 report is
+      derived only after schema-6 validation, never persisted as evidence, and
+      keeps contaminated or runtime-unbound observations descriptive only.
 
 Exit criterion: the public install path is verifiable without persistent host
 mutation, main is visibly ahead of the shipped release, and one central

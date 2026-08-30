@@ -111,7 +111,10 @@ is observed when the runtime reports it; KV and remaining-capacity parts are
 labeled as derived. Structured output, instruction following, and tool use are
 graded mechanically against computed or declarative answers. Refusal uses a
 disclosed deterministic classifier. Another model's opinion never supplies a
-core verdict.
+core verdict. CLI, TUI, Board, and HTML now receive performance, exact-context
+resident capacity, evidence gaps, and the next action from one derived
+analysis contract after the sealed result validates. That contract reports
+what was observed; it does not yet guess a hardware bottleneck.
 
 Tool calls are measured **in the tool channel**, not as text. The most common
 local tool failure is not bad JSON: it is a perfectly well-formed call that

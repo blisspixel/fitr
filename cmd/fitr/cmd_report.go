@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -375,16 +376,13 @@ func makeBoardRow(result *Result, excluded *boardExclusions) render.BoardRow {
 			codes = append(codes, code)
 		}
 	}
-	decodes := make([]float64, 0, len(result.Speed))
-	for _, sample := range result.Speed {
-		decodes = append(decodes, sample.DecodeTPS)
-	}
+	meta := resultMeta(result, result.Profile)
 	return render.BoardRow{
 		Model: result.Model, ParamSize: result.ModelMeta.Details.ParameterSize,
 		Quant:      result.ModelMeta.Details.QuantizationLevel,
-		DecodeMean: result.DecodeSum.Mean, DecodeSD: result.DecodeSum.SD,
-		PrefillMean: result.PrefillSum.Mean, ResidentGB: verifiedResidentGB(result.Memory),
-		DecodeSeries: decodes, Repeats: result.Repeats, Serves: codes,
+		DecodeMean: meta.DecodeMean, DecodeSD: meta.DecodeSD,
+		PrefillMean: meta.PrefillMean, ResidentGB: meta.ResidentGB,
+		DecodeSeries: slices.Clone(meta.DecodeSeries), Repeats: result.Repeats, Serves: codes,
 	}
 }
 
