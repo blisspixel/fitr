@@ -282,7 +282,7 @@ func evidenceUsable(tag InstalledModel, ev InventoryEvidence, q InventoryQuery) 
 	if q.CurrentKey == "" || ev.DeviceKey == "" || ev.DeviceKey != q.CurrentKey {
 		return false
 	}
-	if len(ev.Device.Diff(q.Current)) != 0 {
+	if len(performanceRelevantDiff(ev.Device, q.Current)) != 0 {
 		return false
 	}
 	currentDigest, currentOK := normalizedArtifactDigest(tag.ArtifactDigest)
@@ -374,7 +374,7 @@ func fingerprintChanges(saved, current device.Fingerprint) string {
 	if saved.Key() == "||||||" || current.Key() == "||||||" {
 		return ""
 	}
-	diffs := saved.Diff(current)
+	diffs := performanceRelevantDiff(saved, current)
 	if len(diffs) == 0 {
 		return ""
 	}
@@ -386,6 +386,51 @@ func fingerprintChanges(saved, current device.Fingerprint) string {
 	}
 	return strings.Join(fields, ", ")
 }
+
+func performanceRelevantDiff(saved, current device.Fingerprint) [][3]string {
+	diffs := saved.Diff(current)
+	out := diffs[:0]
+	for _, diff := range diffs {
+		if diff[0] == "inference_device" && equivalentPlacement(diff[1], diff[2]) {
+			continue
+		}
+		out = append(out, diff)
+	}
+	return out
+}
+
+func equivalentPlacement(a, b string) bool {
+	classA, classB := placementClass(a), placementClass(b)
+	return classA != "" && classA == classB
+}
+
+func placementClass(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	if match := gpuPercentPattern.FindStringSubmatch(value); len(match) == 2 {
+		percent, err := strconv.ParseFloat(match[1], 64)
+		if err == nil && percent < 99.95 {
+			return "mixed"
+		}
+	}
+	hasCPU := strings.Contains(value, "cpu")
+	hasAccelerator := strings.Contains(value, "gpu") || strings.Contains(value, "cuda") ||
+		strings.Contains(value, "metal") || strings.Contains(value, "rocm") || strings.Contains(value, "vulkan")
+	switch {
+	case hasCPU && hasAccelerator:
+		return "mixed"
+	case hasCPU:
+		return "cpu"
+	case hasAccelerator:
+		return "accelerator"
+	default:
+		return ""
+	}
+}
+
+var gpuPercentPattern = regexp.MustCompile(`gpu[^0-9]{0,8}([0-9]+(?:\.[0-9]+)?)%`)
 
 func loadedMatch(loaded map[string]bool, name string) bool {
 	if loaded[name] {

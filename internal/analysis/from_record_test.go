@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -64,6 +65,7 @@ func TestFromRecordKeepsUnreconciledStorageEvidenceDescriptive(t *testing.T) {
 	result := completedTestRecordConfigured(t, "", func(result *record.Record) {
 		result.TaskPlan.Memory = true
 		result.Memory = measuredMemory(requested, &requested)
+		addAuxiliaryLatencySamples(result)
 	})
 	raw, err := json.Marshal(result)
 	if err != nil {
@@ -83,6 +85,8 @@ func TestFromRecordKeepsUnreconciledStorageEvidenceDescriptive(t *testing.T) {
 	}
 	for _, observation := range []PerformanceObservation{
 		report.Performance.DecodeTPS, report.Performance.PrefillTPS, report.Performance.TTFTSeconds,
+		report.Performance.RuntimeUnloadedTTFTSeconds, report.Performance.RuntimeLoadSeconds,
+		report.Performance.LoadedCacheHitTTFTSeconds,
 	} {
 		if observation.Estimate == nil || observation.Status != StatusDescriptiveOnly || len(observation.Supports) != 0 {
 			t.Fatalf("display-only performance retained claimability: %+v", observation)
@@ -134,13 +138,165 @@ func TestPerformanceObservationsPreservePointFactsAndCacheEligibility(t *testing
 	assertObservation(t, report.Performance.PrefillTPS, 210, UnitTokensPerSecond, AcquisitionMixed,
 		ClaimObservedPrefill, ClaimUncachedPrefill)
 	assertObservation(t, report.Performance.TTFTSeconds, 0.9, UnitSeconds, AcquisitionClientWallClock,
-		ClaimObservedLoadedTTFT, ClaimLoadedUncachedTTFT)
+		ClaimObservedRequestTTFT, ClaimObservedLoadedTTFT, ClaimLoadedUncachedTTFT)
 	if report.Performance.DecodeTPS.SD == nil || report.Performance.DecodeTPS.Min == nil ||
 		report.Performance.DecodeTPS.Max == nil {
 		t.Fatalf("multi-sample shape was lost: %+v", report.Performance.DecodeTPS)
 	}
 	if hasGapPrefix(report.Gaps, "performance.prefill_cache_") || hasGapPrefix(report.Gaps, "performance.ttft_cache_") {
 		t.Fatalf("verified cache misses produced cache gaps: %+v", report.Gaps)
+	}
+}
+
+func TestTTFTLoadedClaimRequiresEveryGatedRequestResidencyReceipt(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		configure func([]eval.SpeedResult)
+		wantGap   GapCode
+	}{
+		{name: "unknown", configure: func(samples []eval.SpeedResult) {
+			samples[1].GatedResidencyKnown, samples[1].GatedResident = false, false
+		}, wantGap: GapTTFTResidencyUnknown},
+		{name: "not resident", configure: func(samples []eval.SpeedResult) {
+			samples[1].GatedResident = false
+		}, wantGap: GapTTFTNotResident},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := handRecord(validUncachedSamples(3))
+			test.configure(result.Speed)
+			setSpeedSummaries(result)
+			report := fromValidatedRecord(result)
+			observation := report.Performance.TTFTSeconds
+			if !Supports(observation, ClaimObservedRequestTTFT) ||
+				Supports(observation, ClaimObservedLoadedTTFT) ||
+				Supports(observation, ClaimLoadedUncachedTTFT) {
+				t.Fatalf("TTFT supports = %v", observation.Supports)
+			}
+			if !hasGap(report.Gaps, test.wantGap) || TTFTLabel(observation) != "request TTFT" {
+				t.Fatalf("gaps/label = %+v / %q", report.Gaps, TTFTLabel(observation))
+			}
+		})
+	}
+}
+
+func TestLatencyStatesRemainSeparateAndReceiptBound(t *testing.T) {
+	result := completedTestRecordConfigured(t, "", func(result *record.Record) {
+		result.Speed[0].ColdLoad, result.Speed[0].ColdTTFT = 4.2, 5.1
+		for i := range result.Speed {
+			result.Speed[i].WarmTTFT = 0.18 + 0.02*float64(i)
+			result.Speed[i].WarmCacheKnown = true
+			result.Speed[i].WarmPromptTok = 20
+			result.Speed[i].WarmCachedTok = 80
+		}
+	})
+	report, err := FromRecord(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertObservation(t, report.Performance.RuntimeUnloadedTTFTSeconds, 5.1, UnitSeconds,
+		AcquisitionClientWallClock, ClaimObservedRuntimeUnloadedTTFT)
+	assertObservation(t, report.Performance.RuntimeLoadSeconds, 4.2, UnitSeconds,
+		AcquisitionRuntimeReported, ClaimObservedRuntimeLoadTime)
+	assertObservation(t, report.Performance.LoadedCacheHitTTFTSeconds, 0.2, UnitSeconds,
+		AcquisitionClientWallClock, ClaimObservedLoadedCacheHitTTFT)
+	if report.Performance.RuntimeUnloadedTTFTSeconds.SampleCount != 1 ||
+		report.Performance.RuntimeUnloadedTTFTSeconds.SD != nil {
+		t.Fatalf("runtime-unloaded TTFT gained fake repeat precision: %+v",
+			report.Performance.RuntimeUnloadedTTFTSeconds)
+	}
+	cacheHit := report.Performance.LoadedCacheHitTTFTSeconds
+	if cacheHit.SampleCount != 3 || cacheHit.SD == nil || cacheHit.Min == nil ||
+		math.Abs(*cacheHit.Min-0.18) > 1e-12 || cacheHit.Max == nil ||
+		math.Abs(*cacheHit.Max-0.22) > 1e-12 || len(cacheHit.Samples) != 3 ||
+		math.Abs(cacheHit.Samples[0]-0.18) > 1e-12 || math.Abs(cacheHit.Samples[1]-0.2) > 1e-12 ||
+		math.Abs(cacheHit.Samples[2]-0.22) > 1e-12 {
+		t.Fatalf("loaded cache-hit TTFT lost its repeat shape: %+v", cacheHit)
+	}
+	for _, code := range []GapCode{
+		GapRuntimeUnloadedTTFTUnavailable, GapRuntimeLoadUnavailable, GapLoadedCacheHitTTFTUnavailable,
+	} {
+		if hasGap(report.Gaps, code) {
+			t.Fatalf("observed latency state retained gap %s: %+v", code, report.Gaps)
+		}
+	}
+	encoded, err := json.Marshal(report.Performance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"machine_cold", "disk_cold", "cold_cache", "fully_cached"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("latency analysis overclaimed %q: %s", forbidden, encoded)
+		}
+	}
+}
+
+func TestAnalysisJSONContractForLatencyAndPlacement(t *testing.T) {
+	runtimeUnloadedTTFT, runtimeLoad, cacheHitTTFT := 5.1, 4.2, 0.2
+	ctx := 32768
+	contract := struct {
+		Performance Performance `json:"performance"`
+		Capacity    Capacity    `json:"capacity"`
+	}{
+		Performance: Performance{
+			RuntimeUnloadedTTFTSeconds: PerformanceObservation{
+				Estimate: &runtimeUnloadedTTFT, Unit: UnitSeconds, Status: StatusAvailable,
+				Acquisition: AcquisitionClientWallClock, SampleCount: 1,
+				Supports: []SupportClaim{ClaimObservedRuntimeUnloadedTTFT},
+			},
+			RuntimeLoadSeconds: PerformanceObservation{
+				Estimate: &runtimeLoad, Unit: UnitSeconds, Status: StatusAvailable,
+				Acquisition: AcquisitionRuntimeReported, SampleCount: 1,
+				Supports: []SupportClaim{ClaimObservedRuntimeLoadTime},
+			},
+			LoadedCacheHitTTFTSeconds: PerformanceObservation{
+				Estimate: &cacheHitTTFT, Unit: UnitSeconds, Status: StatusAvailable,
+				Acquisition: AcquisitionClientWallClock, SampleCount: 1,
+				Supports: []SupportClaim{ClaimObservedLoadedCacheHitTTFT},
+			},
+		},
+		Capacity: Capacity{Placement: &PlacementObservation{
+			AcceleratorBytes: 15, NonAcceleratorBytes: 5, AcceleratorPercent: 75,
+			Kind: PlacementAcceleratorSharePartial, Status: StatusAvailable,
+			Acquisition: AcquisitionRuntimeAllocation, RemainderAcquisition: AcquisitionClientDerived,
+			RequestedContext: ctx, EffectiveContext: &ctx,
+			Supports: []SupportClaim{ClaimExactContextAcceleratorBytes, ClaimExactContextPlacement},
+			Boundary: AllocationAttributionBoundary,
+		}},
+	}
+
+	got, err := json.Marshal(contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"performance":{"decode_tps":{"estimate":null,"unit":"","status":"","acquisition":"","sample_count":0},"prefill_tps":{"estimate":null,"unit":"","status":"","acquisition":"","sample_count":0},"ttft_seconds":{"estimate":null,"unit":"","status":"","acquisition":"","sample_count":0},"runtime_unloaded_ttft_seconds":{"estimate":5.1,"unit":"seconds","status":"available","acquisition":"client_wall_clock","sample_count":1,"supports":["observed_runtime_unloaded_ttft"]},"runtime_load_seconds":{"estimate":4.2,"unit":"seconds","status":"available","acquisition":"runtime_reported","sample_count":1,"supports":["observed_runtime_load_time"]},"loaded_cache_hit_ttft_seconds":{"estimate":0.2,"unit":"seconds","status":"available","acquisition":"client_wall_clock","sample_count":1,"supports":["observed_loaded_cache_hit_ttft"]}},"capacity":{"placement":{"accelerator_bytes":15,"non_accelerator_bytes":5,"accelerator_percent":75,"kind":"accelerator_share_partial","status":"available","acquisition":"runtime_allocation","remainder_acquisition":"client_derived","requested_context":32768,"effective_context":32768,"supports":["exact_context_accelerator_bytes","exact_context_allocation_placement"],"boundary":"Runtime allocation attribution only; not proof of exclusive physical pools, layer placement, or host traffic."}}}`
+	if string(got) != want {
+		t.Fatalf("analysis JSON contract changed:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestLatencyStatesFailClosedWithoutTheirSpecificReceipts(t *testing.T) {
+	samples := validUncachedSamples(3)
+	samples[0].ColdLoad, samples[0].ColdTTFT = 4.2, 5.1
+	samples[0].WarmTTFT = 0.2
+	result := handRecord(samples)
+	// The hand-built manifest deliberately lacks a versioned backend protocol,
+	// and the warm observation deliberately lacks a positive cache-hit receipt.
+	report := fromValidatedRecord(result)
+	for _, observation := range []PerformanceObservation{
+		report.Performance.RuntimeUnloadedTTFTSeconds,
+		report.Performance.RuntimeLoadSeconds,
+		report.Performance.LoadedCacheHitTTFTSeconds,
+	} {
+		if observation.Estimate != nil || observation.Status != StatusUnavailable || len(observation.Supports) != 0 {
+			t.Fatalf("unsupported latency state was promoted: %+v", observation)
+		}
+	}
+	for _, code := range []GapCode{
+		GapRuntimeUnloadedTTFTUnavailable, GapRuntimeLoadUnavailable, GapLoadedCacheHitTTFTUnavailable,
+	} {
+		if !hasGap(report.Gaps, code) {
+			t.Fatalf("missing latency gap %s: %+v", code, report.Gaps)
+		}
 	}
 }
 
@@ -225,6 +381,9 @@ func TestCapacityRequiresAnExactContextReceiptAndNeverSealsPolicy(t *testing.T) 
 			if !hasGap(report.Gaps, GapCapacityPolicyUnsealed) {
 				t.Fatalf("capacity policy gap missing: %+v", report.Gaps)
 			}
+			if !test.plan && hasGap(report.Gaps, GapPlacementUnavailable) {
+				t.Fatalf("unplanned memory work produced an allocation-attribution gap: %+v", report.Gaps)
+			}
 		})
 	}
 }
@@ -244,15 +403,76 @@ func TestExactResidentUsesBytesAndExplicitSupport(t *testing.T) {
 	}
 }
 
-func TestContaminationMakesEveryObservationDescriptiveOnly(t *testing.T) {
+func TestExactPlacementUsesRuntimeBytesAndDerivedRemainder(t *testing.T) {
+	requested := 32768
+	const resident = int64(20 * 1024 * 1024 * 1024)
+	tests := []struct {
+		name        string
+		accelerator int64
+		kind        PlacementKind
+		percent     float64
+		diagnosis   bool
+	}{
+		{name: "partial", accelerator: 15 * 1024 * 1024 * 1024,
+			kind: PlacementAcceleratorSharePartial, percent: 75, diagnosis: true},
+		{name: "full", accelerator: resident, kind: PlacementAcceleratorShareFull, percent: 100},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := handRecord(validUncachedSamples(3))
+			result.TaskPlan.Memory = true
+			result.Memory = measuredMemoryWithAccelerator(requested, &requested, test.accelerator)
+			report := fromValidatedRecord(result)
+			placement := report.Capacity.Placement
+			if placement == nil || placement.AcceleratorBytes != test.accelerator ||
+				placement.NonAcceleratorBytes != resident-test.accelerator ||
+				placement.AcceleratorPercent != test.percent || placement.Kind != test.kind ||
+				placement.Status != StatusAvailable || placement.Acquisition != AcquisitionRuntimeAllocation ||
+				placement.RemainderAcquisition != AcquisitionClientDerived ||
+				!containsClaim(placement.Supports, ClaimExactContextAcceleratorBytes) ||
+				!containsClaim(placement.Supports, ClaimExactContextPlacement) ||
+				placement.Boundary != AllocationAttributionBoundary {
+				t.Fatalf("placement = %+v", placement)
+			}
+			if hasDiagnosis(report.Diagnoses, DiagnosisPartialPlacement) != test.diagnosis {
+				t.Fatalf("placement diagnosis = %+v, want present=%v", report.Diagnoses, test.diagnosis)
+			}
+		})
+	}
+}
+
+func TestZeroAcceleratorBytesCannotEstablishCPUOnlyPlacementInSchemaSix(t *testing.T) {
 	requested := 32768
 	result := handRecord(validUncachedSamples(3))
 	result.TaskPlan.Memory = true
-	result.Memory = measuredMemory(requested, &requested)
-	result.Contamination = []string{`C:\private\models\secret.gguf`}
+	result.Memory = measuredMemoryWithAccelerator(requested, &requested, 0)
 	report := fromValidatedRecord(result)
+	if report.Capacity.Resident == nil || report.Capacity.Placement != nil {
+		t.Fatalf("zero-valued accelerator field established placement: %+v", report.Capacity)
+	}
+	if !hasGap(report.Gaps, GapPlacementUnavailable) ||
+		hasDiagnosis(report.Diagnoses, DiagnosisPartialPlacement) {
+		t.Fatalf("zero-valued accelerator field response = gaps %+v diagnoses %+v",
+			report.Gaps, report.Diagnoses)
+	}
+}
+
+func TestContaminationMakesEveryObservationDescriptiveOnly(t *testing.T) {
+	requested := 32768
+	result := completedTestRecordConfigured(t, "", func(result *record.Record) {
+		result.TaskPlan.Memory = true
+		result.Memory = measuredMemory(requested, &requested)
+		addAuxiliaryLatencySamples(result)
+		result.Contamination = []string{`C:\private\models\secret.gguf`}
+	})
+	report, err := FromRecord(result)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, observation := range []PerformanceObservation{
 		report.Performance.DecodeTPS, report.Performance.PrefillTPS, report.Performance.TTFTSeconds,
+		report.Performance.RuntimeUnloadedTTFTSeconds, report.Performance.RuntimeLoadSeconds,
+		report.Performance.LoadedCacheHitTTFTSeconds,
 	} {
 		if observation.Estimate == nil || observation.Status != StatusDescriptiveOnly || len(observation.Supports) != 0 {
 			t.Fatalf("contaminated performance made a claim: %+v", observation)
@@ -261,6 +481,10 @@ func TestContaminationMakesEveryObservationDescriptiveOnly(t *testing.T) {
 	if resident := report.Capacity.Resident; resident == nil || resident.Status != StatusDescriptiveOnly || len(resident.Supports) != 0 {
 		t.Fatalf("contaminated resident made a claim: %+v", resident)
 	}
+	if placement := report.Capacity.Placement; placement == nil || placement.Status != StatusDescriptiveOnly ||
+		len(placement.Supports) != 0 {
+		t.Fatalf("contaminated placement made a claim: %+v", placement)
+	}
 	if !hasDiagnosis(report.Diagnoses, DiagnosisContaminated) || report.NextActions[0].Code != ActionRerunUncontaminated {
 		t.Fatalf("contamination response = diagnoses %+v actions %+v", report.Diagnoses, report.NextActions)
 	}
@@ -268,12 +492,16 @@ func TestContaminationMakesEveryObservationDescriptiveOnly(t *testing.T) {
 
 func TestUnboundArtifactLeavesFactsDescriptiveAndNoRankingAction(t *testing.T) {
 	requested := 32768
-	result := handRecord(validUncachedSamples(3))
-	result.TaskPlan.Memory = true
-	result.Memory = measuredMemory(requested, &requested)
+	result := completedTestRecordConfigured(t, "", func(result *record.Record) {
+		result.TaskPlan.Memory = true
+		result.Memory = measuredMemory(requested, &requested)
+		addAuxiliaryLatencySamples(result)
+	})
 	report := fromValidatedRecordWithIdentity(result, "not runtime bound")
 	for _, observation := range []PerformanceObservation{
 		report.Performance.DecodeTPS, report.Performance.PrefillTPS, report.Performance.TTFTSeconds,
+		report.Performance.RuntimeUnloadedTTFTSeconds, report.Performance.RuntimeLoadSeconds,
+		report.Performance.LoadedCacheHitTTFTSeconds,
 	} {
 		if observation.Status != StatusDescriptiveOnly || len(observation.Supports) != 0 {
 			t.Fatalf("unbound artifact retained a performance claim: %+v", observation)
@@ -283,7 +511,8 @@ func TestUnboundArtifactLeavesFactsDescriptiveAndNoRankingAction(t *testing.T) {
 		len(resident.Supports) != 0 {
 		t.Fatalf("unbound artifact retained a resident claim: %+v", resident)
 	}
-	if !hasGap(report.Gaps, GapModelIdentityUnbound) || len(report.NextActions) != 0 {
+	if !hasGap(report.Gaps, GapModelIdentityUnbound) || len(report.NextActions) != 0 ||
+		hasDiagnosis(report.Diagnoses, DiagnosisPartialPlacement) {
 		t.Fatalf("unbound artifact response = gaps %+v actions %+v", report.Gaps, report.NextActions)
 	}
 }
@@ -494,6 +723,7 @@ func validUncachedSamples(count int) []eval.SpeedResult {
 		samples[i] = eval.SpeedResult{
 			DecodeTPS: 21 + float64(i), PrefillTPS: 200 + 10*float64(i), TTFT: 0.8 + 0.1*float64(i),
 			PromptTok: 200, PrefillCacheKnown: true, GatedPromptTok: 100, GatedCacheKnown: true,
+			GatedLoadKnown: true, GatedResidencyKnown: true, GatedResident: true,
 			FirstOutputObserved: true,
 		}
 	}
@@ -507,11 +737,29 @@ func setSpeedSummaries(result *record.Record) {
 	result.TTFTSum = stats.MeanSD(ttft)
 }
 
+func addAuxiliaryLatencySamples(result *record.Record) {
+	if result == nil || len(result.Speed) == 0 {
+		return
+	}
+	result.Speed[0].ColdLoad, result.Speed[0].ColdTTFT = 4.2, 5.1
+	for i := range result.Speed {
+		result.Speed[i].WarmTTFT = 0.18 + 0.02*float64(i)
+		result.Speed[i].WarmCacheKnown = true
+		result.Speed[i].WarmPromptTok = 20
+		result.Speed[i].WarmCachedTok = 80
+	}
+}
+
 func measuredMemory(requested int, effective *int) eval.MemoryResult {
+	return measuredMemoryWithAccelerator(requested, effective, 20*1024*1024*1024)
+}
+
+func measuredMemoryWithAccelerator(requested int, effective *int, accelerator int64) eval.MemoryResult {
 	const bytes = int64(20 * 1024 * 1024 * 1024)
 	return eval.MemoryResult{
 		Outcome: eval.OutcomePass, RequestedCtx: requested, EffectiveCtx: cloneInt(effective),
-		ResidentBytes: bytes, ResidentGB: 20, AcceleratorBytes: bytes, PctOnGPU: 100,
+		ResidentBytes: bytes, ResidentGB: 20, AcceleratorBytes: accelerator,
+		PctOnGPU: int(100 * float64(accelerator) / float64(bytes)),
 	}
 }
 
@@ -528,7 +776,8 @@ func assertObservation(t *testing.T, got PerformanceObservation, estimate float6
 func cacheGapCodes(gaps []EvidenceGap) []GapCode {
 	var codes []GapCode
 	for _, gap := range gaps {
-		if strings.Contains(string(gap.Code), "cache_") {
+		switch gap.Code {
+		case GapPrefillCacheUnknown, GapPrefillCacheHit, GapTTFTCacheUnknown, GapTTFTCacheHit:
 			codes = append(codes, gap.Code)
 		}
 	}
@@ -625,6 +874,9 @@ func assertDetached(t *testing.T, result *record.Record, report Report) {
 	report.Performance.DecodeTPS.Samples[0] = 999
 	*report.Context.Effective = 1
 	*report.Capacity.Resident.Estimate = 1
+	if report.Capacity.Placement != nil && report.Capacity.Placement.EffectiveContext != nil {
+		*report.Capacity.Placement.EffectiveContext = 1
+	}
 	if result.Speed[0].DecodeTPS != originalSample || *result.DeviceV2.Context.EffectiveTokens != originalContext ||
 		result.Memory.ResidentBytes != originalBytes {
 		t.Fatal("mutating analysis changed the source record")

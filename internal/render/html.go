@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/score"
 )
@@ -130,39 +131,47 @@ type htmlNeed struct {
 type htmlKV struct{ K, V string }
 
 type htmlData struct {
-	CSS           template.CSS
-	Title         string
-	Model         string
-	SizeLine      string
-	UseFor        string
-	Profile       string
-	Uncalibrated  bool
-	DeviceKey     string
-	OS            string
-	CPU           string
-	RAM           string
-	GPU           string
-	Driver        string
-	Runtime       string
-	Inference     string
-	GPUBackend    string
-	NumCtx        string
-	Config        []htmlKV
-	Needs         []htmlNeed
-	Gaps          []htmlNeed
-	EvidenceGaps  []htmlKV
-	Decode        string
-	Prefill       string
-	TTFT          string
-	Resident      string
-	RepeatsWarn   bool
-	Contamination []string
-	StartedAt     string
-	Level         string
-	Schema        int
-	Version       string
-	Wall          string
-	Next          string
+	CSS                 template.CSS
+	Title               string
+	Model               string
+	SizeLine            string
+	UseFor              string
+	Profile             string
+	Uncalibrated        bool
+	DeviceKey           string
+	OS                  string
+	CPU                 string
+	RAM                 string
+	GPU                 string
+	Driver              string
+	Runtime             string
+	Inference           string
+	GPUBackend          string
+	NumCtx              string
+	Config              []htmlKV
+	Needs               []htmlNeed
+	Gaps                []htmlNeed
+	EvidenceGaps        []htmlKV
+	Diagnoses           []htmlKV
+	Decode              string
+	Prefill             string
+	TTFT                string
+	TTFTLabel           string
+	RuntimeUnloadedTTFT string
+	RuntimeLoad         string
+	LoadedCacheHitTTFT  string
+	Resident            string
+	Accelerator         string
+	NonAccelerator      string
+	PlacementNote       string
+	RepeatsWarn         bool
+	Contamination       []string
+	StartedAt           string
+	Level               string
+	Schema              int
+	Version             string
+	Wall                string
+	Next                string
 }
 
 const artifactCSS = `:root{--bg:#0f1419;--fg:#e6edf3;--muted:#8b949e;--pass:#3fb950;--fail:#f85149;--skip:#8b949e;--blkd:#d29922;--line:#30363d;--card:#161b22}
@@ -241,12 +250,24 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 </table>
 {{end}}
 
-{{if or .Decode .Prefill .TTFT}}
+{{if .Diagnoses}}
+<h2>Observed conditions</h2>
+<table>
+{{range .Diagnoses}}
+<tr><th class="k">{{.K}}</th><td>{{.V}}</td></tr>
+{{end}}
+</table>
+{{end}}
+
+{{if or .Decode .Prefill .TTFT .RuntimeUnloadedTTFT .RuntimeLoad .LoadedCacheHitTTFT}}
 <h2>Performance</h2>
 <table>
 {{if .Decode}}<tr><th class="k">decode</th><td>{{.Decode}}</td></tr>{{end}}
 {{if .Prefill}}<tr><th class="k">prefill</th><td>{{.Prefill}}</td></tr>{{end}}
-{{if .TTFT}}<tr><th class="k">TTFT</th><td>{{.TTFT}}</td></tr>{{end}}
+{{if .TTFT}}<tr><th class="k">{{.TTFTLabel}}</th><td>{{.TTFT}}</td></tr>{{end}}
+{{if .LoadedCacheHitTTFT}}<tr><th class="k">loaded cache-hit TTFT</th><td>{{.LoadedCacheHitTTFT}}</td></tr>{{end}}
+{{if .RuntimeUnloadedTTFT}}<tr><th class="k">runtime-unloaded TTFT</th><td>{{.RuntimeUnloadedTTFT}}</td></tr>{{end}}
+{{if .RuntimeLoad}}<tr><th class="k">runtime load</th><td>{{.RuntimeLoad}}</td></tr>{{end}}
 </table>
 {{end}}
 
@@ -254,7 +275,10 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 <h2>Capacity</h2>
 <table>
 <tr><th class="k">resident</th><td>{{.Resident}}</td></tr>
+{{if .Accelerator}}<tr><th class="k">runtime-attributed accelerator</th><td>{{.Accelerator}}</td></tr>{{end}}
+{{if .NonAccelerator}}<tr><th class="k">non-accelerator</th><td>{{.NonAccelerator}}</td></tr>{{end}}
 </table>
+{{if .PlacementNote}}<p class="sub">{{.PlacementNote}}</p>{{end}}
 {{end}}
 
 {{if .RepeatsWarn}}
@@ -297,13 +321,65 @@ func htmlDataFrom(a Artifact) htmlData {
 	d.Config = htmlConfig(a.Device)
 	d.Needs, d.Gaps = htmlNeeds(a.Scorecard)
 	if a.Meta.Analysis != nil {
+		d.TTFTLabel = analysis.TTFTLabel(a.Meta.Analysis.Performance.TTFTSeconds)
 		for _, gap := range a.Meta.Analysis.Gaps {
-			d.EvidenceGaps = append(d.EvidenceGaps, htmlKV{K: string(gap.Code), V: gap.Message})
+			d.EvidenceGaps = append(d.EvidenceGaps, htmlKV{K: analysis.GapLabel(gap.Code), V: gap.Message})
+		}
+		for _, diagnosis := range a.Meta.Analysis.Diagnoses {
+			d.Diagnoses = append(d.Diagnoses, htmlKV{K: analysis.DiagnosisLabel(diagnosis.Code), V: diagnosis.Statement})
+		}
+		d.RuntimeUnloadedTTFT = htmlAnalysisObservation(
+			a.Meta.Analysis.Performance.RuntimeUnloadedTTFTSeconds, g)
+		d.RuntimeLoad = htmlAnalysisObservation(a.Meta.Analysis.Performance.RuntimeLoadSeconds, g)
+		d.LoadedCacheHitTTFT = htmlAnalysisObservation(
+			a.Meta.Analysis.Performance.LoadedCacheHitTTFTSeconds, g)
+		if placement := a.Meta.Analysis.Capacity.Placement; placement != nil {
+			const gib = 1024 * 1024 * 1024
+			d.Accelerator = fmt.Sprintf("%.2f GB (%.1f%% of runtime allocation)",
+				float64(placement.AcceleratorBytes)/gib, placement.AcceleratorPercent)
+			d.NonAccelerator = fmt.Sprintf("%.2f GB (derived remainder)",
+				float64(placement.NonAcceleratorBytes)/gib)
+			d.PlacementNote = placement.Boundary
+			if placement.Status == analysis.StatusDescriptiveOnly {
+				d.PlacementNote = "Descriptive only; source " +
+					analysis.AcquisitionLabel(placement.Acquisition) + ". " + d.PlacementNote
+			}
 		}
 	}
 	d.Decode, d.Prefill, d.TTFT = htmlPerformance(a.Meta, g)
 	d.Resident = htmlCapacity(a.Meta)
+	if a.Meta.Analysis != nil {
+		d.Decode = htmlDescriptive(d.Decode, a.Meta.Analysis.Performance.DecodeTPS)
+		d.Prefill = htmlDescriptive(d.Prefill, a.Meta.Analysis.Performance.PrefillTPS)
+		d.TTFT = htmlDescriptive(d.TTFT, a.Meta.Analysis.Performance.TTFTSeconds)
+		if resident := a.Meta.Analysis.Capacity.Resident; resident != nil &&
+			resident.Status == analysis.StatusDescriptiveOnly {
+			d.Resident += "; descriptive only; source " + analysis.AcquisitionLabel(resident.Acquisition)
+		}
+	}
 	return d
+}
+
+func htmlAnalysisObservation(observation analysis.PerformanceObservation, g glyphs) string {
+	if observation.Estimate == nil {
+		return ""
+	}
+	sd := 0.0
+	if observation.SD != nil {
+		sd = *observation.SD
+	}
+	value := stat(*observation.Estimate, sd, observation.SampleCount, g) + " s"
+	if observation.Min != nil && observation.Max != nil && *observation.Max > *observation.Min {
+		value += fmt.Sprintf("; min %.2f, max %.2f", *observation.Min, *observation.Max)
+	}
+	return htmlDescriptive(value, observation)
+}
+
+func htmlDescriptive(value string, observation analysis.PerformanceObservation) string {
+	if value == "" || observation.Status != analysis.StatusDescriptiveOnly {
+		return value
+	}
+	return value + "; descriptive only; source " + analysis.AcquisitionLabel(observation.Acquisition)
 }
 
 func baseHTMLData(a Artifact) htmlData {
@@ -311,8 +387,9 @@ func baseHTMLData(a Artifact) htmlData {
 		CSS:           template.CSS(artifactCSS),
 		Title:         "fitr · " + a.Model,
 		Model:         a.Model,
-		UseFor:        a.Scorecard.UseFor,
+		UseFor:        UseForLabel(a.Scorecard.UseFor),
 		Profile:       a.Profile,
+		TTFTLabel:     "TTFT",
 		Uncalibrated:  a.Profile == "default",
 		DeviceKey:     a.DeviceKey,
 		OS:            a.Device.OS,
@@ -392,7 +469,7 @@ func htmlNeeds(card score.Scorecard) (needs, gaps []htmlNeed) {
 		row := htmlNeed{
 			Label: score.NeedLabel[k],
 			State: string(v.State),
-			Why:   v.Why,
+			Why:   PresentVerdictWhy(k, v),
 			Class: htmlStateClass(v.State),
 		}
 		if row.Label == "" {

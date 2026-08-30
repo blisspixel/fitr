@@ -44,6 +44,7 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.9.8 | Output that fits the terminal, and verdicts the renderer can lay out |
 | Shipped | 0.9.9 | Evidence correctness, tool-channel behavior, internal decomposition, and the native matrix |
 | Shipped | 0.9.10 | Release and installer polish, then the first renderer-neutral explanation slice |
+| Shipped | 0.9.11 | Distinct latency states and exact-context runtime allocation attribution |
 | Now | 0.10 | Explain and choose: central analysis, capacity versus performance, calibration, context and quant experiments |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
@@ -435,6 +436,41 @@ analysis contract owns the supported facts and actions across CLI, TUI, Board,
 and HTML. Each client may render a deliberate subset, but no client recomputes
 an evidence claim.
 
+### 0.9.11 - latency, allocation, and terminal evidence [shipped]
+
+- [x] Separate loaded, runtime-unloaded, and verified loaded cache-hit TTFT,
+      plus runtime-reported model-load duration, in the central analysis
+      contract and every result surface. Runtime-unloaded never implies a
+      machine-cold or disk-cold measurement.
+- [x] Report exact-context resident bytes, positive runtime-classified
+      accelerator bytes, and the derived non-accelerator remainder without
+      claiming host spill, layer placement, host traffic, or exclusive
+      physical pools.
+- [x] Fail closed on a zero accelerator byte field in schema 6 because the
+      receipt cannot distinguish an explicit CPU-only allocation from a missing
+      field. Unplanned memory work no longer produces a misleading placement
+      gap.
+- [x] Move auxiliary latency out of behavior verdict prose under scoring policy
+      v4 while preserving exact validation of sealed v3 scorecards.
+- [x] Require a gated-request residency receipt for loaded-TTFT claims under
+      scoring policy v5 while preserving exact validation of sealed v3 and v4
+      scorecards.
+- [x] Keep verdicts and the next command above secondary TUI diagnostics, use
+      human evidence labels in terminal and HTML output, and regenerate the
+      fail-closed unified-memory demos.
+- [x] Add `fitr update` for the latest stable official release. Require the
+      exact platform asset, one matching published checksum, a staged binary
+      version check, and a pre-replacement target-digest guard. Do not run a
+      remote install script or check automatically during ordinary commands.
+- [x] Repair TUI span spacing, mark semantic truncation, summarize a full
+      Result honestly at 80x24, label observation counts consistently, add a
+      Board measurement legend, and make help and footer controls view-specific.
+
+Exit criterion: CLI, TUI, and HTML use the same central latency and allocation
+semantics; unsupported zero-valued attribution stays unavailable; v3 evidence
+remains valid; the verified updater and public demos agree with the release;
+aggregate and native CI pass on the exact tagged main commit.
+
 ### 0.10 - explain and choose
 
 The first two questions in a hardware decision are different: can the model
@@ -442,10 +478,38 @@ fit, and how does it perform once it does? This release makes that separation
 structural and adds cautious explanation without turning vendor specifications
 or arithmetic proxies into measured facts.
 
+The next capacity sequence is explicit, based on the 2026-08-30 GB10 field
+reports:
+
+1. Seal current shared-memory availability as a transient operating-system
+   receipt with source and observation time. Test `/proc/meminfo`
+   `MemAvailable`, container limits, swap policy, and an explicit operator
+   reserve before allowing it to become a safe budget. Addressable total stays
+   a different fact and `--vram-gb` continues to win when supplied.
+2. Learn exact-context `OTHER` from matched runtime allocation receipts.
+   Resident remainder and sampled in-flight peak are separate observations;
+   neither is guessed from a percentage. This is especially important for
+   vision towers, graphs, mappings, and compute buffers.
+3. Build a model-set projection from those receipts, then require a
+   simultaneous runtime observation before claiming co-residency. Single-model
+   fit never proves that a resident model, vision model, embedder, reranker,
+   and audio model can share one pool.
+
 - [ ] Extend `fitr.analysis.run.v1` across CLI, TUI, HTML, and later clients.
       Add typed capacity policy, model shape, placement, cautious diagnoses,
       and broader client coverage without letting a renderer recompute a
       verdict or bottleneck.
+- [x] Preserve supported latency states as separate central observations.
+      Request TTFT, receipt-proven loaded TTFT, runtime-unloaded TTFT, verified
+      loaded cache-hit TTFT, and runtime-reported load time now retain their
+      own acquisition and support claims across CLI, TUI, and HTML.
+      Runtime-unloaded is explicitly not a machine-cold claim.
+- [x] Surface exact-context allocation attribution without inventing a
+      physical memory topology. Runtime-classified accelerator bytes and the
+      derived non-accelerator remainder now share the verified memory-probe
+      context.
+      The output does not rename that remainder as spill, infer layer
+      placement, or claim exclusive pools on unified-memory systems.
 - [ ] Version typed memory evidence and an explicit capacity policy. Keep
       physical or addressable total, OS availability, runtime allocation,
       accelerator allocation, process residency, and allocator projection as
@@ -453,11 +517,10 @@ or arithmetic proxies into measured facts.
       policy, container limit, observation time, and the exact usable-budget
       formula. A nominal vendor number never substitutes for an operating
       system reading.
-- [ ] Complete the existing PERFORMANCE and CAPACITY split with headroom,
-      context, placement, and latency-state evidence. Keep TTFT, prefill,
-      decode, and load separate from resident allocation. Preserve cold,
-      loaded-uncached, and cache-hit observations as distinct evidence when the
-      backend can identify them.
+- [ ] Complete the existing PERFORMANCE and CAPACITY split with a sealed
+      capacity policy, safe headroom, model shape, and broader context
+      evidence. Keep TTFT, prefill, decode, and load separate from resident
+      allocation.
 - [ ] Show dense versus MoE shape with total and active-per-token parameters
       only when artifact metadata supports those facts. Do not infer either
       from a model name. Expose a compact architecture and KV-strategy label
@@ -470,6 +533,10 @@ or arithmetic proxies into measured facts.
 - [ ] Make help selection-aware for TTFT, prefill, decode, resident memory,
       placement, model shape, and verdict uncertainty. Explain what each fact
       answers and what comparisons remain valid.
+- [ ] Add responsive master-detail views to Board, History, and Inventory:
+      side-by-side at wide widths, stacked at medium widths, and an explicit
+      detail surface when narrow. Preserve the decision spine, view-specific
+      controls, exact values, and comparison boundaries.
 - [ ] Score fitr's own capacity predictions. Store predicted weights plus KV
       beside observed runtime allocation, accumulate residuals by architecture
       and context, and publish uncertainty. A correction never enters a fit
@@ -487,6 +554,13 @@ or arithmetic proxies into measured facts.
       co-residency claim until one runtime receipt proves simultaneous
       residency, spill, and eviction state. Model-set results never enter the
       ordinary single-model Board.
+- [ ] When the requested context is unresolved and advice stays SKIP, title
+      enumerated context rows as projections and suppress the suggestion star.
+      A projected compatible row must not look like it overrides the headline
+      refusal.
+- [ ] Clarify Inventory's `CTX` as measured evidence, not artifact maximum.
+      Either rename the column to `EVID CTX` or add a separately sourced
+      metadata-maximum field without fetching every artifact on the hot path.
 - [ ] Prototype a quant and configuration frontier. Report dominance only when
       one measured option is no worse on all declared dimensions and strictly
       better on at least one. Otherwise show the tradeoff, not a winner.
@@ -894,6 +968,7 @@ These features must preserve the evidence contract.
 | 0.9.8 | Output that fits: every surface composed to a resolved width, verdicts given a structure the renderer can lay out, sparklines refused where the data cannot support them, and the transport retry that stopped discarding completed runs |
 | 0.9.9 | Evidence correctness, native tool-channel behavior, package decomposition, the Linux and macOS native acceptance matrix, and exact-commit release gates |
 | 0.9.10 | Non-persistent PowerShell installs, HTML performance and capacity parity, central validated analysis, fail-closed unified-memory advice, display-only history preservation, and hardened Board actions |
+| 0.9.11 | Distinct latency states, exact-context runtime allocation attribution, scoring-policy compatibility, secure self-update, native RTX 4090 validation, and terminal evidence polish |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

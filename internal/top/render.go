@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/blisspixel/fitr/internal/analysis"
 )
 
 // Render converts state into a clipped, renderer-neutral canvas.
@@ -277,12 +279,62 @@ func renderResult(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: "No saved result selected.", Role: RoleMuted})
 		return
 	}
-	renderResultIdentity(w, run, glyphs)
-	renderResultPerformance(w, run, glyphs)
-	if !renderResultWarnings(w, run) {
+	if canvas.Height < 32 {
+		renderCompactResult(w, run, glyphs)
 		return
 	}
+	renderResultIdentity(w, run, glyphs)
 	renderResultVerdicts(w, run, canvas.Width)
+	renderResultNext(w, run)
+	renderResultPerformance(w, run, glyphs, false)
+	renderResultAnalysis(w, run)
+	renderResultWarnings(w, run)
+}
+
+func renderCompactResult(w *lineWriter, run Run, glyphs Glyphs) {
+	renderResultIdentity(w, run, glyphs)
+	renderCompactVerdicts(w, run)
+	renderResultNext(w, run)
+	renderResultPerformance(w, run, glyphs, true)
+	diagnoses, gaps := 0, 0
+	if run.Analysis != nil {
+		diagnoses = len(run.Analysis.Diagnoses)
+		gaps = len(run.Analysis.Gaps)
+	}
+	w.line(Span{Text: "details    ", Role: RoleMuted}, Span{Text: fmt.Sprintf(
+		"compact; %d gap, %d diagnosis, %d warning; full: fitr view %s",
+		gaps, diagnoses, len(run.Warnings), run.Model), Role: RoleDefault})
+}
+
+func renderCompactVerdicts(w *lineWriter, run Run) {
+	if len(run.Verdicts) == 0 {
+		return
+	}
+	w.line(Span{Text: "verdicts", Role: RoleHeader})
+	order := []string{"PASS", "FAIL", "INCONCLUSIVE", "BLKD", "SKIP", "N/A"}
+	counts := make(map[string]int, len(order))
+	var attention []string
+	for _, verdict := range run.Verdicts {
+		state := strings.ToUpper(strings.TrimSpace(verdict.State))
+		counts[state]++
+		if state == "FAIL" || state == "BLKD" || state == "INCONCLUSIVE" {
+			label := verdict.Label
+			if label == "" {
+				label = verdict.Need
+			}
+			attention = append(attention, label+" ["+state+"]")
+		}
+	}
+	parts := make([]string, 0, len(order))
+	for _, state := range order {
+		if counts[state] > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", counts[state], state))
+		}
+	}
+	w.line(Span{Text: "summary    ", Role: RoleMuted}, Span{Text: strings.Join(parts, " | "), Role: RoleDefault})
+	if len(attention) > 0 {
+		w.line(Span{Text: "attention  ", Role: RoleWarning}, Span{Text: strings.Join(attention, "; "), Role: RoleDefault})
+	}
 }
 
 func renderResultIdentity(w *lineWriter, run Run, glyphs Glyphs) {
@@ -292,30 +344,143 @@ func renderResultIdentity(w *lineWriter, run Run, glyphs Glyphs) {
 	}
 	build := strings.TrimSpace(strings.Join([]string{run.ParamSize, run.Quant, run.Family}, " "))
 	w.line(Span{Text: "build      ", Role: RoleMuted}, Span{Text: build + glyphs.Dot + fmt.Sprintf("ctx %d", run.Context), Role: RoleDefault})
-	identity := strings.TrimSpace(strings.Join([]string{run.Device, run.Driver, run.Runtime}, glyphs.Dot))
+	identity := joinPresent(glyphs.Dot, run.Device, run.Driver, run.Runtime)
 	if identity != "" {
 		w.line(Span{Text: "device     ", Role: RoleMuted}, Span{Text: identity, Role: RoleDefault})
 	}
-	w.line(Span{Text: "config     ", Role: RoleMuted}, Span{Text: run.Config + glyphs.Dot + "profile " + run.Profile, Role: RoleDefault})
+	config := joinPresent(glyphs.Dot, run.Config, "profile "+run.Profile)
+	w.line(Span{Text: "config     ", Role: RoleMuted}, Span{Text: config, Role: RoleDefault})
 }
 
-func renderResultPerformance(w *lineWriter, run Run, glyphs Glyphs) {
+func joinPresent(separator string, values ...string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" && value != "profile" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, separator)
+}
+
+func renderResultPerformance(w *lineWriter, run Run, glyphs Glyphs, compact bool) {
 	w.line(Span{Text: "performance", Role: RoleHeader})
 	if run.DecodePresent {
-		w.line(Span{Text: "decode     ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f ± %.2f tok/s  k=%d", run.DecodeMean, run.DecodeSD, run.Repeats), Role: RoleDefault},
-			Span{Text: "  " + sparkline(run.DecodeSeries, 12, glyphs), Role: RoleAccent})
+		observation := analysis.PerformanceObservation{}
+		if run.Analysis != nil {
+			observation = run.Analysis.Performance.DecodeTPS
+		}
+		w.line(resultMetricSpans("decode", run.DecodeMean, run.DecodeSD, run.Repeats,
+			"tok/s", run.DecodeSeries, observation, glyphs)...)
 	}
 	if run.PrefillPresent {
-		w.line(metricSpans("prefill", run.PrefillMean, "tok/s", nil, glyphs)...)
+		observation := analysis.PerformanceObservation{}
+		if run.Analysis != nil {
+			observation = run.Analysis.Performance.PrefillTPS
+		}
+		w.line(resultMetricSpans("prefill", run.PrefillMean, 0, run.Repeats,
+			"tok/s", nil, observation, glyphs)...)
 	}
 	if run.TTFTPresent {
-		w.line(metricSpans("TTFT", run.TTFTMean, "s", nil, glyphs)...)
+		label := "TTFT"
+		if run.Analysis != nil {
+			label = analysis.TTFTLabel(run.Analysis.Performance.TTFTSeconds)
+		}
+		observation := analysis.PerformanceObservation{}
+		if run.Analysis != nil {
+			observation = run.Analysis.Performance.TTFTSeconds
+		}
+		w.line(resultMetricSpans(label, run.TTFTMean, 0, run.Repeats,
+			"s", nil, observation, glyphs)...)
 	}
-	if run.MemoryPresent {
-		w.line(Span{Text: "capacity", Role: RoleHeader})
-		w.line(Span{Text: "resident   ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GB after requested %s load probe", run.MemoryGB,
-			residentContextLabel(run.ResidentContext)), Role: RoleDefault})
+	if run.Analysis != nil {
+		renderAnalysisMetric(w, "loaded cache-hit TTFT", run.Analysis.Performance.LoadedCacheHitTTFTSeconds, glyphs)
+		renderAnalysisMetric(w, "runtime-unloaded TTFT", run.Analysis.Performance.RuntimeUnloadedTTFTSeconds, glyphs)
+		renderAnalysisMetric(w, "runtime load", run.Analysis.Performance.RuntimeLoadSeconds, glyphs)
 	}
+	renderResultCapacity(w, run, compact)
+}
+
+func renderResultCapacity(w *lineWriter, run Run, compact bool) {
+	if !run.MemoryPresent {
+		return
+	}
+	w.line(Span{Text: "capacity", Role: RoleHeader})
+	residentLabel, residentQualifier := "resident   ", ""
+	if run.Analysis != nil && run.Analysis.Capacity.Resident != nil &&
+		run.Analysis.Capacity.Resident.Status == analysis.StatusDescriptiveOnly {
+		residentLabel = "resident [descriptive] "
+		residentQualifier = " via " + analysis.AcquisitionLabel(run.Analysis.Capacity.Resident.Acquisition)
+	}
+	w.line(Span{Text: residentLabel, Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GB after requested %s load probe", run.MemoryGB,
+		residentContextLabel(run.ResidentContext)), Role: RoleDefault}, Span{Text: residentQualifier, Role: RoleMuted})
+	if compact || run.Analysis == nil || run.Analysis.Capacity.Placement == nil {
+		return
+	}
+	placement := run.Analysis.Capacity.Placement
+	const gib = 1024 * 1024 * 1024
+	w.line(Span{Text: "runtime accel", Role: RoleMuted}, Span{Text: fmt.Sprintf("  %.2f GB (%.1f%% of runtime allocation)",
+		float64(placement.AcceleratorBytes)/gib, placement.AcceleratorPercent), Role: RoleDefault})
+	w.line(Span{Text: "non-accel  ", Role: RoleMuted}, Span{Text: fmt.Sprintf("  %.2f GB (derived remainder)",
+		float64(placement.NonAcceleratorBytes)/gib), Role: RoleDefault})
+	boundary := strings.SplitN(placement.Boundary, "; ", 2)
+	w.line(Span{Text: "            " + boundary[0] + ";", Role: RoleMuted})
+	if len(boundary) == 2 {
+		w.line(Span{Text: "            " + boundary[1], Role: RoleMuted})
+	}
+}
+
+func renderResultAnalysis(w *lineWriter, run Run) {
+	if run.Analysis == nil {
+		return
+	}
+	for _, diagnosis := range run.Analysis.Diagnoses {
+		w.line(Span{Text: "observed   ", Role: RoleMuted},
+			Span{Text: analysis.DiagnosisLabel(diagnosis.Code) + ": " + diagnosis.Statement, Role: RoleDefault})
+	}
+}
+
+func renderAnalysisMetric(w *lineWriter, label string, observation analysis.PerformanceObservation, glyphs Glyphs) {
+	if observation.Estimate == nil {
+		return
+	}
+	w.line(resultMetricSpans(label, *observation.Estimate, 0, observation.SampleCount,
+		"s", observation.Samples, observation, glyphs)...)
+}
+
+func resultMetricSpans(name string, fallback, fallbackSD float64, fallbackN int, unit string,
+	series []float64, observation analysis.PerformanceObservation, glyphs Glyphs) []Span {
+	value, sd, sampleCount := fallback, fallbackSD, fallbackN
+	hasSD := fallbackN > 1
+	if observation.Estimate != nil {
+		value, sampleCount = *observation.Estimate, observation.SampleCount
+		hasSD = observation.SD != nil
+		if hasSD {
+			sd = *observation.SD
+		}
+		if len(observation.Samples) > 0 {
+			series = observation.Samples
+		}
+	}
+	valueText := fmt.Sprintf("%8.2f %s", value, unit)
+	if hasSD {
+		valueText = fmt.Sprintf("%8.2f ± %.2f %s", value, sd, unit)
+	}
+	if sampleCount > 0 {
+		valueText += fmt.Sprintf("  n=%d", sampleCount)
+	}
+	qualifier := ""
+	if observation.Status == analysis.StatusDescriptiveOnly {
+		name += " [descriptive]"
+		qualifier = " via " + analysis.AcquisitionLabel(observation.Acquisition)
+	}
+	spans := []Span{{Text: fmt.Sprintf("%-24s", name), Role: RoleMuted}, {Text: valueText, Role: RoleDefault}}
+	if qualifier != "" {
+		spans = append(spans, Span{Text: qualifier, Role: RoleMuted})
+	}
+	if len(series) > 0 {
+		spans = append(spans, Span{Text: "  " + sparkline(series, 12, glyphs), Role: RoleAccent})
+	}
+	return spans
 }
 
 func residentContextLabel(ctx int) string {
@@ -331,10 +496,13 @@ func renderResultWarnings(w *lineWriter, run Run) bool {
 			return false
 		}
 	}
+	return true
+}
+
+func renderResultNext(w *lineWriter, run Run) {
 	if run.NextCommand != "" {
 		w.line(Span{Text: "next       ", Role: RoleMuted}, Span{Text: run.NextCommand, Role: RoleAccent})
 	}
-	return true
 }
 
 func renderResultVerdicts(w *lineWriter, run Run, width int) {
@@ -368,8 +536,13 @@ func renderBoard(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: emptyFilterMessage(state), Role: RoleMuted})
 		return
 	}
-	if !w.line(Span{Text: fmt.Sprintf("BOARD  %d comparable group(s)  sort %s", len(groups), state.BoardSort), Role: RoleHeader}) {
+	if !w.line(Span{Text: fmt.Sprintf("BOARD  %d comparable group(s)  sort %s%s", len(groups), state.BoardSort, filterSuffix(state.Filter)), Role: RoleHeader}) {
 		return
+	}
+	if canvas.Width >= 80 {
+		if !w.line(Span{Text: "columns  model / build | relative bar | decode tok/s | SD | N", Role: RoleMuted}) {
+			return
+		}
 	}
 	offset := state.Offset[ViewBoard]
 	rowIndex := 0
@@ -453,7 +626,7 @@ func boardRowSpans(run Run, selected bool, ceiling float64, width int, glyphs Gl
 		{Text: fmt.Sprintf(" %6.2f", run.DecodeMean), Role: RoleDefault},
 	}
 	if width >= 80 {
-		spans = append(spans, Span{Text: fmt.Sprintf("  sd %-5.2f  k %-2d", run.DecodeSD, run.Repeats), Role: RoleMuted})
+		spans = append(spans, Span{Text: fmt.Sprintf("  SD %-5.2f  N %-2d", run.DecodeSD, run.Repeats), Role: RoleMuted})
 	}
 	if width >= 110 {
 		spans = append(spans,
@@ -481,7 +654,7 @@ func renderHistory(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: emptyFilterMessage(state), Role: RoleMuted})
 		return
 	}
-	w.line(Span{Text: fmt.Sprintf("HISTORY  %d run(s)  sort %s", len(runs), state.HistorySort), Role: RoleHeader})
+	w.line(Span{Text: fmt.Sprintf("HISTORY  %d run(s)  sort %s%s", len(runs), state.HistorySort, filterSuffix(state.Filter)), Role: RoleHeader})
 	offset := min(state.Offset[ViewHistory], max(len(runs)-1, 0))
 	for _, run := range runs[offset:] {
 		selected := run.ID == state.Selected[ViewHistory]
@@ -522,7 +695,12 @@ func renderHistory(canvas *Canvas, state State, glyphs Glyphs) {
 func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
 	w := contentWriter(canvas)
 	items := VisibleInventory(state)
-	w.line(Span{Text: "INVENTORY  installed models, not a ranking", Role: RoleHeader})
+	w.line(Span{Text: "INVENTORY  installed models, not a ranking" + filterSuffix(state.Filter), Role: RoleHeader})
+	observed := "observed " + state.Snapshot.UpdatedAt.UTC().Format("15:04:05Z") + "; r reload"
+	w.line(Span{Text: observed, Role: RoleMuted})
+	if state.Snapshot.InventoryWarning != "" {
+		w.line(Span{Text: "warning  ", Role: RoleWarning}, Span{Text: state.Snapshot.InventoryWarning, Role: RoleDefault})
+	}
 	if len(items) == 0 {
 		msg := "no models listed; start a runtime or pull a model"
 		if strings.TrimSpace(state.Filter) != "" {
@@ -539,7 +717,7 @@ func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
 			break
 		}
 	}
-	w.line(Span{Text: "* loaded   CTX measured/serving   Enter opens a measured result   board still ranks only comparable runs", Role: RoleMuted})
+	w.line(Span{Text: "[L] loaded   CTX measured/serving   Enter opens a measured result   board still ranks only comparable runs", Role: RoleMuted})
 }
 
 func renderInventoryItem(w *lineWriter, item InventoryItem, selected bool, width int, glyphs Glyphs) bool {
@@ -549,7 +727,7 @@ func renderInventoryItem(w *lineWriter, item InventoryItem, selected bool, width
 	}
 	name := item.Model
 	if item.Loaded {
-		name = "* " + name
+		name = "[L] " + name
 	}
 	line := prefix + padCells(clipCells(name, 22, glyphs.Ellipsis), 22)
 	line += "  " + padCells(item.State, 12)
@@ -568,6 +746,13 @@ func renderInventoryItem(w *lineWriter, item InventoryItem, selected bool, width
 		return false
 	}
 	return true
+}
+
+func filterSuffix(filter string) string {
+	if filter = strings.TrimSpace(filter); filter != "" {
+		return fmt.Sprintf("  filter %q", filter)
+	}
+	return ""
 }
 
 func inventoryFitLabel(label string) string {
@@ -620,29 +805,44 @@ func renderComparison(canvas *Canvas, state State) {
 	w.line(Span{Text: "Use fitr compare for confidence intervals and paired tests.", Role: RoleMuted})
 }
 
-func renderHelp(canvas *Canvas, _ State, _ Glyphs) {
+func renderHelp(canvas *Canvas, state State, _ Glyphs) {
 	w := contentWriter(canvas)
-	w.line(Span{Text: "KEYS", Role: RoleHeader})
+	w.line(Span{Text: "CURRENT VIEW  " + strings.ToUpper(state.View.String()), Role: RoleHeader})
+	for _, item := range helpForView(state.View) {
+		if !w.line(Span{Text: item, Role: RoleDefault}) {
+			return
+		}
+	}
+	w.line(Span{Text: "COMMON", Role: RoleHeader})
 	items := []string{
-		"1-5 / Tab       switch view",
-		"arrows / j k    move selection",
-		"h l             previous or next view",
-		"PgUp PgDn       move one page",
-		"Home End / g G  first or last",
-		"Enter Esc       open or go back",
-		"/ / Ctrl+U      filter or clear filter",
-		"s               cycle sort",
-		"Space           pause Live display updates",
-		"Space / c       mark or compare History runs",
-		"r               reload saved results",
-		"Ctrl+L          force complete redraw",
-		"? / F1          close this help",
-		"q               quit",
+		"1-5 / Tab        switch view",
+		"h / l            previous / next view",
+		"r                reload saved results",
+		"Ctrl+L           force complete redraw",
+		"? / F1           close help",
+		"q                quit",
 	}
 	for _, item := range items {
 		if !w.line(Span{Text: item, Role: RoleDefault}) {
 			break
 		}
+	}
+}
+
+func helpForView(view View) []string {
+	switch view {
+	case ViewLive:
+		return []string{"Space            pause / resume display updates", "Enter            open completed Result"}
+	case ViewResult:
+		return []string{"j / k            previous / next saved result", "Esc              return to History"}
+	case ViewBoard:
+		return []string{"j / k, PgUp/Dn   move selection", "Enter            open selected evidence", "/                edit filter", "Ctrl+U           clear filter", "s                cycle group-local sort"}
+	case ViewHistory:
+		return []string{"j / k, PgUp/Dn   move selection", "Enter            open selected evidence", "Space            mark comparison baseline", "c                compare with baseline", "/                edit filter", "Ctrl+U           clear filter", "s                cycle sort"}
+	case ViewInventory:
+		return []string{"j / k, PgUp/Dn   move selection", "Enter            open measured evidence", "/                edit filter", "Ctrl+U           clear filter"}
+	default:
+		return nil
 	}
 }
 
@@ -655,17 +855,36 @@ func renderFooter(canvas *Canvas, state State) {
 	case state.EditingFilter:
 		spans = []Span{{Text: " / " + state.Filter, Role: RoleAccent}, {Text: "  Enter apply  Esc close", Role: RoleMuted}}
 	case state.Error != "":
-		spans = []Span{{Text: " error: ", Role: RoleFail}, {Text: state.Error, Role: RoleDefault}}
+		spans = []Span{{Text: " error: ", Role: RoleFail}, {Text: state.Error, Role: RoleDefault},
+			{Text: "  r retry  ? help  q quit", Role: RoleMuted}}
 	default:
 		if state.Comparison != nil {
 			spans = []Span{{Text: " Esc/Enter/c close comparison  ? help  q quit", Role: RoleMuted}}
-		} else if state.View == ViewHistory {
-			spans = []Span{{Text: " Space baseline  c compare  Enter open  / filter  s sort  ? help  q quit", Role: RoleMuted}}
 		} else {
-			spans = []Span{{Text: " 1-5 views  j/k move  Enter open  / filter  s sort  ? help  q quit", Role: RoleMuted}}
+			spans = footerForView(state)
 		}
 	}
 	canvas.SetLine(canvas.Height-1, spans...)
+}
+
+func footerForView(state State) []Span {
+	var text string
+	switch state.View {
+	case ViewLive:
+		text = " Space pause  ? help  q quit"
+		if state.Snapshot.Live.Completed {
+			text = " Enter result  ? help  q quit"
+		}
+	case ViewResult:
+		text = " Esc history  j/k result  ? help  q quit"
+	case ViewBoard:
+		text = " j/k move  Enter open  / filter  s sort  ? help  q quit"
+	case ViewHistory:
+		text = " Space baseline  c compare  Enter open  / filter  s sort  ? help  q quit"
+	case ViewInventory:
+		text = " j/k move  Enter evidence  / filter  ? help  q quit"
+	}
+	return []Span{{Text: text, Role: RoleMuted}}
 }
 
 func metricSpans(name string, value float64, unit string, series []float64, glyphs Glyphs) []Span {

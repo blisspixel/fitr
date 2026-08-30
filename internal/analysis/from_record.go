@@ -81,7 +81,7 @@ func fromValidatedRecordWithDisplayOnly(result *record.Record, displayOnly displ
 		Capacity:    capacityFrom(result, unclaimable),
 	}
 	report.Gaps = gapsFrom(result, report, displayOnly)
-	report.Diagnoses = diagnosesFrom(result)
+	report.Diagnoses = diagnosesFrom(result, unclaimable)
 	report.NextActions = nextActionsFrom(result, unclaimable)
 	return report
 }
@@ -101,6 +101,7 @@ func contextFrom(result *record.Record) Context {
 
 func performanceFrom(result *record.Record, identityUnbound bool) Performance {
 	decode, prefill, ttft := speedValues(result.Speed)
+	runtimeUnloadedTTFT, runtimeLoad, loadedCacheHitTTFT := latencyStateValues(result)
 	decodeSupport := []SupportClaim(nil)
 	if result.DecodeSum.N > 0 {
 		decodeSupport = []SupportClaim{ClaimObservedDecode}
@@ -114,8 +115,12 @@ func performanceFrom(result *record.Record, identityUnbound bool) Performance {
 	}
 	ttftSupport := []SupportClaim(nil)
 	if result.TTFTSum.N > 0 {
-		ttftSupport = []SupportClaim{ClaimObservedLoadedTTFT}
-		if cacheEligibility(result.Speed, ttftCacheReceipt) == cacheVerifiedUncached {
+		ttftSupport = []SupportClaim{ClaimObservedRequestTTFT}
+		loaded := ttftResidencyEligibility(result.Speed) == residencyVerifiedLoaded
+		if loaded {
+			ttftSupport = append(ttftSupport, ClaimObservedLoadedTTFT)
+		}
+		if loaded && cacheEligibility(result.Speed, ttftCacheReceipt) == cacheVerifiedUncached {
 			ttftSupport = append(ttftSupport, ClaimLoadedUncachedTTFT)
 		}
 	}
@@ -127,7 +132,39 @@ func performanceFrom(result *record.Record, identityUnbound bool) Performance {
 			timingAcquisition(result.Speed), prefillSupport, contaminated, false),
 		TTFTSeconds: observation(result.TTFTSum, ttft, UnitSeconds,
 			AcquisitionClientWallClock, ttftSupport, contaminated, false),
+		RuntimeUnloadedTTFTSeconds: observationFromValues(runtimeUnloadedTTFT, UnitSeconds,
+			AcquisitionClientWallClock, ClaimObservedRuntimeUnloadedTTFT, contaminated),
+		RuntimeLoadSeconds: observationFromValues(runtimeLoad, UnitSeconds,
+			AcquisitionRuntimeReported, ClaimObservedRuntimeLoadTime, contaminated),
+		LoadedCacheHitTTFTSeconds: observationFromValues(loadedCacheHitTTFT, UnitSeconds,
+			AcquisitionClientWallClock, ClaimObservedLoadedCacheHitTTFT, contaminated),
 	}
+}
+
+func latencyStateValues(result *record.Record) (runtimeUnloadedTTFT, runtimeLoad, loadedCacheHitTTFT []float64) {
+	ollamaLoadReceipt := result.Manifest != nil && result.Manifest.Provenance != nil &&
+		result.Manifest.Provenance.BackendProtocol == record.BackendProtocolOllama
+	for _, sample := range result.Speed {
+		if ollamaLoadReceipt && sample.ColdLoad > 0.1 {
+			runtimeLoad = append(runtimeLoad, sample.ColdLoad)
+			if sample.ColdTTFT > 0 {
+				runtimeUnloadedTTFT = append(runtimeUnloadedTTFT, sample.ColdTTFT)
+			}
+		}
+		if sample.WarmTTFT > 0 && sample.WarmCacheReceiptValid() {
+			loadedCacheHitTTFT = append(loadedCacheHitTTFT, sample.WarmTTFT)
+		}
+	}
+	return runtimeUnloadedTTFT, runtimeLoad, loadedCacheHitTTFT
+}
+
+func observationFromValues(values []float64, unit Unit, acquisition Acquisition,
+	support SupportClaim, descriptiveOnly bool) PerformanceObservation {
+	var supports []SupportClaim
+	if len(values) > 0 {
+		supports = []SupportClaim{support}
+	}
+	return observation(stats.MeanSD(values), values, unit, acquisition, supports, descriptiveOnly, false)
 }
 
 func observation(summary stats.Summary, samples []float64, unit Unit, acquisition Acquisition,
@@ -193,7 +230,8 @@ func capacityFrom(result *record.Record, identityUnbound bool) Capacity {
 	if !result.TaskPlan.Memory || memory.RequestedCtx <= 0 {
 		return Capacity{}
 	}
-	if _, verified := memory.VerifiedAt(memory.RequestedCtx); !verified {
+	allocation, verified := memory.VerifiedAllocationAt(memory.RequestedCtx)
+	if !verified {
 		return Capacity{}
 	}
 	status := StatusAvailable
@@ -203,11 +241,37 @@ func capacityFrom(result *record.Record, identityUnbound bool) Capacity {
 		supports = nil
 	}
 	return Capacity{Resident: &ResidentObservation{
-		Estimate: int64Pointer(memory.ResidentBytes), Unit: UnitBytes,
+		Estimate: int64Pointer(allocation.ResidentBytes), Unit: UnitBytes,
 		Status: status, Acquisition: AcquisitionRuntimeAllocation,
 		RequestedContext: memory.RequestedCtx, EffectiveContext: cloneInt(memory.EffectiveCtx),
 		Supports: supports,
-	}}
+	}, Placement: placementFrom(allocation, status, identityUnbound || len(result.Contamination) > 0)}
+}
+
+func placementFrom(allocation eval.VerifiedAllocation, status ObservationStatus,
+	descriptiveOnly bool) *PlacementObservation {
+	// Schema 6 has no presence bit for accelerator bytes. Zero therefore cannot
+	// distinguish an explicit CPU-only classification from a missing field.
+	if allocation.AcceleratorBytes <= 0 {
+		return nil
+	}
+	percent := 100 * float64(allocation.AcceleratorBytes) / float64(allocation.ResidentBytes)
+	kind := PlacementAcceleratorSharePartial
+	if allocation.AcceleratorBytes == allocation.ResidentBytes {
+		kind = PlacementAcceleratorShareFull
+	}
+	supports := []SupportClaim{ClaimExactContextAcceleratorBytes, ClaimExactContextPlacement}
+	if descriptiveOnly {
+		supports = nil
+	}
+	return &PlacementObservation{
+		AcceleratorBytes:    allocation.AcceleratorBytes,
+		NonAcceleratorBytes: allocation.ResidentBytes - allocation.AcceleratorBytes,
+		AcceleratorPercent:  percent, Kind: kind, Status: status,
+		Acquisition: AcquisitionRuntimeAllocation, RemainderAcquisition: AcquisitionClientDerived,
+		RequestedContext: allocation.RequestedCtx, EffectiveContext: intPointer(allocation.EffectiveCtx),
+		Supports: supports, Boundary: AllocationAttributionBoundary,
+	}
 }
 
 type cacheStatus int
@@ -218,6 +282,32 @@ const (
 	cacheHit
 	cacheUnknownAndHit
 )
+
+type residencyStatus int
+
+const (
+	residencyVerifiedLoaded residencyStatus = iota
+	residencyUnknown
+	residencyNotResident
+)
+
+func ttftResidencyEligibility(results []eval.SpeedResult) residencyStatus {
+	if len(results) == 0 {
+		return residencyUnknown
+	}
+	unknown, notResident := false, false
+	for _, result := range results {
+		unknown = unknown || !result.GatedResidencyKnown
+		notResident = notResident || result.GatedResidencyKnown && !result.GatedResident
+	}
+	if notResident {
+		return residencyNotResident
+	}
+	if unknown {
+		return residencyUnknown
+	}
+	return residencyVerifiedLoaded
+}
 
 type cacheReceipt func(eval.SpeedResult) (valid, hit bool)
 
@@ -261,13 +351,60 @@ func gapsFrom(result *record.Record, report Report, displayOnly displayOnlyReaso
 			"the saved copy is not reconciled with canonical current history, so measurements remain descriptive only"))
 	}
 	gaps = appendUnavailablePerformanceGaps(gaps, report.Performance)
+	gaps = appendTTFTResidencyGaps(gaps, result.Speed)
 	gaps = appendCacheGaps(gaps, result.Speed)
+	gaps = appendLatencyStateGaps(gaps, result, report.Performance)
 	if lowPerformanceSampleCount(report.Performance) {
 		gaps = append(gaps, gap(GapPerformanceSampleCountLow, "performance",
 			"fewer than three observations cannot establish stable performance", ClaimStablePerformance))
 	}
 	gaps = appendCapacityGaps(gaps, result)
+	if report.Capacity.Resident != nil && report.Capacity.Placement == nil {
+		gaps = append(gaps, gap(GapPlacementUnavailable, "capacity",
+			"schema 6 cannot distinguish a missing accelerator byte field from an explicit zero; allocation attribution is unavailable",
+			ClaimExactContextAcceleratorBytes, ClaimExactContextPlacement))
+	}
 	sort.Slice(gaps, func(i, j int) bool { return gaps[i].Code < gaps[j].Code })
+	return gaps
+}
+
+func appendTTFTResidencyGaps(gaps []EvidenceGap, results []eval.SpeedResult) []EvidenceGap {
+	if len(results) == 0 {
+		return gaps
+	}
+	switch ttftResidencyEligibility(results) {
+	case residencyUnknown:
+		return append(gaps, gap(GapTTFTResidencyUnknown, "performance",
+			"the gated request has no runtime residency receipt, so its latency is request TTFT, not proven loaded TTFT",
+			ClaimObservedLoadedTTFT, ClaimLoadedUncachedTTFT))
+	case residencyNotResident:
+		return append(gaps, gap(GapTTFTNotResident, "performance",
+			"the runtime did not report the model resident immediately before at least one gated request, so the aggregate is request TTFT, not loaded TTFT",
+			ClaimObservedLoadedTTFT, ClaimLoadedUncachedTTFT))
+	default:
+		return gaps
+	}
+}
+
+func appendLatencyStateGaps(gaps []EvidenceGap, result *record.Record, performance Performance) []EvidenceGap {
+	if result.TaskPlan.SpeedSamples <= 0 {
+		return gaps
+	}
+	if performance.RuntimeUnloadedTTFTSeconds.Estimate == nil {
+		gaps = append(gaps, gap(GapRuntimeUnloadedTTFTUnavailable, "performance",
+			"runtime-unloaded TTFT was not observed; operating-system page-cache state is not measured",
+			ClaimObservedRuntimeUnloadedTTFT))
+	}
+	if performance.RuntimeLoadSeconds.Estimate == nil {
+		gaps = append(gaps, gap(GapRuntimeLoadUnavailable, "performance",
+			"the backend did not provide a versioned runtime-load duration receipt",
+			ClaimObservedRuntimeLoadTime))
+	}
+	if performance.LoadedCacheHitTTFTSeconds.Estimate == nil {
+		gaps = append(gaps, gap(GapLoadedCacheHitTTFTUnavailable, "performance",
+			"no positive cached-token receipt established this latency state",
+			ClaimObservedLoadedCacheHitTTFT))
+	}
 	return gaps
 }
 
@@ -282,7 +419,8 @@ func appendUnavailablePerformanceGaps(gaps []EvidenceGap, performance Performanc
 	}
 	if performance.TTFTSeconds.Estimate == nil {
 		gaps = append(gaps, gap(GapTTFTUnavailable, "performance",
-			"loaded time to first token was not observed", ClaimObservedLoadedTTFT, ClaimLoadedUncachedTTFT))
+			"request time to first token was not observed", ClaimObservedRequestTTFT,
+			ClaimObservedLoadedTTFT, ClaimLoadedUncachedTTFT))
 	}
 	return gaps
 }
@@ -347,7 +485,7 @@ func gap(code GapCode, section, message string, claims ...SupportClaim) Evidence
 		UnsupportedClaims: append([]SupportClaim(nil), claims...)}
 }
 
-func diagnosesFrom(result *record.Record) []Diagnosis {
+func diagnosesFrom(result *record.Record, unclaimable bool) []Diagnosis {
 	var diagnoses []Diagnosis
 	if len(result.Contamination) > 0 {
 		diagnoses = append(diagnoses, Diagnosis{
@@ -362,6 +500,17 @@ func diagnosesFrom(result *record.Record) []Diagnosis {
 			Statement: "the runtime reported an effective context different from the request",
 			Evidence:  []string{"device_fingerprint_v2.context"},
 		})
+	}
+	if !unclaimable && result.TaskPlan.Memory && result.Memory.RequestedCtx > 0 {
+		if allocation, ok := result.Memory.VerifiedAllocationAt(result.Memory.RequestedCtx); ok &&
+			allocation.AcceleratorBytes > 0 && allocation.AcceleratorBytes < allocation.ResidentBytes {
+			diagnoses = append(diagnoses, Diagnosis{
+				Code:      DiagnosisPartialPlacement,
+				Statement: "the runtime reported a partial accelerator share at the exact-context allocation point",
+				Evidence: []string{"memory.resident_bytes", "memory.accelerator_bytes",
+					"memory.requested_ctx", "memory.effective_ctx"},
+			})
+		}
 	}
 	sort.Slice(diagnoses, func(i, j int) bool { return diagnoses[i].Code < diagnoses[j].Code })
 	return diagnoses
@@ -424,6 +573,7 @@ func toolsBlocked(card score.Scorecard) bool {
 
 func float64Pointer(value float64) *float64 { return &value }
 func int64Pointer(value int64) *int64       { return &value }
+func intPointer(value int) *int             { return &value }
 
 func cloneInt(value *int) *int {
 	if value == nil {

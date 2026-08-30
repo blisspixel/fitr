@@ -23,6 +23,7 @@ type fakeTurn struct {
 }
 
 type fakeBackend struct {
+	name          string
 	turns         []fakeTurn
 	i             int
 	gens          []ollama.Metrics
@@ -35,19 +36,28 @@ type fakeBackend struct {
 	generateErrAt map[int]error
 	chatErrAt     map[int]error
 	showErr       error
+	running       []ollama.RunningModel
+	psErr         error
 	chatHook      func(int)
 	messagesSeen  [][]ollama.Message
 }
 
 var _ llm.Backend = (*fakeBackend)(nil)
 
-func (f *fakeBackend) Name() string                                          { return "fake" }
-func (f *fakeBackend) URL() string                                           { return "fake://" }
-func (f *fakeBackend) Version(ctx context.Context) string                    { return "fake 1" }
-func (f *fakeBackend) Reachable(ctx context.Context) bool                    { return true }
-func (f *fakeBackend) StopAll(ctx context.Context) ([]string, error)         { return nil, nil }
-func (f *fakeBackend) Tags(ctx context.Context) ([]ollama.ModelInfo, error)  { return nil, nil }
-func (f *fakeBackend) PS(ctx context.Context) ([]ollama.RunningModel, error) { return nil, nil }
+func (f *fakeBackend) Name() string {
+	if f.name != "" {
+		return f.name
+	}
+	return "fake"
+}
+func (f *fakeBackend) URL() string                                          { return "fake://" }
+func (f *fakeBackend) Version(ctx context.Context) string                   { return "fake 1" }
+func (f *fakeBackend) Reachable(ctx context.Context) bool                   { return true }
+func (f *fakeBackend) StopAll(ctx context.Context) ([]string, error)        { return nil, nil }
+func (f *fakeBackend) Tags(ctx context.Context) ([]ollama.ModelInfo, error) { return nil, nil }
+func (f *fakeBackend) PS(ctx context.Context) ([]ollama.RunningModel, error) {
+	return f.running, f.psErr
+}
 func (f *fakeBackend) Show(ctx context.Context, model string) (ollama.ModelInfo, error) {
 	if f.showErr != nil {
 		return ollama.ModelInfo{}, f.showErr
@@ -191,7 +201,7 @@ func TestWarmPrefixTTFTUsesTheCacheReceipt(t *testing.T) {
 
 func assertUncachedSpeedReceipt(t *testing.T, s *Spec) {
 	t.Helper()
-	f := &fakeBackend{gens: []ollama.Metrics{
+	f := &fakeBackend{name: "ollama", running: []ollama.RunningModel{{Name: "m"}}, gens: []ollama.Metrics{
 		{TTFTSeconds: 4.0, LoadSeconds: 3.5},
 		{TTFTSeconds: 0.9, DecodeTPS: 23, CacheKnown: true, CachedTokens: 0, PromptTokens: 80},
 		{TTFTSeconds: 0.12, CacheKnown: true, CachedTokens: 78, PromptTokens: 2},
@@ -218,6 +228,33 @@ func assertUncachedSpeedReceipt(t *testing.T, s *Spec) {
 	}
 	if r.GatedTTFTContaminated() {
 		t.Fatal("an uncached gated prompt must not be labeled a cache hit")
+	}
+	if !r.GatedLoadKnown || r.GatedLoad != 0 {
+		t.Fatalf("gated load receipt = known %v, load %.2f", r.GatedLoadKnown, r.GatedLoad)
+	}
+	if !r.GatedResidencyKnown || !r.GatedResident {
+		t.Fatalf("gated residency receipt = known %v, resident %v", r.GatedResidencyKnown, r.GatedResident)
+	}
+}
+
+func TestGatedRequestReloadIsReceiptedSeparatelyFromWarmup(t *testing.T) {
+	s, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &fakeBackend{name: "ollama", gens: []ollama.Metrics{
+		{TTFTSeconds: 0.8, LoadSeconds: 0},
+		{TTFTSeconds: 1.2, LoadSeconds: 0.7, DecodeTPS: 23, CacheKnown: true, PromptTokens: 80},
+		{TTFTSeconds: 0.1, CacheKnown: true, CachedTokens: 78, PromptTokens: 2},
+		{PrefillTPS: 220, PromptTokens: 2800},
+	}}
+	result, err := RunSpeed(context.Background(), backend, "m", s, "nonce-reload")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.GatedLoadKnown || result.GatedLoad != 0.7 || result.ColdTTFT != 0 ||
+		!result.GatedResidencyKnown || result.GatedResident {
+		t.Fatalf("gated/warmup load receipt = %+v", result)
 	}
 }
 

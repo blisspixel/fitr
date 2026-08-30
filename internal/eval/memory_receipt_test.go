@@ -37,4 +37,17 @@ func TestMemoryResultReceiptValidation(t *testing.T) {
 	if _, ok := valid.VerifiedAt(8192); ok {
 		t.Fatal("32K receipt was reused at 8K")
 	}
+	allocation, ok := valid.VerifiedAllocationAt(32768)
+	if !ok || allocation.ResidentBytes != 20<<30 || allocation.AcceleratorBytes != 15<<30 ||
+		allocation.RequestedCtx != 32768 || allocation.EffectiveCtx != 32768 {
+		t.Fatalf("verified allocation = %+v, %v", allocation, ok)
+	}
+	if _, ok := valid.VerifiedAllocationAt(8192); ok {
+		t.Fatal("32K allocation was reused at 8K")
+	}
+	invalid := valid
+	invalid.PctOnGPU = 74
+	if _, ok := invalid.VerifiedAllocationAt(32768); ok {
+		t.Fatal("an internally inconsistent receipt was returned as verified")
+	}
 }

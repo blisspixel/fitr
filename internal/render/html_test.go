@@ -78,6 +78,36 @@ func TestHTMLSeparatesPerformanceAndVerifiedCapacity(t *testing.T) {
 	}
 }
 
+func TestHTMLMarksDescriptiveOnlyEvidenceAndSource(t *testing.T) {
+	artifact := sampleArtifact()
+	decode, ttft := artifact.Meta.DecodeMean, artifact.Meta.TTFTMean
+	resident := int64(artifact.Meta.ResidentGB * 1024 * 1024 * 1024)
+	artifact.Meta.Analysis = &analysis.Report{
+		Performance: analysis.Performance{
+			DecodeTPS: analysis.PerformanceObservation{Estimate: &decode, Status: analysis.StatusDescriptiveOnly,
+				Acquisition: analysis.AcquisitionRuntimeReported, SampleCount: 1},
+			TTFTSeconds: analysis.PerformanceObservation{Estimate: &ttft, Status: analysis.StatusDescriptiveOnly,
+				Acquisition: analysis.AcquisitionClientWallClock, SampleCount: 1},
+		},
+		Capacity: analysis.Capacity{Resident: &analysis.ResidentObservation{
+			Estimate: &resident, Status: analysis.StatusDescriptiveOnly,
+			Acquisition: analysis.AcquisitionRuntimeAllocation,
+		}},
+	}
+	var output bytes.Buffer
+	if err := WriteHTML(&output, artifact); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"request TTFT", "descriptive only; source runtime reported",
+		"descriptive only; source client wall clock", "descriptive only; source runtime allocation",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("HTML missing %q", want)
+		}
+	}
+}
+
 func TestHTMLPerformanceDoesNotRequireDecode(t *testing.T) {
 	a := sampleArtifact()
 	a.Meta.DecodeN = 0
@@ -120,7 +150,7 @@ func TestHTMLCapacityAndPerformanceAreIndependent(t *testing.T) {
 	}
 }
 
-func TestHTMLRendersCentralEvidenceGapCodes(t *testing.T) {
+func TestHTMLRendersFriendlyCentralEvidenceLabels(t *testing.T) {
 	a := sampleArtifact()
 	a.Meta.Analysis = &analysis.Report{Gaps: []analysis.EvidenceGap{{
 		Code:    analysis.GapCapacityPolicyUnsealed,
@@ -133,11 +163,56 @@ func TestHTMLRendersCentralEvidenceGapCodes(t *testing.T) {
 	got := buf.String()
 	for _, want := range []string{
 		"<h2>Evidence limits</h2>",
-		"capacity.policy_unsealed",
+		"usable capacity",
 		"resident bytes cannot establish headroom or fit",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("HTML missing central evidence limit %q", want)
+		}
+	}
+}
+
+func TestHTMLRendersCentralLatencyPlacementAndDiagnosis(t *testing.T) {
+	a := sampleArtifact()
+	cachedTTFT, unloadedTTFT, runtimeLoad := 0.19, 4.82, 3.93
+	resident := int64(20 * 1024 * 1024 * 1024)
+	a.Meta.Analysis = &analysis.Report{
+		Performance: analysis.Performance{
+			LoadedCacheHitTTFTSeconds:  analysis.PerformanceObservation{Estimate: &cachedTTFT, SampleCount: 3},
+			RuntimeUnloadedTTFTSeconds: analysis.PerformanceObservation{Estimate: &unloadedTTFT, SampleCount: 1},
+			RuntimeLoadSeconds:         analysis.PerformanceObservation{Estimate: &runtimeLoad, SampleCount: 1},
+		},
+		Capacity: analysis.Capacity{
+			Resident: &analysis.ResidentObservation{Estimate: &resident, RequestedContext: 32768},
+			Placement: &analysis.PlacementObservation{
+				AcceleratorBytes:    15 * 1024 * 1024 * 1024,
+				NonAcceleratorBytes: 5 * 1024 * 1024 * 1024,
+				AcceleratorPercent:  75,
+				Boundary:            analysis.AllocationAttributionBoundary,
+			},
+		},
+		Diagnoses: []analysis.Diagnosis{{
+			Code:      analysis.DiagnosisPartialPlacement,
+			Statement: "the runtime reported a partial accelerator share at the exact-context allocation point",
+		}},
+	}
+	var buf bytes.Buffer
+	if err := WriteHTML(&buf, a); err != nil {
+		t.Fatal(err)
+	}
+	got := html.UnescapeString(buf.String())
+	for _, want := range []string{
+		"loaded TTFT</th>",
+		"loaded cache-hit TTFT</th><td>0.19 (identical, n=3) s",
+		"runtime-unloaded TTFT</th><td>4.82 (abs, n=1) s",
+		"runtime load</th><td>3.93 (abs, n=1) s",
+		"runtime-attributed accelerator</th><td>15.00 GB (75.0% of runtime allocation)",
+		"non-accelerator</th><td>5.00 GB (derived remainder)",
+		"not proof of exclusive physical pools, layer placement, or host traffic",
+		"allocation attribution",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("HTML missing %q", want)
 		}
 	}
 }

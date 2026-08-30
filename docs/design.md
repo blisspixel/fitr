@@ -48,7 +48,7 @@ and fail another, and one number cannot say that.
 
 | Need | Why separate |
 |---|---|
-| **fast + pretty good** | responsiveness; decode plus uncached, already-loaded TTFT when that cache state is known |
+| **fast + pretty good** | responsiveness; decode plus uncached, already-loaded TTFT when gated-request residency and cache state are proven |
 | **great coding / reasoning** | computed-answer checks today; executable assertions stay INCONCLUSIVE until isolated |
 | **valid structured output** | quantization breaks JSON before prose - the earliest damage signal |
 | **follows exact instructions** | verifiable constraints, graded by code |
@@ -159,10 +159,12 @@ prints "not recommended."
 Current schema-6 results have one derived analysis boundary. After the sealed
 record, completion receipt, profile, summaries, and scorecard validate,
 `fitr.analysis.run.v1` projects requested and effective context, decode,
-prefill, TTFT, exact-context resident bytes, typed evidence gaps, direct
-receipt-state diagnoses, and a semantic next action. CLI, TUI, Board, and HTML
-consume supported subsets of that projection rather than deriving their own
-claims; the compatibility JSON shapes remain unchanged.
+prefill, request TTFT, receipt-proven loaded TTFT, supported runtime-unloaded and cache-hit TTFT states,
+runtime load time, exact-context resident and accelerator allocation bytes,
+typed evidence gaps, direct receipt-state diagnoses, and a semantic next
+action. CLI, TUI, Board, and HTML consume supported subsets of that projection
+rather than deriving their own claims; the compatibility JSON shapes remain
+unchanged.
 
 The analysis is rebuilt from the record and is never written into schema 6 as
 new evidence. Its estimates use pointers so an observed zero is not confused
@@ -173,6 +175,23 @@ the serving runtime remove the affected support claim without deleting the
 observation. Schema 6 has no sealed usable-capacity policy, so the report
 always blocks headroom and fit claims even when resident bytes and a device
 memory value both exist.
+
+Latency states never borrow evidence from one another. Loaded TTFT requires a
+gated-request residency receipt. Runtime-unloaded TTFT and runtime load require
+the versioned Ollama protocol receipt. A loaded
+cache-hit TTFT separately requires a positive cached-token receipt. The
+runtime-unloaded label describes runtime residency only, not operating-system
+page-cache state. Exact-context placement uses runtime-classified accelerator
+bytes and derives only the non-accelerator remainder. On unified-memory systems
+that arithmetic does not identify exclusive pools, spill, layer placement, or
+host traffic.
+
+New results use `fitr.scoring.policy.v5`. Policy v4 keeps auxiliary latency
+states out of behavior-verdict prose; v5 additionally requires the gated
+request's own residency receipt before a loaded-TTFT gate can clear. Sealed
+schema-6 results written with policies v3 and v4 are reconstructed with their
+original scorers and remain valid. The policy hashes are different, so Board
+does not compare across those presentation-contract changes.
 
 - **Small, heterogeneous battery.** The default battery has 22 generated task
   specs across 16 families and five measured needs. Each need has its own

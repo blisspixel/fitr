@@ -329,6 +329,16 @@ type MemoryResult struct {
 	AcceleratorBytes  int64   `json:"accelerator_bytes,omitempty"`
 }
 
+// VerifiedAllocation is one point-specific runtime allocation receipt. The
+// runtime classifies AcceleratorBytes; no field claims an exclusive physical
+// pool, layer count, or absence of host traffic on unified-memory systems.
+type VerifiedAllocation struct {
+	ResidentBytes    int64
+	AcceleratorBytes int64
+	RequestedCtx     int
+	EffectiveCtx     int
+}
+
 // ValidateReceipt checks the point-specific facts added to new memory probes.
 // A zero RequestedCtx identifies a legacy receipt and is validated by its
 // historical evidence contract instead.
@@ -405,8 +415,25 @@ func (r MemoryResult) validateDerivedAllocation() error {
 // confirmed the same effective context. This is the presentation and scoring
 // guard against labeling an arbitrary load as a 32K observation.
 func (r MemoryResult) VerifiedAt(ctx int) (float64, bool) {
-	return r.ResidentGB, r.Outcome == OutcomePass && r.ResidentBytes > 0 &&
-		r.RequestedCtx == ctx && r.EffectiveCtx != nil && *r.EffectiveCtx == ctx
+	_, ok := r.VerifiedAllocationAt(ctx)
+	return r.ResidentGB, ok
+}
+
+// VerifiedAllocationAt returns resident and accelerator bytes only when the
+// runtime confirmed the requested context as the effective context for the
+// same allocation point.
+func (r MemoryResult) VerifiedAllocationAt(ctx int) (VerifiedAllocation, bool) {
+	if r.Outcome != OutcomePass || r.ResidentBytes <= 0 || r.RequestedCtx != ctx ||
+		r.EffectiveCtx == nil || *r.EffectiveCtx != ctx {
+		return VerifiedAllocation{}, false
+	}
+	if err := r.ValidateReceipt(); err != nil {
+		return VerifiedAllocation{}, false
+	}
+	return VerifiedAllocation{
+		ResidentBytes: r.ResidentBytes, AcceleratorBytes: r.AcceleratorBytes,
+		RequestedCtx: r.RequestedCtx, EffectiveCtx: *r.EffectiveCtx,
+	}, true
 }
 
 // RunMemory measures ACTUAL resident bytes at a real context size.

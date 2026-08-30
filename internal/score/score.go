@@ -419,8 +419,8 @@ type Measured struct {
 
 	DecodeTPS  float64
 	TTFT       float64 // loaded, prompt uncached - what the gate judges
-	TTFTCold   float64 // first question of the day: load + prefill + first token
-	TTFTWarm   float64 // same prompt again, prefix cache hit
+	TTFTCold   float64 // retained receipt data; central analysis owns its user-facing claim
+	TTFTWarm   float64 // retained receipt data; central analysis owns its user-facing claim
 	PrefillTPS float64
 	SpeedKnown bool
 	// TTFTCacheContaminated is true when the gated TTFT prompt was mostly
@@ -430,6 +430,10 @@ type Measured struct {
 	// cannot report cache state. Unknown cache state cannot establish the
 	// loaded/uncached latency gate.
 	TTFTCacheKnown bool
+	// TTFTResidencyKnown requires a runtime status receipt for every gated
+	// request. TTFTNotResident records any pre-request status miss.
+	TTFTResidencyKnown bool
+	TTFTNotResident    bool
 	// PrefillCacheKnown requires a valid cache receipt for every long-prompt
 	// sample. PrefillCacheContaminated records any positive cache hit. Unknown
 	// or contaminated timings stay visible but cannot prove an uncached-prefill
@@ -516,8 +520,25 @@ type Scorecard struct {
 }
 
 func Score(m Measured, p device.Profile) Scorecard {
+	return score(m, p, false, true)
+}
+
+// ScoreLegacyV4 reconstructs scorecards written before the gated TTFT request
+// carried its own runtime residency receipt.
+func ScoreLegacyV4(m Measured, p device.Profile) Scorecard {
+	return score(m, p, false, false)
+}
+
+// ScoreLegacyV3 reconstructs sealed schema-6 scorecards written before
+// auxiliary latency states moved out of behavior prose and into central
+// analysis. It exists only for evidence compatibility.
+func ScoreLegacyV3(m Measured, p device.Profile) Scorecard {
+	return score(m, p, true, false)
+}
+
+func score(m Measured, p device.Profile, includeAuxiliaryTTFT, requireTTFTResidency bool) Scorecard {
 	n := map[string]Verdict{}
-	n["fast_and_decent"] = scoreFastAndDecent(m, p)
+	n["fast_and_decent"] = scoreFastAndDecent(m, p, includeAuxiliaryTTFT, requireTTFTResidency)
 
 	n["coding"] = scoreCoding(m)
 
@@ -569,7 +590,7 @@ func Score(m Measured, p device.Profile) Scorecard {
 	return ExcludeContamination(sc, m.Contamination)
 }
 
-func scoreFastAndDecent(m Measured, p device.Profile) Verdict {
+func scoreFastAndDecent(m Measured, p device.Profile, includeAuxiliaryTTFT, requireResidency bool) Verdict {
 	tpsMin, configured := p.Float("fast_chat", "decode_tps_min")
 	if !configured {
 		return skipped("no fast_chat gate in profile")
@@ -582,28 +603,12 @@ func scoreFastAndDecent(m Measured, p device.Profile) Verdict {
 	// would let a warm-prefix figure wear a cold-prompt badge (usually
 	// a false PASS). Exclude it from the gate and say so.
 	decodeOK := m.DecodeTPS >= tpsMin
-	verdictState := state(decodeOK && m.TTFT <= ttftMax)
-	detail := []string{fmt.Sprintf("TTFT %.2fs loaded/cache state unknown (need <=%.1f)", m.TTFT, ttftMax)}
-	note := ""
-	switch {
-	case !m.TTFTCacheKnown:
-		note = "backend did not provide a cache receipt; loaded/uncached TTFT is unproven"
-		if decodeOK {
-			verdictState = Inconclusive
-		}
-	case m.TTFTCacheContaminated:
-		detail[0] = fmt.Sprintf("TTFT %.2fs loaded/partial cache hit (need <=%.1f)", m.TTFT, ttftMax)
-		note = "gated TTFT included cached prompt tokens - not an explicit miss, excluded from the gate"
-		if decodeOK {
-			verdictState = Inconclusive
-		}
-	default:
-		detail[0] = fmt.Sprintf("TTFT %.2fs loaded/uncached (need <=%.1f)", m.TTFT, ttftMax)
-	}
-	if m.TTFTCold > 0 {
+	verdictState, ttftDetail, note := scoreTTFTState(m, ttftMax, decodeOK, requireResidency)
+	detail := []string{ttftDetail}
+	if includeAuxiliaryTTFT && m.TTFTCold > 0 {
 		detail = append(detail, fmt.Sprintf("cold start %.1fs", m.TTFTCold))
 	}
-	if m.TTFTWarm > 0 {
+	if includeAuxiliaryTTFT && m.TTFTWarm > 0 {
 		detail = append(detail, fmt.Sprintf("cached prefix %.2fs", m.TTFTWarm))
 	}
 	if m.TimingsClientDerived {
@@ -611,6 +616,48 @@ func scoreFastAndDecent(m Measured, p device.Profile) Verdict {
 	}
 	return newVerdict(verdictState, fmt.Sprintf("%.2f tok/s", m.DecodeTPS),
 		fmt.Sprintf("need >=%.1f", tpsMin), detail, note)
+}
+
+func scoreTTFTState(m Measured, ttftMax float64, decodeOK, requireResidency bool) (State, string, string) {
+	verdictState := state(decodeOK && m.TTFT <= ttftMax)
+	detail := fmt.Sprintf("TTFT %.2fs loaded/cache state unknown (need <=%.1f)", m.TTFT, ttftMax)
+	note := ""
+	if requireResidency {
+		switch {
+		case !m.TTFTResidencyKnown:
+			detail = fmt.Sprintf("TTFT %.2fs request/residency unknown (need <=%.1f)", m.TTFT, ttftMax)
+			note = "gated request has no runtime residency receipt; loaded TTFT is unproven"
+			if decodeOK {
+				verdictState = Inconclusive
+			}
+		case m.TTFTNotResident:
+			detail = fmt.Sprintf("TTFT %.2fs request/not resident (need <=%.1f)", m.TTFT, ttftMax)
+			note = "runtime did not report the model resident immediately before a gated request; loaded TTFT is unproven"
+			if decodeOK {
+				verdictState = Inconclusive
+			}
+		}
+	}
+	switch {
+	case !m.TTFTCacheKnown:
+		note = joinNote(note, "backend did not provide a cache receipt; loaded/uncached TTFT is unproven")
+		if decodeOK {
+			verdictState = Inconclusive
+		}
+	case m.TTFTCacheContaminated:
+		if !requireResidency || m.TTFTResidencyKnown && !m.TTFTNotResident {
+			detail = fmt.Sprintf("TTFT %.2fs loaded/partial cache hit (need <=%.1f)", m.TTFT, ttftMax)
+		}
+		note = joinNote(note, "gated TTFT included cached prompt tokens - not an explicit miss, excluded from the gate")
+		if decodeOK {
+			verdictState = Inconclusive
+		}
+	default:
+		if !requireResidency || m.TTFTResidencyKnown && !m.TTFTNotResident {
+			detail = fmt.Sprintf("TTFT %.2fs loaded/uncached (need <=%.1f)", m.TTFT, ttftMax)
+		}
+	}
+	return verdictState, detail, note
 }
 
 // scoreCoding keeps executable evidence separate from generated reasoning.

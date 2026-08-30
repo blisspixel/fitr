@@ -61,16 +61,24 @@ Result answers: what can this model do here, and what should happen next?
 
 The order is deliberate:
 
-1. The `use for` statement.
-2. Independent need verdicts with explicit state tokens.
-3. Performance observations and repeat shapes.
-4. The verified resident observation from the requested 32K load probe, when
-   the runtime confirms that effective context.
-5. Per-need uncertainty, family structure, cache, repeat-count, and
+1. Model, configuration, device identity, and the `use for` statement.
+2. Independent need verdicts with explicit state tokens, kept above the longer
+   diagnostic sections. Below 32 rows they become an explicit state-count
+   summary with failed, blocked, and inconclusive needs called out, so a full
+   battery cannot silently push performance and capacity out of view.
+3. The next useful command, kept above secondary diagnostics.
+4. Performance observations and repeat shapes, with request TTFT,
+   receipt-proven loaded TTFT, runtime-unloaded TTFT, and verified loaded
+   cache-hit TTFT kept separate.
+5. The verified resident and allocation-attribution observation from the
+   requested 32K load probe, when the runtime confirms that effective context.
+   The non-accelerator value is a derived remainder, not a spill claim.
+6. Direct receipt-state diagnoses and the selected evidence gaps that are most
+   useful in the bounded TUI viewport. The full analysis contract remains
+   available in CLI and HTML output.
+7. Per-need uncertainty, family structure, cache, repeat-count, and
    contamination disclosures. Unrelated needs are never combined into one
    global resolution claim.
-6. Device, runtime, quant, context, and profile identity.
-7. The next useful command.
 
 Color never replaces `[PASS]`, `[FAIL]`, `[SKIP]`, `n/a`, or `[BLKD]`.
 
@@ -130,15 +138,27 @@ Layout uses terminal-cell width, not byte or rune count.
 
 | Terminal size | Behavior |
 |---|---|
-| Width 120 or greater | Full data table, graphs, and selected detail |
-| Width 80 to 119 | One primary table with selected detail below |
-| Width 56 to 79 | Stacked compact cards with exact values |
+| Width 120 or greater | Full width-qualified tables, values, and supported graphs |
+| Width 80 to 119 | One primary column; Result uses a compact full-battery summary below 32 rows |
+| Width 56 to 79 | Priority-trimmed rows with exact primary values and explicit truncation |
 | Width below 56 or height below 14 | Tiny safe view with identity, state, `?`, and `q` |
 
 Decoration disappears before measurements. Graphs disappear before exact
 numbers. Tables never wrap one logical row into an ambiguous second row.
 Hostile control sequences are removed before layout, and long names are
-truncated by display cells.
+truncated by display cells with a visible ellipsis. Deliberate spacing remains
+present in no-color output, so style is never the only field separator.
+
+Board includes a compact measurement legend for decode tok/s, SD, and N.
+Result labels every displayed performance observation with `n`; a single
+runtime-unloaded sample is not visually equivalent to a repeated estimate.
+The footer and `?` help are view-specific and never advertise a no-op key.
+
+A selected-detail pane is planned, not claimed as shipped. At 120 columns and
+above it will sit beside Board, History, and Inventory; at 80 to 119 it will
+stack below; narrower terminals will open detail as its own surface. Until
+that contract ships, the current single-column layouts remain the documented
+behavior.
 
 `NO_COLOR` removes color while retaining text and selection shape. Any
 non-empty `FITR_ASCII` replaces structural Unicode -- rules, bars, selection

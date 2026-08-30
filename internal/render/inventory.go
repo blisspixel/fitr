@@ -200,7 +200,7 @@ func writeInventoryTable(w io.Writer, inv Inventory, width int, p palette, g gly
 func writeInventoryRow(w io.Writer, row InventoryRow, width, modelWidth int, p palette, g glyphs) {
 	name := row.Model
 	if row.Loaded {
-		name = "* " + name
+		name = "[L] " + name
 	}
 	state, style := inventoryState(row, p)
 	ctxCol := row.Ctx
@@ -215,8 +215,9 @@ func writeInventoryRow(w io.Writer, row InventoryRow, width, modelWidth int, p p
 		pad(name, modelWidth, g.Ell), p.wrap(style, pad(state, invStateWidth, g.Ell)),
 		invCtxWidth, ctxCol, invSizeWidth, size,
 		fit(shortNext(row.Next, row.Model), invNextWidth, g.Ell))
-	for _, extra := range []string{row.Note, row.Windows} {
-		writeInventoryRowExtra(w, extra, width, p)
+	writeInventoryRowExtra(w, row.Note, width, p)
+	if row.Windows != "" {
+		writeInventoryRowExtra(w, "projected windows: "+row.Windows, width, p)
 	}
 }
 
@@ -246,8 +247,9 @@ func writeInventoryFooter(w io.Writer, inv Inventory, width int, p palette) {
 		}
 		fmt.Fprintln(w, p.wrap(p.Muted, lead+l))
 	}
-	fmt.Fprintln(w, p.wrap(p.Muted, "  * loaded    CTX is measured, or measured/serving when they differ"))
+	fmt.Fprintln(w, p.wrap(p.Muted, "  [L] loaded model    CTX is measured, or measured/serving when they differ"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  * suggested window   > requested window that does not fit"))
+	fmt.Fprintln(w, p.wrap(p.Muted, "  projected windows derive from weights, KV, and the stated memory budget"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  unmeasured is a candidate, never a recommendation"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  board compares only measured runs"))
 }

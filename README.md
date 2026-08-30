@@ -33,7 +33,13 @@ exact setting to change when one does not fit.
 > that still writes clean prose but emits malformed tool calls, the parser that
 > swallows them, the loop your GPU triggers and nobody else's does.
 
-<img src="docs/assets/inventory.svg?v=0.9.10" alt="fitr inventory (demo data)" width="820">
+<img src="docs/assets/inventory.svg?v=0.9.11" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
+
+The run capture is a deterministic reconstruction based on selected
+observations from a native RTX 4090 validation on 2026-08-30, not a sanitized
+copy of the sealed record. The inventory, advice, and TUI captures are
+deterministic fixtures using that same device profile. Host identity and local
+paths are omitted throughout.
 
 ## Install
 
@@ -53,16 +59,23 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
-One command, then it runs. No Python, no venv, no CUDA wrangling, nothing to
-keep up to date. fitr sends no telemetry. Installed-model evaluation talks only
+One command, then it runs. No Python, no venv, and no CUDA wrangling. Keep the
+single binary current with `fitr update --check` and `fitr update`. fitr sends no telemetry. Installed-model evaluation talks only
 to the endpoint you selected; network access otherwise occurs only for an
-explicit install, pull, or remote endpoint. Installers verify the download
-against its published checksum.
+explicit install, update, pull, or remote endpoint. Installers and the updater
+verify the download against its published checksum.
 Pinning, relocating and building from source are in
 [install](docs/usage.md#install).
 Candidate releases are also installed through that checksum-verifying path and
 run against a pinned native llama-server on clean Linux and macOS runners. The
 reviewable receipts are tracked in [release acceptance](docs/release-acceptance.md).
+
+`fitr update` resolves the latest stable release from the official GitHub
+repository, selects the exact asset for the running OS and architecture,
+matches it to the release's `SHA256SUMS` entry, and executes the staged binary
+to confirm its version before replacement. It never runs a remote install
+script. On Windows, replacement is attempted just after the current process
+exits; run `fitr version` to verify completion.
 
 ## The loop
 
@@ -94,28 +107,41 @@ The product is organized around evidence, not a composite score:
 - **COVERAGE:** which declared workloads have earned local trust, and which
   still require evidence or a fallback?
 
-FIT, behavior, and burst performance are measured today. The remaining layers
-are the pre-1.0 direction, with their evidence contracts specified before
-their CLI shape is frozen. See the [roadmap](ROADMAP.md) for the boundary
-between shipped behavior and planned experiments.
+FIT, behavior, and burst performance are measured today. The derived analysis
+also keeps supported latency states separate and reports exact-context runtime
+allocation attribution when the runtime supplies that receipt. Root-cause
+diagnosis, validated work, tradeoff experiments, and workload coverage remain
+the pre-1.0 direction, with their evidence contracts specified before their
+CLI shape is frozen. See the [roadmap](ROADMAP.md) for the boundary between
+shipped behavior and planned experiments.
 
 **Does it fit, and what do I change if not.** Artifact bytes, derived KV cache,
-and remaining capacity at each context length, with evidence labels and a flag
-plus resulting number on every negative verdict.
+and allocation projections at each context length. A safe configured budget
+adds headroom and fit verdicts; addressable shared capacity alone stays
+unproven. Every value carries its evidence label, and every negative verdict
+ends with a flag plus resulting number.
 
-<img src="docs/assets/advise.svg?v=0.9.10" alt="fitr advise (demo data)" width="820">
+<img src="docs/assets/advise.svg?v=0.9.11" alt="fitr advise for qwen3-coder 30B on an RTX 4090" width="820">
 
 **What it actually does here.** Load, first-response, prompt-processing, and
-generation timings are observed from the selected runtime. Resident allocation
-is observed when the runtime reports it; KV and remaining-capacity parts are
-labeled as derived. Structured output, instruction following, and tool use are
-graded mechanically against computed or declarative answers. Refusal uses a
-disclosed deterministic classifier. Another model's opinion never supplies a
-core verdict. One derived analysis contract now owns performance,
-exact-context resident capacity, typed evidence gaps, and semantic next
-actions after the sealed result validates. Each renderer consumes the subset
-it supports; no renderer recomputes an evidence claim. The contract reports
-what was observed; it does not yet guess a hardware bottleneck.
+generation timings are observed from the selected runtime. Request TTFT is
+promoted to loaded TTFT only when the gated request has its own residency
+receipt. Runtime-unloaded TTFT, verified loaded cache-hit TTFT, and
+runtime-reported load time remain separate observations. Runtime-unloaded does not mean machine
+cold because the operating system may still cache model pages. Exact-context
+resident allocation and runtime-classified accelerator bytes are shown when
+the runtime supplies them. The non-accelerator value is only the arithmetic
+remainder, not proof of host spill, layer placement, or exclusive physical
+memory pools.
+
+Structured output, instruction following, and tool use are graded
+mechanically against computed or declarative answers. Refusal uses a disclosed
+deterministic classifier. Another model's opinion never supplies a core
+verdict. One derived analysis contract owns these observations, typed evidence
+gaps, direct receipt-state diagnoses, and semantic next actions after the
+sealed result validates. Each renderer consumes the subset it supports; no
+renderer recomputes an evidence claim. The contract reports what was observed;
+it does not yet guess a hardware bottleneck.
 
 Tool calls are measured **in the tool channel**, not as text. The most common
 local tool failure is not bad JSON: it is a perfectly well-formed call that
@@ -124,7 +150,7 @@ template or a tool-call parser did not fire. An agent harness reads that as
 silence. fitr names it, and separates it from a model that genuinely cannot
 call tools.
 
-<img src="docs/assets/run.svg?v=0.9.10" alt="fitr run scorecard (demo data)" width="820">
+<img src="docs/assets/run.svg?v=0.9.11" alt="fitr reconstructed full-run demo based on selected RTX 4090 validation observations" width="820">
 
 ## What it refuses to do
 
@@ -188,9 +214,9 @@ performance, workload fit, and honest buying evidence), [workload evidence](docs
 acceptance](docs/release-acceptance.md), [retonr](docs/retonr.md) (optional
 sister project; fitr works without it).
 
-Screenshots use demo data and regenerate from the real printers via
-`make screenshots`. They reflect current `main` and may be ahead of the latest
-stable release.
+Screenshots regenerate from deterministic fixtures through the real printers
+via `make screenshots`. They reflect current `main` and may be ahead of the
+latest stable release.
 
 ## License
 

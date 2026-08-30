@@ -550,6 +550,29 @@ func TestEvidenceReusableRejectsPlacementAndComparabilityChanges(t *testing.T) {
 	}
 }
 
+func TestEvidenceReusableAcceptsEquivalentAcceleratorPlacementLabels(t *testing.T) {
+	saved := device.Fingerprint{
+		Host: "box", GPU: "NVIDIA GeForce RTX 4090", GPUDriver: "driver", GPUBackend: "cuda",
+		Runtime: "runtime", InferenceDevice: "GPU 100%", Config: map[string]string{},
+	}
+	current := saved
+	current.InferenceDevice = "CUDA / NVIDIA GeForce RTX 4090"
+	tag := InstalledModel{Name: "model", ArtifactDigest: inventoryTestDigest}
+	evidence := InventoryEvidence{
+		Model: "model", ArtifactDigest: inventoryTestDigest,
+		Device: saved, DeviceKey: saved.Key(),
+	}
+	query := InventoryQuery{Current: current, CurrentKey: current.Key()}
+	if !EvidenceReusable(tag, evidence, query) {
+		t.Fatal("equivalent full-accelerator placement labels made fresh evidence stale")
+	}
+	current.InferenceDevice = "GPU 50%"
+	query.Current = current
+	if EvidenceReusable(tag, evidence, query) {
+		t.Fatal("partial accelerator placement reused full-accelerator evidence")
+	}
+}
+
 func TestJoinUnprovenWithArchSkipsAdviseWhenItFits(t *testing.T) {
 	table := Join(InventoryQuery{
 		Tags:   []InstalledModel{{Name: "llama3.1:8b", Size: 5 * GiB, Arch: llama8B()}},

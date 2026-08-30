@@ -45,6 +45,7 @@ func (r *Record) addSpeedMeasurements(m *score.Measured) {
 	m.SpeedKnown = true
 	m.DecodeTPS, m.TTFT, m.PrefillTPS = r.DecodeSum.Mean, r.TTFTSum.Mean, r.PrefillSum.Mean
 	m.TTFTCacheKnown = len(r.Speed) > 0
+	m.TTFTResidencyKnown = len(r.Speed) > 0
 	m.PrefillCacheKnown = len(r.Speed) > 0
 	for _, sample := range r.Speed {
 		if sample.ColdTTFT > 0 && m.TTFTCold == 0 {
@@ -55,6 +56,12 @@ func (r *Record) addSpeedMeasurements(m *score.Measured) {
 		}
 		if sample.GatedTTFTContaminated() {
 			m.TTFTCacheContaminated = true
+		}
+		if !sample.GatedResidencyKnown {
+			m.TTFTResidencyKnown = false
+		}
+		if sample.GatedResidencyKnown && !sample.GatedResident {
+			m.TTFTNotResident = true
 		}
 		if sample.PrefillContaminated() {
 			m.PrefillCacheContaminated = true

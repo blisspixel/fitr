@@ -122,7 +122,7 @@ func (c *Canvas) SetLine(y int, spans ...Span) {
 			break
 		}
 		text := singleLine(span.Text)
-		text = clipCells(text, remaining, "")
+		text = clipCells(text, remaining, "...")
 		if text == "" {
 			continue
 		}
@@ -152,7 +152,17 @@ func Sanitize(value string) string {
 }
 
 func singleLine(value string) string {
-	return Sanitize(value)
+	leading := len(value) - len(strings.TrimLeft(value, " "))
+	trailing := len(value) - len(strings.TrimRight(value, " "))
+	if leading+trailing > len(value) {
+		trailing = len(value) - leading
+	}
+	coreEnd := len(value) - trailing
+	core := ""
+	if leading < coreEnd {
+		core = Sanitize(value[leading:coreEnd])
+	}
+	return strings.Repeat(" ", leading) + core + strings.Repeat(" ", trailing)
 }
 
 func clipCells(value string, width int, ellipsis string) string {
@@ -163,7 +173,7 @@ func clipCells(value string, width int, ellipsis string) string {
 		return value
 	}
 	ellWidth := displayWidth(ellipsis)
-	if ellWidth >= width {
+	if ellWidth > width {
 		ellipsis = ""
 		ellWidth = 0
 	}

@@ -16,6 +16,7 @@ Last updated: 2026-08-30.
 | Native candidate acceptance | A manual clean-run workflow installs the candidate artifact on ephemeral Linux and macOS runners, starts a pinned llama-server with two independently hashed GGUFs, exercises the everyday loop, checks evidence refusals, verifies cleanup, and uploads the complete transcript. |
 | Release binary smoke | The built Linux binary must pass global and subcommand help, then reject a malformed command with exit 2 and a useful hint. |
 | Installer smoke | Windows, macOS, and Linux runners install locally served candidate artifacts, bind the native asset to its exact checksum entry, and validate its version command. |
+| In-process updater | Unit and command-contract tests cover the six platform assets, canonical stable tags, duplicate or missing assets and checksums, bounded downloads and version output, hash mismatch cleanup, staged version identity, pre-replacement digest guards, JSON disclosure, and unsupported targets. Public replacement is verified and recorded after release publication. |
 | Release quality | Formatting, vet, unit tests, race detection, cross-compilation, reproducible Linux build comparison, static ELF verification, size limits, vulnerability scanning, fuzz smoke tests, and installer syntax checks must all pass. |
 
 ### 0.9.10 release receipt
@@ -105,6 +106,47 @@ This host is the reason three defects are fixed in 0.9.7. It was not a clean
 install, which is what made it useful: a used machine carries the virtual
 display adapter, the older interpreter, and the mixed model store that a clean
 VM does not.
+
+#### 0.9.11 full-run validation
+
+On 2026-08-30, a development 0.9.11 binary completed the full default battery
+against `qwen3-coder:30b` Q4_K_M with Ollama 0.24.0 at a verified 8192-token
+request context. Generated-code execution remained disabled, so coding and
+long-horizon executable tasks correctly stayed SKIP rather than becoming
+unverified PASS or FAIL evidence.
+
+Three speed observations produced 119.64 tok/s decode with SD 1.74,
+4801.81 tok/s prefill with SD 70.46, and 0.17 s request TTFT with SD 0.01. The
+development binary did not retain a gated-request load receipt, so this value
+does not establish loaded TTFT. The release candidate closes that gap. The
+separate runtime-unloaded observation was 6.39 s and runtime-reported load was
+6.30 s, each with `n=1`. The verified requested-32K load probe reported
+20.49 GB resident and 20.49 GB runtime-classified accelerator allocation. The
+0.00 GB non-accelerator value remained labeled as a derived remainder.
+
+The behavior battery passed 60 of 66 generated checks. Tool-channel plumbing
+and all 9 ordinary tool calls passed, while the independent tool-withdrawal
+scenario caught repeated calls and failure to terminate after a tool vanished.
+That produced a real tool-restraint FAIL despite high raw generation speed.
+The result saved, reopened, and entered Inventory as measured. This run also
+found and fixed an integration bug where `GPU 100%` and
+`CUDA / NVIDIA GeForce RTX 4090` described equivalent full-accelerator
+placement but caused fresh evidence to appear stale. A regression now preserves
+the distinction between equivalent full-accelerator labels and a genuinely
+partial `GPU 50%` placement.
+
+The README run image is a deterministic reconstruction from selected values
+above. It is not the original sealed native record and does not claim that
+lineage.
+
+After the residency contract was finalized, the release candidate completed a
+second native quick run with three speed observations. The runtime status probe
+reported the model resident immediately before every gated request, so 0.16 s
+was correctly promoted to loaded TTFT. Decode was 136.55 tok/s with SD 1.34,
+prefill was 5261.84 tok/s with SD 17.63, runtime-unloaded TTFT was 6.13 s, and
+runtime load was 6.05 s. Cache state remained unknown and therefore did not
+establish the loaded-uncached behavioral gate. This is the intended separation
+between residency proof and cache proof.
 
 ### Windows amd64, host B (0.9.6, superseded)
 

@@ -1,15 +1,15 @@
 package main
 
-// `fitr screenshots [dir]` regenerates the README's terminal images from MOCK
-// data pushed through the REAL display code paths, so a screenshot cannot
-// drift from what the tool actually prints. Dev-only; not listed in usage.
-// The mock numbers are labeled as such by the model names they carry.
+// `fitr screenshots [dir]` regenerates the README's terminal images from
+// deterministic fixtures pushed through the real display code paths, so a
+// screenshot cannot drift from what the tool actually prints. The primary
+// fixtures are deterministic reconstructions informed by selected observations
+// from a native RTX 4090 validation run.
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,12 +22,19 @@ import (
 	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
+	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/score"
 	"github.com/blisspixel/fitr/internal/stats"
 	"github.com/blisspixel/fitr/internal/top"
 )
+
+const validationProse = `Local language models are becoming practical tools for private writing, coding, extraction, and automation. Choosing one still requires more than a model name or a speed number. The artifact must fit within the available memory budget at the requested context. Prompt processing, first response latency, generation speed, and sustained behavior describe different parts of the experience. Structured output and tool calls also need direct verification because a model can write fluent prose while silently breaking an agent workflow.
+
+A useful evaluation keeps those questions separate. It records the exact model, quantization, runtime, context, device, and configuration that produced each observation. It distinguishes a measured value from a derived value, and it leaves missing evidence unavailable instead of replacing it with a guess. Repeated trials expose ordinary variance. Independent checks establish whether the result is usable rather than trusting the worker to grade its own output.
+
+The final decision depends on the workload. Interactive chat values responsive generation. Large documents emphasize prompt processing and context cost. Tool-heavy agents need valid calls, restraint, recovery, and stable state. A smaller or more heavily quantized model may emit tokens faster but produce fewer accepted outcomes after retries. The best local configuration is therefore the one that fits the machine, completes the declared work reliably, and preserves enough evidence for the operator to understand the tradeoff. Additional trials strengthen the estimate, while a clear record of failures makes the next experiment obvious and reproducible.`
 
 func cmdScreenshots(ctx context.Context, args []string) int {
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
@@ -157,30 +164,52 @@ func captureStdout(ctx context.Context, fn func(context.Context) (string, error)
 	if err != nil {
 		return "", err
 	}
+	defer r.Close()
+	defer func() {
+		os.Stdout = old
+		_ = w.Close()
+	}()
+	type capturedOutput struct {
+		data []byte
+		err  error
+	}
+	done := make(chan capturedOutput, 1)
+	go func() {
+		data, readErr := io.ReadAll(r)
+		done <- capturedOutput{data: data, err: readErr}
+	}()
 	os.Stdout = w
 	pre, ferr := fn(ctx)
-	w.Close()
+	closeErr := w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
-	return pre + string(out), ferr
+	captured := <-done
+	if ferr != nil {
+		return pre + string(captured.data), ferr
+	}
+	if closeErr != nil {
+		return pre + string(captured.data), closeErr
+	}
+	if captured.err != nil {
+		return pre + string(captured.data), captured.err
+	}
+	return pre + string(captured.data), nil
 }
 
-// shotRun renders the golden fixture through the real scorecard renderer.
-// shotAdvise prints a Low-memory verdict through the real advise printer.
-// The numbers are demo: Qwen3-30B-A3B architecture, a 20 GB budget, 32k ctx.
+// shotRun renders a deterministic validation reconstruction through the real
+// scorecard renderer. shotAdvise prints a low-memory planning example.
 func shotAdvise(ctx context.Context) (string, error) {
 	in := advise.Input{
-		Model: "qwen3:30b", Quant: "Q4_K_M", Backend: "ollama",
-		WeightsB: 18 * advise.GiB, HaveGB: 20, HaveSrc: "demo (not your GPU)",
-		Ctx: 32768, Source: "demo GGUF metadata",
+		Model: "qwen3-coder:30b", Quant: "Q4_K_M", Backend: "ollama",
+		WeightsB: 18556700761, HaveGB: 24, HaveSrc: "nvidia-smi",
+		Ctx: 8192, Source: "Ollama /api/show",
 		Arch: advise.Arch{
 			Name: "qwen3moe", Blocks: 48, Embed: 2048, Heads: 32, KVHeads: 4,
-			KeyLength: 128, ValLength: 128, MaxCtx: 40960,
+			KeyLength: 128, ValLength: 128, MaxCtx: 262144,
 			Experts: 128, ExpertUsed: 8, FFN: 768, Vocab: 151936,
-			Params: 30532132864,
+			Params: 30532122624,
 		},
 	}
-	fmt.Println("$ fitr advise qwen3:30b")
+	fmt.Println("$ fitr advise qwen3-coder:30b --ctx 8192")
 	fmt.Println()
 	advise.Write(os.Stdout, advise.Evaluate(in))
 	return "", nil
@@ -194,45 +223,94 @@ func shotApply(ctx context.Context) (string, error) {
 }
 
 func shotRun(ctx context.Context) (string, error) {
-	b, err := os.ReadFile(goldenResultPath())
-	if err != nil {
-		return "", fmt.Errorf("run from the repo root: %w", err)
-	}
-	var res Result
-	if err := json.Unmarshal(b, &res); err != nil {
-		return "", err
-	}
-	// The frozen golden record predates the fixed 22-spec plan. Rebuild its
-	// generated-check evidence from the current embedded spec so the command in
-	// the screenshot is reproducible by today's default full-run semantics.
+	res := validationRunFixture()
 	spec, err := eval.LoadSpec()
 	if err != nil {
 		return "", err
 	}
-	failures := map[string]bool{
-		"json_object_nested": true,
-		"math_chain_noise":   true,
-		"tool_call_strict":   true,
-	}
-	res.Checks = make([]eval.CheckOutcome, 0, len(spec.Checks))
-	for _, check := range spec.Checks {
-		pass := !failures[check.ID]
-		res.Checks = append(res.Checks, eval.CheckOutcome{
-			TaskID: check.ID, Family: check.Family, Need: check.Need, Origin: check.Origin,
-			Seed: eval.InstanceSeed(res.SeedSet, check.ID, 0), Pass: pass, Outcome: mockBinaryOutcome(pass),
-		})
-	}
-	if err := prepareMockEvidence(&res); err != nil {
+	addValidationChecks(&res, spec)
+	if err := prepareValidationEvidence(&res); err != nil {
 		return "", err
 	}
 	artifact, err := artifactFrom(&res)
 	if err != nil {
 		return "", err
 	}
-	pre := "$ fitr run qwen3-coder:30b --full --pull\n\n"
+	pre := "$ fitr run qwen3-coder:30b --full -k 3\n\n"
 	disp := render.New("rich")
 	disp.Result(artifact.Scorecard, resultMeta(&res, artifact.Profile))
 	return pre, nil
+}
+
+func validationRunFixture() Result {
+	res := Result{
+		Model: "qwen3-coder:30b", StartedAt: "2026-08-30T15:24:00-07:00",
+		Level: "full", Repeats: 3, NumCtx: 8192, SeedSet: "rtx4090-validation-2026-08-30",
+		WallSeconds: 126.5, Profile: "default",
+		Device: validationDevice(),
+		Speed: []eval.SpeedResult{
+			{DecodeTPS: 121.54, TTFT: 0.172, ColdTTFT: 6.387, ColdLoad: 6.30,
+				PrefillTPS: 4864.41, PromptTok: 2759, GatedPromptTok: 73, FirstOutputObserved: true},
+			{DecodeTPS: 118.14, TTFT: 0.161, ColdLoad: 0.10,
+				PrefillTPS: 4725.50, PromptTok: 2759, GatedPromptTok: 73, FirstOutputObserved: true},
+			{DecodeTPS: 119.24, TTFT: 0.164, ColdLoad: 0.10,
+				PrefillTPS: 4815.53, PromptTok: 2759, GatedPromptTok: 73, FirstOutputObserved: true},
+		},
+		Memory: eval.MemoryResult{ResidentGB: 20.49, PctOnGPU: 100},
+		Refusal: map[string]eval.RefusalVerdict{
+			"political": {Verdict: "answered", Outcome: eval.OutcomePass, Chars: 1557},
+			"fiction":   {Verdict: "answered", Outcome: eval.OutcomePass, Chars: 1283},
+			"rewrite":   {Verdict: "answered", Outcome: eval.OutcomePass, Chars: len(validationProse), Text: validationProse},
+		},
+		Plumbing: &eval.PlumbingResult{Model: "qwen3-coder:30b", Healthy: true, Outcome: eval.OutcomePass},
+		Withdrawal: &eval.ToolLoopResult{
+			Pass: false, Outcome: eval.OutcomeFail, Verified: true, Turns: 6, Calls: 9,
+			Repeats: 3, Looped: true, Ended: "stopped_without_done", Sequence: "KRWKWKWKW",
+			MaxPromptTok: 1020, DeadCalls: 1, FilesWrote: []string{"prices.txt"},
+		},
+		Agentic: &eval.ToolLoopResult{Outcome: eval.OutcomeSkipped, Ended: "unsafe_execution_disabled"},
+	}
+	res.ModelMeta = ollama.ModelInfo{
+		Name: "qwen3-coder:30b", Size: 18556700761,
+		Capabilities: []string{"completion", "tools"},
+		Info: map[string]any{
+			"general.architecture": "qwen3moe", "general.parameter_count": float64(30532122624),
+			"qwen3moe.expert_count": float64(128), "qwen3moe.expert_used_count": float64(8),
+		},
+	}
+	res.ModelMeta.Details.ParameterSize = "30.5B"
+	res.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
+	res.ModelMeta.Details.Family = "qwen3moe"
+	for range 3 {
+		res.CodeWrite = append(res.CodeWrite, eval.ExecResult{Outcome: eval.OutcomeSkipped,
+			Detail: "disabled: generated code execution requires --allow-unsafe-exec and remains unverified"})
+		res.CodeFix = append(res.CodeFix, eval.ExecResult{Outcome: eval.OutcomeSkipped,
+			Detail: "disabled: generated code execution requires --allow-unsafe-exec and remains unverified"})
+		res.Tools = append(res.Tools, eval.ToolLoopResult{Outcome: eval.OutcomeSkipped, Ended: "unsafe_execution_disabled"})
+	}
+	return res
+}
+
+func addValidationChecks(res *Result, spec *eval.Spec) {
+	failures := map[int]map[string]bool{
+		0: {"list_ops": true},
+		1: {"tool_args": true},
+		2: {"date_math": true, "line_rules": true, "math_chain": true, "tool_args": true},
+	}
+	res.Checks = make([]eval.CheckOutcome, 0, len(spec.Checks)*res.Repeats)
+	for repeat := range res.Repeats {
+		for _, check := range spec.Checks {
+			pass := !failures[repeat][check.ID]
+			outcome := eval.CheckOutcome{
+				TaskID: check.ID, Family: check.Family, Need: check.Need, Origin: check.Origin,
+				Seed: eval.InstanceSeed(res.SeedSet, check.ID, repeat), Pass: pass, Outcome: mockBinaryOutcome(pass),
+			}
+			if repeat == 2 && check.ID == "date_math" {
+				outcome.Truncated = true
+			}
+			res.Checks = append(res.Checks, outcome)
+		}
+	}
 }
 
 func shotInventory(context.Context) (string, error) {
@@ -242,22 +320,20 @@ func shotInventory(context.Context) (string, error) {
 		// Tracks the real version. Hardcoding it left the headline screenshot
 		// claiming 0.9.6 two releases later, which is the first thing a reader
 		// sees and the easiest thing to leave stale.
-		Fitr: buildinfo.Version(), CPU: "AMD Ryzen 7 7840U  (16 logical)", GPU: "AMD Radeon 780M",
-		GPUBackend: "rocm", MemoryGB: 32, MemorySource: "unified memory (system RAM)",
+		Fitr: buildinfo.Version(), CPU: "AMD Ryzen 9 5950X 16-Core Processor (32 logical)", GPU: "NVIDIA GeForce RTX 4090",
+		GPUBackend: "cuda", MemoryGB: 24, MemorySource: "nvidia-smi",
 		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
-		Profile: "lappy", Uncalibrated: false,
-		Warnings: []string{"32.0 GB is addressable shared capacity, not a safe model budget; pass --vram-gb N"},
+		Profile: "default", Uncalibrated: true,
 		Rows: []render.InventoryRow{
-			{Model: "qwen3:30b-q4", State: "measured", Fit: "low_memory", SizeB: 18 << 30, Loaded: true,
-				Ctx: "16k/8k", Next: "fitr apply qwen3:30b-q4",
-				Note:    "measured ctx=16384; serving ctx=8192",
-				Windows: "2k ok | 4k ok | 8k ok | *16k ok | >32k no"},
-			{Model: "gemma4:12b", State: "unproven", SizeB: 8 << 30,
-				Next: "fitr advise gemma4:12b", Note: "shared-memory fit needs a safe operator budget or an exact runtime receipt"},
-			{Model: "qwen3:32b", State: "stale", SizeB: 20 << 30, Next: "fitr run qwen3:32b",
-				Note: "device or runtime changed since the last measurement"},
-			{Model: "llama3.1:70b", State: "unproven", SizeB: 40 << 30, Next: "fitr advise llama3.1:70b",
-				Note: "addressable system RAM is not a safe budget; mmap and runtime allocation are unmeasured"},
+			{Model: "qwen3-coder:30b", State: "measured", SizeB: 18556700761,
+				Ctx: "8k", Next: "fitr view qwen3-coder:30b",
+				Windows: "2k ok | 4k ok | *8k ok | 16k ok | 32k ok | 256k no"},
+			{Model: "devstral-small-2:24b", State: "unproven", SizeB: 15177374099,
+				Next: "fitr advise devstral-small-2:24b"},
+			{Model: "qwen3.5:27b", State: "unproven", SizeB: 17394617543,
+				Next: "fitr advise qwen3.5:27b"},
+			{Model: "llama3:70b", State: "incompatible", SizeB: 39943195892,
+				Next: "try a smaller quant", Note: "weights 37.2 GB exceed 24.0 GB (nvidia-smi)"},
 		},
 	}, "rich")
 	return "", nil
@@ -325,7 +401,7 @@ func shotBoard(ctx context.Context) (string, error) {
 	os.Setenv("FITR_RESULTS", dir)
 	defer os.Unsetenv("FITR_RESULTS")
 
-	cur := device.Detect(ctx, probeBackend(ctx))
+	cur := validationDevice()
 	a := mockResult("qwen3:30b-q4", 23.16, 0.44, 226.64, 3.10, 6, 6, 20, 22)
 	a.ModelMeta.Details.ParameterSize = "30.5B"
 	a.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
@@ -358,16 +434,17 @@ func shotBoard(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-func goldenResultPath() string {
-	for _, p := range []string{
-		filepath.Join("cmd", "fitr", "testdata", "golden_result.json"),
-		filepath.Join("testdata", "golden_result.json"),
-	} {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
+func validationDevice() device.Fingerprint {
+	return device.Fingerprint{
+		Host: "sanitized", OS: "windows", CPU: "AMD Ryzen 9 5950X 16-Core Processor",
+		RAMGb: 63.9, GPU: "NVIDIA GeForce RTX 4090", GPUDriver: "32.0.16.1047",
+		GPUDriverDate: "2026-05-18", GPUBackend: "cuda", VRAMGb: 24,
+		VRAMSource: "nvidia-smi", Runtime: "0.24.0", InferenceDevice: "GPU 100%",
+		Config: map[string]string{
+			"OLLAMA_CONTEXT_LENGTH": "262144", "OLLAMA_FLASH_ATTENTION": "true",
+			"OLLAMA_NUM_PARALLEL": "1",
+		},
 	}
-	return filepath.Join("cmd", "fitr", "testdata", "golden_result.json")
 }
 
 // mockResult fabricates a plausible stored result for the compare screenshot.
@@ -433,6 +510,26 @@ func prepareMockEvidence(r *Result) error {
 		return err
 	}
 	prepareMockMeasurements(r)
+	prepareMockTextMetrics(r)
+	if err := prepareMockDeviceReceipt(r); err != nil {
+		return err
+	}
+	return completeMockEvidence(r)
+}
+
+func prepareValidationEvidence(r *Result) error {
+	if r == nil {
+		return errors.New("nil validation result")
+	}
+	prepareMockDefaults(r)
+	prepareMockTaskPlan(r)
+	if err := prepareMockCheckPlan(r); err != nil {
+		return err
+	}
+	if err := prepareMockOutcomeEvidence(r); err != nil {
+		return err
+	}
+	prepareValidationMeasurements(r)
 	prepareMockTextMetrics(r)
 	if err := prepareMockDeviceReceipt(r); err != nil {
 		return err
@@ -542,12 +639,16 @@ func prepareMockOutcomeEvidence(r *Result) error {
 func mockCodingOutcomes(r *Result) []eval.Outcome {
 	coding := make([]eval.Outcome, 0, r.TaskPlan.CodeTrials)
 	for i := range r.CodeWrite {
-		r.CodeWrite[i].Outcome = eval.OutcomeInconclusive
-		coding = append(coding, eval.OutcomeInconclusive)
+		if r.CodeWrite[i].Outcome == "" {
+			r.CodeWrite[i].Outcome = eval.OutcomeInconclusive
+		}
+		coding = append(coding, r.CodeWrite[i].Outcome)
 	}
 	for i := range r.CodeFix {
-		r.CodeFix[i].Outcome = eval.OutcomeInconclusive
-		coding = append(coding, eval.OutcomeInconclusive)
+		if r.CodeFix[i].Outcome == "" {
+			r.CodeFix[i].Outcome = eval.OutcomeInconclusive
+		}
+		coding = append(coding, r.CodeFix[i].Outcome)
 	}
 	return coding
 }
@@ -566,8 +667,10 @@ func mockCheckOutcomes(r *Result) []eval.Outcome {
 func mockToolOutcomes(r *Result) []eval.Outcome {
 	tools := make([]eval.Outcome, len(r.Tools))
 	for i := range r.Tools {
-		r.Tools[i].Outcome = eval.OutcomeInconclusive
-		tools[i] = eval.OutcomeInconclusive
+		if r.Tools[i].Outcome == "" {
+			r.Tools[i].Outcome = eval.OutcomeInconclusive
+		}
+		tools[i] = r.Tools[i].Outcome
 	}
 	return tools
 }
@@ -601,8 +704,10 @@ func mockOptionalOutcomes(r *Result) (plumbing, withdrawal, agentic []eval.Outco
 	}
 	agentic = []eval.Outcome{}
 	if r.Agentic != nil {
-		r.Agentic.Outcome = eval.OutcomeInconclusive
-		agentic = append(agentic, eval.OutcomeInconclusive)
+		if r.Agentic.Outcome == "" {
+			r.Agentic.Outcome = eval.OutcomeInconclusive
+		}
+		agentic = append(agentic, r.Agentic.Outcome)
 	}
 	return plumbing, withdrawal, agentic
 }
@@ -631,6 +736,20 @@ func prepareMockMeasurements(r *Result) {
 			r.Speed[i].WarmCacheKnown = true
 			r.Speed[i].WarmCachedTok = 1
 		}
+	}
+	prepareMockMemory(r)
+	r.DecodeSum, r.TTFTSum, r.PrefillSum = stats.MeanSD(decode), stats.MeanSD(ttft), stats.MeanSD(prefill)
+}
+
+func prepareValidationMeasurements(r *Result) {
+	decode := make([]float64, 0, len(r.Speed))
+	ttft := make([]float64, 0, len(r.Speed))
+	prefill := make([]float64, 0, len(r.Speed))
+	for i := range r.Speed {
+		r.Speed[i].FirstOutputObserved = true
+		decode = append(decode, r.Speed[i].DecodeTPS)
+		ttft = append(ttft, r.Speed[i].TTFT)
+		prefill = append(prefill, r.Speed[i].PrefillTPS)
 	}
 	prepareMockMemory(r)
 	r.DecodeSum, r.TTFTSum, r.PrefillSum = stats.MeanSD(decode), stats.MeanSD(ttft), stats.MeanSD(prefill)
@@ -691,7 +810,11 @@ func prepareMockDeviceReceipt(r *Result) error {
 
 func completeMockEvidence(r *Result) error {
 	sum := sha256.Sum256([]byte("fitr mock artifact\x00" + r.Model))
-	identity, err := record.NewModelIdentity(r.Model, r.Model, "mock", "mock-runtime-v1",
+	runtimeVersion := r.Device.Runtime
+	if runtimeVersion == "" {
+		runtimeVersion = "mock-runtime-v1"
+	}
+	identity, err := record.NewModelIdentity(r.Model, r.Model, "ollama", runtimeVersion,
 		"sha256:"+hex.EncodeToString(sum[:]), "", 0)
 	if err != nil {
 		return err
@@ -715,7 +838,7 @@ func completeMockEvidence(r *Result) error {
 	provenance, err := record.NewRunProvenance(hashes.TaskSetSHA256, hashes.SpecSHA256,
 		profile, record.CurrentScoringPolicy(),
 		record.SoftwareReceipt{FitrVersion: buildinfo.Version(), SoftwareBuildSHA256: softwareBuild,
-			BackendProtocol: "fitr.backend.mock.v1"})
+			BackendProtocol: record.BackendProtocolOllama})
 	if err != nil {
 		return err
 	}

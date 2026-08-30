@@ -19,7 +19,7 @@ destination is not on `PATH`; the PowerShell installer adds its destination to
 the user `PATH`. Set `FITR_NO_PATH=1` to leave the persistent user `PATH`
 unchanged during automation or an isolated install. The current PowerShell host
 can still invoke fitr immediately. The default evidence path needs no Go,
-Python, or venv. Pin a release with `FITR_VERSION=v0.9.10`; relocate with
+Python, or venv. Pin a release with `FITR_VERSION=v0.9.11`; relocate with
 `FITR_BIN`.
 
 Both installers bind the downloaded binary to the exact asset entry in the
@@ -33,6 +33,36 @@ From source (Go 1.25+):
 git clone https://github.com/blisspixel/fitr && cd fitr
 make install
 ```
+
+### Update
+
+```bash
+fitr update --check             # validate the latest stable release receipt
+fitr update                     # verify, stage, and replace this binary
+fitr update --reinstall         # verify and reinstall the same latest version
+fitr update --display json      # fitr.update.v1 event for automation
+```
+
+The updater is deliberately bounded to stable releases in
+`blisspixel/fitr`. It accepts no repository, URL, target-path, or
+checksum-bypass flag. It selects the exact asset for the running OS and
+architecture, requires exactly one matching entry in the release's
+`SHA256SUMS`, streams the candidate beside the current executable, checks its
+SHA-256, and runs the staged binary's `version` command before replacement.
+It refuses downgrades, unsupported platforms, symlink-managed binaries, and a
+target whose digest differs at the pre-replacement check.
+
+On Linux and macOS, replacement is a same-directory rename. On Windows, the
+verified candidate is staged and a hidden helper attempts replacement after
+the running process exits, because Windows does not replace its active image.
+Run `fitr version` afterward to verify completion.
+If the executable directory is not writable or a package manager owns the
+path, use that package manager or rerun the installer. No automatic update
+check occurs during ordinary commands.
+
+The checksum binds the binary to the manifest published with the same GitHub
+release. It detects corruption and mismatched assets; it is not an independent
+publisher signature.
 
 A rankable run needs a serving runtime and verified artifact identity. Ollama
 exposes a runtime content digest. A readable GGUF reported by an already-running
@@ -57,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.9.10" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.9.10" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.9.10" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.9.10" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.9.11" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.9.11" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.9.11" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.9.11" alt="fitr top (demo data)" width="820">
 
 ### Disk
 
@@ -364,18 +394,31 @@ row is the largest window that still fits when the requested one does not.
 
 Performance and capacity are deliberately separate. A model may fit and still
 generate slowly, process long prompts quickly while streaming slowly, or have
-good warm responsiveness while paying a large cold-load cost.
+good loaded responsiveness while paying a large runtime-unloaded startup cost.
 
-- **Load** is the runtime's model-load observation when available.
-- **TTFT** is wall time from request start to the first non-empty streamed
-  chunk. Its cache state is reported separately. Unknown or cache-hit TTFT
-  remains an observation but cannot prove the uncached responsiveness gate.
+- **Request TTFT** is wall time from the gated request start to the first
+  non-empty streamed chunk. It is labeled **Loaded TTFT** only when that
+  request has a runtime residency receipt showing no material reload. Its
+  cache state is reported separately. Unknown residency, unknown cache state,
+  or a cache hit remains an observation but cannot prove the loaded-uncached
+  responsiveness gate.
+- **Runtime-unloaded TTFT** is wall time from a request made after fitr unloaded
+  the model to the first non-empty streamed chunk. It is not machine-cold or
+  disk-cold because the operating system may still cache model pages.
+- **Loaded cache-hit TTFT** is reported separately only when the backend
+  receipt identifies a positive cached-token count.
+- **Runtime load** is the backend's model-load duration when the versioned
+  protocol provides it. It is not inferred by subtracting TTFT observations.
 - **Prefill** describes input-token processing and matters for long prompts,
   retrieval, and repeated agent histories. A gate or comparison requires an
   explicit zero-cache receipt for every sample; unknown state or any positive
   cached-token count remains descriptive only.
 - **Decode** describes generated-token streaming after prompt processing.
 - **Resident** is observed loaded allocation when the runtime reports it.
+- **Accelerator allocation** is the runtime-classified byte count at that same
+  exact-context memory probe. **Non-accelerator allocation** is only resident
+  minus accelerator bytes. Neither proves dedicated VRAM, host spill, layer
+  placement, or the absence of host traffic on a unified-memory system.
 - **Weights** and **KV** are derived from artifact metadata. The remainder of
   observed resident allocation is labeled as other resident memory, not as a
   directly measured compute-buffer component.
@@ -386,10 +429,12 @@ runtime clamps or does not report the effective context, the raw receipt is
 retained, but Result and Board do not present its allocation as verified 32K
 capacity and the need is SKIP.
 
-Current output does not claim a hardware bottleneck. Evidence-backed limiter
-diagnoses, context sweeps, quant tradeoff frontiers, sustained runs, and
-concurrent serving tests are planned as distinct experiment types so their
-measurements cannot contaminate an ordinary scored run.
+The allocation attribution applies to the exact memory-probe point, not every
+speed repeat in the battery. Current output does not claim a hardware
+bottleneck. Evidence-backed limiter diagnoses, context sweeps, quant tradeoff
+frontiers, sustained runs, and concurrent serving tests are planned as
+distinct experiment types so their measurements cannot contaminate an
+ordinary scored run.
 
 ## Cores
 

@@ -87,6 +87,7 @@ usage:
   fitr diag <model>
   fitr doctor <model> [-n N]
   fitr device
+	fitr update [--check] [--reinstall]
   fitr profiles [new [name]]
   fitr calibrate <model-a> <model-b> [--out PATH] [--lineage PATH]
   fitr calibrate merge <pair.json>... [--out PATH]
@@ -122,6 +123,7 @@ examples:
   fitr advise ./model.gguf --vram-gb 8 --fit
   fitr run qwen3:30b --ctx 4096
   fitr apply qwen3:30b
+	fitr update --check
   fitr tune
   fitr tune qwen3:30b qwen3:30b-q8
   fitr export qwen3:30b --out scorecard.html
@@ -190,6 +192,8 @@ func commandHandler(name string) commandFunc {
 		return cmdDoctor
 	case "device":
 		return cmdDevice
+	case "update":
+		return cmdUpdate
 	case "profiles":
 		return cmdProfiles
 	case "calibrate":
@@ -894,7 +898,10 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 		return advise.InventoryTable{}, nil, err
 	}
 	installed, warnings := installedInventoryModels(b, tags)
-	loaded, serving := loadedInventoryModels(listCtx, b, installed)
+	loaded, serving, statusErr := loadedInventoryModels(listCtx, b, installed)
+	if statusErr != nil {
+		warnings = append(warnings, "runtime status unavailable; loaded markers and serving contexts are unknown: "+statusErr.Error())
+	}
 	stored, err := record.NewStore(resultsDir()).LoadCurrent()
 	if err != nil {
 		return advise.InventoryTable{}, nil, fmt.Errorf("load saved evidence: %w", err)
@@ -958,12 +965,13 @@ func enrichInstalledArtifact(item *advise.InstalledModel) {
 	}
 }
 
-func loadedInventoryModels(ctx context.Context, b llm.Backend, installed []advise.InstalledModel) ([]string, map[string]int) {
+func loadedInventoryModels(ctx context.Context, b llm.Backend,
+	installed []advise.InstalledModel) ([]string, map[string]int, error) {
 	var loaded []string
 	serving := map[string]int{}
 	running, err := b.PS(ctx)
 	if err != nil {
-		return loaded, serving
+		return loaded, serving, err
 	}
 	for _, model := range running {
 		loaded = append(loaded, model.Name)
@@ -974,7 +982,7 @@ func loadedInventoryModels(ctx context.Context, b llm.Backend, installed []advis
 			installed[i].ResidentB = size
 		}
 	}
-	return loaded, serving
+	return loaded, serving, nil
 }
 
 func recordServingContext(serving map[string]int, model ollama.RunningModel) {

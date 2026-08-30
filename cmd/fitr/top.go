@@ -673,10 +673,12 @@ func attachTopInventory(ctx context.Context, snapshot *top.Snapshot) {
 	}
 	b := probeBackend(ctx)
 	fp := device.Detect(ctx, b)
-	table, _, err := joinInstalled(ctx, b, fp)
+	table, warnings, err := joinInstalled(ctx, b, fp)
 	if err != nil {
+		snapshot.InventoryWarning = "inventory unavailable: " + err.Error()
 		return
 	}
+	snapshot.InventoryWarning = strings.Join(warnings, "; ")
 	snapshot.Inventory = snapshot.Inventory[:0]
 	for _, row := range table.Rows {
 		snapshot.Inventory = append(snapshot.Inventory, top.InventoryItem{
@@ -835,7 +837,7 @@ func presentTopRun(result *Result) top.Run {
 		Quant:    result.ModelMeta.Details.QuantizationLevel,
 		DeviceID: deviceID, HardwareID: hardwareID, Device: result.Device.GPU,
 		Driver: result.Device.GPUDriver, Runtime: result.Device.Runtime,
-		Config: topRunConfig(result), Profile: result.Profile, Level: result.Level, UseFor: scorecard.UseFor,
+		Config: topRunConfig(result), Profile: result.Profile, Level: result.Level, UseFor: render.UseForLabel(scorecard.UseFor),
 		StartedAt: started, Duration: time.Duration(result.WallSeconds * float64(time.Second)),
 		Context: meta.NumCtx, Repeats: result.Repeats,
 		DecodeMean: meta.DecodeMean, DecodeSD: meta.DecodeSD,
@@ -843,6 +845,7 @@ func presentTopRun(result *Result) top.Run {
 		MemoryGB: meta.ResidentGB, ResidentContext: meta.ResidentContext,
 		DecodePresent: meta.DecodeN > 0, PrefillPresent: meta.PrefillN > 0,
 		TTFTPresent: meta.TTFTN > 0, MemoryPresent: meta.ResidentGB > 0,
+		Analysis:     meta.Analysis,
 		DecodeSeries: slices.Clone(meta.DecodeSeries),
 		Serves:       topServes(scorecard), Warnings: topWarnings(result), Verdicts: topVerdicts(scorecard),
 		NextCommand: nextCommand,
@@ -850,13 +853,11 @@ func presentTopRun(result *Result) top.Run {
 }
 
 func topScorecard(result *Result) score.Scorecard {
-	scorecard := result.Scorecard
 	if artifact, err := artifactFrom(result); err == nil {
-		scorecard = artifact.Scorecard
-	} else {
-		scorecard = score.ExcludeEvidence(scorecard,
-			"the scoring profile is unavailable, so the stored verdict cannot be reproduced")
+		return artifact.Scorecard
 	}
+	scorecard := score.ExcludeEvidence(result.Scorecard,
+		"the scoring profile is unavailable, so the stored verdict cannot be reproduced")
 	scorecard = score.ExcludeContamination(scorecard, result.Contamination)
 	if issue := result.EvidenceIntegrityIssue(); issue != "" {
 		scorecard = score.ExcludeEvidence(scorecard, issue)
@@ -872,7 +873,9 @@ func topVerdicts(scorecard score.Scorecard) []top.Verdict {
 		if label == "" {
 			label = need
 		}
-		verdicts = append(verdicts, top.Verdict{Need: need, Label: label, State: string(verdict.State), Why: verdict.Why})
+		verdicts = append(verdicts, top.Verdict{
+			Need: need, Label: label, State: string(verdict.State), Why: render.PresentVerdictWhy(need, verdict),
+		})
 	}
 	return verdicts
 }
@@ -926,14 +929,18 @@ func topAnalysisWarnings(report *analysis.Report) []string {
 		}
 	}
 	visible := map[analysis.GapCode]bool{
-		analysis.GapPrefillCacheUnknown:       true,
-		analysis.GapPrefillCacheHit:           true,
-		analysis.GapTTFTCacheUnknown:          true,
-		analysis.GapTTFTCacheHit:              true,
-		analysis.GapPerformanceSampleCountLow: true,
-		analysis.GapResidentUnavailable:       true,
-		analysis.GapResidentContextUnverified: true,
-		analysis.GapResidentContextAdjusted:   true,
+		analysis.GapPrefillCacheUnknown:            true,
+		analysis.GapPrefillCacheHit:                true,
+		analysis.GapTTFTCacheUnknown:               true,
+		analysis.GapTTFTCacheHit:                   true,
+		analysis.GapPerformanceSampleCountLow:      true,
+		analysis.GapResidentUnavailable:            true,
+		analysis.GapResidentContextUnverified:      true,
+		analysis.GapResidentContextAdjusted:        true,
+		analysis.GapPlacementUnavailable:           true,
+		analysis.GapRuntimeUnloadedTTFTUnavailable: true,
+		analysis.GapRuntimeLoadUnavailable:         true,
+		analysis.GapLoadedCacheHitTTFTUnavailable:  true,
 	}
 	for _, gap := range report.Gaps {
 		if visible[gap.Code] {

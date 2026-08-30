@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
@@ -440,6 +441,37 @@ func TestTopSnapshotDisclosesUnavailableMemoryProbe(t *testing.T) {
 	}
 }
 
+func TestTopSnapshotDisclosesUnavailableAuxiliaryLatencyStates(t *testing.T) {
+	run := presentTopRun(mockResult("latency-gaps", 10, .1, 100, 1, 1, 1, 1, 1))
+	for _, want := range []string{
+		"runtime-unloaded TTFT was not observed; operating-system page-cache state is not measured",
+		"the backend did not provide a versioned runtime-load duration receipt",
+		"no positive cached-token receipt established this latency state",
+	} {
+		if !slices.Contains(run.Warnings, want) {
+			t.Fatalf("TUI warnings missing %q: %+v", want, run.Warnings)
+		}
+	}
+}
+
+func TestTopSnapshotKeepsDirectDiagnosisOutOfWarnings(t *testing.T) {
+	result := mockResult("partial-allocation", 10, .1, 100, 1, 1, 1, 1, 1)
+	result.Memory.ResidentGB = 20
+	result.Memory.PctOnGPU = 75
+	sealCurrentResult(t, result)
+	run := presentTopRun(result)
+	if run.Analysis == nil || !slices.ContainsFunc(run.Analysis.Diagnoses, func(diagnosis analysis.Diagnosis) bool {
+		return diagnosis.Code == analysis.DiagnosisPartialPlacement
+	}) {
+		t.Fatalf("partial allocation diagnosis missing: %+v", run.Analysis)
+	}
+	for _, warning := range run.Warnings {
+		if strings.Contains(warning, "partial accelerator share") {
+			t.Fatalf("direct observation was rendered as a warning: %q", warning)
+		}
+	}
+}
+
 func TestTopSnapshotUsesCentralSemanticNextAction(t *testing.T) {
 	run := presentTopRun(mockResult("measured", 10, .1, 100, 1, 1, 1, 1, 1))
 	if run.NextCommand != "fitr board" {
@@ -458,11 +490,17 @@ func TestTopRunPreservesObservedZeroAndResidentContext(t *testing.T) {
 	if !run.MemoryPresent || run.ResidentContext != memoryProbeCtx {
 		t.Fatalf("resident context was not projected: %+v", run)
 	}
+	if run.Analysis == nil || run.Analysis.Capacity.Placement != nil ||
+		!slices.Contains(run.Warnings,
+			"schema 6 cannot distinguish a missing accelerator byte field from an explicit zero; allocation attribution is unavailable") {
+		t.Fatalf("ambiguous zero accelerator attribution did not fail closed: analysis=%+v warnings=%+v",
+			run.Analysis, run.Warnings)
+	}
 	encoded, err := json.Marshal(run)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"ttft_present", "memory_present", "resident_context"} {
+	for _, field := range []string{"ttft_present", "memory_present", "resident_context", "analysis"} {
 		if strings.Contains(string(encoded), field) {
 			t.Fatalf("compatibility JSON gained internal field %q: %s", field, encoded)
 		}
@@ -526,6 +564,11 @@ func TestTopBoardUsesOnlyReconciledCurrentRecords(t *testing.T) {
 	}
 	if forgedHistory.DecodeMean != 999 || forgedHistory.PrefillMean != 999 || len(forgedHistory.DecodeSeries) != 3 {
 		t.Fatalf("display-only history lost its descriptive observations: %+v", forgedHistory)
+	}
+	for _, verdict := range forgedHistory.Verdicts {
+		if strings.Count(verdict.Why, "this run does not count") > 1 {
+			t.Fatalf("display-only exclusion was applied twice: %q", verdict.Why)
+		}
 	}
 }
 

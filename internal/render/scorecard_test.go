@@ -100,7 +100,7 @@ func TestScorecardColumnsAreStable(t *testing.T) {
 func TestLabelAndMeasureNeverCollide(t *testing.T) {
 	var buf strings.Builder
 	d := plainDisplay(&buf)
-	d.verdictRow(&buf, "a label far longer than the column can hold, by a mile",
+	d.verdictRow(&buf, "long_label", "a label far longer than the column can hold, by a mile",
 		score.Verdict{State: score.Fail, Measure: "1/2 clean", Gate: "need 2/2"}, DefaultWidth)
 	first := strings.Split(buf.String(), "\n")[0]
 	if !strings.Contains(first, "... ") && !strings.Contains(first, "...  ") {
@@ -178,7 +178,7 @@ func TestLongMachineStringsStayInsideTheRule(t *testing.T) {
 func TestLegacyVerdictsStillShowTheirExplanation(t *testing.T) {
 	var buf strings.Builder
 	d := plainDisplay(&buf)
-	d.verdictRow(&buf, "reads images",
+	d.verdictRow(&buf, "vision", "reads images",
 		score.Verdict{State: score.NA, Why: "text-only model - not a deficiency"}, DefaultWidth)
 	if !strings.Contains(buf.String(), "not a deficiency") {
 		t.Fatalf("legacy verdict lost its reason:\n%s", buf.String())
@@ -190,7 +190,7 @@ func TestLegacyVerdictsStillShowTheirExplanation(t *testing.T) {
 func TestNarrowTerminalDropsTheTailInsteadOfShredding(t *testing.T) {
 	var buf strings.Builder
 	d := plainDisplay(&buf)
-	d.verdictRow(&buf, "valid structured output",
+	d.verdictRow(&buf, "structured_output", "valid structured output",
 		score.Verdict{State: score.Fail, Measure: "34/40 held [0.55-0.96]", Gate: "need >=0.70"}, MinWidth)
 	out := buf.String()
 	for _, line := range strings.Split(out, "\n") {

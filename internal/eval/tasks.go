@@ -15,6 +15,7 @@ import (
 
 	"github.com/blisspixel/fitr/internal/boundedio"
 	"github.com/blisspixel/fitr/internal/llm"
+	"github.com/blisspixel/fitr/internal/modelref"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/strictjson"
 )
@@ -27,20 +28,28 @@ type SpeedResult struct {
 	// Three TTFTs, because blending them is the single biggest measurement
 	// error available (they differ 70-200x on real stacks):
 	//
-	//   TTFT      - model loaded, prompt uncached. This is a new question
-	//               on a running model, and it is what the gate judges.
-	//   ColdTTFT  - first question of the day: load + prefill + first token.
-	//   WarmTTFT  - same prompt sent again; prefix cache hit. Only filled
-	//               when the backend returns a real cache receipt.
+	//   TTFT      - gated request to first output. GatedLoadKnown and
+	//               GatedLoad prove whether this request stayed loaded.
+	//   ColdTTFT  - runtime-unloaded request to first output; OS page-cache
+	//               state is not measured.
+	//   WarmTTFT  - loaded follow-up request. Cache counts and whether the
+	//               backend supplied them are recorded separately.
 	TTFT           float64 `json:"ttft_s"`
-	ColdTTFT       float64 `json:"cold_ttft_s,omitempty"`
-	ColdLoad       float64 `json:"cold_load_s,omitempty"`
-	WarmTTFT       float64 `json:"warm_ttft_s,omitempty"`
-	WarmPromptTok  int     `json:"warm_prompt_tokens,omitempty"`
-	WarmCachedTok  int     `json:"warm_cached_tokens,omitempty"`
-	WarmCacheKnown bool    `json:"warm_cache_known,omitempty"`
-	PrefillTPS     float64 `json:"prefill_tps"`
-	PromptTok      int     `json:"prompt_tokens"`
+	GatedLoad      float64 `json:"gated_load_s,omitempty"`
+	GatedLoadKnown bool    `json:"gated_load_known,omitempty"`
+	// GatedResidencyKnown/GatedResident are captured immediately after warm-up
+	// and before the gated request. They prove loaded state independently of
+	// Ollama's nonzero baseline load-duration counter.
+	GatedResidencyKnown bool    `json:"gated_residency_known,omitempty"`
+	GatedResident       bool    `json:"gated_resident,omitempty"`
+	ColdTTFT            float64 `json:"cold_ttft_s,omitempty"`
+	ColdLoad            float64 `json:"cold_load_s,omitempty"`
+	WarmTTFT            float64 `json:"warm_ttft_s,omitempty"`
+	WarmPromptTok       int     `json:"warm_prompt_tokens,omitempty"`
+	WarmCachedTok       int     `json:"warm_cached_tokens,omitempty"`
+	WarmCacheKnown      bool    `json:"warm_cache_known,omitempty"`
+	PrefillTPS          float64 `json:"prefill_tps"`
+	PromptTok           int     `json:"prompt_tokens"`
 	// FirstOutputObserved distinguishes a sub-millisecond TTFT rounded to zero
 	// from a stream that never produced a non-empty output chunk.
 	FirstOutputObserved bool `json:"first_output_observed,omitempty"`
@@ -108,6 +117,7 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 	if err := runSpeedWarmup(ctx, c, model, &out); err != nil {
 		return out, err
 	}
+	recordGatedResidency(ctx, c, model, &out)
 	decodePrompt, samp, err := runSpeedDecode(ctx, c, model, s, nonce, &out)
 	if err != nil {
 		return out, err
@@ -119,6 +129,25 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 		return out, err
 	}
 	return out, nil
+}
+
+func recordGatedResidency(ctx context.Context, backend llm.Backend, model string, out *SpeedResult) {
+	switch strings.ToLower(strings.TrimSpace(backend.Name())) {
+	case "llama-server", "llamaserver":
+		out.GatedResidencyKnown, out.GatedResident = true, true
+	case "ollama":
+		running, err := backend.PS(ctx)
+		if err != nil {
+			return
+		}
+		out.GatedResidencyKnown = true
+		for _, candidate := range running {
+			if modelref.SameServed(model, candidate.Name) {
+				out.GatedResident = true
+				return
+			}
+		}
+	}
 }
 
 func runSpeedWarmup(ctx context.Context, c llm.Backend, model string, out *SpeedResult) error {
@@ -158,6 +187,13 @@ func runSpeedDecode(ctx context.Context, c llm.Backend, model string, s *Spec, n
 		return "", samp, errors.New("speed probe produced no output; decode throughput and TTFT are not measurable")
 	}
 	out.DecodeTPS, out.TTFT = m1.DecodeTPS, m1.TTFTSeconds
+	out.GatedLoad = m1.LoadSeconds
+	switch strings.ToLower(strings.TrimSpace(c.Name())) {
+	case "ollama":
+		// Ollama reports load duration on the gated request. A native
+		// llama-server process is launch-resident but has no equivalent counter.
+		out.GatedLoadKnown = true
+	}
 	out.FirstOutputObserved = text != ""
 	out.ClientDerived = m1.ClientDerived
 	out.GatedPromptTok = m1.PromptTokens

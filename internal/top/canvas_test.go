@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/blisspixel/fitr/internal/analysis"
 )
 
 func TestRenderResponsiveAndClipped(t *testing.T) {
@@ -30,10 +32,14 @@ func TestRenderResponsiveAndClipped(t *testing.T) {
 
 func TestRenderInventoryListsStateInText(t *testing.T) {
 	state := NewState(testSnapshot())
+	state.Snapshot.InventoryWarning = "runtime status unknown"
 	state.View = ViewInventory
 	state.Width, state.Height = 100, 24
 	got := Render(state, DefaultGlyphs(false)).Plain()
-	for _, want := range []string{"INVENTORY", "measured", "unproven", "not a ranking", "16k/8k", "2k ok", "fitr apply"} {
+	for _, want := range []string{
+		"INVENTORY", "measured", "unproven", "not a ranking", "16k/8k", "2k ok", "fitr apply",
+		"observed", "r reload", "runtime status unknown",
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("inventory canvas missing %q:\n%s", want, got)
 		}
@@ -69,6 +75,29 @@ func TestCanvasSanitizesTerminalControls(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("sanitized canvas missing %q: %q", want, got)
 		}
+	}
+}
+
+func TestCanvasPreservesLayoutSpacesBetweenSanitizedSpans(t *testing.T) {
+	canvas := NewCanvas(80, 3)
+	canvas.SetLine(0,
+		Span{Text: " fitr top ", Role: RoleHeader},
+		Span{Text: " 1:live ", Role: RoleSelected},
+		Span{Text: " 2:result ", Role: RoleMuted},
+	)
+	canvas.SetLine(1, Span{Text: "RESULT  ", Role: RoleHeader}, Span{Text: "golden-model", Role: RoleAccent})
+	canvas.SetLine(2, Span{Text: "decode     ", Role: RoleMuted}, Span{Text: "   23.16 tok/s", Role: RoleDefault})
+	want := " fitr top  1:live  2:result\nRESULT  golden-model\ndecode        23.16 tok/s"
+	if got := canvas.Plain(); got != want {
+		t.Fatalf("canvas spacing:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestCanvasMarksSemanticHorizontalTruncation(t *testing.T) {
+	canvas := NewCanvas(14, 1)
+	canvas.SetLine(0, Span{Text: "warning    ", Role: RoleWarning}, Span{Text: "important detail", Role: RoleDefault})
+	if got := canvas.Plain(); got != "warning    ..." {
+		t.Fatalf("clipped line = %q", got)
 	}
 }
 
@@ -317,6 +346,138 @@ func TestResultRendersObservedZeroTTFTAndActualResidentContext(t *testing.T) {
 	}
 }
 
+func TestResultRendersCentralLatencyAndPlacement(t *testing.T) {
+	snapshot := testSnapshot()
+	run := &snapshot.History[0]
+	markFullMetricsPresent(run)
+	run.MemoryGB = 20
+	cachedTTFT, unloadedTTFT, runtimeLoad := 0.19, 4.82, 3.93
+	run.Analysis = &analysis.Report{
+		Performance: analysis.Performance{
+			LoadedCacheHitTTFTSeconds:  analysis.PerformanceObservation{Estimate: &cachedTTFT, SampleCount: 3},
+			RuntimeUnloadedTTFTSeconds: analysis.PerformanceObservation{Estimate: &unloadedTTFT, SampleCount: 1},
+			RuntimeLoadSeconds:         analysis.PerformanceObservation{Estimate: &runtimeLoad, SampleCount: 1},
+		},
+		Capacity: analysis.Capacity{Placement: &analysis.PlacementObservation{
+			AcceleratorBytes:    15 * 1024 * 1024 * 1024,
+			NonAcceleratorBytes: 5 * 1024 * 1024 * 1024,
+			AcceleratorPercent:  75,
+			Boundary:            analysis.AllocationAttributionBoundary,
+		}},
+	}
+	state := NewState(snapshot)
+	state.View, state.Width, state.Height = ViewResult, 120, 40
+	state.Selected[ViewResult] = run.ID
+	plain := Render(state, DefaultGlyphs(false)).Plain()
+	for _, want := range []string{
+		"loaded TTFT", "loaded cache-hit TTFT", "0.19 s", "runtime-unloaded TTFT", "4.82 s",
+		"runtime load", "3.93 s", "15.00 GB", "75.0% of runtime allocation",
+		"5.00 GB (derived remainder)", "Runtime allocation attribution only;",
+		"not proof of exclusive physical pools, layer placement, or host traffic",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("result missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestShortResultKeepsVerdictAndNextBeforeSecondaryDiagnostics(t *testing.T) {
+	snapshot := testSnapshot()
+	run := &snapshot.History[0]
+	markFullMetricsPresent(run)
+	run.Verdicts = []Verdict{{State: "PASS", Label: "fast local chat"}}
+	run.NextCommand = "fitr apply alpha:8b"
+	run.MemoryGB = 20
+	cachedTTFT, unloadedTTFT, runtimeLoad := 0.19, 4.82, 3.93
+	run.Analysis = &analysis.Report{
+		Performance: analysis.Performance{
+			LoadedCacheHitTTFTSeconds:  analysis.PerformanceObservation{Estimate: &cachedTTFT, SampleCount: 3},
+			RuntimeUnloadedTTFTSeconds: analysis.PerformanceObservation{Estimate: &unloadedTTFT, SampleCount: 1},
+			RuntimeLoadSeconds:         analysis.PerformanceObservation{Estimate: &runtimeLoad, SampleCount: 1},
+		},
+		Capacity: analysis.Capacity{Placement: &analysis.PlacementObservation{
+			AcceleratorBytes: 15 * 1024 * 1024 * 1024, NonAcceleratorBytes: 5 * 1024 * 1024 * 1024,
+			AcceleratorPercent: 75, Boundary: analysis.AllocationAttributionBoundary,
+		}},
+	}
+	state := NewState(snapshot)
+	state.View, state.Width, state.Height = ViewResult, 80, 24
+	state.Selected[ViewResult] = run.ID
+	plain := Render(state, DefaultGlyphs(false)).Plain()
+	for _, want := range []string{"verdicts", "1 PASS", "next", "fitr apply alpha:8b"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("short result lost %q:\n%s", want, plain)
+		}
+	}
+	if strings.Index(plain, "verdicts") > strings.Index(plain, "performance") ||
+		strings.Index(plain, "fitr apply alpha:8b") > strings.Index(plain, "performance") {
+		t.Fatalf("primary result content fell below secondary diagnostics:\n%s", plain)
+	}
+}
+
+func TestCompactResultSummarizesFullBatteryWithoutHidingPrimaryEvidence(t *testing.T) {
+	snapshot := testSnapshot()
+	run := &snapshot.History[0]
+	markFullMetricsPresent(run)
+	run.MemoryGB = 20.49
+	run.NextCommand = "fitr run alpha:8b -k 3"
+	states := []string{"PASS", "PASS", "PASS", "PASS", "FAIL", "INCONCLUSIVE", "INCONCLUSIVE", "SKIP", "SKIP", "SKIP", "BLKD"}
+	for i, state := range states {
+		run.Verdicts = append(run.Verdicts, Verdict{Need: fmt.Sprintf("need-%d", i), Label: fmt.Sprintf("need %d", i), State: state})
+	}
+	unloaded, load := 6.79, 6.68
+	run.Analysis = &analysis.Report{Performance: analysis.Performance{
+		RuntimeUnloadedTTFTSeconds: analysis.PerformanceObservation{Estimate: &unloaded, SampleCount: 1},
+		RuntimeLoadSeconds:         analysis.PerformanceObservation{Estimate: &load, SampleCount: 1},
+	}, Gaps: []analysis.EvidenceGap{{Code: analysis.GapCapacityPolicyUnsealed}}}
+	state := NewState(snapshot)
+	state.View, state.Width, state.Height = ViewResult, 80, 24
+	state.Selected[ViewResult] = run.ID
+	plain := Render(state, DefaultGlyphs(false)).Plain()
+	for _, want := range []string{
+		"4 PASS", "1 FAIL", "2 INCONCLUSIVE", "1 BLKD", "3 SKIP",
+		"next", "fitr run alpha:8b -k 3", "performance", "decode", "prefill",
+		"runtime-unloaded TTFT", "n=1", "capacity", "20.49 GB", "compact; 1 gap",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("compact result lost %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestResultMarksDescriptiveOnlyEvidenceBeforeItsValueCanBeMistakenForAClaim(t *testing.T) {
+	snapshot := testSnapshot()
+	run := &snapshot.History[0]
+	markFullMetricsPresent(run)
+	run.MemoryGB = 5
+	decode, ttft := run.DecodeMean, run.TTFTMean
+	resident := int64(5 * 1024 * 1024 * 1024)
+	run.Analysis = &analysis.Report{
+		Performance: analysis.Performance{
+			DecodeTPS: analysis.PerformanceObservation{Estimate: &decode, Status: analysis.StatusDescriptiveOnly,
+				Acquisition: analysis.AcquisitionRuntimeReported, SampleCount: 3},
+			TTFTSeconds: analysis.PerformanceObservation{Estimate: &ttft, Status: analysis.StatusDescriptiveOnly,
+				Acquisition: analysis.AcquisitionClientWallClock, SampleCount: 3},
+		},
+		Capacity: analysis.Capacity{Resident: &analysis.ResidentObservation{
+			Estimate: &resident, Status: analysis.StatusDescriptiveOnly,
+			Acquisition: analysis.AcquisitionRuntimeAllocation,
+		}},
+	}
+	state := NewState(snapshot)
+	state.View, state.Width, state.Height = ViewResult, 100, 40
+	state.Selected[ViewResult] = run.ID
+	plain := Render(state, DefaultGlyphs(false)).Plain()
+	for _, want := range []string{
+		"decode [descriptive]", "via runtime reported", "request TTFT [descriptive]",
+		"via client wall clock", "resident [descriptive]", "via runtime allocation",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("result missing %q:\n%s", want, plain)
+		}
+	}
+}
+
 func TestRenderCompatibleComparisonAndFooterModes(t *testing.T) {
 	state := NewState(testSnapshot())
 	state.View, state.Width, state.Height = ViewHistory, 100, 24
@@ -338,7 +499,8 @@ func TestRenderCompatibleComparisonAndFooterModes(t *testing.T) {
 		t.Fatalf("filter footer missing:\n%s", plain)
 	}
 	state.EditingFilter, state.Error = false, "reload failed"
-	if plain = Render(state, DefaultGlyphs(true)).Plain(); !strings.Contains(plain, "error:reload failed") {
+	if plain = Render(state, DefaultGlyphs(true)).Plain(); !strings.Contains(plain, "error: reload failed") ||
+		!strings.Contains(plain, "r retry") {
 		t.Fatalf("error footer missing:\n%s", plain)
 	}
 }

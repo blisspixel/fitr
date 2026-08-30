@@ -102,6 +102,19 @@ reserve bytes, swap policy, container limit, observation time, and the exact
 formula producing usable bytes. fitr will not silently choose a fixed reserve
 or turn nominal sticker capacity into addressable memory.
 
+The next capacity work starts with a transient current-availability receipt,
+then a safe-budget policy. On Linux unified-memory hosts,
+`/proc/meminfo` `MemAvailable` is the first candidate source, but it must retain
+its observation time and resource domain and must not be stored as a permanent
+machine property. A configured reserve, container limit, or explicit
+`--vram-gb` may produce a smaller usable budget.
+
+The second step learns `OTHER` only from matched observations. A resident
+remainder is exact-context runtime allocation minus bound artifact bytes and
+modeled KV. A sampled in-flight peak is a separate receipt. Vision-tower
+activations and compute graphs can make peak demand much larger than resident
+demand, so one must never be relabeled as the other.
+
 Single-model capacity also does not prove co-residency. Adding independent
 weights and KV estimates ignores eviction, shared runtime state, mmap policy,
 placement, compute allocation, and the contexts active at the same time. A
@@ -133,8 +146,10 @@ Performance answers how the measured configuration felt:
 |---|---|
 | Decode | How quickly does the answer stream after prompt processing? |
 | Prefill | How quickly does the runtime ingest the prompt? |
-| TTFT | How long until the first non-empty output? |
-| Load probe wall time | How long did the complete runtime-unloaded probe take? |
+| Request TTFT | How long until the first non-empty output, with loaded state claimed only from a gated-request residency receipt? |
+| Runtime-unloaded TTFT | How long until first output after fitr unloads the runtime model? |
+| Loaded cache-hit TTFT | How responsive was a request with verified cached prompt tokens? |
+| Runtime load | What model-load duration did the backend report? |
 | Repeat dispersion | How much did the observation move within this run? |
 
 TTFT needs an explicit cache and residency state. The useful categories are:
@@ -142,12 +157,14 @@ TTFT needs an explicit cache and residency state. The useful categories are:
 - runtime unloaded;
 - loaded with a verified cache miss;
 - loaded with a verified cache hit;
-- loaded with cache state unknown.
+- request residency or cache state unknown.
 
 Unknown cache state is not the same as an observed zero cached-token count.
-fitr now preserves that distinction and will not certify a loaded/uncached
-latency gate from an unknown receipt. Runtime-unloaded is also not machine
-cold: the operating system may still cache model pages.
+fitr preserves that distinction and will not certify a loaded/uncached latency
+gate from unknown residency or cache receipts. Result presents request,
+receipt-proven loaded, runtime-unloaded, and
+verified loaded cache-hit TTFT separately. Runtime-unloaded is also not machine cold:
+the operating system may still cache model pages.
 
 ### Behavior and workload
 
@@ -194,7 +211,11 @@ honest explanation is:
 Controlled interventions or hardware counters are required before a stronger
 root-cause claim.
 
-## Model shape and placement
+## Model shape and allocation attribution
+
+The allocation attribution described below is shipped. The compact model-shape
+view remains a planned 0.10 feature and will appear only when artifact metadata
+supports it.
 
 Dense and mixture-of-experts models need different labels:
 
@@ -209,10 +230,12 @@ MODEL SHAPE
 Total parameters help explain artifact capacity. Nominal active parameters
 help describe the compute path. Neither directly predicts speed.
 
-Placement is similarly specific. `GPU 100%` means the runtime reported that
-share of resident bytes on the accelerator at the observation point. It does
-not prove an exact layer count, exclusive residency on unified memory, or the
-absence of every host-memory transfer.
+Allocation attribution is similarly specific. At an exact-context memory probe, fitr can
+show the runtime-classified accelerator bytes and derive the non-accelerator
+remainder from total resident allocation. That observation applies to the
+probe point. It does not prove an exact layer count, dedicated VRAM, host
+spill, exclusive residency on unified memory, or the absence of every
+host-memory transfer.
 
 ## Experiments that answer different purchase questions
 

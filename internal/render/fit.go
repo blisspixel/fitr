@@ -61,7 +61,7 @@ func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 		marginLabel = "DELTA"
 	}
 	fmt.Fprintf(w, "%s\n", p.wrap(p.Head, fmt.Sprintf(fitHeaderFmt,
-		"FIT", "CTX", "WEIGHT", "KV", "OTHER", "NEED", marginLabel, "DECODE", "PREFILL", "OF HAVE")))
+		"FIT", "CTX", "WEIGHT", "KV", "OTHER", "NEED", marginLabel, "DECODE", "PREFILL", "FIT BAR")))
 	maxNeed := contextFitMaxNeed(table)
 	for _, pt := range table.Points {
 		writeContextFitPoint(w, pt, maxNeed, p, g, unicode)
@@ -123,7 +123,7 @@ func writeContextFitPoint(w io.Writer, point ContextFitPoint, maxNeed float64,
 		fmt.Sprintf("%s%d", mark, point.Ctx),
 		point.WeightsGB, point.KVGB, other, point.NeedGB, point.MarginGB,
 		decode, prefill, p.wrap(p.Accent, bar))
-	if point.Note != "" {
+	if point.Note != "" && !strings.Contains(strings.ToLower(point.Note), "other allocation n/a") {
 		fmt.Fprintf(w, "          %s\n", p.wrap(p.Muted, SingleLine(point.Note)))
 	}
 }

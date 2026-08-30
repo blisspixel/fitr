@@ -158,7 +158,32 @@ func (r *Record) validateProfileSnapshot(profile device.Profile) error {
 }
 
 func (r *Record) validateScorecard(profile device.Profile) error {
-	expected := score.Score(r.Measured(), profile)
+	if r.Manifest == nil || r.Manifest.Provenance == nil {
+		return errors.New("persisted scorecard has no scoring policy receipt")
+	}
+	currentHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", CurrentScoringPolicy())
+	if err != nil {
+		return fmt.Errorf("hash current scoring policy: %w", err)
+	}
+	legacyHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV3())
+	if err != nil {
+		return fmt.Errorf("hash legacy scoring policy: %w", err)
+	}
+	legacyV4Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV4())
+	if err != nil {
+		return fmt.Errorf("hash legacy v4 scoring policy: %w", err)
+	}
+	var expected score.Scorecard
+	switch r.Manifest.Provenance.ScoringPolicySHA256 {
+	case currentHash:
+		expected = score.Score(r.Measured(), profile)
+	case legacyHash:
+		expected = score.ScoreLegacyV3(r.Measured(), profile)
+	case legacyV4Hash:
+		expected = score.ScoreLegacyV4(r.Measured(), profile)
+	default:
+		return errors.New("persisted scorecard uses an unsupported scoring policy")
+	}
 	if !reflect.DeepEqual(expected, r.Scorecard) {
 		return errors.New("persisted scorecard does not match sealed raw evidence and profile")
 	}
@@ -268,7 +293,7 @@ func (r *Record) validateSpeedEvidence() error {
 
 func validateSpeedSample(i int, sample eval.SpeedResult) error {
 	measurements := []float64{
-		sample.DecodeTPS, sample.TTFT, sample.ColdTTFT, sample.ColdLoad,
+		sample.DecodeTPS, sample.TTFT, sample.GatedLoad, sample.ColdTTFT, sample.ColdLoad,
 		sample.WarmTTFT, sample.PrefillTPS,
 	}
 	for _, measurement := range measurements {
@@ -284,6 +309,12 @@ func validateSpeedSample(i int, sample eval.SpeedResult) error {
 	}
 	if sample.ColdTTFT > 0 && sample.ColdLoad <= 0.1 {
 		return fmt.Errorf("speed observation %d labels cold TTFT without a cold-load receipt", i)
+	}
+	if !sample.GatedLoadKnown && sample.GatedLoad != 0 {
+		return fmt.Errorf("speed observation %d has gated load duration without a load-duration receipt", i)
+	}
+	if !sample.GatedResidencyKnown && sample.GatedResident {
+		return fmt.Errorf("speed observation %d claims gated residency without a status receipt", i)
 	}
 	if sample.GatedCacheKnown && !sample.GatedCacheReceiptValid() {
 		return fmt.Errorf("speed observation %d has an empty gated cache receipt", i)
@@ -304,7 +335,7 @@ func validateSpeedSample(i int, sample eval.SpeedResult) error {
 }
 
 func hasNegativeSpeedMeasurement(sample eval.SpeedResult) bool {
-	return sample.DecodeTPS < 0 || sample.TTFT < 0 || sample.ColdTTFT < 0 || sample.ColdLoad < 0 ||
+	return sample.DecodeTPS < 0 || sample.TTFT < 0 || sample.GatedLoad < 0 || sample.ColdTTFT < 0 || sample.ColdLoad < 0 ||
 		sample.WarmTTFT < 0 || sample.PrefillTPS < 0 || sample.PromptTok < 0 ||
 		sample.CachedPromptTok < 0 || sample.GatedCachedTok < 0 || sample.GatedPromptTok < 0 ||
 		sample.WarmPromptTok < 0 || sample.WarmCachedTok < 0

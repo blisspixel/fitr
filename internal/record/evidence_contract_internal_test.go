@@ -101,6 +101,13 @@ var derivedEvidenceForgeryCases = []derivedEvidenceForgeryCase{
 		want: "cold TTFT without a cold-load receipt",
 	},
 	{
+		name: "gated load without residency receipt",
+		mutate: func(_ *testing.T, r *Record) {
+			addDerivedSpeed(r, eval.SpeedResult{GatedLoad: 0.5})
+		},
+		want: "gated load duration without a load-duration receipt",
+	},
+	{
 		name: "warm label without cache hit",
 		mutate: func(_ *testing.T, r *Record) {
 			addDerivedSpeed(r, eval.SpeedResult{WarmTTFT: 1})
@@ -212,6 +219,7 @@ func TestMeasuredPartialTTFTCacheHitCannotEstablishLoadedUncachedLatency(t *test
 		Speed: []eval.SpeedResult{{
 			DecodeTPS: 20, TTFT: 0.2, PrefillTPS: 100,
 			GatedCacheKnown: true, GatedPromptTok: 99, GatedCachedTok: 1,
+			GatedLoadKnown: true, GatedResidencyKnown: true, GatedResident: true,
 		}},
 		DecodeSum:  stats.Summary{Mean: 20, N: 1},
 		TTFTSum:    stats.Summary{Mean: 0.2, N: 1},
@@ -227,6 +235,53 @@ func TestMeasuredPartialTTFTCacheHitCannotEstablishLoadedUncachedLatency(t *test
 	verdict := score.Score(m, profile).Needs["fast_and_decent"]
 	if verdict.State != score.Inconclusive || !strings.Contains(verdict.Why, "cache hit") {
 		t.Fatalf("partial cache hit verdict = %+v", verdict)
+	}
+}
+
+func TestScorecardValidationPreservesSealedV3AuxiliaryLatencyProse(t *testing.T) {
+	profile := device.Profile{Name: "test", Gates: map[string]device.Gate{
+		"fast_chat": {"decode_tps_min": 10, "ttft_s_max": 1},
+	}}
+	r := &Record{
+		TaskPlan: TaskPlan{SpeedSamples: 1},
+		Speed: []eval.SpeedResult{{
+			DecodeTPS: 20, TTFT: 0.2, PrefillTPS: 100,
+			ColdTTFT: 9.1, ColdLoad: 8.5, WarmTTFT: 0.18,
+			GatedCacheKnown: true, GatedPromptTok: 100,
+		}},
+		DecodeSum: stats.Summary{Mean: 20, N: 1}, TTFTSum: stats.Summary{Mean: 0.2, N: 1},
+		PrefillSum: stats.Summary{Mean: 100, N: 1},
+	}
+	legacyHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV3())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Manifest = &RunManifest{Provenance: &RunProvenance{ScoringPolicySHA256: legacyHash}}
+	r.Scorecard = score.ScoreLegacyV3(r.Measured(), profile)
+	if err := r.validateScorecard(profile); err != nil {
+		t.Fatalf("sealed v3 scorecard no longer validates: %v", err)
+	}
+	if why := r.Scorecard.Needs["fast_and_decent"].Why; !strings.Contains(why, "cold start 9.1s") || !strings.Contains(why, "cached prefix 0.18s") {
+		t.Fatalf("v3 auxiliary latency prose changed: %q", why)
+	}
+	legacyV4Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV4())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Manifest.Provenance.ScoringPolicySHA256 = legacyV4Hash
+	r.Scorecard = score.ScoreLegacyV4(r.Measured(), profile)
+	if err := r.validateScorecard(profile); err != nil {
+		t.Fatalf("sealed v4 scorecard no longer validates: %v", err)
+	}
+	if why := r.Scorecard.Needs["fast_and_decent"].Why; strings.Contains(why, "residency receipt") {
+		t.Fatalf("v4 scorecard gained v5 residency prose: %q", why)
+	}
+	currentHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", CurrentScoringPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentHash == legacyHash || currentHash == legacyV4Hash || legacyHash == legacyV4Hash {
+		t.Fatal("scoring policies v3, v4, and v5 must have distinct receipts")
 	}
 }
 

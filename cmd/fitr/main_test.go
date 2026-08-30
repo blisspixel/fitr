@@ -238,6 +238,9 @@ func TestDegradedResultFailsTheRightNeeds(t *testing.T) {
 	for i := range r.Speed {
 		r.Speed[i].GatedCacheKnown = true
 		r.Speed[i].GatedPromptTok = 32
+		r.Speed[i].GatedLoadKnown = true
+		r.Speed[i].GatedResidencyKnown = true
+		r.Speed[i].GatedResident = true
 	}
 	for i := range r.Checks {
 		if r.Checks[i].Need == "structured_output" {
@@ -622,11 +625,29 @@ func TestUsageMentionsAdvise(t *testing.T) {
 	if !strings.Contains(got, "fitr apply") {
 		t.Fatalf("usage must list apply:\n%s", got)
 	}
+	if !strings.Contains(got, "fitr update") {
+		t.Fatalf("usage must list update:\n%s", got)
+	}
 	if !strings.Contains(got, "--retonr") {
 		t.Fatalf("usage must mention the optional retonr export:\n%s", got)
 	}
 	if !strings.Contains(got, "--checks-only") || !strings.Contains(got, "calibrate merge") {
 		t.Fatalf("usage must include the calibration workflow:\n%s", got)
+	}
+}
+
+func TestUpdateHelpAndFlagValidation(t *testing.T) {
+	if commandHandler("update") == nil {
+		t.Fatal("update command is not registered")
+	}
+	if code := cmdUpdate(context.Background(), []string{"--help"}); code != exitOK {
+		t.Fatalf("update --help exit = %d", code)
+	}
+	if code := cmdUpdate(context.Background(), []string{"--check", "--reinstall"}); code != exitUsage {
+		t.Fatalf("incompatible update flags exit = %d", code)
+	}
+	if code := cmdUpdate(context.Background(), []string{"--display", "invalid"}); code != exitUsage {
+		t.Fatalf("invalid update display exit = %d", code)
 	}
 }
 
@@ -966,6 +987,24 @@ func TestScreenshotsWriteDemoSVGs(t *testing.T) {
 		if name == "top.svg" && !strings.Contains(got, "#79c0ff") {
 			t.Fatalf("top screenshot lost its rich terminal color:\n%.400s", got)
 		}
+	}
+}
+
+func TestCaptureStdoutDrainsWhileTheProducerWrites(t *testing.T) {
+	const size = 1 << 20
+	want := strings.Repeat("x", size)
+	got, err := captureStdout(context.Background(), func(context.Context) (string, error) {
+		if _, writeErr := io.WriteString(os.Stdout, want); writeErr != nil {
+			return "", writeErr
+		}
+		return "prefix", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len("prefix")+size || !strings.HasPrefix(got, "prefix") ||
+		!strings.HasSuffix(got, "xxxx") {
+		t.Fatalf("captured %d bytes, want %d", len(got), len("prefix")+size)
 	}
 }
 
@@ -1389,6 +1428,7 @@ type runIntegrationBackend struct {
 	digest        string
 	effectiveCtx  int
 	contextErr    error
+	psErr         error
 	// flapPlacement makes /api/ps report a different resident split on later
 	// calls, the way a real runtime does once a battery has finished and the
 	// model's allocation has changed.
@@ -1447,6 +1487,9 @@ func (b *runIntegrationBackend) Show(context.Context, string) (ollama.ModelInfo,
 }
 func (b *runIntegrationBackend) PS(context.Context) ([]ollama.RunningModel, error) {
 	b.psCalls++
+	if b.psErr != nil {
+		return nil, b.psErr
+	}
 	vram := int64(1024)
 	if b.flapPlacement {
 		// Every call reports a distinct split, so any two placement probes
@@ -1923,6 +1966,22 @@ func TestInventoryDisclosesUnreadableSavedEvidence(t *testing.T) {
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "could not be trusted") {
 		t.Fatalf("evidence warnings = %v", warnings)
+	}
+}
+
+func TestInventoryDisclosesUnknownRuntimeStatus(t *testing.T) {
+	t.Setenv("FITR_RESULTS", t.TempDir())
+	table, warnings, err := joinInstalled(context.Background(), &runIntegrationBackend{
+		psErr: errors.New("status endpoint unavailable"),
+	}, device.Fingerprint{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(table.Rows) != 1 || table.Rows[0].Loaded || table.Rows[0].ServingKnown {
+		t.Fatalf("inventory status failure = %+v", table.Rows)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "loaded markers and serving contexts are unknown") {
+		t.Fatalf("warnings = %v", warnings)
 	}
 }
 

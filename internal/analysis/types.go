@@ -54,15 +54,21 @@ const (
 type SupportClaim string
 
 const (
-	ClaimObservedDecode            SupportClaim = "observed_decode_throughput"
-	ClaimObservedPrefill           SupportClaim = "observed_prefill_throughput"
-	ClaimUncachedPrefill           SupportClaim = "uncached_prefill_throughput"
-	ClaimObservedLoadedTTFT        SupportClaim = "observed_loaded_ttft"
-	ClaimLoadedUncachedTTFT        SupportClaim = "loaded_uncached_ttft"
-	ClaimExactContextResidentBytes SupportClaim = "exact_context_resident_bytes"
-	ClaimStablePerformance         SupportClaim = "stable_performance"
-	ClaimCapacityHeadroom          SupportClaim = "capacity_headroom"
-	ClaimFit                       SupportClaim = "fit"
+	ClaimObservedDecode               SupportClaim = "observed_decode_throughput"
+	ClaimObservedPrefill              SupportClaim = "observed_prefill_throughput"
+	ClaimUncachedPrefill              SupportClaim = "uncached_prefill_throughput"
+	ClaimObservedRequestTTFT          SupportClaim = "observed_request_ttft"
+	ClaimObservedLoadedTTFT           SupportClaim = "observed_loaded_ttft"
+	ClaimLoadedUncachedTTFT           SupportClaim = "loaded_uncached_ttft"
+	ClaimObservedRuntimeUnloadedTTFT  SupportClaim = "observed_runtime_unloaded_ttft"
+	ClaimObservedRuntimeLoadTime      SupportClaim = "observed_runtime_load_time"
+	ClaimObservedLoadedCacheHitTTFT   SupportClaim = "observed_loaded_cache_hit_ttft"
+	ClaimExactContextResidentBytes    SupportClaim = "exact_context_resident_bytes"
+	ClaimExactContextAcceleratorBytes SupportClaim = "exact_context_accelerator_bytes"
+	ClaimExactContextPlacement        SupportClaim = "exact_context_allocation_placement"
+	ClaimStablePerformance            SupportClaim = "stable_performance"
+	ClaimCapacityHeadroom             SupportClaim = "capacity_headroom"
+	ClaimFit                          SupportClaim = "fit"
 )
 
 // PerformanceObservation is a point estimate and its observed sample shape.
@@ -85,9 +91,12 @@ type PerformanceObservation struct {
 }
 
 type Performance struct {
-	DecodeTPS   PerformanceObservation `json:"decode_tps"`
-	PrefillTPS  PerformanceObservation `json:"prefill_tps"`
-	TTFTSeconds PerformanceObservation `json:"ttft_seconds"`
+	DecodeTPS                  PerformanceObservation `json:"decode_tps"`
+	PrefillTPS                 PerformanceObservation `json:"prefill_tps"`
+	TTFTSeconds                PerformanceObservation `json:"ttft_seconds"`
+	RuntimeUnloadedTTFTSeconds PerformanceObservation `json:"runtime_unloaded_ttft_seconds"`
+	RuntimeLoadSeconds         PerformanceObservation `json:"runtime_load_seconds"`
+	LoadedCacheHitTTFTSeconds  PerformanceObservation `json:"loaded_cache_hit_ttft_seconds"`
 }
 
 type Context struct {
@@ -110,28 +119,63 @@ type ResidentObservation struct {
 	Supports         []SupportClaim    `json:"supports"`
 }
 
+type PlacementKind string
+
+const (
+	PlacementAcceleratorSharePartial PlacementKind = "accelerator_share_partial"
+	PlacementAcceleratorShareFull    PlacementKind = "accelerator_share_full"
+)
+
+const AllocationAttributionBoundary = "Runtime allocation attribution only; not proof of exclusive physical pools, layer placement, or host traffic."
+
+// PlacementObservation describes one exact-context runtime allocation point.
+// AcceleratorBytes is runtime classified. NonAcceleratorBytes is only the
+// arithmetic remainder of resident minus accelerator bytes. On unified-memory
+// systems neither value identifies an exclusive physical memory pool, layer
+// placement, or host traffic.
+type PlacementObservation struct {
+	AcceleratorBytes     int64             `json:"accelerator_bytes"`
+	NonAcceleratorBytes  int64             `json:"non_accelerator_bytes"`
+	AcceleratorPercent   float64           `json:"accelerator_percent"`
+	Kind                 PlacementKind     `json:"kind"`
+	Status               ObservationStatus `json:"status"`
+	Acquisition          Acquisition       `json:"acquisition"`
+	RemainderAcquisition Acquisition       `json:"remainder_acquisition"`
+	RequestedContext     int               `json:"requested_context"`
+	EffectiveContext     *int              `json:"effective_context"`
+	Supports             []SupportClaim    `json:"supports,omitempty"`
+	Boundary             string            `json:"boundary"`
+}
+
 type Capacity struct {
-	Resident *ResidentObservation `json:"resident,omitempty"`
+	Resident  *ResidentObservation  `json:"resident,omitempty"`
+	Placement *PlacementObservation `json:"placement,omitempty"`
 }
 
 type GapCode string
 
 const (
-	GapDecodeUnavailable         GapCode = "performance.decode_unavailable"
-	GapPrefillUnavailable        GapCode = "performance.prefill_unavailable"
-	GapTTFTUnavailable           GapCode = "performance.ttft_unavailable"
-	GapPrefillCacheUnknown       GapCode = "performance.prefill_cache_unknown"
-	GapPrefillCacheHit           GapCode = "performance.prefill_cache_hit"
-	GapTTFTCacheUnknown          GapCode = "performance.ttft_cache_unknown"
-	GapTTFTCacheHit              GapCode = "performance.ttft_cache_hit"
-	GapPerformanceSampleCountLow GapCode = "performance.sample_count_low"
-	GapResidentNotPlanned        GapCode = "capacity.resident_not_planned"
-	GapResidentUnavailable       GapCode = "capacity.resident_unavailable"
-	GapResidentContextUnverified GapCode = "capacity.resident_context_unverified"
-	GapResidentContextAdjusted   GapCode = "capacity.resident_context_adjusted"
-	GapCapacityPolicyUnsealed    GapCode = "capacity.policy_unsealed"
-	GapModelIdentityUnbound      GapCode = "artifact.identity_unbound"
-	GapStorageUnreconciled       GapCode = "artifact.storage_unreconciled"
+	GapDecodeUnavailable              GapCode = "performance.decode_unavailable"
+	GapPrefillUnavailable             GapCode = "performance.prefill_unavailable"
+	GapTTFTUnavailable                GapCode = "performance.ttft_unavailable"
+	GapPrefillCacheUnknown            GapCode = "performance.prefill_cache_unknown"
+	GapPrefillCacheHit                GapCode = "performance.prefill_cache_hit"
+	GapTTFTCacheUnknown               GapCode = "performance.ttft_cache_unknown"
+	GapTTFTCacheHit                   GapCode = "performance.ttft_cache_hit"
+	GapTTFTResidencyUnknown           GapCode = "performance.ttft_residency_unknown"
+	GapTTFTNotResident                GapCode = "performance.ttft_not_resident"
+	GapRuntimeUnloadedTTFTUnavailable GapCode = "performance.runtime_unloaded_ttft_unavailable"
+	GapRuntimeLoadUnavailable         GapCode = "performance.runtime_load_unavailable"
+	GapLoadedCacheHitTTFTUnavailable  GapCode = "performance.loaded_cache_hit_ttft_unavailable"
+	GapPerformanceSampleCountLow      GapCode = "performance.sample_count_low"
+	GapResidentNotPlanned             GapCode = "capacity.resident_not_planned"
+	GapResidentUnavailable            GapCode = "capacity.resident_unavailable"
+	GapResidentContextUnverified      GapCode = "capacity.resident_context_unverified"
+	GapResidentContextAdjusted        GapCode = "capacity.resident_context_adjusted"
+	GapPlacementUnavailable           GapCode = "capacity.placement_unavailable"
+	GapCapacityPolicyUnsealed         GapCode = "capacity.policy_unsealed"
+	GapModelIdentityUnbound           GapCode = "artifact.identity_unbound"
+	GapStorageUnreconciled            GapCode = "artifact.storage_unreconciled"
 )
 
 type EvidenceGap struct {
@@ -141,11 +185,97 @@ type EvidenceGap struct {
 	UnsupportedClaims []SupportClaim `json:"unsupported_claims,omitempty"`
 }
 
+// GapLabel provides one renderer-neutral human label while Code remains the
+// stable machine-readable identifier.
+func GapLabel(code GapCode) string {
+	switch code {
+	case GapDecodeUnavailable:
+		return "decode throughput"
+	case GapPrefillUnavailable:
+		return "prefill throughput"
+	case GapTTFTUnavailable:
+		return "loaded TTFT"
+	case GapPrefillCacheUnknown, GapPrefillCacheHit:
+		return "prefill cache state"
+	case GapTTFTCacheUnknown, GapTTFTCacheHit:
+		return "gated TTFT cache state"
+	case GapTTFTResidencyUnknown, GapTTFTNotResident:
+		return "TTFT residency state"
+	case GapRuntimeUnloadedTTFTUnavailable:
+		return "runtime-unloaded TTFT"
+	case GapRuntimeLoadUnavailable:
+		return "runtime load"
+	case GapLoadedCacheHitTTFTUnavailable:
+		return "loaded cache-hit TTFT"
+	case GapPerformanceSampleCountLow:
+		return "repeat strength"
+	case GapResidentNotPlanned, GapResidentUnavailable, GapResidentContextUnverified, GapResidentContextAdjusted:
+		return "resident allocation"
+	case GapPlacementUnavailable:
+		return "allocation attribution"
+	case GapCapacityPolicyUnsealed:
+		return "usable capacity"
+	case GapModelIdentityUnbound:
+		return "artifact identity"
+	case GapStorageUnreconciled:
+		return "evidence storage"
+	default:
+		return string(code)
+	}
+}
+
+// Supports reports whether an observation can establish a claim.
+func Supports(observation PerformanceObservation, claim SupportClaim) bool {
+	for _, supported := range observation.Supports {
+		if supported == claim {
+			return true
+		}
+	}
+	return false
+}
+
+// TTFTLabel names the request state actually established by evidence.
+func TTFTLabel(observation PerformanceObservation) string {
+	if Supports(observation, ClaimObservedLoadedTTFT) {
+		return "loaded TTFT"
+	}
+	return "request TTFT"
+}
+
+// AcquisitionLabel is stable human wording for an observation source.
+func AcquisitionLabel(acquisition Acquisition) string {
+	switch acquisition {
+	case AcquisitionRuntimeReported:
+		return "runtime reported"
+	case AcquisitionClientDerived:
+		return "client derived"
+	case AcquisitionMixed:
+		return "mixed runtime and client"
+	case AcquisitionClientWallClock:
+		return "client wall clock"
+	case AcquisitionRuntimeAllocation:
+		return "runtime allocation"
+	default:
+		return "unavailable"
+	}
+}
+
+// ObservationQualifier keeps evidence status and acquisition visible in all
+// renderers instead of allowing descriptive-only values to resemble claims.
+func ObservationQualifier(status ObservationStatus, acquisition Acquisition) string {
+	source := AcquisitionLabel(acquisition)
+	if status == StatusDescriptiveOnly {
+		return "descriptive only; " + source
+	}
+	return source
+}
+
 type DiagnosisCode string
 
 const (
-	DiagnosisContextAdjusted DiagnosisCode = "context.adjusted"
-	DiagnosisContaminated    DiagnosisCode = "run.resident_contamination"
+	DiagnosisContextAdjusted  DiagnosisCode = "context.adjusted"
+	DiagnosisContaminated     DiagnosisCode = "run.resident_contamination"
+	DiagnosisPartialPlacement DiagnosisCode = "placement.partial_accelerator_allocation"
 )
 
 // Diagnosis is limited to a direct statement carried by a sealed receipt.
@@ -154,6 +284,19 @@ type Diagnosis struct {
 	Code      DiagnosisCode `json:"code"`
 	Statement string        `json:"statement"`
 	Evidence  []string      `json:"evidence"`
+}
+
+func DiagnosisLabel(code DiagnosisCode) string {
+	switch code {
+	case DiagnosisContextAdjusted:
+		return "effective context"
+	case DiagnosisContaminated:
+		return "run contamination"
+	case DiagnosisPartialPlacement:
+		return "allocation attribution"
+	default:
+		return string(code)
+	}
 }
 
 type ActionCode string

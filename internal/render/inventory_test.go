@@ -28,7 +28,7 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 		// The verb survives; the model name and the binary's own name do not,
 		// because the row already carries both.
 		"apply", "advise", "try a smaller quant",
-		"* gemma4:12b", "never a recommendation",
+		"[L] gemma4:12b", "never a recommendation",
 		"fitr advise qwen3:8b", // the one worked example in the legend
 		"warning", "could not be trusted",
 	} {

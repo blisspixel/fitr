@@ -11,6 +11,62 @@ import (
 	"github.com/blisspixel/fitr/internal/score"
 )
 
+func TestPresentationLabelsClarifyLegacyAndIndependentEvidence(t *testing.T) {
+	if got := UseForLabel("chat, (small footprint)"); got != "chat; small footprint" {
+		t.Fatalf("UseForLabel = %q", got)
+	}
+	verdict := score.Verdict{
+		State: score.Fail, Measure: "9/9 clean [0.21-1.00]", Gate: "need >=0.70",
+		Detail: []string{"tool_irrelevance 9/9", "did not stop cleanly after a tool was withdrawn"},
+		Note:   "undecided: the interval crosses the bar. Not a fail",
+	}
+	why := PresentVerdictWhy("tool_restraint", verdict)
+	for _, want := range []string{
+		"ordinary irrelevance checks are undecided",
+		"that interval alone is not a fail",
+		"overall FAIL comes from the separate withdrawal scenario above",
+	} {
+		if !strings.Contains(why, want) {
+			t.Fatalf("presented verdict missing %q: %s", want, why)
+		}
+	}
+	if verdict.Note != "undecided: the interval crosses the bar. Not a fail" {
+		t.Fatal("presentation mutated sealed verdict")
+	}
+}
+
+func TestResultMarksDescriptiveOnlyEvidenceAndItsSource(t *testing.T) {
+	decode, ttft := 12.0, 0.2
+	resident := int64(5 * 1024 * 1024 * 1024)
+	report := &analysis.Report{
+		Performance: analysis.Performance{
+			DecodeTPS: analysis.PerformanceObservation{Estimate: &decode, Status: analysis.StatusDescriptiveOnly,
+				Acquisition: analysis.AcquisitionRuntimeReported, SampleCount: 1},
+			TTFTSeconds: analysis.PerformanceObservation{Estimate: &ttft, Status: analysis.StatusDescriptiveOnly,
+				Acquisition: analysis.AcquisitionClientWallClock, SampleCount: 1},
+		},
+		Capacity: analysis.Capacity{Resident: &analysis.ResidentObservation{
+			Estimate: &resident, Status: analysis.StatusDescriptiveOnly,
+			Acquisition: analysis.AcquisitionRuntimeAllocation,
+		}},
+	}
+	var output strings.Builder
+	display := plainDisplay(&output)
+	display.Result(score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}}, Meta{
+		DecodeMean: 12, DecodeN: 1, TTFTMean: 0.2, TTFTN: 1,
+		ResidentGB: 5, ResidentContext: 8192, Analysis: report,
+	})
+	text := output.String()
+	for _, want := range []string{
+		"request TTFT", "descriptive only; source runtime reported",
+		"descriptive only; source client wall clock", "descriptive only; source runtime allocation",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("result missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestNoColorEmptyStringMeansUnset(t *testing.T) {
 	// no-color.org: present AND NOT EMPTY disables colour. NO_COLOR="" must NOT
 	// disable it -- the classic off-by-one in this spec.
@@ -270,6 +326,7 @@ func TestScorecardSeparatesRequestedAndEffectiveContext(t *testing.T) {
 
 func TestScorecardProjectsValidatedAnalysisInsteadOfLegacyFields(t *testing.T) {
 	decode, prefill, ttft := 23.16, 226.6, 0.89
+	cachedTTFT, unloadedTTFT, runtimeLoad := 0.19, 4.82, 3.93
 	sd, minValue, maxValue := 0.44, 22.71, 23.6
 	effective, resident := 4096, int64(20*1024*1024*1024)
 	meta := Meta{
@@ -279,11 +336,19 @@ func TestScorecardProjectsValidatedAnalysisInsteadOfLegacyFields(t *testing.T) {
 			Performance: analysis.Performance{
 				DecodeTPS: analysis.PerformanceObservation{Estimate: &decode, SD: &sd, Min: &minValue, Max: &maxValue,
 					SampleCount: 3, Samples: []float64{22.71, 23.17, 23.6}},
-				PrefillTPS:  analysis.PerformanceObservation{Estimate: &prefill, SampleCount: 3},
-				TTFTSeconds: analysis.PerformanceObservation{Estimate: &ttft, SampleCount: 3},
+				PrefillTPS:                 analysis.PerformanceObservation{Estimate: &prefill, SampleCount: 3},
+				TTFTSeconds:                analysis.PerformanceObservation{Estimate: &ttft, SampleCount: 3},
+				LoadedCacheHitTTFTSeconds:  analysis.PerformanceObservation{Estimate: &cachedTTFT, SampleCount: 3},
+				RuntimeUnloadedTTFTSeconds: analysis.PerformanceObservation{Estimate: &unloadedTTFT, SampleCount: 1},
+				RuntimeLoadSeconds:         analysis.PerformanceObservation{Estimate: &runtimeLoad, SampleCount: 1},
 			},
 			Capacity: analysis.Capacity{Resident: &analysis.ResidentObservation{
 				Estimate: &resident, RequestedContext: 32768,
+			}, Placement: &analysis.PlacementObservation{
+				AcceleratorBytes:    15 * 1024 * 1024 * 1024,
+				NonAcceleratorBytes: 5 * 1024 * 1024 * 1024,
+				AcceleratorPercent:  75,
+				Boundary:            analysis.AllocationAttributionBoundary,
 			}},
 		},
 	}
@@ -296,11 +361,20 @@ func TestScorecardProjectsValidatedAnalysisInsteadOfLegacyFields(t *testing.T) {
 		"23.16 +/-0.44 (CV 1.9%, n=3) tok/s",
 		"226.60 (identical, n=3) tok/s",
 		"0.89 (identical, n=3) s",
+		"loaded cache-hit TTFT 0.19 (identical, n=3) s",
+		"runtime-unloaded TTFT 4.82 (abs, n=1) s",
+		"runtime load 3.93 (abs, n=1) s",
 		"20.00 GB after requested 32K load probe",
+		"runtime accelerator 15.00 GB (75.0% of runtime allocation)",
+		"non-accelerator    5.00 GB (derived remainder)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("analysis-backed scorecard missing %q:\n%s", want, got)
 		}
+	}
+	if flat := reflow(got); !strings.Contains(flat,
+		"not proof of exclusive physical pools, layer placement, or host traffic") {
+		t.Errorf("analysis-backed scorecard lost the placement boundary:\n%s", got)
 	}
 	if strings.Contains(got, "999") {
 		t.Fatal("renderer trusted a stale compatibility field over validated analysis")

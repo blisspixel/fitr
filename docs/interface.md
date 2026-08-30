@@ -23,6 +23,60 @@ repeat counts, and the refusal to rank across device fingerprints remain more
 important than visual density. There is no global resolution statistic across
 unrelated needs.
 
+## Terminal UX quality bar
+
+fitr is a decision interface, not a telemetry wallpaper. Every result surface
+uses the same spine:
+
+```text
+MODEL / CONFIG / DEVICE
+VERDICTS
+NEXT
+PERFORMANCE
+CAPACITY
+EVIDENCE AND LIMITS
+```
+
+Outcome and evidence source remain separate dimensions. `PASS`, `FAIL`,
+`INCONCLUSIVE`, `SKIP`, `BLKD`, and `n/a` describe the decision state;
+measured, runtime-reported, client-derived, projected, and unavailable
+describe how a fact was obtained. Color reinforces those words but never
+replaces them.
+
+An observation that survives for context but cannot support a claim is marked
+`descriptive only` beside its acquisition source in CLI, TUI, and HTML. It is
+never rendered like an available observation merely because the numeric value
+still exists.
+
+Responsive layouts remove information by decision priority rather than
+clipping a desktop table. Model, state, exact primary values, and the next
+action survive first. Secondary identity, variability, timestamps, bars, and
+repeat-shape graphs appear only when space supports them. Result uses a compact
+full-battery summary below 32 rows and points to `fitr view` for the complete
+evidence. Horizontal semantic truncation is marked with an ellipsis.
+
+Help and the footer advertise only actions valid in the current view. Filter,
+sort, pause, baseline, comparison, and error state are explicit text. Exact
+values stay visually above bars and graphs, and graphs are withheld when the
+sample shape cannot support them.
+
+The next major interaction slice is a responsive master-detail layout for
+Board, History, and Inventory: side-by-side at wide widths, stacked at medium
+widths, and an explicit full-screen detail action when narrow. That work must
+preserve the same decision spine and comparison boundaries rather than adding
+a composite score or a second interpretation path.
+
+This direction borrows focused-panel and width-sensitive split behavior from
+[lazygit](https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md),
+preview disclosure from [fzf](https://github.com/junegunn/fzf.vim/blob/master/README.md),
+and visible sort/follow state from
+[htop](https://github.com/htop-dev/htop/blob/main/htop.1.in) and
+[btop](https://github.com/aristocratos/btop/blob/main/README.md). It
+deliberately does not copy dashboard density or a composite ranking. The
+[llmfit TUI](https://github.com/AlexsJones/llmfit/blob/main/docs/tui.md) is a
+useful catalog-navigation reference, while its broad shortcut surface and
+primary composite score are not a fit for this evidence model.
+
 ## The opt-in full-screen TUI
 
 The opt-in `fitr top` interface shipped in 0.4. Its explicit command contract
@@ -40,8 +94,8 @@ It has five views:
 
 1. Live run: current phase, elapsed time, device placement, decode/prefill
    samples, memory, and warnings.
-2. Result: independent need verdicts, raw observations, uncertainty, and the
-   next useful command.
+2. Result: independent need verdicts, distinct latency states, exact-context
+   allocation attribution, uncertainty, and the next useful command.
 3. Board: filter and sort within one comparable device/config block, with an
    explicit boundary between blocks.
 4. History: inspect configuration changes and open a valid pairwise compare.

@@ -55,7 +55,7 @@ func good() Measured {
 	return Measured{
 		Model: "test:1b", Capabilities: []string{"completion", "tools"},
 		DecodeTPS: 30, TTFT: 0.5, PrefillTPS: 200, SpeedKnown: true,
-		TTFTCacheKnown: true, PrefillCacheKnown: true,
+		TTFTCacheKnown: true, TTFTResidencyKnown: true, PrefillCacheKnown: true,
 		ResidentGB32K: 5, MemoryKnown: true,
 		CodeWritePass: true, CodeFixPass: true, CodeKnown: true,
 		Rep: RepetitionMetrics(clean),
@@ -458,19 +458,24 @@ func TestContextCeilingWithCompactionIsDisclosedNotFailed(t *testing.T) {
 	}
 }
 
-func TestColdAndWarmTTFTAreDisclosedInFastChat(t *testing.T) {
+func TestAuxiliaryTTFTStatesDoNotEnterTheBehaviorVerdict(t *testing.T) {
 	m := good()
 	m.TTFTCold, m.TTFTWarm = 9.1, 0.18
 	sc := Score(m, lappy(t))
 	why := sc.Needs["fast_and_decent"].Why
-	if !strings.Contains(why, "loaded/uncached") || !strings.Contains(why, "cold start 9.1s") {
-		t.Fatalf("why must label the gated figure and disclose cold: %q", why)
+	if !strings.Contains(why, "loaded/uncached") {
+		t.Fatalf("why must label the gated figure: %q", why)
 	}
-	if !strings.Contains(why, "cached prefix 0.18s") {
-		t.Fatalf("why must disclose the warm-prefix receipt: %q", why)
+	if strings.Contains(why, "runtime-unloaded") || strings.Contains(why, "follow-up") {
+		t.Fatalf("central analysis, not the behavior verdict, must own auxiliary TTFT states: %q", why)
 	}
 	if sc.Needs["fast_and_decent"].State != Pass {
 		t.Fatal("the gate judges the loaded/uncached figure only")
+	}
+	legacyWhy := ScoreLegacyV3(m, lappy(t)).Needs["fast_and_decent"].Why
+	if !strings.Contains(legacyWhy, "cold start 9.1s") ||
+		!strings.Contains(legacyWhy, "cached prefix 0.18s") {
+		t.Fatalf("legacy v3 scorecard reconstruction changed: %q", legacyWhy)
 	}
 }
 
@@ -508,6 +513,26 @@ func TestUnknownTTFTCacheStateCannotEstablishFastChatPass(t *testing.T) {
 	m.DecodeTPS = 1
 	if verdict = Score(m, lappy(t)).Needs["fast_and_decent"]; verdict.State != Fail {
 		t.Fatalf("known decode failure became %v", verdict.State)
+	}
+}
+
+func TestUnknownOrMissingTTFTResidencyCannotEstablishFastChatPass(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		configure func(*Measured)
+		want      string
+	}{
+		{name: "unknown", configure: func(m *Measured) { m.TTFTResidencyKnown = false }, want: "residency receipt"},
+		{name: "not resident", configure: func(m *Measured) { m.TTFTNotResident = true }, want: "did not report the model resident"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := good()
+			test.configure(&m)
+			verdict := Score(m, lappy(t)).Needs["fast_and_decent"]
+			if verdict.State != Inconclusive || !strings.Contains(verdict.Why, test.want) {
+				t.Fatalf("verdict = %+v", verdict)
+			}
+		})
 	}
 }
 

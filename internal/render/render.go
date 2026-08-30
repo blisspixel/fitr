@@ -446,8 +446,8 @@ const (
 // variable-length text -- the family breakdown and the prose caveat -- is
 // wrapped underneath rather than allowed to run off the right edge, which is
 // what produced a 224-character row against a 78-column rule.
-func (d *textDisplay) verdictRow(w io.Writer, label string, v score.Verdict, width int) {
-	measure, gate, detail, note := v.Parts()
+func (d *textDisplay) verdictRow(w io.Writer, need, label string, v score.Verdict, width int) {
+	measure, gate, detail, note := PresentVerdictParts(need, v)
 	// On a narrow terminal the label yields before anything else. Truncating a
 	// need's name costs a word; truncating its measure costs the interval.
 	labelWidth := min(score.LabelWidth, max(width-contIndent-minTailWidth, 8))
@@ -508,7 +508,8 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	d.resultHeader(w, sc, m, width, rule)
 	d.resultVerdicts(w, sc, width)
 	d.resultPerformance(w, m, width)
-	d.resultCapacity(w, m)
+	d.resultCapacity(w, m, width)
+	d.resultAnalysis(w, m, width)
 	d.resultEvidenceNotes(w, m, width)
 	fmt.Fprintln(w, rule)
 }
@@ -524,15 +525,83 @@ func (d *textDisplay) resultHeader(w io.Writer, sc score.Scorecard, m Meta, widt
 	if m.Level != "" {
 		fmt.Fprintf(w, "run      %s\n", resultRunLine(m, d.g))
 	}
-	useFor := sc.UseFor
+	useFor := UseForLabel(sc.UseFor)
 	if m.Calibration {
 		useFor = "calibration evidence only - not a standalone product verdict"
 	}
 	d.headerField(w, "use for", useFor, width, d.pal.Accent)
-	d.headerField(w, "device", fmt.Sprintf("%s%sdriver %s%s%s%sprofile %s",
-		SingleLine(m.GPU), d.g.Dot, SingleLine(m.Driver), d.g.Dot,
-		SingleLine(m.Device), d.g.Dot, SingleLine(m.Profile)), width, "")
+	deviceParts := make([]string, 0, 3)
+	if gpu := SingleLine(m.GPU); gpu != "" {
+		deviceParts = append(deviceParts, gpu)
+	}
+	if driver := SingleLine(m.Driver); driver != "" {
+		deviceParts = append(deviceParts, "driver "+driver)
+	}
+	if placement := SingleLine(m.Device); placement != "" {
+		deviceParts = append(deviceParts, placement)
+	}
+	d.headerField(w, "device", strings.Join(deviceParts, d.g.Dot), width, "")
+	d.headerField(w, "profile", m.Profile, width, "")
 	fmt.Fprintln(w, rule)
+}
+
+// UseForLabel improves the grammar of a legacy scorecard phrase without
+// changing the sealed scorecard or scoring-policy hash.
+func UseForLabel(value string) string {
+	const suffix = ", (small footprint)"
+	if strings.HasSuffix(value, suffix) {
+		return strings.TrimSuffix(value, suffix) + "; small footprint"
+	}
+	return value
+}
+
+// PresentVerdictParts resolves display-only wording where one independent
+// scenario can override a pooled rate. The sealed verdict remains unchanged.
+func PresentVerdictParts(need string, verdict score.Verdict) (string, string, []string, string) {
+	measure, gate, detail, note := verdict.Parts()
+	if need != "tool_restraint" || verdict.State != score.Fail || !hasWithdrawalFailure(detail) {
+		return measure, gate, detail, note
+	}
+	note = strings.Replace(note, "undecided:", "ordinary irrelevance checks are undecided:", 1)
+	note = strings.Replace(note, "Not a fail", "that interval alone is not a fail", 1)
+	note = strings.TrimSpace(note)
+	if note != "" {
+		note += "; "
+	}
+	note += "overall FAIL comes from the separate withdrawal scenario above"
+	return measure, gate, detail, note
+}
+
+// PresentVerdictWhy composes the display-only parts for clients that render a
+// single evidence string.
+func PresentVerdictWhy(need string, verdict score.Verdict) string {
+	measure, gate, detail, note := PresentVerdictParts(need, verdict)
+	var parts []string
+	head := measure
+	if head != "" && gate != "" {
+		head += " (" + gate + ")"
+	} else if head == "" {
+		head = gate
+	}
+	if head != "" {
+		parts = append(parts, head)
+	}
+	if len(detail) > 0 {
+		parts = append(parts, strings.Join(detail, ", "))
+	}
+	if note != "" {
+		parts = append(parts, note)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func hasWithdrawalFailure(detail []string) bool {
+	for _, item := range detail {
+		if strings.Contains(item, "withdrawn tool") || strings.Contains(item, "stop cleanly after a tool was withdrawn") {
+			return true
+		}
+	}
+	return false
 }
 
 func writeResultContext(w io.Writer, m Meta) {
@@ -571,36 +640,132 @@ func (d *textDisplay) resultVerdicts(w io.Writer, sc score.Scorecard, width int)
 		if !ok {
 			continue
 		}
-		d.verdictRow(w, score.NeedLabel[k], v, width)
+		d.verdictRow(w, k, score.NeedLabel[k], v, width)
 	}
 }
 
 func (d *textDisplay) resultPerformance(w io.Writer, m Meta, width int) {
-	if m.DecodeN > 0 || m.PrefillN > 0 || m.TTFTN > 0 {
-		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "performance"))
-		if m.DecodeN > 0 {
-			d.perfRow(w, "decode", "tok/s", m.DecodeMean, m.DecodeSD, m.DecodeN,
-				m.DecodeSeries, m.DecodeMin, m.DecodeMax, width)
+	if m.DecodeN <= 0 && m.PrefillN <= 0 && m.TTFTN <= 0 && !analysisLatencyAvailable(m.Analysis) {
+		return
+	}
+	fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "performance"))
+	d.resultPrimaryPerformance(w, m, width)
+	d.resultAuxiliaryLatency(w, m.Analysis, width)
+	if m.FirstRunSlow {
+		d.footer(w, fmt.Sprintf("! first decode repeat was %.1fx slower than the settled repeats",
+			m.FirstRunRatio), width, 2, 4, d.pal.Warn)
+	}
+}
+
+func (d *textDisplay) resultPrimaryPerformance(w io.Writer, m Meta, width int) {
+	if m.DecodeN > 0 {
+		d.perfRow(w, "decode", "tok/s", m.DecodeMean, m.DecodeSD, m.DecodeN,
+			m.DecodeSeries, m.DecodeMin, m.DecodeMax, width)
+		if m.Analysis != nil {
+			d.descriptiveReceipt(w, m.Analysis.Performance.DecodeTPS, width)
 		}
-		if m.PrefillN > 0 {
-			d.perfRow(w, "prefill", "tok/s", m.PrefillMean, m.PrefillSD, m.PrefillN,
-				m.PrefillSeries, 0, 0, width)
+	}
+	if m.PrefillN > 0 {
+		d.perfRow(w, "prefill", "tok/s", m.PrefillMean, m.PrefillSD, m.PrefillN,
+			m.PrefillSeries, 0, 0, width)
+		if m.Analysis != nil {
+			d.descriptiveReceipt(w, m.Analysis.Performance.PrefillTPS, width)
 		}
-		if m.TTFTN > 0 {
-			d.perfRow(w, "TTFT", "s", m.TTFTMean, m.TTFTSD, m.TTFTN, m.TTFTSeries, 0, 0, width)
-		}
-		if m.FirstRunSlow {
-			d.footer(w, fmt.Sprintf("! first decode repeat was %.1fx slower than the settled repeats",
-				m.FirstRunRatio), width, 2, 4, d.pal.Warn)
+	}
+	if m.TTFTN > 0 {
+		d.perfRow(w, primaryTTFTLabel(m.Analysis), "s", m.TTFTMean, m.TTFTSD, m.TTFTN,
+			m.TTFTSeries, 0, 0, width)
+		if m.Analysis != nil {
+			d.descriptiveReceipt(w, m.Analysis.Performance.TTFTSeconds, width)
 		}
 	}
 }
 
-func (d *textDisplay) resultCapacity(w io.Writer, m Meta) {
+func primaryTTFTLabel(report *analysis.Report) string {
+	if report != nil {
+		return analysis.TTFTLabel(report.Performance.TTFTSeconds)
+	}
+	return "TTFT"
+}
+
+func (d *textDisplay) resultAuxiliaryLatency(w io.Writer, report *analysis.Report, width int) {
+	if report == nil {
+		return
+	}
+	d.analysisPerfRow(w, "loaded cache-hit TTFT", report.Performance.LoadedCacheHitTTFTSeconds, width)
+	d.analysisPerfRow(w, "runtime-unloaded TTFT", report.Performance.RuntimeUnloadedTTFTSeconds, width)
+	d.analysisPerfRow(w, "runtime load", report.Performance.RuntimeLoadSeconds, width)
+}
+
+func analysisLatencyAvailable(report *analysis.Report) bool {
+	if report == nil {
+		return false
+	}
+	return report.Performance.RuntimeUnloadedTTFTSeconds.Estimate != nil ||
+		report.Performance.RuntimeLoadSeconds.Estimate != nil ||
+		report.Performance.LoadedCacheHitTTFTSeconds.Estimate != nil
+}
+
+func (d *textDisplay) analysisPerfRow(w io.Writer, label string,
+	observation analysis.PerformanceObservation, width int) {
+	if observation.Estimate == nil {
+		return
+	}
+	sd, minValue, maxValue := 0.0, 0.0, 0.0
+	if observation.SD != nil {
+		sd = *observation.SD
+	}
+	if observation.Min != nil {
+		minValue = *observation.Min
+	}
+	if observation.Max != nil {
+		maxValue = *observation.Max
+	}
+	d.perfRow(w, label, "s", *observation.Estimate, sd, observation.SampleCount,
+		observation.Samples, minValue, maxValue, width)
+	d.descriptiveReceipt(w, observation, width)
+}
+
+func (d *textDisplay) descriptiveReceipt(w io.Writer, observation analysis.PerformanceObservation, width int) {
+	if observation.Status != analysis.StatusDescriptiveOnly {
+		return
+	}
+	d.footer(w, "descriptive only; source "+analysis.AcquisitionLabel(observation.Acquisition),
+		width, 2, 4, d.pal.Muted)
+}
+
+func (d *textDisplay) resultCapacity(w io.Writer, m Meta, width int) {
 	if m.ResidentGB > 0 {
 		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "capacity"))
 		fmt.Fprintf(w, "  %-8s %.2f GB after requested %s load probe\n", "resident", m.ResidentGB,
 			residentContextLabel(m.ResidentContext))
+		if m.Analysis != nil && m.Analysis.Capacity.Resident != nil &&
+			m.Analysis.Capacity.Resident.Status == analysis.StatusDescriptiveOnly {
+			d.footer(w, "descriptive only; source "+analysis.AcquisitionLabel(
+				m.Analysis.Capacity.Resident.Acquisition), width, 2, 4, d.pal.Muted)
+		}
+		if m.Analysis != nil && m.Analysis.Capacity.Placement != nil {
+			placement := m.Analysis.Capacity.Placement
+			const gib = 1024 * 1024 * 1024
+			fmt.Fprintf(w, "  %-18s %.2f GB (%.1f%% of runtime allocation)\n", "runtime accelerator",
+				float64(placement.AcceleratorBytes)/gib, placement.AcceleratorPercent)
+			fmt.Fprintf(w, "  %-18s %.2f GB (derived remainder)\n", "non-accelerator",
+				float64(placement.NonAcceleratorBytes)/gib)
+			d.footer(w, placement.Boundary, width, 2, 4, d.pal.Muted)
+		}
+	}
+}
+
+func (d *textDisplay) resultAnalysis(w io.Writer, m Meta, width int) {
+	if m.Analysis == nil || len(m.Analysis.Diagnoses) == 0 && len(m.Analysis.Gaps) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "evidence"))
+	for _, diagnosis := range m.Analysis.Diagnoses {
+		d.headerField(w, "observed", analysis.DiagnosisLabel(diagnosis.Code)+": "+diagnosis.Statement, width, "")
+	}
+	for _, gap := range m.Analysis.Gaps {
+		d.headerField(w, "limit", analysis.GapLabel(gap.Code)+": "+gap.Message, width, d.pal.Muted)
 	}
 }
 
