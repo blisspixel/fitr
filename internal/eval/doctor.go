@@ -65,43 +65,66 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 		runs = 2
 	}
 	r := DoctorResult{Model: model, Runs: runs}
-	add := func(id, state, detail string) {
-		r.Checks = append(r.Checks, DoctorCheck{ID: id, State: state, Detail: detail})
+	if !doctorRealToken(ctx, c, model, &r) {
+		return r, nil
 	}
+	doctorPlacement(ctx, opts, &r)
+	doctorServedContext(ctx, c, model, &r)
+	textDeterministic, err := doctorTextDeterminism(ctx, c, model, runs, &r)
+	if err != nil {
+		return r, err
+	}
+	doctorJSONDeterminism(ctx, c, model, runs, textDeterministic, &r)
+	doctorConfig(opts.Config, &r)
+	finishDoctor(&r)
+	return r, nil
+}
 
+func addDoctorCheck(r *DoctorResult, id, state, detail string) {
+	r.Checks = append(r.Checks, DoctorCheck{ID: id, State: state, Detail: detail})
+}
+
+func doctorRealToken(ctx context.Context, c llm.Backend, model string, r *DoctorResult) bool {
 	// 1. A real generated token, not an HTTP 200. Cold on purpose: load time
 	// is part of what this box is.
 	text, m, err := c.Generate(ctx, model, "Say OK.", ollama.Deterministic(8, numCtx(ctx)))
 	if err != nil {
-		add("real_token", "FAIL", "generation failed: "+err.Error())
+		addDoctorCheck(r, "real_token", "FAIL", "generation failed: "+err.Error())
 		r.Verdict = "the server is reachable but did not generate - nothing else is measurable"
-		//nolint:nilerr // doctor reports a failed generation as a FAIL finding; erroring would hide it
-		return r, nil
+		return false
 	}
 	if strings.TrimSpace(text) == "" {
-		add("real_token", "FAIL", fmt.Sprintf(
+		addDoctorCheck(r, "real_token", "FAIL", fmt.Sprintf(
 			"0 tokens of text produced (done_reason=%s) - a reachable server that does not infer", m.DoneReason))
 		r.Verdict = "the server accepts requests but emits no tokens - fix the stack before measuring anything"
-		return r, nil
+		return false
 	}
-	add("real_token", "PASS", fmt.Sprintf("generated %d token(s), TTFT %.2fs, load %.1fs", m.EvalCount, m.TTFTSeconds, m.LoadSeconds))
+	addDoctorCheck(r, "real_token", "PASS", fmt.Sprintf(
+		"generated %d token(s), TTFT %.2fs, load %.1fs", m.EvalCount, m.TTFTSeconds, m.LoadSeconds))
+	return true
+}
 
+func doctorPlacement(ctx context.Context, opts DoctorOpts, r *DoctorResult) {
 	// 2. Where did the runtime place it? Placement defines comparability, but
 	// does not by itself prove which subsystem limits performance.
 	if opts.Placement != nil {
 		place := opts.Placement(ctx)
 		switch {
 		case place == "GPU 100%":
-			add("placement", "PASS", place)
+			addDoctorCheck(r, "placement", "PASS", place)
 		case strings.HasPrefix(place, "GPU "):
-			add("placement", "WARN", place+" - runtime reported partial accelerator placement; compare only with the same placement")
+			addDoctorCheck(r, "placement", "WARN", place+
+				" - runtime reported partial accelerator placement; compare only with the same placement")
 		case place == "CPU":
-			add("placement", "WARN", "CPU - runtime reported no accelerator offload; compare only with CPU-only runs")
+			addDoctorCheck(r, "placement", "WARN",
+				"CPU - runtime reported no accelerator offload; compare only with CPU-only runs")
 		default:
-			add("placement", "SKIP", "could not determine placement")
+			addDoctorCheck(r, "placement", "SKIP", "could not determine placement")
 		}
 	}
+}
 
+func doctorServedContext(ctx context.Context, c llm.Backend, model string, r *DoctorResult) {
 	// 3. Served context. A server can silently evaluate less prompt than you
 	// sent; prompt_eval_count is the receipt. Nonce defeats the prefix cache.
 	_, mp, err := c.Generate(ctx, model, buildLongPrompt("doctor-ctx-probe"), ollama.Deterministic(16, numCtx(ctx)))
@@ -110,26 +133,32 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	served := mp.PromptTokens + mp.CachedTokens
 	switch {
 	case err != nil:
-		add("served_context", "FAIL", "long-prompt probe failed: "+err.Error())
+		addDoctorCheck(r, "served_context", "FAIL", "long-prompt probe failed: "+err.Error())
 	case served < 2000:
-		add("served_context", "WARN", fmt.Sprintf(
+		addDoctorCheck(r, "served_context", "WARN", fmt.Sprintf(
 			"a ~2.8k-token prompt evaluated as %d tokens - the server may be truncating or shrinking context; check OLLAMA_CONTEXT_LENGTH and num_ctx", served))
 	default:
-		add("served_context", "PASS", fmt.Sprintf("~2.8k-token prompt evaluated as %d tokens", served))
+		addDoctorCheck(r, "served_context", "PASS", fmt.Sprintf("~2.8k-token prompt evaluated as %d tokens", served))
 	}
+}
 
+func doctorTextDeterminism(ctx context.Context, c llm.Backend, model string, runs int,
+	r *DoctorResult) (bool, error) {
 	// 4. Determinism, plain text. Identical request, N times, byte-compared.
 	texts := make([]string, 0, runs)
 	for range runs {
 		t, _, err := c.Generate(ctx, model, doctorTextPrompt, ollama.Deterministic(64, numCtx(ctx)))
 		if err != nil {
-			return r, err
+			return false, err
 		}
 		texts = append(texts, t)
 	}
-	textDeterministic := reportDeterminism(&r, "determinism_text", texts,
-		"greedy decoding reproduces on this stack")
+	return reportDeterminism(r, "determinism_text", texts,
+		"greedy decoding reproduces on this stack"), nil
+}
 
+func doctorJSONDeterminism(ctx context.Context, c llm.Backend, model string, runs int,
+	textDeterministic bool, r *DoctorResult) {
 	// 5. Determinism, grammar-constrained JSON mode. The constrained path is a
 	// DIFFERENT code path and is known to break seed reproducibility on some
 	// stacks while plain text reproduces.
@@ -140,14 +169,14 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	for range runs {
 		t, _, err := c.Generate(ctx, model, doctorJSONPrompt, samp)
 		if err != nil {
-			add("determinism_json", "SKIP", "JSON-mode generation failed: "+err.Error())
+			addDoctorCheck(r, "determinism_json", "SKIP", "JSON-mode generation failed: "+err.Error())
 			jsonOK = false
 			break
 		}
 		jsons = append(jsons, t)
 	}
 	if jsonOK {
-		jsonDeterministic := reportDeterminism(&r, "determinism_json", jsons,
+		jsonDeterministic := reportDeterminism(r, "determinism_json", jsons,
 			"grammar-constrained output reproduces on this stack")
 		if textDeterministic && !jsonDeterministic {
 			last := &r.Checks[len(r.Checks)-1]
@@ -155,25 +184,29 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 				"is the culprit (a known local-stack bug class); prefer prompt-level JSON when you need repeatability"
 		}
 	}
+}
 
+func doctorConfig(config map[string]string, r *DoctorResult) {
 	// 6. Config red flags. The values come from the server log when available,
 	// so they are what the server actually started with.
-	if opts.Config != nil {
+	if config != nil {
 		var flags []string
-		if v, err := strconv.Atoi(opts.Config["OLLAMA_NUM_PARALLEL"]); err == nil && v > 1 {
+		if v, err := strconv.Atoi(config["OLLAMA_NUM_PARALLEL"]); err == nil && v > 1 {
 			flags = append(flags, fmt.Sprintf("OLLAMA_NUM_PARALLEL=%d divides the context between slots and adds batching variance", v))
 		}
-		if v, err := strconv.Atoi(opts.Config["OLLAMA_MAX_LOADED_MODELS"]); err == nil && v > 1 {
+		if v, err := strconv.Atoi(config["OLLAMA_MAX_LOADED_MODELS"]); err == nil && v > 1 {
 			flags = append(flags, fmt.Sprintf("OLLAMA_MAX_LOADED_MODELS=%d allows a second resident model to contaminate timings", v))
 		}
 		if len(flags) > 0 {
-			add("config", "WARN", strings.Join(flags, "; "))
+			addDoctorCheck(r, "config", "WARN", strings.Join(flags, "; "))
 		} else {
-			add("config", "PASS", fmt.Sprintf("flash_attention=%s kv_cache_type=%s",
-				orUnset(opts.Config["OLLAMA_FLASH_ATTENTION"]), orUnset(opts.Config["OLLAMA_KV_CACHE_TYPE"])))
+			addDoctorCheck(r, "config", "PASS", fmt.Sprintf("flash_attention=%s kv_cache_type=%s",
+				orUnset(config["OLLAMA_FLASH_ATTENTION"]), orUnset(config["OLLAMA_KV_CACHE_TYPE"])))
 		}
 	}
+}
 
+func finishDoctor(r *DoctorResult) {
 	r.Healthy = true
 	warns := 0
 	for _, ck := range r.Checks {
@@ -192,7 +225,6 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	default:
 		r.Verdict = "healthy - measurements on this box mean what they say"
 	}
-	return r, nil
 }
 
 // reportDeterminism folds N identical requests into one verdict. Returns

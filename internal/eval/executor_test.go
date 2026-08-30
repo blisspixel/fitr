@@ -15,29 +15,33 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if os.Getenv("FITR_EXECUTOR_HELPER") == "1" {
-		if len(os.Args) > 1 && os.Args[1] == "--version" {
-			version := os.Getenv("FITR_EXECUTOR_HELPER_VERSION")
-			if version == "" {
-				version = "Python 3.12.7"
-			}
-			_, _ = fmt.Fprintln(os.Stdout, version)
-			os.Exit(0)
+	if os.Getenv("FITR_EXECUTOR_HELPER") != "1" {
+		os.Exit(m.Run())
+	}
+	runExecutorHelper()
+}
+
+func runExecutorHelper() {
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		version := os.Getenv("FITR_EXECUTOR_HELPER_VERSION")
+		if version == "" {
+			version = "Python 3.12.7"
 		}
-		if len(os.Args) > 1 && os.Args[1] == "-I" {
-			path := os.Getenv("FITR_EXECUTOR_HELPER_REPORTED_PATH")
-			if path == "" {
-				path, _ = os.Executable()
-			}
-			_, _ = fmt.Fprintln(os.Stdout, path)
-			os.Exit(0)
-		}
-		path, _ := os.Executable()
-		_, _ = fmt.Fprintln(os.Stdout, path)
-		_, _ = fmt.Fprintln(os.Stdout, "PASS_TOKEN")
+		_, _ = fmt.Fprintln(os.Stdout, version)
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	if len(os.Args) > 1 && os.Args[1] == "-I" {
+		path := os.Getenv("FITR_EXECUTOR_HELPER_REPORTED_PATH")
+		if path == "" {
+			path, _ = os.Executable()
+		}
+		_, _ = fmt.Fprintln(os.Stdout, path)
+		os.Exit(0)
+	}
+	path, _ := os.Executable()
+	_, _ = fmt.Fprintln(os.Stdout, path)
+	_, _ = fmt.Fprintln(os.Stdout, "PASS_TOKEN")
+	os.Exit(0)
 }
 
 func installHelperPython(t *testing.T, dir string) string {

@@ -66,8 +66,9 @@ different evidence strength:
 |---|---|---|
 | Artifact bytes | File or runtime-listed artifact size | observed |
 | KV cache | Architecture, context, and KV dtype arithmetic | derived |
-| Total allocation | Runtime or allocator observation at a named point | observed |
-| Other resident | Total allocation minus artifact bytes minus modeled KV | derived remainder |
+| Runtime allocation | Runtime receipt at a named context and configuration | observed |
+| Allocator projection | Versioned fitter output for its declared resource domain | projected |
+| Other resident | Runtime allocation minus artifact bytes minus modeled KV | derived remainder |
 | Capacity margin | Configured device budget minus the modeled or observed need | derived or projected |
 | Free memory | A transient live device reading | observed now, not a stored constant |
 
@@ -75,6 +76,46 @@ different evidence strength:
 include runtime overhead, mappings, allocator effects, and compute buffers.
 When total allocation was not observed, the context table projects from the
 components it has and keeps the missing remainder visible.
+
+The current `--fit` adapter does not yet satisfy the versioned allocator row
+above. It reports the final device-memory projection as descriptive evidence,
+but keeps the verdict at SKIP because the fitter's adjusted context, placement,
+binary version, and host-memory resource domain are not sealed.
+
+### Unified memory and operating reserve
+
+On a unified-memory machine, installed capacity, addressable capacity, current
+system availability, and a safe model budget are four different quantities.
+They must not share one label.
+
+On Linux GB10 and Thor systems, fitr can use `/proc/meminfo` `MemTotal` as the
+addressable pool when the dedicated `nvidia-smi` memory fields have no value.
+It never substitutes the advertised capacity for that operating-system
+reading. The addressable pool still contains Linux, services, page cache, and
+every CPU and accelerator allocation. It is not a live free-memory receipt or
+an unconditional fit budget.
+
+Today an operator can pass a deliberately conservative planning budget with
+`--vram-gb`. That value is labeled as supplied rather than measured. An
+explicit reserve policy needs its own versioned contract: capacity source,
+reserve bytes, swap policy, container limit, observation time, and the exact
+formula producing usable bytes. fitr will not silently choose a fixed reserve
+or turn nominal sticker capacity into addressable memory.
+
+Single-model capacity also does not prove co-residency. Adding independent
+weights and KV estimates ignores eviction, shared runtime state, mmap policy,
+placement, compute allocation, and the contexts active at the same time. A
+future model-set experiment must bind the ordered artifacts, roles, contexts,
+placements, runtime state, and simultaneous-residency receipt. Until then, a
+sum is a projected lower bound, not proof that the set co-fits.
+
+Pageability and offload settings change this problem without making it simple.
+An mmap setting is not proof that pages are absent from physical memory, and a
+fitter's proposed `-ngl` or tensor override is not evidence that the serving
+runtime applied it. fitr records coarse observed placement today. Future
+llama.cpp advice must first bind resolved mmap/mlock, layer and tensor
+placement, CPU-MoE settings, effective context, and the runtime process that
+actually served the request.
 
 The standard run currently performs a separate requested-32K load probe. New
 receipts always retain its requested context and outcome. When the runtime

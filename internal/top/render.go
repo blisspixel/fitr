@@ -16,30 +16,41 @@ func Render(state State, glyphs Glyphs) Canvas {
 		return canvas
 	}
 	renderHeader(&canvas, state, glyphs)
-	if state.Help {
-		renderHelp(&canvas, state, glyphs)
-	} else if state.Comparison != nil {
-		renderComparison(&canvas, state)
-	} else {
-		switch state.View {
-		case ViewLive:
-			renderLive(&canvas, state, glyphs)
-		case ViewResult:
-			renderResult(&canvas, state, glyphs)
-		case ViewBoard:
-			renderBoard(&canvas, state, glyphs)
-		case ViewHistory:
-			renderHistory(&canvas, state, glyphs)
-		case ViewInventory:
-			renderInventory(&canvas, state, glyphs)
-		}
-	}
+	renderMainContent(&canvas, state, glyphs)
 	renderFooter(&canvas, state)
-	if state.ConfirmQuit {
-		y := min(max(state.Height/2, 2), state.Height-2)
-		canvas.SetLine(y, Span{Text: " Quit and cancel the active run? [y] yes  [n] no ", Role: RoleWarning})
-	}
+	renderQuitConfirmation(&canvas, state)
 	return canvas
+}
+
+func renderMainContent(canvas *Canvas, state State, glyphs Glyphs) {
+	if state.Help {
+		renderHelp(canvas, state, glyphs)
+		return
+	}
+	if state.Comparison != nil {
+		renderComparison(canvas, state)
+		return
+	}
+	switch state.View {
+	case ViewLive:
+		renderLive(canvas, state, glyphs)
+	case ViewResult:
+		renderResult(canvas, state, glyphs)
+	case ViewBoard:
+		renderBoard(canvas, state, glyphs)
+	case ViewHistory:
+		renderHistory(canvas, state, glyphs)
+	case ViewInventory:
+		renderInventory(canvas, state, glyphs)
+	}
+}
+
+func renderQuitConfirmation(canvas *Canvas, state State) {
+	if !state.ConfirmQuit {
+		return
+	}
+	y := min(max(state.Height/2, 2), state.Height-2)
+	canvas.SetLine(y, Span{Text: " Quit and cancel the active run? [y] yes  [n] no ", Role: RoleWarning})
 }
 
 func renderTiny(canvas *Canvas, state State) {
@@ -50,38 +61,52 @@ func renderTiny(canvas *Canvas, state State) {
 	if state.Help {
 		canvas.SetLine(1, Span{Text: "1-5 views | j/k move | ? close | q quit", Role: RoleDefault})
 	} else {
-		switch state.View {
-		case ViewLive:
-			live := state.Snapshot.Live
-			status := "idle"
-			if live.Active {
-				status = "running: " + live.Phase
-			} else if live.Cancelled {
-				status = "cancelled"
-			} else if live.Error != "" {
-				status = "error: " + live.Error
-			} else if live.Completed {
-				status = "complete; Enter opens Result"
-			}
-			canvas.SetLine(1, Span{Text: status + " | " + live.Model, Role: RoleDefault})
-		case ViewResult:
-			if run, ok := FindRun(state.Snapshot, state.Selected[ViewResult]); ok {
-				canvas.SetLine(1, Span{Text: run.Model + fmt.Sprintf(" | %.2f tok/s", run.DecodeMean), Role: RoleDefault})
-			} else {
-				canvas.SetLine(1, Span{Text: "no saved result", Role: RoleMuted})
-			}
-		case ViewBoard:
-			canvas.SetLine(1, Span{Text: fmt.Sprintf("%d comparable group(s)", len(VisibleBoard(state))), Role: RoleDefault})
-		case ViewHistory:
-			canvas.SetLine(1, Span{Text: fmt.Sprintf("%d saved run(s)", len(VisibleHistory(state))), Role: RoleDefault})
-		case ViewInventory:
-			canvas.SetLine(1, Span{Text: fmt.Sprintf("%d installed", len(VisibleInventory(state))), Role: RoleDefault})
-		}
+		renderTinyView(canvas, state)
 	}
 	if canvas.Height >= 3 && state.Error != "" {
 		canvas.SetLine(2, Span{Text: "error: " + state.Error, Role: RoleFail})
 	}
 	canvas.SetLine(canvas.Height-1, Span{Text: "1-5 views | ? help | q quit", Role: RoleMuted})
+}
+
+func renderTinyView(canvas *Canvas, state State) {
+	switch state.View {
+	case ViewLive:
+		live := state.Snapshot.Live
+		canvas.SetLine(1, Span{Text: tinyLiveStatus(live) + " | " + live.Model, Role: RoleDefault})
+	case ViewResult:
+		renderTinyResult(canvas, state)
+	case ViewBoard:
+		canvas.SetLine(1, Span{Text: fmt.Sprintf("%d comparable group(s)", len(VisibleBoard(state))), Role: RoleDefault})
+	case ViewHistory:
+		canvas.SetLine(1, Span{Text: fmt.Sprintf("%d saved run(s)", len(VisibleHistory(state))), Role: RoleDefault})
+	case ViewInventory:
+		canvas.SetLine(1, Span{Text: fmt.Sprintf("%d installed", len(VisibleInventory(state))), Role: RoleDefault})
+	}
+}
+
+func tinyLiveStatus(live Live) string {
+	switch {
+	case live.Active:
+		return "running: " + live.Phase
+	case live.Cancelled:
+		return "cancelled"
+	case live.Error != "":
+		return "error: " + live.Error
+	case live.Completed:
+		return "complete; Enter opens Result"
+	default:
+		return "idle"
+	}
+}
+
+func renderTinyResult(canvas *Canvas, state State) {
+	run, ok := FindRun(state.Snapshot, state.Selected[ViewResult])
+	if !ok {
+		canvas.SetLine(1, Span{Text: "no saved result", Role: RoleMuted})
+		return
+	}
+	canvas.SetLine(1, Span{Text: run.Model + fmt.Sprintf(" | %.2f tok/s", run.DecodeMean), Role: RoleDefault})
 }
 
 func renderHeader(canvas *Canvas, state State, glyphs Glyphs) {
@@ -132,6 +157,21 @@ func renderLive(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: "Start one with: fitr top run <model>", Role: RoleAccent})
 		return
 	}
+	renderLiveIdentity(w, live)
+	renderLiveProgress(w, canvas, state, live, glyphs)
+	renderLiveMessages(w, live)
+	renderLivePhases(w, live, canvas.Height)
+}
+
+func renderLiveIdentity(w *lineWriter, live Live) {
+	status, role := liveStatus(live)
+	w.line(Span{Text: "LIVE  ", Role: RoleHeader}, Span{Text: status, Role: role})
+	w.line(Span{Text: "model      ", Role: RoleMuted}, Span{Text: live.Model, Role: RoleDefault})
+	w.line(Span{Text: "phase      ", Role: RoleMuted}, Span{Text: live.Phase, Role: RoleAccent},
+		Span{Text: "  " + live.Detail, Role: RoleMuted})
+}
+
+func liveStatus(live Live) (string, Role) {
 	status, role := "RUNNING", RoleAccent
 	if live.Completed {
 		status, role = "COMPLETE", RolePass
@@ -141,10 +181,10 @@ func renderLive(canvas *Canvas, state State, glyphs Glyphs) {
 	} else if live.Error != "" {
 		status, role = "ERROR", RoleFail
 	}
-	w.line(Span{Text: "LIVE  ", Role: RoleHeader}, Span{Text: status, Role: role})
-	w.line(Span{Text: "model      ", Role: RoleMuted}, Span{Text: live.Model, Role: RoleDefault})
-	w.line(Span{Text: "phase      ", Role: RoleMuted}, Span{Text: live.Phase, Role: RoleAccent},
-		Span{Text: "  " + live.Detail, Role: RoleMuted})
+	return status, role
+}
+
+func renderLiveProgress(w *lineWriter, canvas *Canvas, state State, live Live, glyphs Glyphs) {
 	if !live.StartedAt.IsZero() {
 		end := state.Now
 		if end.Before(live.StartedAt) {
@@ -173,6 +213,9 @@ func renderLive(canvas *Canvas, state State, glyphs Glyphs) {
 	if live.MemoryGB > 0 {
 		w.line(Span{Text: "memory     ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GB", live.MemoryGB), Role: RoleDefault})
 	}
+}
+
+func renderLiveMessages(w *lineWriter, live Live) {
 	for _, warning := range live.Warnings {
 		if !w.line(Span{Text: "warning    ", Role: RoleWarning}, Span{Text: warning, Role: RoleDefault}) {
 			break
@@ -192,27 +235,36 @@ func renderLive(canvas *Canvas, state State, glyphs Glyphs) {
 			w.line(Span{Text: "Enter opens the saved Result.", Role: RoleAccent})
 		}
 	}
-	if len(live.Phases) > 0 && canvas.Height >= 18 {
-		w.line(Span{Text: "phases", Role: RoleHeader})
-		for _, phase := range live.Phases {
-			stateToken, role := strings.ToUpper(phase.State), RoleMuted
-			switch phase.State {
-			case "running":
-				stateToken, role = "RUN", RoleAccent
-			case "completed":
-				stateToken, role = "DONE", RolePass
-			case "failed", "cancelled":
-				role = RoleFail
-			}
-			progress := ""
-			if phase.Total > 0 {
-				progress = fmt.Sprintf(" %d/%d", phase.Completed, phase.Total)
-			}
-			if !w.line(Span{Text: fmt.Sprintf("  [%-4s] ", stateToken), Role: role},
-				Span{Text: phase.Name + progress, Role: RoleDefault}) {
-				break
-			}
+}
+
+func renderLivePhases(w *lineWriter, live Live, height int) {
+	if len(live.Phases) == 0 || height < 18 {
+		return
+	}
+	w.line(Span{Text: "phases", Role: RoleHeader})
+	for _, phase := range live.Phases {
+		stateToken, role := livePhaseStyle(phase.State)
+		progress := ""
+		if phase.Total > 0 {
+			progress = fmt.Sprintf(" %d/%d", phase.Completed, phase.Total)
 		}
+		if !w.line(Span{Text: fmt.Sprintf("  [%-4s] ", stateToken), Role: role},
+			Span{Text: phase.Name + progress, Role: RoleDefault}) {
+			break
+		}
+	}
+}
+
+func livePhaseStyle(state string) (string, Role) {
+	switch state {
+	case "running":
+		return "RUN", RoleAccent
+	case "completed":
+		return "DONE", RolePass
+	case "failed", "cancelled":
+		return strings.ToUpper(state), RoleFail
+	default:
+		return strings.ToUpper(state), RoleMuted
 	}
 }
 
@@ -225,6 +277,15 @@ func renderResult(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: "No saved result selected.", Role: RoleMuted})
 		return
 	}
+	renderResultIdentity(w, run, glyphs)
+	renderResultPerformance(w, run, glyphs)
+	if !renderResultWarnings(w, run) {
+		return
+	}
+	renderResultVerdicts(w, run, canvas.Width)
+}
+
+func renderResultIdentity(w *lineWriter, run Run, glyphs Glyphs) {
 	w.line(Span{Text: "RESULT  ", Role: RoleHeader}, Span{Text: run.Model, Role: RoleAccent})
 	if run.UseFor != "" {
 		w.line(Span{Text: "use for    ", Role: RoleMuted}, Span{Text: run.UseFor, Role: RoleAccent})
@@ -236,6 +297,9 @@ func renderResult(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: "device     ", Role: RoleMuted}, Span{Text: identity, Role: RoleDefault})
 	}
 	w.line(Span{Text: "config     ", Role: RoleMuted}, Span{Text: run.Config + glyphs.Dot + "profile " + run.Profile, Role: RoleDefault})
+}
+
+func renderResultPerformance(w *lineWriter, run Run, glyphs Glyphs) {
 	w.line(Span{Text: "performance", Role: RoleHeader})
 	if run.DecodeMean > 0 {
 		w.line(Span{Text: "decode     ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f ± %.2f tok/s  k=%d", run.DecodeMean, run.DecodeSD, run.Repeats), Role: RoleDefault},
@@ -251,29 +315,39 @@ func renderResult(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: "capacity", Role: RoleHeader})
 		w.line(Span{Text: "resident   ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GB after requested 32K load probe", run.MemoryGB), Role: RoleDefault})
 	}
+}
+
+func renderResultWarnings(w *lineWriter, run Run) bool {
 	for _, warning := range run.Warnings {
 		if !w.line(Span{Text: "warning    ", Role: RoleWarning}, Span{Text: warning, Role: RoleDefault}) {
-			return
+			return false
 		}
 	}
 	if run.NextCommand != "" {
 		w.line(Span{Text: "next       ", Role: RoleMuted}, Span{Text: run.NextCommand, Role: RoleAccent})
 	}
-	if len(run.Verdicts) > 0 {
-		w.line(Span{Text: "verdicts", Role: RoleHeader})
-		for _, verdict := range run.Verdicts {
-			role := verdictRole(verdict.State)
-			label := verdict.Label
-			if label == "" {
-				label = verdict.Need
-			}
-			spans := []Span{{Text: fmt.Sprintf("[%-4s] ", verdict.State), Role: role}, {Text: label, Role: RoleDefault}}
-			if canvas.Width >= 100 {
-				spans = append(spans, Span{Text: "  " + verdict.Why, Role: RoleMuted})
-			}
-			if !w.line(spans...) {
-				return
-			}
+	return true
+}
+
+func renderResultVerdicts(w *lineWriter, run Run, width int) {
+	if len(run.Verdicts) == 0 {
+		return
+	}
+	w.line(Span{Text: "verdicts", Role: RoleHeader})
+	for _, verdict := range run.Verdicts {
+		label := verdict.Label
+		if label == "" {
+			label = verdict.Need
+		}
+		spans := []Span{
+			{Text: fmt.Sprintf("[%-4s] ", verdict.State), Role: verdictRole(verdict.State)},
+			{Text: label, Role: RoleDefault},
+		}
+		if width >= 100 {
+			spans = append(spans, Span{Text: "  " + verdict.Why, Role: RoleMuted})
+		}
+		if !w.line(spans...) {
+			return
 		}
 	}
 }
@@ -292,37 +366,57 @@ func renderBoard(canvas *Canvas, state State, glyphs Glyphs) {
 	offset := state.Offset[ViewBoard]
 	rowIndex := 0
 	for _, group := range groups {
-		headerWritten := false
-		maxDecode := 0.0
-		for _, run := range group.Runs {
-			maxDecode = max(maxDecode, run.DecodeMean)
-		}
-		for _, run := range group.Runs {
-			if rowIndex < offset {
-				rowIndex++
-				continue
-			}
-			if !headerWritten {
-				if !w.line(Span{Text: group.Title, Role: RoleHeader}) {
-					return
-				}
-				if group.Note != "" && canvas.Width >= 60 {
-					role := RoleMuted
-					if !group.Comparable {
-						role = RoleWarning
-					}
-					if !w.line(Span{Text: "  " + group.Note, Role: role}) {
-						return
-					}
-				}
-				headerWritten = true
-			}
-			if !w.line(boardRowSpans(run, run.ID == state.Selected[ViewBoard], maxDecode, canvas.Width, glyphs)...) {
-				return
-			}
-			rowIndex++
+		if !renderBoardGroup(w, group, state.Selected[ViewBoard], offset, &rowIndex, canvas.Width, glyphs) {
+			return
 		}
 	}
+}
+
+func renderBoardGroup(w *lineWriter, group BoardGroup, selectedID string, offset int,
+	rowIndex *int, width int, glyphs Glyphs) bool {
+	headerWritten := false
+	maxDecode := maxRunDecode(group.Runs)
+	for _, run := range group.Runs {
+		if *rowIndex < offset {
+			(*rowIndex)++
+			continue
+		}
+		var ok bool
+		headerWritten, ok = renderBoardGroupHeader(w, group, headerWritten, width)
+		if !ok {
+			return false
+		}
+		if !w.line(boardRowSpans(run, run.ID == selectedID, maxDecode, width, glyphs)...) {
+			return false
+		}
+		(*rowIndex)++
+	}
+	return true
+}
+
+func maxRunDecode(runs []Run) float64 {
+	maxDecode := 0.0
+	for _, run := range runs {
+		maxDecode = max(maxDecode, run.DecodeMean)
+	}
+	return maxDecode
+}
+
+func renderBoardGroupHeader(w *lineWriter, group BoardGroup, written bool, width int) (bool, bool) {
+	if written {
+		return true, true
+	}
+	if !w.line(Span{Text: group.Title, Role: RoleHeader}) {
+		return false, false
+	}
+	if group.Note == "" || width < 60 {
+		return true, true
+	}
+	role := RoleMuted
+	if !group.Comparable {
+		role = RoleWarning
+	}
+	return true, w.line(Span{Text: "  " + group.Note, Role: role})
 }
 
 func boardRowSpans(run Run, selected bool, ceiling float64, width int, glyphs Glyphs) []Span {
@@ -433,46 +527,57 @@ func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
 	w.line(Span{Text: "MODEL                    STATE        FIT        CTX       NEXT", Role: RoleMuted})
 	offset := min(state.Offset[ViewInventory], max(len(items)-1, 0))
 	for _, item := range items[offset:] {
-		selected := item.ID == state.Selected[ViewInventory]
-		role, prefix := RoleDefault, "  "
-		if selected {
-			role, prefix = RoleSelected, glyphs.Selected+" "
-		}
-		name := item.Model
-		if item.Loaded {
-			name = "* " + name
-		}
-		fitLabel := item.Fit
-		if fitLabel == "" {
-			fitLabel = "-"
-		}
-		if fitLabel == "low_memory" {
-			fitLabel = "low mem"
-		}
-		line := prefix + padCells(clipCells(name, 22, glyphs.Ellipsis), 22)
-		line += "  " + padCells(item.State, 12)
-		line += padCells(fitLabel, 10)
-		ctxCol := item.Ctx
-		if ctxCol == "" {
-			ctxCol = "-"
-		}
-		line += padCells(ctxCol, 9)
-		line += clipCells(item.Next, max(canvas.Width-61, 10), glyphs.Ellipsis)
-		if !w.line(Span{Text: line, Role: role}) {
+		if !renderInventoryItem(w, item, item.ID == state.Selected[ViewInventory], canvas.Width, glyphs) {
 			break
-		}
-		if selected && item.Windows != "" {
-			if !w.line(Span{Text: "    " + clipCells(item.Windows, max(canvas.Width-6, 8), glyphs.Ellipsis), Role: RoleMuted}) {
-				break
-			}
-		}
-		if selected && item.Note != "" {
-			if !w.line(Span{Text: "    " + clipCells(item.Note, max(canvas.Width-6, 8), glyphs.Ellipsis), Role: RoleMuted}) {
-				break
-			}
 		}
 	}
 	w.line(Span{Text: "* loaded   CTX measured/serving   Enter opens a measured result   board still ranks only comparable runs", Role: RoleMuted})
+}
+
+func renderInventoryItem(w *lineWriter, item InventoryItem, selected bool, width int, glyphs Glyphs) bool {
+	role, prefix := RoleDefault, "  "
+	if selected {
+		role, prefix = RoleSelected, glyphs.Selected+" "
+	}
+	name := item.Model
+	if item.Loaded {
+		name = "* " + name
+	}
+	line := prefix + padCells(clipCells(name, 22, glyphs.Ellipsis), 22)
+	line += "  " + padCells(item.State, 12)
+	line += padCells(inventoryFitLabel(item.Fit), 10)
+	line += padCells(inventoryContextLabel(item.Ctx), 9)
+	line += clipCells(item.Next, max(width-61, 10), glyphs.Ellipsis)
+	if !w.line(Span{Text: line, Role: role}) {
+		return false
+	}
+	if selected && item.Windows != "" &&
+		!w.line(Span{Text: "    " + clipCells(item.Windows, max(width-6, 8), glyphs.Ellipsis), Role: RoleMuted}) {
+		return false
+	}
+	if selected && item.Note != "" &&
+		!w.line(Span{Text: "    " + clipCells(item.Note, max(width-6, 8), glyphs.Ellipsis), Role: RoleMuted}) {
+		return false
+	}
+	return true
+}
+
+func inventoryFitLabel(label string) string {
+	switch label {
+	case "":
+		return "-"
+	case "low_memory":
+		return "low mem"
+	default:
+		return label
+	}
+}
+
+func inventoryContextLabel(label string) string {
+	if label == "" {
+		return "-"
+	}
+	return label
 }
 
 func renderComparison(canvas *Canvas, state State) {

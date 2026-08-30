@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"strings"
+	"time"
 
 	"github.com/blisspixel/fitr/internal/ollama"
 )
@@ -83,6 +84,36 @@ func distractorNames() []string {
 // so every instance is a fresh trial with a computed correct answer, and the
 // prompt states each value exactly once in natural order.
 func scheduleMeetingTool(rng *rand.Rand, strict bool) (ollama.Tool, wanted) {
+	request := newMeetingRequest(rng)
+	props := meetingProperties()
+	required := []string{"title", "date", "duration_minutes", "attendees"}
+	args := map[string]any{
+		"title": request.title, "date": request.date.Format("2006-01-02"),
+		"duration_minutes": request.duration, "attendees": request.attendees,
+	}
+	prompt := request.prompt()
+	optional := ""
+	if strict {
+		prompt, required, optional = addStrictMeetingFields(rng, request, props, args, required)
+	}
+	return ollama.Tool{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "schedule_meeting",
+			Description: "Schedule a meeting on the calendar",
+			Parameters:  objectSchema(props, required),
+		},
+	}, wanted{name: "schedule_meeting", prompt: prompt, args: args, optional: optional}
+}
+
+type meetingRequest struct {
+	attendees []string
+	title     string
+	date      time.Time
+	duration  int
+}
+
+func newMeetingRequest(rng *rand.Rand) meetingRequest {
 	people := pick(rng, poolNames, 2)
 	attendees := []string{
 		strings.ToLower(people[0]) + "@example.com",
@@ -94,8 +125,11 @@ func scheduleMeetingTool(rng *rand.Rand, strict bool) (ollama.Tool, wanted) {
 	})
 	date := randDate(rng)
 	duration := []int{15, 30, 45, 60}[rng.IntN(4)]
+	return meetingRequest{attendees: attendees, title: rawTitle, date: date, duration: duration}
+}
 
-	props := map[string]any{
+func meetingProperties() map[string]any {
+	return map[string]any{
 		"title": map[string]any{
 			"type": "string", "description": "Meeting title, exactly as given",
 		},
@@ -111,58 +145,47 @@ func scheduleMeetingTool(rng *rand.Rand, strict bool) (ollama.Tool, wanted) {
 			"items":       map[string]any{"type": "string"},
 		},
 	}
-	required := []string{"title", "date", "duration_minutes", "attendees"}
-	args := map[string]any{
-		"title": rawTitle, "date": date.Format("2006-01-02"),
-		"duration_minutes": duration, "attendees": attendees,
-	}
+}
 
-	prompt := fmt.Sprintf(
+func (request meetingRequest) prompt() string {
+	return fmt.Sprintf(
 		"Schedule a meeting titled %q on %s for %d minutes with %s and %s. "+
 			"Use the tool. Do not ask for confirmation.",
-		rawTitle, date.Format("January 2, 2006"), duration, attendees[0], attendees[1])
+		request.title, request.date.Format("January 2, 2006"), request.duration,
+		request.attendees[0], request.attendees[1])
+}
 
-	optional := ""
-	if strict {
-		// A closed enum and a bounded integer: a model can be syntactically
-		// perfect and still wrong, which is the point. Without these a schema
-		// is satisfied by almost any object.
-		room := one(rng, []string{"onsite", "remote", "hybrid"})
-		props["location"] = map[string]any{
-			"type": "string", "description": "One of: onsite, remote, hybrid",
-			"enum": []any{"onsite", "remote", "hybrid"},
-		}
-		props["priority"] = map[string]any{
-			"type": "integer", "description": "Priority from 1 (lowest) to 5 (highest)",
-			"minimum": 1, "maximum": 5,
-		}
-		priority := 1 + rng.IntN(5)
-		required = append(required, "location", "priority")
-		args["location"] = room
-		args["priority"] = priority
-		prompt = fmt.Sprintf(
-			"Schedule a meeting titled %q on %s for %d minutes with %s and %s. "+
-				"It is %s, priority %d. Use the tool. Do not ask for confirmation.",
-			rawTitle, date.Format("January 2, 2006"), duration,
-			attendees[0], attendees[1], room, priority)
-
-		// A declared-but-unrequested optional. Supplying it is not a failure;
-		// supplying it wrong would be. This separates "invented a parameter"
-		// from "used one it was offered".
-		props["notes"] = map[string]any{
-			"type": "string", "description": "Optional free-text notes",
-		}
-		optional = "notes"
+func addStrictMeetingFields(rng *rand.Rand, request meetingRequest, props, args map[string]any,
+	required []string) (string, []string, string) {
+	// A closed enum and a bounded integer: a model can be syntactically
+	// perfect and still wrong, which is the point. Without these a schema
+	// is satisfied by almost any object.
+	room := one(rng, []string{"onsite", "remote", "hybrid"})
+	props["location"] = map[string]any{
+		"type": "string", "description": "One of: onsite, remote, hybrid",
+		"enum": []any{"onsite", "remote", "hybrid"},
 	}
+	props["priority"] = map[string]any{
+		"type": "integer", "description": "Priority from 1 (lowest) to 5 (highest)",
+		"minimum": 1, "maximum": 5,
+	}
+	priority := 1 + rng.IntN(5)
+	required = append(required, "location", "priority")
+	args["location"] = room
+	args["priority"] = priority
+	prompt := fmt.Sprintf(
+		"Schedule a meeting titled %q on %s for %d minutes with %s and %s. "+
+			"It is %s, priority %d. Use the tool. Do not ask for confirmation.",
+		request.title, request.date.Format("January 2, 2006"), request.duration,
+		request.attendees[0], request.attendees[1], room, priority)
 
-	return ollama.Tool{
-		Type: "function",
-		Function: ollama.ToolFunction{
-			Name:        "schedule_meeting",
-			Description: "Schedule a meeting on the calendar",
-			Parameters:  objectSchema(props, required),
-		},
-	}, wanted{name: "schedule_meeting", prompt: prompt, args: args, optional: optional}
+	// A declared-but-unrequested optional. Supplying it is not a failure;
+	// supplying it wrong would be. This separates "invented a parameter"
+	// from "used one it was offered".
+	props["notes"] = map[string]any{
+		"type": "string", "description": "Optional free-text notes",
+	}
+	return prompt, required, "notes"
 }
 
 func objectSchema(props map[string]any, required []string) map[string]any {

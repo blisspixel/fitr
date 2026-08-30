@@ -39,33 +39,34 @@ func (r *Record) baseMeasured() score.Measured {
 }
 
 func (r *Record) addSpeedMeasurements(m *score.Measured) {
-	if r.DecodeSum.N > 0 {
-		m.SpeedKnown = true
-		m.DecodeTPS, m.TTFT, m.PrefillTPS = r.DecodeSum.Mean, r.TTFTSum.Mean, r.PrefillSum.Mean
-		m.TTFTCacheKnown = len(r.Speed) > 0
-		m.PrefillCacheKnown = len(r.Speed) > 0
-		for _, sample := range r.Speed {
-			if sample.ColdTTFT > 0 && m.TTFTCold == 0 {
-				m.TTFTCold = sample.ColdTTFT
-			}
-			if sample.WarmTTFT > 0 && m.TTFTWarm == 0 {
-				m.TTFTWarm = sample.WarmTTFT
-			}
-			if sample.GatedTTFTContaminated() {
-				m.TTFTCacheContaminated = true
-			}
-			if sample.PrefillContaminated() {
-				m.PrefillCacheContaminated = true
-			}
-			if !sample.GatedCacheReceiptValid() {
-				m.TTFTCacheKnown = false
-			}
-			if !sample.PrefillCacheReceiptValid() {
-				m.PrefillCacheKnown = false
-			}
-			if sample.ClientDerived {
-				m.TimingsClientDerived = true
-			}
+	if r.DecodeSum.N <= 0 {
+		return
+	}
+	m.SpeedKnown = true
+	m.DecodeTPS, m.TTFT, m.PrefillTPS = r.DecodeSum.Mean, r.TTFTSum.Mean, r.PrefillSum.Mean
+	m.TTFTCacheKnown = len(r.Speed) > 0
+	m.PrefillCacheKnown = len(r.Speed) > 0
+	for _, sample := range r.Speed {
+		if sample.ColdTTFT > 0 && m.TTFTCold == 0 {
+			m.TTFTCold = sample.ColdTTFT
+		}
+		if sample.WarmTTFT > 0 && m.TTFTWarm == 0 {
+			m.TTFTWarm = sample.WarmTTFT
+		}
+		if sample.GatedTTFTContaminated() {
+			m.TTFTCacheContaminated = true
+		}
+		if sample.PrefillContaminated() {
+			m.PrefillCacheContaminated = true
+		}
+		if !sample.GatedCacheReceiptValid() {
+			m.TTFTCacheKnown = false
+		}
+		if !sample.PrefillCacheReceiptValid() {
+			m.PrefillCacheKnown = false
+		}
+		if sample.ClientDerived {
+			m.TimingsClientDerived = true
 		}
 	}
 }

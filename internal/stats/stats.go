@@ -89,36 +89,60 @@ type Cluster struct {
 // unit because between-family variance is not identifiable. The interval is
 // never narrower than ordinary Wilson.
 func ClusteredWilson(clusters []Cluster) Interval {
-	var passes, n, groups int
-	equalSingletons := true
-	sizeSquares := 0.0
+	summary := summarizeClusters(clusters)
+	if summary.n <= 0 {
+		return Wilson(0, 0)
+	}
+	p := float64(summary.passes) / float64(summary.n)
+	iid := Wilson(summary.passes, summary.n)
+	if summary.equalSingletons {
+		return iid
+	}
+	if summary.groups == 1 {
+		lo, hi := wilsonRate(p, 1)
+		return Interval{Point: round(p, 4), Lo: round(min(lo, iid.Lo), 4),
+			Hi: round(max(hi, iid.Hi), 4), N: summary.n}
+	}
+
+	meanSize := float64(summary.n) / float64(summary.groups)
+	between, within := clusterMoments(clusters, p)
+	rho := clusterCorrelation(summary, between, within)
+	sizeCV2 := clusterSizeCV2(clusters, summary.groups, meanSize)
+	nEff := effectiveClusterN(summary.n, meanSize, sizeCV2, rho)
+	lo, hi := wilsonRate(p, nEff)
+	if lo > iid.Lo {
+		lo = iid.Lo
+	}
+	if hi < iid.Hi {
+		hi = iid.Hi
+	}
+	return Interval{Point: round(p, 4), Lo: round(lo, 4), Hi: round(hi, 4), N: summary.n}
+}
+
+type clusterSummary struct {
+	passes, n, groups int
+	equalSingletons   bool
+	sizeSquares       float64
+}
+
+func summarizeClusters(clusters []Cluster) clusterSummary {
+	s := clusterSummary{equalSingletons: true}
 	for _, c := range clusters {
 		if c.N <= 0 {
 			continue
 		}
-		groups++
-		passes += c.Passes
-		n += c.N
-		sizeSquares += float64(c.N * c.N)
+		s.groups++
+		s.passes += c.Passes
+		s.n += c.N
+		s.sizeSquares += float64(c.N * c.N)
 		if c.N != 1 {
-			equalSingletons = false
+			s.equalSingletons = false
 		}
 	}
-	if n <= 0 {
-		return Wilson(0, 0)
-	}
-	p := float64(passes) / float64(n)
-	iid := Wilson(passes, n)
-	if equalSingletons {
-		return iid
-	}
-	if groups == 1 {
-		lo, hi := wilsonRate(p, 1)
-		return Interval{Point: round(p, 4), Lo: round(min(lo, iid.Lo), 4),
-			Hi: round(max(hi, iid.Hi), 4), N: n}
-	}
+	return s
+}
 
-	meanSize := float64(n) / float64(groups)
+func clusterMoments(clusters []Cluster, p float64) (float64, float64) {
 	between, within := 0.0, 0.0
 	for _, c := range clusters {
 		if c.N <= 0 {
@@ -129,14 +153,18 @@ func ClusteredWilson(clusters []Cluster) Interval {
 		between += float64(c.N) * d * d
 		within += float64(c.N) * pi * (1 - pi)
 	}
-	msb := between / float64(groups-1)
+	return between, within
+}
+
+func clusterCorrelation(summary clusterSummary, between, within float64) float64 {
+	msb := between / float64(summary.groups-1)
 	msw := 0.0
-	if n > groups {
-		msw = within / float64(n-groups)
+	if summary.n > summary.groups {
+		msw = within / float64(summary.n-summary.groups)
 	}
 	// n0 is the effective cluster size in the unequal-size one-way random
 	// effects estimator. It equals meanSize when cluster sizes are equal.
-	n0 := (float64(n) - sizeSquares/float64(n)) / float64(groups-1)
+	n0 := (float64(summary.n) - summary.sizeSquares/float64(summary.n)) / float64(summary.groups-1)
 	rho := 1.0
 	if denominator := msb + (n0-1)*msw; denominator > 0 {
 		rho = (msb - msw) / denominator
@@ -147,6 +175,10 @@ func ClusteredWilson(clusters []Cluster) Interval {
 	if rho > 1 {
 		rho = 1
 	}
+	return rho
+}
+
+func clusterSizeCV2(clusters []Cluster, groups int, meanSize float64) float64 {
 	sizeVariance := 0.0
 	for _, c := range clusters {
 		if c.N <= 0 {
@@ -156,7 +188,10 @@ func ClusteredWilson(clusters []Cluster) Interval {
 		sizeVariance += d * d
 	}
 	sizeVariance /= float64(groups)
-	sizeCV2 := sizeVariance / (meanSize * meanSize)
+	return sizeVariance / (meanSize * meanSize)
+}
+
+func effectiveClusterN(n int, meanSize, sizeCV2, rho float64) float64 {
 	deff := 1 + ((1+sizeCV2)*meanSize-1)*rho
 	if deff < 1 {
 		deff = 1
@@ -168,14 +203,7 @@ func ClusteredWilson(clusters []Cluster) Interval {
 	if nEff < 1 {
 		nEff = 1
 	}
-	lo, hi := wilsonRate(p, nEff)
-	if lo > iid.Lo {
-		lo = iid.Lo
-	}
-	if hi < iid.Hi {
-		hi = iid.Hi
-	}
-	return Interval{Point: round(p, 4), Lo: round(lo, 4), Hi: round(hi, 4), N: n}
+	return nEff
 }
 
 // NewcombeDiff is the hybrid score ("square-and-add") 95% interval for the

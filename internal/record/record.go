@@ -153,6 +153,22 @@ func (r *Record) ValidateEvidenceContract() error {
 	if r.SchemaVersion < EvidenceSchemaVersion {
 		return nil
 	}
+	if err := r.validateCurrentEvidenceHeader(); err != nil {
+		return err
+	}
+	if err := r.validateCompletedEvidence(); err != nil {
+		return err
+	}
+	if err := r.validateTerminationEvidence(); err != nil {
+		return err
+	}
+	if err := r.validateEvidenceCountCompleteness(); err != nil {
+		return err
+	}
+	return r.validateExecutableEvidenceIsolation()
+}
+
+func (r *Record) validateCurrentEvidenceHeader() error {
 	if r.SchemaVersion != EvidenceSchemaVersion {
 		return fmt.Errorf("unsupported result schema %d", r.SchemaVersion)
 	}
@@ -180,9 +196,10 @@ func (r *Record) ValidateEvidenceContract() error {
 	if err := r.Memory.ValidateReceipt(); err != nil {
 		return fmt.Errorf("memory receipt: %w", err)
 	}
-	if err := r.validateCompletedEvidence(); err != nil {
-		return err
-	}
+	return nil
+}
+
+func (r *Record) validateTerminationEvidence() error {
 	for i, result := range r.Tools {
 		if err := result.ValidateTerminationEvidence(); err != nil {
 			return fmt.Errorf("tool result %d: %w", i, err)
@@ -198,6 +215,10 @@ func (r *Record) ValidateEvidenceContract() error {
 			}
 		}
 	}
+	return nil
+}
+
+func (r *Record) validateEvidenceCountCompleteness() error {
 	expected := []struct {
 		phase string
 		count int
@@ -226,6 +247,10 @@ func (r *Record) ValidateEvidenceContract() error {
 			return fmt.Errorf("%s contains %d infrastructure error outcome(s)", phase, counts.Errors)
 		}
 	}
+	return nil
+}
+
+func (r *Record) validateExecutableEvidenceIsolation() error {
 	for _, phase := range []string{"coding", "tools", "agentic"} {
 		if counts := r.EvidenceCounts[phase]; counts.Scorable != 0 {
 			return fmt.Errorf("%s executable observations cannot be scoreable before isolation", phase)

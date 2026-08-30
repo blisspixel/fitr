@@ -570,47 +570,47 @@ func Score(m Measured, p device.Profile) Scorecard {
 }
 
 func scoreFastAndDecent(m Measured, p device.Profile) Verdict {
-	if tpsMin, ok1 := p.Float("fast_chat", "decode_tps_min"); !ok1 {
+	tpsMin, configured := p.Float("fast_chat", "decode_tps_min")
+	if !configured {
 		return skipped("no fast_chat gate in profile")
-	} else if !m.SpeedKnown {
-		return skipped("speed not measured")
-	} else {
-		ttftMax, _ := p.Float("fast_chat", "ttft_s_max")
-		// A cache-hit TTFT is not a new-question measurement. Judging it
-		// would let a warm-prefix figure wear a cold-prompt badge (usually
-		// a false PASS). Exclude it from the gate and say so.
-		decodeOK := m.DecodeTPS >= tpsMin
-		verdictState := state(decodeOK && m.TTFT <= ttftMax)
-		detail := []string{fmt.Sprintf("TTFT %.2fs loaded/cache state unknown (need <=%.1f)", m.TTFT, ttftMax)}
-		note := ""
-		switch {
-		case !m.TTFTCacheKnown:
-			note = "backend did not provide a cache receipt; loaded/uncached TTFT is unproven"
-			if decodeOK {
-				verdictState = Inconclusive
-			}
-		case m.TTFTCacheContaminated:
-			detail[0] = fmt.Sprintf("TTFT %.2fs loaded/partial cache hit (need <=%.1f)", m.TTFT, ttftMax)
-			note = "gated TTFT included cached prompt tokens - not an explicit miss, excluded from the gate"
-			if decodeOK {
-				verdictState = Inconclusive
-			}
-		default:
-			detail[0] = fmt.Sprintf("TTFT %.2fs loaded/uncached (need <=%.1f)", m.TTFT, ttftMax)
-		}
-		if m.TTFTCold > 0 {
-			detail = append(detail, fmt.Sprintf("cold start %.1fs", m.TTFTCold))
-		}
-		if m.TTFTWarm > 0 {
-			detail = append(detail, fmt.Sprintf("cached prefix %.2fs", m.TTFTWarm))
-		}
-		if m.TimingsClientDerived {
-			note = joinNote(note, "client-derived wall-clock (not server timings)")
-		}
-		return newVerdict(verdictState,
-			fmt.Sprintf("%.2f tok/s", m.DecodeTPS),
-			fmt.Sprintf("need >=%.1f", tpsMin), detail, note)
 	}
+	if !m.SpeedKnown {
+		return skipped("speed not measured")
+	}
+	ttftMax, _ := p.Float("fast_chat", "ttft_s_max")
+	// A cache-hit TTFT is not a new-question measurement. Judging it
+	// would let a warm-prefix figure wear a cold-prompt badge (usually
+	// a false PASS). Exclude it from the gate and say so.
+	decodeOK := m.DecodeTPS >= tpsMin
+	verdictState := state(decodeOK && m.TTFT <= ttftMax)
+	detail := []string{fmt.Sprintf("TTFT %.2fs loaded/cache state unknown (need <=%.1f)", m.TTFT, ttftMax)}
+	note := ""
+	switch {
+	case !m.TTFTCacheKnown:
+		note = "backend did not provide a cache receipt; loaded/uncached TTFT is unproven"
+		if decodeOK {
+			verdictState = Inconclusive
+		}
+	case m.TTFTCacheContaminated:
+		detail[0] = fmt.Sprintf("TTFT %.2fs loaded/partial cache hit (need <=%.1f)", m.TTFT, ttftMax)
+		note = "gated TTFT included cached prompt tokens - not an explicit miss, excluded from the gate"
+		if decodeOK {
+			verdictState = Inconclusive
+		}
+	default:
+		detail[0] = fmt.Sprintf("TTFT %.2fs loaded/uncached (need <=%.1f)", m.TTFT, ttftMax)
+	}
+	if m.TTFTCold > 0 {
+		detail = append(detail, fmt.Sprintf("cold start %.1fs", m.TTFTCold))
+	}
+	if m.TTFTWarm > 0 {
+		detail = append(detail, fmt.Sprintf("cached prefix %.2fs", m.TTFTWarm))
+	}
+	if m.TimingsClientDerived {
+		note = joinNote(note, "client-derived wall-clock (not server timings)")
+	}
+	return newVerdict(verdictState, fmt.Sprintf("%.2f tok/s", m.DecodeTPS),
+		fmt.Sprintf("need >=%.1f", tpsMin), detail, note)
 }
 
 // scoreCoding keeps executable evidence separate from generated reasoning.

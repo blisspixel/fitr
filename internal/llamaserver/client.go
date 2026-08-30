@@ -298,68 +298,109 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 	if resp.StatusCode != http.StatusOK {
 		return "", ollama.Metrics{}, httpError("llama-server", resp)
 	}
+	state, err := readCompletionStream(resp.Body, start)
+	if err != nil {
+		return state.output.String(), ollama.Metrics{}, err
+	}
+	return state.output.String(), completionMetrics(state.final, state.ttft, time.Since(start)), nil
+}
 
-	var sb strings.Builder
-	var ttft float64
-	var final completionResp
-	var totalBytes, frames int
-	terminal := false
-	sc := bufio.NewScanner(resp.Body)
+type completionStreamState struct {
+	output             strings.Builder
+	ttft               float64
+	final              completionResp
+	totalBytes, frames int
+	terminal           bool
+}
+
+func readCompletionStream(r io.Reader, start time.Time) (completionStreamState, error) {
+	var state completionStreamState
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxNativeLine)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 || bytes.HasPrefix(line, []byte(":")) {
 			continue
 		}
-		totalBytes += len(line) + 1
-		frames++
-		if totalBytes > maxNativeStream || frames > maxNativeFrames {
-			return sb.String(), ollama.Metrics{}, errors.New("llama-server completion stream exceeds protocol limits")
-		}
-		if terminal {
-			if bytes.Equal(bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:"))), []byte("[DONE]")) {
-				continue
-			}
-			return sb.String(), ollama.Metrics{}, errors.New("llama-server completion stream contains data after the terminal frame")
-		}
-		if bytes.HasPrefix(line, []byte("data:")) {
-			line = bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
-		} else if !bytes.HasPrefix(line, []byte("{")) {
-			return sb.String(), ollama.Metrics{}, errors.New("llama-server completion stream contains an invalid frame prefix")
-		}
-		if bytes.Equal(line, []byte("[DONE]")) {
-			return sb.String(), ollama.Metrics{}, errors.New("llama-server completion stream ended before a terminal receipt")
-		}
-		var g completionResp
-		if err := decodeJSONFrame(line, &g); err != nil {
-			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion frame: %w", err)
-		}
-		if g.TokensCached < 0 || g.Timings.PromptN < 0 || g.Timings.PromptMS < 0 ||
-			g.Timings.PredictedN < 0 || g.Timings.PredictedMS < 0 {
-			return sb.String(), ollama.Metrics{}, errors.New("llama-server completion frame contains a negative metric")
-		}
-		if g.Content != "" && ttft == 0 {
-			ttft = time.Since(start).Seconds()
-		}
-		if len(g.Content) > maxGeneratedOutput-sb.Len() {
-			return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server generated output exceeds %d bytes", maxGeneratedOutput)
-		}
-		sb.WriteString(g.Content)
-		if g.Stop {
-			final = g
-			terminal = true
+		if err := state.accept(line, start); err != nil {
+			return state, err
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return sb.String(), ollama.Metrics{}, fmt.Errorf("llama-server completion stream: %w", err)
+		return state, fmt.Errorf("llama-server completion stream: %w", err)
 	}
-	if !terminal {
-		return sb.String(), ollama.Metrics{}, errors.New("llama-server completion stream ended before a terminal receipt")
+	if !state.terminal {
+		return state, errors.New("llama-server completion stream ended before a terminal receipt")
 	}
+	return state, nil
+}
 
+func (s *completionStreamState) accept(line []byte, start time.Time) error {
+	s.totalBytes += len(line) + 1
+	s.frames++
+	if s.totalBytes > maxNativeStream || s.frames > maxNativeFrames {
+		return errors.New("llama-server completion stream exceeds protocol limits")
+	}
+	frame, doneMarker, err := completionFramePayload(line)
+	if err != nil {
+		return err
+	}
+	if s.terminal {
+		if doneMarker {
+			return nil
+		}
+		return errors.New("llama-server completion stream contains data after the terminal frame")
+	}
+	if doneMarker {
+		return errors.New("llama-server completion stream ended before a terminal receipt")
+	}
+	return s.acceptCompletionFrame(frame, start)
+}
+
+func completionFramePayload(line []byte) ([]byte, bool, error) {
+	switch {
+	case bytes.HasPrefix(line, []byte("data:")):
+		line = bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+	case !bytes.HasPrefix(line, []byte("{")):
+		return nil, false, errors.New("llama-server completion stream contains an invalid frame prefix")
+	}
+	return line, bytes.Equal(line, []byte("[DONE]")), nil
+}
+
+func (s *completionStreamState) acceptCompletionFrame(data []byte, start time.Time) error {
+	var frame completionResp
+	if err := decodeJSONFrame(data, &frame); err != nil {
+		return fmt.Errorf("llama-server completion frame: %w", err)
+	}
+	if err := validateCompletionFrame(frame); err != nil {
+		return err
+	}
+	if frame.Content != "" && s.ttft == 0 {
+		s.ttft = time.Since(start).Seconds()
+	}
+	if len(frame.Content) > maxGeneratedOutput-s.output.Len() {
+		return fmt.Errorf("llama-server generated output exceeds %d bytes", maxGeneratedOutput)
+	}
+	s.output.WriteString(frame.Content)
+	if frame.Stop {
+		s.final = frame
+		s.terminal = true
+	}
+	return nil
+}
+
+func validateCompletionFrame(frame completionResp) error {
+	if frame.TokensCached < 0 || frame.Timings.PromptN < 0 || frame.Timings.PromptMS < 0 ||
+		frame.Timings.PredictedN < 0 || frame.Timings.PredictedMS < 0 {
+		return errors.New("llama-server completion frame contains a negative metric")
+	}
+	return nil
+}
+
+func completionMetrics(final completionResp, ttft float64, wall time.Duration) ollama.Metrics {
 	m := ollama.Metrics{
 		TTFTSeconds:  round(ttft, 3),
-		WallSeconds:  round(time.Since(start).Seconds(), 2),
+		WallSeconds:  round(wall.Seconds(), 2),
 		EvalCount:    final.Timings.PredictedN,
 		PromptTokens: final.Timings.PromptN,
 		CachedTokens: final.TokensCached,
@@ -373,7 +414,7 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 	if final.Timings.PromptMS > 0 {
 		m.PrefillTPS = round(float64(final.Timings.PromptN)/(final.Timings.PromptMS/1000), 2)
 	}
-	return sb.String(), m, nil
+	return m
 }
 
 // ---------------------------------------------------------------- chat

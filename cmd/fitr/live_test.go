@@ -117,208 +117,209 @@ func TestLiveLoopSmoke(t *testing.T) {
 	model, backend, _ := liveBackend(t, ctx)
 	// Never read or write the operator's real evidence.
 	t.Setenv("FITR_RESULTS", t.TempDir())
+	smoke := liveLoopSmoke{ctx: ctx, model: model, backend: backend}
+	t.Run("inventory", smoke.inventory)
+	t.Run("advise", smoke.advise)
+	t.Run("run", smoke.run)
+	t.Run("board", smoke.board)
+	t.Run("apply", smoke.apply)
+	t.Run("doctor", smoke.doctor)
+	t.Run("diag", smoke.diag)
+	t.Run("device", smoke.device)
+	t.Run("view", smoke.view)
+	t.Run("export", smoke.export)
+	t.Run("top_snapshot", smoke.topSnapshot)
+	t.Run("compare", smoke.compare)
+}
 
-	ranLoop := func(t *testing.T, name string, code int, stdout, stderr string) {
-		t.Helper()
-		if code != exitOK && code != exitGates {
-			t.Fatalf("%s: exit = %d, want %d or %d; stderr=%q", name, code, exitOK, exitGates, stderr)
-		}
-		if strings.TrimSpace(stdout) == "" {
-			t.Fatalf("%s: produced no output", name)
+type liveLoopSmoke struct {
+	ctx     context.Context
+	model   string
+	backend string
+}
+
+func (s liveLoopSmoke) assertRan(t *testing.T, name string, code int, stdout, stderr string) {
+	t.Helper()
+	if code != exitOK && code != exitGates {
+		t.Fatalf("%s: exit = %d, want %d or %d; stderr=%q", name, code, exitOK, exitGates, stderr)
+	}
+	if strings.TrimSpace(stdout) == "" {
+		t.Fatalf("%s: produced no output", name)
+	}
+}
+
+func (s liveLoopSmoke) inventory(t *testing.T) {
+	out, code := captureTopStdout(t, func() int { return cmdStatus(s.ctx, []string{"--backend", s.backend}) })
+	s.assertRan(t, "inventory", code, out, "")
+	if !strings.Contains(out, baseTag(s.model)) {
+		t.Fatalf("bare fitr did not list the installed model %q:\n%s", s.model, out)
+	}
+}
+
+func (s liveLoopSmoke) advise(t *testing.T) {
+	out, code := captureTopStdout(t, func() int {
+		return cmdAdvise(s.ctx, []string{s.model, "--backend", s.backend})
+	})
+	s.assertRan(t, "advise", code, out, "")
+	if strings.Contains(out, "weights were not measured") {
+		t.Fatalf("advise could not size the weights of an installed model:\n%s", out)
+	}
+	if !strings.Contains(out, "WEIGHTS") {
+		t.Fatalf("advise printed no context-fit table:\n%s", out)
+	}
+}
+
+func (s liveLoopSmoke) run(t *testing.T) {
+	stdout := ""
+	stderr, code := captureTopStderr(t, func() int {
+		var inner int
+		stdout, inner = captureTopStdout(t, func() int {
+			return cmdRun(s.ctx, []string{s.model, "--quick", "--backend", s.backend})
+		})
+		return inner
+	})
+	s.assertRan(t, "run", code, stdout, stderr)
+	if !strings.Contains(stderr, "saved") {
+		t.Fatalf("run printed no save receipt:\nstdout=%s\nstderr=%s", stdout, stderr)
+	}
+}
+
+func (s liveLoopSmoke) board(t *testing.T) {
+	if s.backend == "llama-server" {
+		s.assertLlamaServerBoard(t)
+		return
+	}
+	out, code := captureTopStdout(t, func() int { return cmdBoard(s.ctx, nil) })
+	s.assertRan(t, "board", code, out, "")
+	if !strings.Contains(out, baseTag(s.model)) {
+		t.Fatalf("board did not reopen the run just measured:\n%s", out)
+	}
+}
+
+func (s liveLoopSmoke) assertLlamaServerBoard(t *testing.T) {
+	t.Helper()
+	stdout := ""
+	stderr, code := captureTopStderr(t, func() int {
+		var inner int
+		stdout, inner = captureTopStdout(t, func() int { return cmdBoard(s.ctx, nil) })
+		return inner
+	})
+	if code != exitError {
+		t.Fatalf("board exit = %d, want evidence refusal %d; stdout=%s\nstderr=%s", code, exitError, stdout, stderr)
+	}
+	if strings.Contains(stdout, baseTag(s.model)) {
+		t.Fatalf("board ranked llama-server's observed-only artifact identity:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "valid evidence contract") {
+		t.Fatalf("board did not explain llama-server's expected evidence exclusion:\n%s", stderr)
+	}
+}
+
+func (s liveLoopSmoke) apply(t *testing.T) {
+	out, code := captureTopStdout(t, func() int {
+		return cmdApply(s.ctx, []string{s.model, "--backend", s.backend})
+	})
+	s.assertRan(t, "apply", code, out, "")
+	if !strings.Contains(out, "does not restart") {
+		t.Fatalf("apply dropped its non-mutation promise:\n%s", out)
+	}
+}
+
+func (s liveLoopSmoke) runsAtAll(t *testing.T, name string, fn func() int) (string, string) {
+	t.Helper()
+	stdout := ""
+	stderr, code := captureTopStderr(t, func() int {
+		var inner int
+		stdout, inner = captureTopStdout(t, fn)
+		return inner
+	})
+	if code == exitUsage {
+		t.Fatalf("%s rejected its own documented invocation: %s", name, stderr)
+	}
+	if strings.TrimSpace(stdout+stderr) == "" {
+		t.Fatalf("%s produced no output", name)
+	}
+	return stdout, stderr
+}
+
+func (s liveLoopSmoke) doctor(t *testing.T) {
+	s.runsAtAll(t, "doctor", func() int {
+		return cmdDoctor(s.ctx, []string{s.model, "--backend", s.backend})
+	})
+}
+
+func (s liveLoopSmoke) diag(t *testing.T) {
+	s.runsAtAll(t, "diag", func() int {
+		return cmdDiag(s.ctx, []string{s.model, "--backend", s.backend})
+	})
+}
+
+func (s liveLoopSmoke) device(t *testing.T) {
+	out, code := captureTopStdout(t, func() int { return cmdDevice(s.ctx, []string{"--backend", s.backend}) })
+	s.assertRan(t, "device", code, out, "")
+	for _, field := range []string{"host", "os"} {
+		if !strings.Contains(out, field) {
+			t.Fatalf("device output omits %q:\n%s", field, out)
 		}
 	}
+}
 
-	t.Run("inventory", func(t *testing.T) {
-		out, code := captureTopStdout(t, func() int {
-			return cmdStatus(ctx, []string{"--backend", backend})
-		})
-		ranLoop(t, "inventory", code, out, "")
-		if !strings.Contains(out, baseTag(model)) {
-			t.Fatalf("bare fitr did not list the installed model %q:\n%s", model, out)
-		}
-	})
-
-	t.Run("advise", func(t *testing.T) {
-		out, code := captureTopStdout(t, func() int {
-			return cmdAdvise(ctx, []string{model, "--backend", backend})
-		})
-		ranLoop(t, "advise", code, out, "")
-		// The exact 0.9.6 regression: weights unknown suppresses the context
-		// table and the verdict degrades to SKIP. The table is the artifact.
-		if strings.Contains(out, "weights were not measured") {
-			t.Fatalf("advise could not size the weights of an installed model:\n%s", out)
-		}
-		if !strings.Contains(out, "WEIGHTS") {
-			t.Fatalf("advise printed no context-fit table:\n%s", out)
-		}
-	})
-
-	t.Run("run", func(t *testing.T) {
-		// The scorecard is stdout; the save receipt is a stderr diagnostic, so
-		// proving a measurement persisted needs both streams.
-		stdout := ""
-		stderr, code := captureTopStderr(t, func() int {
-			var inner int
-			stdout, inner = captureTopStdout(t, func() int {
-				return cmdRun(ctx, []string{model, "--quick", "--backend", backend})
-			})
-			return inner
-		})
-		ranLoop(t, "run", code, stdout, stderr)
-		if !strings.Contains(stderr, "saved") {
-			t.Fatalf("run printed no save receipt:\nstdout=%s\nstderr=%s", stdout, stderr)
-		}
-	})
-
-	// board and apply both read the evidence run just wrote, so they prove the
-	// save/reopen seam, not only their own rendering.
-	t.Run("board", func(t *testing.T) {
-		if backend == "llama-server" {
-			stdout := ""
-			stderr, code := captureTopStderr(t, func() int {
-				var inner int
-				stdout, inner = captureTopStdout(t, func() int { return cmdBoard(ctx, nil) })
-				return inner
-			})
-			if code != exitError {
-				t.Fatalf("board exit = %d, want evidence refusal %d; stdout=%s\nstderr=%s", code, exitError, stdout, stderr)
-			}
-			if strings.Contains(stdout, baseTag(model)) {
-				t.Fatalf("board ranked llama-server's observed-only artifact identity:\n%s", stdout)
-			}
-			if !strings.Contains(stderr, "valid evidence contract") {
-				t.Fatalf("board did not explain llama-server's expected evidence exclusion:\n%s", stderr)
-			}
-			return
-		}
-		out, code := captureTopStdout(t, func() int { return cmdBoard(ctx, nil) })
-		ranLoop(t, "board", code, out, "")
-		if !strings.Contains(out, baseTag(model)) {
-			t.Fatalf("board did not reopen the run just measured:\n%s", out)
-		}
-	})
-
-	t.Run("apply", func(t *testing.T) {
-		out, code := captureTopStdout(t, func() int {
-			return cmdApply(ctx, []string{model, "--backend", backend})
-		})
-		ranLoop(t, "apply", code, out, "")
-		if !strings.Contains(out, "does not restart") {
-			t.Fatalf("apply dropped its non-mutation promise:\n%s", out)
-		}
-	})
-
-	// The loop above is the README's everyday table. The commands below are the
-	// rest of the documented surface. An acceptance path that walks only the
-	// happy five is how a broken advise shipped behind a green row.
-	//
-	// Doctor and diag report whether this box can be measured at all, so a
-	// refusal is a real answer; only a crash or a rejected invocation fails.
-	runsAtAll := func(t *testing.T, name string, fn func() int) (string, string) {
-		t.Helper()
-		stdout := ""
-		stderr, code := captureTopStderr(t, func() int {
-			var inner int
-			stdout, inner = captureTopStdout(t, fn)
-			return inner
-		})
-		if code == exitUsage {
-			t.Fatalf("%s rejected its own documented invocation: %s", name, stderr)
-		}
-		if strings.TrimSpace(stdout+stderr) == "" {
-			t.Fatalf("%s produced no output", name)
-		}
-		return stdout, stderr
+func (s liveLoopSmoke) view(t *testing.T) {
+	out, code := captureTopStdout(t, func() int { return cmdView(s.ctx, []string{s.model}) })
+	s.assertRan(t, "view", code, out, "")
+	if !strings.Contains(out, baseTag(s.model)) {
+		t.Fatalf("view did not reopen the measured model:\n%s", out)
 	}
+}
 
-	t.Run("doctor", func(t *testing.T) {
-		runsAtAll(t, "doctor", func() int {
-			return cmdDoctor(ctx, []string{model, "--backend", backend})
-		})
+func (s liveLoopSmoke) export(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "scorecard.html")
+	stderr, code := captureTopStderr(t, func() int {
+		return cmdExport(s.ctx, []string{s.model, "--out", dest})
 	})
+	if code != exitOK {
+		t.Fatalf("export exit = %d; stderr=%s", code, stderr)
+	}
+	body, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("export wrote no artifact at %s: %v", dest, err)
+	}
+	if !bytes.Contains(body, []byte("<html")) {
+		t.Fatalf("exported artifact is not HTML (%d bytes)", len(body))
+	}
+	for _, remote := range []string{`src="http`, `href="http`, `src="//`, `href="//`} {
+		if bytes.Contains(body, []byte(remote)) {
+			t.Fatalf("exported artifact references remote content (%s)", remote)
+		}
+	}
+}
 
-	t.Run("diag", func(t *testing.T) {
-		runsAtAll(t, "diag", func() int {
-			return cmdDiag(ctx, []string{model, "--backend", backend})
-		})
-	})
+func (s liveLoopSmoke) topSnapshot(t *testing.T) {
+	out, code := captureTopStdout(t, func() int { return cmdTop(s.ctx, []string{"--snapshot"}) })
+	s.assertRan(t, "top --snapshot", code, out, "")
+	var snap map[string]any
+	if err := json.Unmarshal([]byte(out), &snap); err != nil {
+		t.Fatalf("top --snapshot is not JSON: %v\n%s", err, out)
+	}
+	if snap["schema"] == nil {
+		t.Fatalf("presentation snapshot carries no schema: %s", out)
+	}
+}
 
-	t.Run("device", func(t *testing.T) {
-		out, code := captureTopStdout(t, func() int {
-			return cmdDevice(ctx, []string{"--backend", backend})
-		})
-		ranLoop(t, "device", code, out, "")
-		// The fingerprint decides comparability, so it has to name the machine
-		// rather than print blanks.
-		for _, field := range []string{"host", "os"} {
-			if !strings.Contains(out, field) {
-				t.Fatalf("device output omits %q:\n%s", field, out)
-			}
-		}
-	})
-
-	t.Run("view", func(t *testing.T) {
-		out, code := captureTopStdout(t, func() int { return cmdView(ctx, []string{model}) })
-		ranLoop(t, "view", code, out, "")
-		if !strings.Contains(out, baseTag(model)) {
-			t.Fatalf("view did not reopen the measured model:\n%s", out)
-		}
-	})
-
-	t.Run("export", func(t *testing.T) {
-		dest := filepath.Join(t.TempDir(), "scorecard.html")
-		stderr, code := captureTopStderr(t, func() int {
-			return cmdExport(ctx, []string{model, "--out", dest})
-		})
-		if code != exitOK {
-			t.Fatalf("export exit = %d; stderr=%s", code, stderr)
-		}
-		body, err := os.ReadFile(dest)
-		if err != nil {
-			t.Fatalf("export wrote no artifact at %s: %v", dest, err)
-		}
-		if !bytes.Contains(body, []byte("<html")) {
-			t.Fatalf("exported artifact is not HTML (%d bytes)", len(body))
-		}
-		// Self-contained is part of the export contract: a shared scorecard
-		// must not fetch anything when it is opened.
-		for _, remote := range []string{`src="http`, `href="http`, `src="//`, `href="//`} {
-			if bytes.Contains(body, []byte(remote)) {
-				t.Fatalf("exported artifact references remote content (%s)", remote)
-			}
-		}
-	})
-
-	t.Run("top_snapshot", func(t *testing.T) {
-		out, code := captureTopStdout(t, func() int { return cmdTop(ctx, []string{"--snapshot"}) })
-		ranLoop(t, "top --snapshot", code, out, "")
-		var snap map[string]any
-		if err := json.Unmarshal([]byte(out), &snap); err != nil {
-			t.Fatalf("top --snapshot is not JSON: %v\n%s", err, out)
-		}
-		if snap["schema"] == nil {
-			t.Fatalf("presentation snapshot carries no schema: %s", out)
-		}
-	})
-
-	// compare needs two measured models, so it runs only when the operator
-	// names a second one. A skipped row that reads as green is the failure
-	// this whole test exists to prevent, so the skip is explicit.
-	t.Run("compare", func(t *testing.T) {
-		other := os.Getenv("FITR_LIVE_SECOND")
-		if other == "" {
-			t.Skip("set FITR_LIVE_SECOND=<model> to cover compare")
-		}
-		if backend == "llama-server" {
-			t.Skip("llama-server serves one launch-time model; restart it and record a second run separately")
-		}
-		if _, code := captureTopStdout(t, func() int {
-			return cmdRun(ctx, []string{other, "--quick", "--backend", backend})
-		}); code != exitOK && code != exitGates {
-			t.Fatalf("measuring the second model failed: exit %d", code)
-		}
-		runsAtAll(t, "compare", func() int { return cmdCompare(ctx, []string{model, other}) })
-	})
+func (s liveLoopSmoke) compare(t *testing.T) {
+	other := os.Getenv("FITR_LIVE_SECOND")
+	if other == "" {
+		t.Skip("set FITR_LIVE_SECOND=<model> to cover compare")
+	}
+	if s.backend == "llama-server" {
+		t.Skip("llama-server serves one launch-time model; restart it and record a second run separately")
+	}
+	if _, code := captureTopStdout(t, func() int {
+		return cmdRun(s.ctx, []string{other, "--quick", "--backend", s.backend})
+	}); code != exitOK && code != exitGates {
+		t.Fatalf("measuring the second model failed: exit %d", code)
+	}
+	s.runsAtAll(t, "compare", func() int { return cmdCompare(s.ctx, []string{s.model, other}) })
 }
 
 func liveBackend(t *testing.T, ctx context.Context) (string, string, llm.Backend) {

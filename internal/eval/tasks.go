@@ -105,6 +105,23 @@ func validCacheReceipt(uncached, cached int) bool {
 // does ~140.
 func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce string) (SpeedResult, error) {
 	var out SpeedResult
+	if err := runSpeedWarmup(ctx, c, model, &out); err != nil {
+		return out, err
+	}
+	decodePrompt, samp, err := runSpeedDecode(ctx, c, model, s, nonce, &out)
+	if err != nil {
+		return out, err
+	}
+	if err := runSpeedWarmCache(ctx, c, model, decodePrompt, samp, &out); err != nil {
+		return out, err
+	}
+	if err := runSpeedPrefill(ctx, c, model, s, nonce, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func runSpeedWarmup(ctx context.Context, c llm.Backend, model string, out *SpeedResult) error {
 	// Warm the model first. TTFT must measure time-to-first-token for a LOADED
 	// model; including a cold load reported 4.33s where the warm figure is
 	// 0.97s. When this warm-up call actually had to load (the phase starts
@@ -114,12 +131,17 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 	warm := ollama.Deterministic(8, numCtx(ctx))
 	_, m0, err := c.Generate(ctx, model, "Say OK.", warm)
 	if err != nil {
-		return out, err
+		return err
 	}
 	out.ColdLoad = m0.LoadSeconds
 	if out.ColdLoad > 0.1 {
 		out.ColdTTFT = m0.TTFTSeconds
 	}
+	return nil
+}
+
+func runSpeedDecode(ctx context.Context, c llm.Backend, model string, s *Spec, nonce string,
+	out *SpeedResult) (string, ollama.Sampling, error) {
 	samp := ollama.Deterministic(s.Speed.Decode.NumPredict, numCtx(ctx))
 	tag := ""
 	if nonce != "" {
@@ -128,27 +150,31 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 	decodePrompt := tag + s.Speed.Decode.Prompt
 	text, m1, err := c.Generate(ctx, model, decodePrompt, samp)
 	if err != nil {
-		return out, err
+		return "", samp, err
 	}
 	out.DecodeTPS, out.TTFT = m1.DecodeTPS, m1.TTFTSeconds
 	out.FirstOutputObserved = text != ""
 	out.ClientDerived = m1.ClientDerived
 	out.GatedPromptTok = m1.PromptTokens
 	out.GatedCacheKnown = m1.CacheKnown
-	if m1.CacheKnown {
+	if out.GatedCacheKnown {
 		out.GatedCachedTok = m1.CachedTokens
 	}
 	// Deliberately NOT recording m1.Truncated: the speed probe caps output at
 	// num_predict, so it always stops on "length". Truncation is only a
 	// degeneracy signal for tasks that were free to finish.
+	return decodePrompt, samp, nil
+}
 
+func runSpeedWarmCache(ctx context.Context, c llm.Backend, model, decodePrompt string,
+	samp ollama.Sampling, out *SpeedResult) error {
 	// Same prompt again: if the backend reports a cache receipt, this IS the
 	// warm-prefix number. Skipping when CacheKnown is false is the honesty
 	// rule - a second generate on Ollama would just be another uncached TTFT.
-	if m1.CacheKnown {
+	if out.GatedCacheKnown {
 		_, m1w, err := c.Generate(ctx, model, decodePrompt, samp)
 		if err != nil {
-			return out, err
+			return err
 		}
 		out.WarmPromptTok = m1w.PromptTokens
 		out.WarmCacheKnown = m1w.CacheKnown
@@ -159,18 +185,22 @@ func RunSpeed(ctx context.Context, c llm.Backend, model string, s *Spec, nonce s
 			out.WarmTTFT = m1w.TTFTSeconds
 		}
 	}
+	return nil
+}
 
+func runSpeedPrefill(ctx context.Context, c llm.Backend, model string, s *Spec, nonce string,
+	out *SpeedResult) error {
 	samp2 := ollama.Deterministic(s.Speed.Prefill.NumPredict, numCtx(ctx))
 	_, m2, err := c.Generate(ctx, model, buildLongPrompt(nonce), samp2)
 	if err != nil {
-		return out, err
+		return err
 	}
 	out.PrefillTPS, out.PromptTok = m2.PrefillTPS, m2.PromptTokens
 	out.PrefillCacheKnown = m2.CacheKnown
 	if m2.CacheKnown {
 		out.CachedPromptTok = m2.CachedTokens
 	}
-	return out, nil
+	return nil
 }
 
 const codeChunk = `
@@ -319,65 +349,84 @@ func RunExec(ctx context.Context, c llm.Backend, model string, spec ExecSpec, di
 		return r, f
 	}
 	r.Raw = text
-
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		f := failure(FailureFixtureIO, "mkdir", err)
+	if f := writeExecFixtures(dir, spec.Files); f != nil {
 		r.Outcome, r.Failure = OutcomeError, f
 		return r, f
 	}
-	for name, body := range spec.Files {
+	ready, f := writeExecModelOutput(dir, text, spec, &r)
+	if f != nil {
+		r.Outcome, r.Failure = OutcomeError, f
+		return r, f
+	}
+	if !ready {
+		return r, nil
+	}
+	gradeExecResult(ctx, dir, runner, spec, &r)
+	return r, nil
+}
+
+func writeExecFixtures(dir string, files map[string]string) *Failure {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return failure(FailureFixtureIO, "mkdir", err)
+	}
+	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-			f := failure(FailureFixtureIO, "write_fixture", err)
-			r.Outcome, r.Failure = OutcomeError, f
-			return r, f
+			return failure(FailureFixtureIO, "write_fixture", err)
 		}
 	}
+	return nil
+}
 
+func writeExecModelOutput(dir, text string, spec ExecSpec, r *ExecResult) (bool, *Failure) {
 	switch spec.Extract.Strategy {
 	case "fenced_code_block_with_filename":
-		target, body := spec.Extract.DefaultFile, ""
-		if m := fenceNameRe.FindStringSubmatch(text); m != nil {
-			if m[1] != "" {
-				target = filepath.Base(m[1])
-			}
-			body = m[2]
-		}
-		if body == "" {
-			body = extractCode(text, "")
-		}
-		if strings.TrimSpace(body) == "" {
-			r.Detail = "no executable code was extracted"
-			r.Outcome = OutcomeInconclusive
-			return r, nil
-		}
-		// Only allow edits to files the task declares editable; a model naming
-		// some other path must not be able to write outside the fixture.
-		if !allowed(target, spec.Editable) {
-			target = spec.Extract.DefaultFile
-		}
-		r.File = target
-		if body != "" {
-			if err := os.WriteFile(filepath.Join(dir, target), []byte(body), 0o644); err != nil {
-				f := failure(FailureFixtureIO, "write_model_file", err)
-				r.Outcome, r.Failure = OutcomeError, f
-				return r, f
-			}
-		}
+		return writeNamedExecOutput(dir, text, spec, r)
 	default:
-		code := extractCode(text, spec.Extract.PreferContaining)
-		r.File = spec.Entry
-		if strings.TrimSpace(code) == "" {
-			r.Detail = "no executable code was extracted"
-			r.Outcome = OutcomeInconclusive
-			return r, nil
-		}
-		if err := os.WriteFile(filepath.Join(dir, spec.Entry), []byte(code), 0o644); err != nil {
-			f := failure(FailureFixtureIO, "write_model_file", err)
-			r.Outcome, r.Failure = OutcomeError, f
-			return r, f
-		}
+		return writeDefaultExecOutput(dir, text, spec, r)
 	}
+}
 
+func writeNamedExecOutput(dir, text string, spec ExecSpec, r *ExecResult) (bool, *Failure) {
+	target, body := spec.Extract.DefaultFile, ""
+	if m := fenceNameRe.FindStringSubmatch(text); m != nil {
+		if m[1] != "" {
+			target = filepath.Base(m[1])
+		}
+		body = m[2]
+	}
+	if body == "" {
+		body = extractCode(text, "")
+	}
+	if strings.TrimSpace(body) == "" {
+		r.Detail, r.Outcome = "no executable code was extracted", OutcomeInconclusive
+		return false, nil
+	}
+	// Only allow edits to files the task declares editable; a model naming
+	// some other path must not be able to write outside the fixture.
+	if !allowed(target, spec.Editable) {
+		target = spec.Extract.DefaultFile
+	}
+	r.File = target
+	if err := os.WriteFile(filepath.Join(dir, target), []byte(body), 0o644); err != nil {
+		return false, failure(FailureFixtureIO, "write_model_file", err)
+	}
+	return true, nil
+}
+
+func writeDefaultExecOutput(dir, text string, spec ExecSpec, r *ExecResult) (bool, *Failure) {
+	code := extractCode(text, spec.Extract.PreferContaining)
+	r.File = spec.Entry
+	if strings.TrimSpace(code) == "" {
+		r.Detail, r.Outcome = "no executable code was extracted", OutcomeInconclusive
+		return false, nil
+	}
+	if err := os.WriteFile(filepath.Join(dir, spec.Entry), []byte(code), 0o644); err != nil {
+		return false, failure(FailureFixtureIO, "write_model_file", err)
+	}
+	return true, nil
+}
+
+func gradeExecResult(ctx context.Context, dir string, runner resolvedTaskRunner, spec ExecSpec, r *ExecResult) {
 	receipt := verifyIn(ctx, dir, runner, spec.PassIfStdoutContains)
 	r.Detail = tail(receipt.Output, 400)
 	r.Pass = receipt.SuccessfulExit && receipt.ExactFinalMarker
@@ -389,7 +438,6 @@ func RunExec(ctx context.Context, c llm.Backend, model string, spec ExecSpec, di
 	// Executable observations stay inconclusive until an isolated worker keeps
 	// generated code away from the verifier and the user's machine.
 	r.Outcome = OutcomeInconclusive
-	return r, nil
 }
 
 func allowed(name string, list []string) bool {
@@ -691,70 +739,91 @@ func doTool(ctx context.Context, dir, name, p, content string, args map[string]a
 	written map[string]bool, runner resolvedTaskRunner, observations *[]VerificationReceipt) (string, error) {
 	switch name {
 	case "list_files":
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return "", failure(FailureFixtureIO, "list_files", err)
-		}
-		var names []string
-		for _, e := range entries {
-			names = append(names, e.Name())
-		}
-		sort.Strings(names)
-		return strings.Join(names, "\n"), nil
+		return listToolFiles(dir)
 	case "read_file":
-		if !safeTaskFileName(p) {
-			return "ERROR: invalid task-local path", nil
-		}
-		b, err := boundedio.ReadFile(filepath.Join(dir, p), maxTaskToolFileBytes)
-		if err != nil {
-			if _, fixture := spec.Files[p]; fixture || written[p] {
-				return "", failure(FailureFixtureIO, "read_file", err)
-			}
-			return "ERROR: " + err.Error(), nil
-		}
-		return string(b), nil
+		return readToolFile(dir, p, spec.Files, written)
 	case "write_file":
-		if !safeTaskFileName(p) {
-			return "ERROR: invalid task-local path", nil
-		}
-		if len(content) > maxTaskToolFileBytes {
-			return fmt.Sprintf("ERROR: content exceeds %d bytes", maxTaskToolFileBytes), nil
-		}
-		if err := os.WriteFile(filepath.Join(dir, p), []byte(content), 0o644); err != nil {
-			return "", failure(FailureFixtureIO, "write_file", err)
-		}
-		written[p] = true
-		return fmt.Sprintf("wrote %d bytes to %s", len(content), p), nil
+		return writeToolFile(dir, p, content, written)
 	case "run_tests":
-		receipt := verifyIn(ctx, dir, runner, spec.Verify.PassIfStdoutContains)
-		*observations = append(*observations, receipt)
-		if receipt.SuccessfulExit && receipt.ExactFinalMarker {
-			return "PASS\n" + receipt.Output, nil
-		}
-		if receipt.Failure != nil {
-			switch receipt.Failure.Kind {
-			case FailureExecutorPreflight, FailureExecutorLaunch, FailureExecutorTimeout:
-				return "", receipt.Failure
-			}
-			return "INCONCLUSIVE: " + receipt.Failure.Error() + "\n" + receipt.Output, nil
-		}
-		return "FAIL\n" + receipt.Output, nil
+		return runTestsTool(ctx, dir, runner, spec.Verify.PassIfStdoutContains, observations)
 	case "lookup_part":
-		// Prices ship in the task's own parts.txt (NAME=PRICE per line), so
-		// the data stays in the spec, not in Go.
-		part, _ := args["part"].(string)
-		b, err := boundedio.ReadFile(filepath.Join(dir, "parts.txt"), maxTaskToolFileBytes)
-		if err != nil {
-			return "", failure(FailureFixtureIO, "lookup_part", err)
-		}
-		for _, line := range strings.Split(string(b), "\n") {
-			if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok && k == part {
-				return v, nil
-			}
-		}
-		return "ERROR: unknown part " + part, nil
+		return lookupToolPart(dir, args)
 	}
 	return "ERROR: unknown tool " + name, nil
+}
+
+func listToolFiles(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", failure(FailureFixtureIO, "list_files", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	return strings.Join(names, "\n"), nil
+}
+
+func readToolFile(dir, name string, fixtures map[string]string, written map[string]bool) (string, error) {
+	if !safeTaskFileName(name) {
+		return "ERROR: invalid task-local path", nil
+	}
+	b, err := boundedio.ReadFile(filepath.Join(dir, name), maxTaskToolFileBytes)
+	if err != nil {
+		if _, fixture := fixtures[name]; fixture || written[name] {
+			return "", failure(FailureFixtureIO, "read_file", err)
+		}
+		return "ERROR: " + err.Error(), nil
+	}
+	return string(b), nil
+}
+
+func writeToolFile(dir, name, content string, written map[string]bool) (string, error) {
+	if !safeTaskFileName(name) {
+		return "ERROR: invalid task-local path", nil
+	}
+	if len(content) > maxTaskToolFileBytes {
+		return fmt.Sprintf("ERROR: content exceeds %d bytes", maxTaskToolFileBytes), nil
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		return "", failure(FailureFixtureIO, "write_file", err)
+	}
+	written[name] = true
+	return fmt.Sprintf("wrote %d bytes to %s", len(content), name), nil
+}
+
+func runTestsTool(ctx context.Context, dir string, runner resolvedTaskRunner, marker string,
+	observations *[]VerificationReceipt) (string, error) {
+	receipt := verifyIn(ctx, dir, runner, marker)
+	*observations = append(*observations, receipt)
+	if receipt.SuccessfulExit && receipt.ExactFinalMarker {
+		return "PASS\n" + receipt.Output, nil
+	}
+	if receipt.Failure != nil {
+		switch receipt.Failure.Kind {
+		case FailureExecutorPreflight, FailureExecutorLaunch, FailureExecutorTimeout:
+			return "", receipt.Failure
+		}
+		return "INCONCLUSIVE: " + receipt.Failure.Error() + "\n" + receipt.Output, nil
+	}
+	return "FAIL\n" + receipt.Output, nil
+}
+
+func lookupToolPart(dir string, args map[string]any) (string, error) {
+	// Prices ship in the task's own parts.txt (NAME=PRICE per line), so
+	// the data stays in the spec, not in Go.
+	part, _ := args["part"].(string)
+	b, err := boundedio.ReadFile(filepath.Join(dir, "parts.txt"), maxTaskToolFileBytes)
+	if err != nil {
+		return "", failure(FailureFixtureIO, "lookup_part", err)
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok && k == part {
+			return v, nil
+		}
+	}
+	return "ERROR: unknown part " + part, nil
 }
 
 // safeTaskFileName recognizes one ordinary portable filename. The tool loop

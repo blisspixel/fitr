@@ -184,6 +184,13 @@ func TestWarmPrefixTTFTUsesTheCacheReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("uncached gate", func(t *testing.T) { assertUncachedSpeedReceipt(t, s) })
+	t.Run("cache hit", func(t *testing.T) { assertCachedSpeedReceipt(t, s) })
+	t.Run("cache unknown", func(t *testing.T) { assertUnknownSpeedReceipt(t, s) })
+}
+
+func assertUncachedSpeedReceipt(t *testing.T, s *Spec) {
+	t.Helper()
 	f := &fakeBackend{gens: []ollama.Metrics{
 		{TTFTSeconds: 4.0, LoadSeconds: 3.5},
 		{TTFTSeconds: 0.9, DecodeTPS: 23, CacheKnown: true, CachedTokens: 0, PromptTokens: 80},
@@ -212,7 +219,10 @@ func TestWarmPrefixTTFTUsesTheCacheReceipt(t *testing.T) {
 	if r.GatedTTFTContaminated() {
 		t.Fatal("an uncached gated prompt must not be labeled a cache hit")
 	}
+}
 
+func assertCachedSpeedReceipt(t *testing.T, s *Spec) {
+	t.Helper()
 	hit := &fakeBackend{gens: []ollama.Metrics{
 		{TTFTSeconds: 0.8, LoadSeconds: 0},
 		{TTFTSeconds: 0.05, DecodeTPS: 23, CacheKnown: true, CachedTokens: 78, PromptTokens: 2},
@@ -231,7 +241,10 @@ func TestWarmPrefixTTFTUsesTheCacheReceipt(t *testing.T) {
 	if rh.WarmPromptTok != 2 || rh.WarmCachedTok != 78 || !rh.WarmCacheKnown {
 		t.Fatalf("warm cache receipt = %d+%d known=%v", rh.WarmPromptTok, rh.WarmCachedTok, rh.WarmCacheKnown)
 	}
+}
 
+func assertUnknownSpeedReceipt(t *testing.T, s *Spec) {
+	t.Helper()
 	// A backend that cannot report cache must not spend a second generate
 	// just to invent a warm-prefix number.
 	f2 := &fakeBackend{gens: []ollama.Metrics{

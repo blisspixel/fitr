@@ -34,83 +34,86 @@ func newBackendWithDisplay(ctx context.Context, model, kind string, pull bool, d
 		kind = os.Getenv("FITR_BACKEND")
 	}
 	if isHFRef(model) && (kind == "" || kind == "auto" || kind == "ollama") {
-		o := ollama.New()
-		if !o.Reachable(ctx) {
-			backendError(disp, "Hugging Face refs need a running Ollama",
-				"Ollama pulls GGUFs from hf.co/{user}/{repo}[:quant]; other servers already have a model loaded",
-				"start `ollama serve` and re-run, or pass the name of a model already being served")
-			return nil, exitError
-		}
-		return checkModelWithDisplay(ctx, o, model, pull, disp)
+		return huggingFaceBackend(ctx, model, pull, disp)
 	}
 	switch kind {
 	case "", "auto":
-		found, err := llm.Discover(ctx)
-		if err != nil {
-			backendError(disp, "invalid runtime discovery configuration", err.Error(),
-				"fix FITR_DISCOVER_URLS or the configured backend URL, then re-run")
-			return nil, exitUsage
-		}
-		if len(found) == 0 {
-			candidates, _ := llm.Candidates()
-			backendError(disp, "no serving runtime reachable",
-				"tried "+strings.Join(candidates, ", "),
-				"start one, or point fitr at it: OLLAMA_BASE_URL, LLAMA_SERVER_URL, FITR_OPENAI_URL, FITR_DISCOVER_URLS, or --backend")
-			return nil, exitError
-		}
-		if len(found) > 1 {
-			var extra []string
-			for _, f := range found[1:] {
-				extra = append(extra, f.Kind+" at "+f.URL)
-			}
-			message := fmt.Sprintf("also found %s; using %s; set --backend or a URL environment variable to choose",
-				strings.Join(extra, ", "), found[0].Kind)
-			if disp != nil {
-				disp.Note(message, "warn")
-			} else {
-				fmt.Fprintf(os.Stderr, "! also found %s - using %s at %s; set --backend or a URL env to pick\n",
-					terminalText(strings.Join(extra, ", ")), terminalText(found[0].Kind), terminalText(found[0].URL))
-			}
-		}
-		b, err := backendAt(found[0].Kind, found[0].URL)
-		if err != nil {
-			backendError(disp, "could not configure discovered runtime", err.Error(),
-				"set --backend and the matching endpoint environment variable explicitly")
-			return nil, exitError
-		}
-		return checkModelWithDisplay(ctx, b, model, pull, disp)
+		return discoveredBackend(ctx, model, pull, disp)
 	case "ollama":
-		o := ollama.New()
-		if !o.Reachable(ctx) {
-			backendError(disp, "cannot reach Ollama",
-				"every measurement needs a running server",
-				"start it with `ollama serve`, or set OLLAMA_BASE_URL")
-			return nil, exitError
-		}
-		return checkModelWithDisplay(ctx, o, model, pull, disp)
+		return reachableBackend(ctx, ollama.New(), model, pull, disp,
+			"cannot reach Ollama", "start it with `ollama serve`, or set OLLAMA_BASE_URL")
 	case "llama-server", "llamaserver":
-		l := llamaserver.New()
-		if !l.Reachable(ctx) {
-			backendError(disp, "cannot reach llama-server",
-				"every measurement needs a running server",
-				"start it with `llama-server -m model.gguf`, or set LLAMA_SERVER_URL")
-			return nil, exitError
-		}
-		return checkModelWithDisplay(ctx, l, model, pull, disp)
+		return reachableBackend(ctx, llamaserver.New(), model, pull, disp,
+			"cannot reach llama-server", "start it with `llama-server -m model.gguf`, or set LLAMA_SERVER_URL")
 	case "openai":
-		g := openaicompat.New()
-		if !g.Reachable(ctx) {
-			backendError(disp, "cannot reach an OpenAI-compatible server",
-				"every measurement needs a running server",
-				"start LM Studio / vLLM / SGLang, or set FITR_OPENAI_URL")
-			return nil, exitError
-		}
-		return checkModelWithDisplay(ctx, g, model, pull, disp)
+		return reachableBackend(ctx, openaicompat.New(), model, pull, disp,
+			"cannot reach an OpenAI-compatible server", "start LM Studio / vLLM / SGLang, or set FITR_OPENAI_URL")
 	default:
 		backendError(disp, fmt.Sprintf("unknown backend %q", kind), "",
 			"valid: auto, ollama, llama-server, openai")
 		return nil, exitUsage
 	}
+}
+
+func huggingFaceBackend(ctx context.Context, model string, pull bool, disp render.Display) (llm.Backend, int) {
+	backend := ollama.New()
+	if !backend.Reachable(ctx) {
+		backendError(disp, "Hugging Face refs need a running Ollama",
+			"Ollama pulls GGUFs from hf.co/{user}/{repo}[:quant]; other servers already have a model loaded",
+			"start `ollama serve` and re-run, or pass the name of a model already being served")
+		return nil, exitError
+	}
+	return checkModelWithDisplay(ctx, backend, model, pull, disp)
+}
+
+func discoveredBackend(ctx context.Context, model string, pull bool, disp render.Display) (llm.Backend, int) {
+	found, err := llm.Discover(ctx)
+	if err != nil {
+		backendError(disp, "invalid runtime discovery configuration", err.Error(),
+			"fix FITR_DISCOVER_URLS or the configured backend URL, then re-run")
+		return nil, exitUsage
+	}
+	if len(found) == 0 {
+		candidates, _ := llm.Candidates()
+		backendError(disp, "no serving runtime reachable", "tried "+strings.Join(candidates, ", "),
+			"start one, or point fitr at it: OLLAMA_BASE_URL, LLAMA_SERVER_URL, FITR_OPENAI_URL, FITR_DISCOVER_URLS, or --backend")
+		return nil, exitError
+	}
+	warnMultipleBackends(found, disp)
+	backend, err := backendAt(found[0].Kind, found[0].URL)
+	if err != nil {
+		backendError(disp, "could not configure discovered runtime", err.Error(),
+			"set --backend and the matching endpoint environment variable explicitly")
+		return nil, exitError
+	}
+	return checkModelWithDisplay(ctx, backend, model, pull, disp)
+}
+
+func warnMultipleBackends(found []llm.Found, disp render.Display) {
+	if len(found) <= 1 {
+		return
+	}
+	extra := make([]string, 0, len(found)-1)
+	for _, backend := range found[1:] {
+		extra = append(extra, backend.Kind+" at "+backend.URL)
+	}
+	message := fmt.Sprintf("also found %s; using %s; set --backend or a URL environment variable to choose",
+		strings.Join(extra, ", "), found[0].Kind)
+	if disp != nil {
+		disp.Note(message, "warn")
+		return
+	}
+	fmt.Fprintf(os.Stderr, "! also found %s - using %s at %s; set --backend or a URL env to pick\n",
+		terminalText(strings.Join(extra, ", ")), terminalText(found[0].Kind), terminalText(found[0].URL))
+}
+
+func reachableBackend(ctx context.Context, backend llm.Backend, model string, pull bool,
+	disp render.Display, message, hint string) (llm.Backend, int) {
+	if !backend.Reachable(ctx) {
+		backendError(disp, message, "every measurement needs a running server", hint)
+		return nil, exitError
+	}
+	return checkModelWithDisplay(ctx, backend, model, pull, disp)
 }
 
 func backendAt(kind, url string) (llm.Backend, error) {
@@ -200,88 +203,18 @@ func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pul
 			"check the runtime logs and its model inventory endpoint")
 		return nil, exitError
 	}
-	found := false
-	var near []string
-	base := strings.SplitN(model, ":", 2)[0]
-	for _, t := range tags {
-		if modelref.SameServed(model, t.Name) {
-			found = true
-		}
-		if strings.Contains(t.Name, base) {
-			near = append(near, t.Name)
-		}
-	}
+	found, near := findServedModel(model, tags)
 	if found {
 		return b, exitOK
 	}
 	if b.Name() != "ollama" {
-		if len(tags) == 0 {
-			backendError(disp, b.Name()+" is serving no models", "the runtime returned an empty model inventory",
-				"load a model in the runtime, then re-run fitr")
-			return nil, exitError
-		}
-		if isHFRef(model) {
-			backendError(disp, "Hugging Face refs need Ollama to pull",
-				b.Name()+" is serving its own model, not fetching from Hugging Face",
-				"start Ollama, or pass the served model name instead of an HF URL")
-			return nil, exitUsage
-		}
-		if pull {
-			if disp != nil {
-				disp.Note("--pull is an Ollama feature; "+b.Name()+" serves whatever is already loaded", "warn")
-			} else {
-				fmt.Fprintf(os.Stderr, "! --pull is an Ollama feature; %s serves whatever is already loaded\n", terminalText(b.Name()))
-			}
-		}
-		message := fmt.Sprintf("%s serves %q, not %q; the run manifest will record the resolved model", b.Name(), tags[0].Name, model)
-		if disp != nil {
-			disp.Note(message, "warn")
-		} else {
-			fmt.Fprintf(os.Stderr, "! %s serves %q, not %q - the run manifest will record %q\n",
-				terminalText(b.Name()), terminalText(tags[0].Name), terminalText(model), terminalText(tags[0].Name))
-		}
-		return b, exitOK
+		return checkSingleModelBackend(b, model, pull, tags, disp)
 	}
 	// Pasting an HF URL is the request to fetch it. Regular Ollama tags
 	// still need --pull so a typo does not start a multi-gigabyte download.
 	if pull || isHFRef(model) {
-		o, ok := b.(*ollama.Client)
-		if ok {
-			src := "Ollama"
-			if isHFRef(model) {
-				src = "Hugging Face via Ollama"
-			}
-			if disp != nil {
-				disp.Phase("pull", src)
-			} else {
-				fmt.Fprintf(os.Stderr, "  pulling %s from %s\n", terminalText(model), terminalText(src))
-			}
-			last := ""
-			err := o.Pull(ctx, model, func(status string, pct int) {
-				line := terminalText(status)
-				if pct >= 0 {
-					line = fmt.Sprintf("%s %d%%", line, pct)
-				}
-				if line != last && disp == nil {
-					fmt.Fprintf(os.Stderr, "\r  %-60s", line)
-					last = line
-				}
-				if live, ok := disp.(liveTelemetry); ok && pct >= 0 {
-					live.LiveProgress(pct, 100, terminalText(status))
-				}
-			})
-			if disp != nil {
-				if err == nil {
-					disp.Done("pull", 0)
-				}
-			} else {
-				fmt.Fprintln(os.Stderr)
-			}
-			if err != nil {
-				backendError(disp, "model pull failed", err.Error(), "")
-				return nil, exitError
-			}
-			return b, exitOK
+		if client, ok := b.(*ollama.Client); ok {
+			return pullOllamaModel(ctx, client, b, model, disp)
 		}
 	}
 	hint := "pull it first: `ollama pull " + model + "`, or re-run with --pull"
@@ -291,6 +224,114 @@ func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pul
 	backendError(disp, fmt.Sprintf("model %q is not installed", presentationModelLabel(model)),
 		fmt.Sprintf("%d model(s) available", len(tags)), hint)
 	return nil, exitUsage
+}
+
+func findServedModel(model string, tags []ollama.ModelInfo) (bool, []string) {
+	found := false
+	var near []string
+	base := strings.SplitN(model, ":", 2)[0]
+	for _, tag := range tags {
+		if modelref.SameServed(model, tag.Name) {
+			found = true
+		}
+		if strings.Contains(tag.Name, base) {
+			near = append(near, tag.Name)
+		}
+	}
+	return found, near
+}
+
+func checkSingleModelBackend(b llm.Backend, model string, pull bool,
+	tags []ollama.ModelInfo, disp render.Display) (llm.Backend, int) {
+	if len(tags) == 0 {
+		backendError(disp, b.Name()+" is serving no models", "the runtime returned an empty model inventory",
+			"load a model in the runtime, then re-run fitr")
+		return nil, exitError
+	}
+	if isHFRef(model) {
+		backendError(disp, "Hugging Face refs need Ollama to pull",
+			b.Name()+" is serving its own model, not fetching from Hugging Face",
+			"start Ollama, or pass the served model name instead of an HF URL")
+		return nil, exitUsage
+	}
+	if pull {
+		writeUnsupportedPullWarning(b.Name(), disp)
+	}
+	writeResolvedModelWarning(b.Name(), model, tags[0].Name, disp)
+	return b, exitOK
+}
+
+func writeUnsupportedPullWarning(backend string, disp render.Display) {
+	if disp != nil {
+		disp.Note("--pull is an Ollama feature; "+backend+" serves whatever is already loaded", "warn")
+		return
+	}
+	fmt.Fprintf(os.Stderr, "! --pull is an Ollama feature; %s serves whatever is already loaded\n", terminalText(backend))
+}
+
+func writeResolvedModelWarning(backend, requested, resolved string, disp render.Display) {
+	message := fmt.Sprintf("%s serves %q, not %q; the run manifest will record the resolved model",
+		backend, resolved, requested)
+	if disp != nil {
+		disp.Note(message, "warn")
+		return
+	}
+	fmt.Fprintf(os.Stderr, "! %s serves %q, not %q - the run manifest will record %q\n",
+		terminalText(backend), terminalText(resolved), terminalText(requested), terminalText(resolved))
+}
+
+func pullOllamaModel(ctx context.Context, client *ollama.Client, backend llm.Backend,
+	model string, disp render.Display) (llm.Backend, int) {
+	source := "Ollama"
+	if isHFRef(model) {
+		source = "Hugging Face via Ollama"
+	}
+	writePullStart(model, source, disp)
+	progress := &pullProgress{display: disp}
+	err := client.Pull(ctx, model, progress.update)
+	writePullDone(err, disp)
+	if err != nil {
+		backendError(disp, "model pull failed", err.Error(), "")
+		return nil, exitError
+	}
+	return backend, exitOK
+}
+
+type pullProgress struct {
+	display render.Display
+	last    string
+}
+
+func (p *pullProgress) update(status string, pct int) {
+	line := terminalText(status)
+	if pct >= 0 {
+		line = fmt.Sprintf("%s %d%%", line, pct)
+	}
+	if line != p.last && p.display == nil {
+		fmt.Fprintf(os.Stderr, "\r  %-60s", line)
+		p.last = line
+	}
+	if live, ok := p.display.(liveTelemetry); ok && pct >= 0 {
+		live.LiveProgress(pct, 100, terminalText(status))
+	}
+}
+
+func writePullStart(model, source string, disp render.Display) {
+	if disp != nil {
+		disp.Phase("pull", source)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "  pulling %s from %s\n", terminalText(model), terminalText(source))
+}
+
+func writePullDone(err error, disp render.Display) {
+	if disp == nil {
+		fmt.Fprintln(os.Stderr)
+		return
+	}
+	if err == nil {
+		disp.Done("pull", 0)
+	}
 }
 
 // weightsFromTags recovers the on-disk weight size for a served model from the

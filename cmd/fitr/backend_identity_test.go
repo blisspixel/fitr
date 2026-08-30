@@ -208,15 +208,25 @@ func TestCheckModelWithDisplaySkipsInventoryForEmptyModel(t *testing.T) {
 }
 
 func TestCheckModelWithDisplayIdentityAndHintDecisions(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		backend   *inventoryBackend
-		model     string
-		pull      bool
-		wantCode  int
-		wantSame  bool
-		wantNotes []string
-	}{
+	for _, tc := range checkModelIdentityCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			assertCheckModelIdentityDecision(t, tc)
+		})
+	}
+}
+
+type checkModelIdentityCase struct {
+	name      string
+	backend   *inventoryBackend
+	model     string
+	pull      bool
+	wantCode  int
+	wantSame  bool
+	wantNotes []string
+}
+
+func checkModelIdentityCases() []checkModelIdentityCase {
+	return []checkModelIdentityCase{
 		{
 			name: "inventory error", backend: testInventoryBackend("openai", nil, errors.New("malformed inventory")),
 			model: "model", wantCode: exitError,
@@ -251,29 +261,30 @@ func TestCheckModelWithDisplayIdentityAndHintDecisions(t *testing.T) {
 			model: "missing", wantCode: exitUsage,
 			wantNotes: []string{"model \"missing\" is not installed", "ollama pull missing", "re-run with --pull"},
 		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			display := newBackendTraceDisplay(t)
-			got, code := checkModelWithDisplay(context.Background(), tc.backend, tc.model, tc.pull, display)
-			if code != tc.wantCode {
-				t.Fatalf("exit code = %d, want %d", code, tc.wantCode)
-			}
-			if tc.wantSame && got != tc.backend {
-				t.Fatalf("backend = %T, want original backend", got)
-			}
-			if !tc.wantSame && got != nil {
-				t.Fatalf("backend = %T, want nil", got)
-			}
-			joined := strings.Join(display.notes, "\n")
-			for _, want := range tc.wantNotes {
-				if !strings.Contains(joined, want) {
-					t.Fatalf("notes do not contain %q:\n%s", want, joined)
-				}
-			}
-			if len(tc.wantNotes) == 0 && joined != "" {
-				t.Fatalf("successful exact identity emitted notes:\n%s", joined)
-			}
-		})
+	}
+}
+
+func assertCheckModelIdentityDecision(t *testing.T, tc checkModelIdentityCase) {
+	t.Helper()
+	display := newBackendTraceDisplay(t)
+	got, code := checkModelWithDisplay(context.Background(), tc.backend, tc.model, tc.pull, display)
+	if code != tc.wantCode {
+		t.Fatalf("exit code = %d, want %d", code, tc.wantCode)
+	}
+	if tc.wantSame && got != tc.backend {
+		t.Fatalf("backend = %T, want original backend", got)
+	}
+	if !tc.wantSame && got != nil {
+		t.Fatalf("backend = %T, want nil", got)
+	}
+	joined := strings.Join(display.notes, "\n")
+	for _, want := range tc.wantNotes {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("notes do not contain %q:\n%s", want, joined)
+		}
+	}
+	if len(tc.wantNotes) == 0 && joined != "" {
+		t.Fatalf("successful exact identity emitted notes:\n%s", joined)
 	}
 }
 

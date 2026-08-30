@@ -61,21 +61,32 @@ func TestStableRunIDSupportsLegacyRecords(t *testing.T) {
 
 func TestSavePreservesCanonicalAndAppendsPrivateHistory(t *testing.T) {
 	dir := t.TempDir()
-	rootMode := os.FileMode(0)
-	if runtime.GOOS != "windows" {
-		info, err := os.Stat(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		rootMode = info.Mode().Perm()
-	}
+	rootMode := testRootMode(t, dir)
 	store := NewStore(dir)
 	r := testRecord("org/model:Q4_K_M", "2026-08-20T12:00:00.123456789Z")
-
 	saved, err := store.Save(r)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertSavedPathsAndRunID(t, store, r, saved, dir)
+	assertSavedRecordFiles(t, r, saved)
+	assertPrivateStoreDirectories(t, dir, rootMode)
+}
+
+func testRootMode(t *testing.T, dir string) os.FileMode {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return 0
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Mode().Perm()
+}
+
+func assertSavedPathsAndRunID(t *testing.T, store Store, r *Record, saved SavedPaths, dir string) {
+	t.Helper()
 	if saved.CanonicalPath != store.CanonicalPath(r.Model) ||
 		filepath.Base(saved.CanonicalPath) == "org_model_Q4_K_M.json" {
 		t.Fatalf("canonical path = %q", saved.CanonicalPath)
@@ -86,6 +97,10 @@ func TestSavePreservesCanonicalAndAppendsPrivateHistory(t *testing.T) {
 	if filepath.Dir(saved.HistoryPath) != filepath.Join(dir, historyDirName) {
 		t.Fatalf("history path = %q", saved.HistoryPath)
 	}
+}
+
+func assertSavedRecordFiles(t *testing.T, r *Record, saved SavedPaths) {
+	t.Helper()
 	for _, path := range []string{saved.CanonicalPath, saved.HistoryPath} {
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -108,21 +123,26 @@ func TestSavePreservesCanonicalAndAppendsPrivateHistory(t *testing.T) {
 			}
 		}
 	}
-	if runtime.GOOS != "windows" {
-		for _, check := range []struct {
-			path string
-			want os.FileMode
-		}{
-			{dir, rootMode},
-			{filepath.Join(dir, historyDirName), 0o700},
-		} {
-			info, err := os.Stat(check.path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := info.Mode().Perm(); got != check.want {
-				t.Fatalf("%s mode = %o, want %o", check.path, got, check.want)
-			}
+}
+
+func assertPrivateStoreDirectories(t *testing.T, dir string, rootMode os.FileMode) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	for _, check := range []struct {
+		path string
+		want os.FileMode
+	}{
+		{dir, rootMode},
+		{filepath.Join(dir, historyDirName), 0o700},
+	} {
+		info, err := os.Stat(check.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != check.want {
+			t.Fatalf("%s mode = %o, want %o", check.path, got, check.want)
 		}
 	}
 }

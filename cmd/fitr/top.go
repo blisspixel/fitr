@@ -208,24 +208,9 @@ func cmdTopRun(ctx context.Context, args []string) int {
 		errPrint("fitr top needs an interactive terminal", "stdout or stdin is not a terminal, or TERM=dumb", "use fitr run <model> --display plain|json instead")
 		return exitUsage
 	}
-
-	initial, warnings, err := loadTopSnapshot(nil)
-	if err != nil {
-		errPrint("could not load result history: "+err.Error(), "", "")
-		return exitError
-	}
-	attachTopInventory(ctx, &initial)
-	sink, err := session.NewSink(session.Options{})
-	if err != nil {
-		errPrint("could not create live session: "+err.Error(), "", "")
-		return exitError
-	}
-	if _, err := sink.Start(session.RunInfo{
-		Model: preview.model, Profile: preview.profile, Level: preview.level,
-		NumCtx: preview.numCtx, Repeats: preview.repeats,
-	}); err != nil {
-		errPrint("could not start live session: "+err.Error(), "", "")
-		return exitError
+	initial, warnings, sink, code := prepareTopRun(ctx, preview)
+	if code != exitOK {
+		return code
 	}
 	initial.Generation = 1
 	initial.Live = liveFromSession(sink.Snapshot())
@@ -250,23 +235,52 @@ func cmdTopRun(ctx context.Context, args []string) int {
 	sequence.Store(initial.Generation)
 	display := &topDisplay{ctx: runCtx, sink: sink, events: events, sequence: sequence, saved: true}
 	runDone := make(chan int, 1)
-	go func() {
-		code := cmdRunWithDisplay(runCtx, args, display)
-		display.finish(code, runCtx.Err())
-		runDone <- code
-	}()
+	go runTopMeasurement(runCtx, args, display, runDone)
 
-	code := runTopBrowser(uiCtx, state, cancelRun, runDone, sequence, events)
+	code = runTopBrowser(uiCtx, state, cancelRun, runDone, sequence, events)
 	cancelUI()
-	if code != exitOK {
-		return code
+	return finishTopMeasurement(code, cancelRun, runDone)
+}
+
+func prepareTopRun(ctx context.Context, preview topRunPreview) (top.Snapshot, []record.FileWarning, *session.Sink, int) {
+	initial, warnings, err := loadTopSnapshot(nil)
+	if err != nil {
+		errPrint("could not load result history: "+err.Error(), "", "")
+		return top.Snapshot{}, nil, nil, exitError
+	}
+	attachTopInventory(ctx, &initial)
+	sink, err := session.NewSink(session.Options{})
+	if err != nil {
+		errPrint("could not create live session: "+err.Error(), "", "")
+		return top.Snapshot{}, nil, nil, exitError
+	}
+	_, err = sink.Start(session.RunInfo{
+		Model: preview.model, Profile: preview.profile, Level: preview.level,
+		NumCtx: preview.numCtx, Repeats: preview.repeats,
+	})
+	if err != nil {
+		errPrint("could not start live session: "+err.Error(), "", "")
+		return top.Snapshot{}, nil, nil, exitError
+	}
+	return initial, warnings, sink, exitOK
+}
+
+func runTopMeasurement(ctx context.Context, args []string, display *topDisplay, done chan<- int) {
+	code := cmdRunWithDisplay(ctx, args, display)
+	display.finish(code, ctx.Err())
+	done <- code
+}
+
+func finishTopMeasurement(browserCode int, cancel context.CancelFunc, done <-chan int) int {
+	if browserCode != exitOK {
+		return browserCode
 	}
 	select {
-	case completed := <-runDone:
+	case completed := <-done:
 		return completed
 	default:
-		cancelRun()
-		return <-runDone
+		cancel()
+		return <-done
 	}
 }
 
@@ -359,76 +373,71 @@ type topRunPreview struct {
 	repeats, numCtx       int
 }
 
+type topRunPreviewFlags struct {
+	quick, full, checks, html, unsafeExec *bool
+	k, numCtx                             *int
+	profile, seedset                      *string
+}
+
 func previewTopRun(args []string) (topRunPreview, error) {
 	fs := flag.NewFlagSet("top run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	quick := fs.Bool("quick", false, "")
-	full := fs.Bool("full", false, "")
-	checks := fs.Bool("checks-only", false, "")
-	k := fs.Int("k", 0, "")
-	profile := fs.String("profile", "", "")
-	_ = fs.String("display", "auto", "")
-	_ = fs.String("backend", "auto", "")
-	seedset := fs.String("seedset", "", "")
-	_ = fs.Bool("pull", false, "")
-	html := fs.Bool("html", false, "")
-	unsafeExec := fs.Bool("allow-unsafe-exec", false, "")
-	numCtx := fs.Int("ctx", 0, "")
-	var quiet countFlag
-	fs.Var(&quiet, "q", "")
-	_ = fs.Bool("v", false, "")
+	options := registerTopRunPreviewFlags(fs)
 	if err := fs.Parse(permute(args)); err != nil {
 		return topRunPreview{}, err
 	}
-	if fs.NArg() != 1 {
-		return topRunPreview{}, errors.New("top run needs exactly one model")
+	if err := validateTopRunPreview(fs, options); err != nil {
+		return topRunPreview{}, err
 	}
-	levels := 0
-	for _, selected := range []bool{*quick, *full, *checks} {
-		if selected {
-			levels++
-		}
-	}
-	if levels > 1 {
-		return topRunPreview{}, errors.New("--quick, --full, and --checks-only are mutually exclusive")
-	}
-	if *checks && *seedset == "" {
-		return topRunPreview{}, errors.New("--checks-only requires --seedset")
-	}
-	if *checks && *html {
-		return topRunPreview{}, errors.New("--checks-only cannot use --html")
-	}
-	if *checks && *unsafeExec {
-		return topRunPreview{}, errors.New("--checks-only cannot use --allow-unsafe-exec")
-	}
-	level := "default"
-	if *quick {
-		level = "quick"
-	} else if *full {
-		level = "full"
-	} else if *checks {
-		level = "checks"
-	}
-	repeats := *k
-	if repeats == 0 {
-		repeats = 3
-		switch level {
-		case "quick":
-			repeats = 1
-		case "checks":
-			repeats = 5
-		}
-	}
-	if repeats < 1 {
-		return topRunPreview{}, errors.New("-k must be at least 1")
-	}
-	if *numCtx < 0 {
-		return topRunPreview{}, errors.New("--ctx cannot be negative")
-	}
+	level := selectedRunLevel(*options.quick, *options.full, *options.checks)
 	return topRunPreview{
-		model: presentationModelLabel(normalizeModelRef(fs.Arg(0))), profile: *profile, level: level,
-		repeats: repeats, numCtx: eval.ResolvedCtx(*numCtx),
+		model: presentationModelLabel(normalizeModelRef(fs.Arg(0))), profile: *options.profile, level: level,
+		repeats: runRepeats(level, *options.k), numCtx: eval.ResolvedCtx(*options.numCtx),
 	}, nil
+}
+
+func registerTopRunPreviewFlags(fs *flag.FlagSet) topRunPreviewFlags {
+	options := topRunPreviewFlags{
+		quick: fs.Bool("quick", false, ""), full: fs.Bool("full", false, ""),
+		checks: fs.Bool("checks-only", false, ""), k: fs.Int("k", 0, ""),
+		profile: fs.String("profile", "", ""), seedset: fs.String("seedset", "", ""),
+		html: fs.Bool("html", false, ""), unsafeExec: fs.Bool("allow-unsafe-exec", false, ""),
+		numCtx: fs.Int("ctx", 0, ""),
+	}
+	_ = fs.String("display", "auto", "")
+	_ = fs.String("backend", "auto", "")
+	_ = fs.Bool("pull", false, "")
+	var quiet countFlag
+	fs.Var(&quiet, "q", "")
+	_ = fs.Bool("v", false, "")
+	return options
+}
+
+func validateTopRunPreview(fs *flag.FlagSet, options topRunPreviewFlags) error {
+	if fs.NArg() != 1 {
+		return errors.New("top run needs exactly one model")
+	}
+	if selectedRunLevels(*options.quick, *options.full, *options.checks) > 1 {
+		return errors.New("--quick, --full, and --checks-only are mutually exclusive")
+	}
+	if *options.checks && *options.seedset == "" {
+		return errors.New("--checks-only requires --seedset")
+	}
+	if *options.checks && *options.html {
+		return errors.New("--checks-only cannot use --html")
+	}
+	if *options.checks && *options.unsafeExec {
+		return errors.New("--checks-only cannot use --allow-unsafe-exec")
+	}
+	level := selectedRunLevel(*options.quick, *options.full, *options.checks)
+	repeats := runRepeats(level, *options.k)
+	if repeats < 1 {
+		return errors.New("-k must be at least 1")
+	}
+	if *options.numCtx < 0 {
+		return errors.New("--ctx cannot be negative")
+	}
+	return nil
 }
 
 type topDisplay struct {
@@ -694,27 +703,36 @@ func loadTopSnapshot(candidate *string) (top.Snapshot, []record.FileWarning, err
 	if err != nil {
 		return top.Snapshot{}, history.Warnings, err
 	}
-	records := history.Records
-	if candidate != nil {
-		if info, statErr := os.Stat(*candidate); statErr == nil && !info.IsDir() {
-			selected, readErr := store.Read(*candidate)
-			if readErr != nil {
-				return top.Snapshot{}, history.Warnings, readErr
-			}
-			id := selected.EnsureRunID()
-			found := false
-			for _, existing := range records {
-				if existing.StableRunID() == id {
-					found = true
-					break
-				}
-			}
-			if !found {
-				records = append([]*Result{selected}, records...)
-			}
-		}
+	records, err := addTopCandidate(store, history.Records, candidate)
+	if err != nil {
+		return top.Snapshot{}, history.Warnings, err
 	}
 	return buildTopSnapshotWithBoard(records, current.Records), history.Warnings, nil
+}
+
+func addTopCandidate(store record.Store, records []*Result, candidate *string) ([]*Result, error) {
+	if candidate == nil {
+		return records, nil
+	}
+	if !topCandidateIsFile(*candidate) {
+		return records, nil
+	}
+	selected, err := store.Read(*candidate)
+	if err != nil {
+		return nil, err
+	}
+	id := selected.EnsureRunID()
+	for _, existing := range records {
+		if existing.StableRunID() == id {
+			return records, nil
+		}
+	}
+	return append([]*Result{selected}, records...), nil
+}
+
+func topCandidateIsFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func buildTopSnapshot(records []*Result) top.Snapshot {
@@ -722,13 +740,18 @@ func buildTopSnapshot(records []*Result) top.Snapshot {
 }
 
 func buildTopSnapshotWithBoard(historyRecords, boardRecords []*Result) top.Snapshot {
-	now := time.Now().UTC()
-	snapshot := top.Snapshot{UpdatedAt: now}
+	snapshot := top.Snapshot{UpdatedAt: time.Now().UTC()}
 	for _, result := range historyRecords {
 		if result != nil {
 			snapshot.History = append(snapshot.History, presentTopRun(result))
 		}
 	}
+	groups, groupRecords := collectTopBoardGroups(boardRecords)
+	appendTopBoardGroups(&snapshot, groups, groupRecords)
+	return snapshot
+}
+
+func collectTopBoardGroups(boardRecords []*Result) (map[string][]top.Run, map[string]*Result) {
 	groups := make(map[string][]top.Run)
 	groupRecords := make(map[string]*Result)
 	seenBoard := make(map[string]bool)
@@ -756,6 +779,11 @@ func buildTopSnapshotWithBoard(historyRecords, boardRecords []*Result) top.Snaps
 			groupRecords[groupKey] = result
 		}
 	}
+	return groups, groupRecords
+}
+
+func appendTopBoardGroups(snapshot *top.Snapshot, groups map[string][]top.Run,
+	groupRecords map[string]*Result) {
 	keys := make([]string, 0, len(groups))
 	for key := range groups {
 		keys = append(keys, key)
@@ -765,26 +793,29 @@ func buildTopSnapshotWithBoard(historyRecords, boardRecords []*Result) top.Snaps
 		runs := groups[key]
 		sort.SliceStable(runs, func(i, j int) bool { return runs[i].DecodeMean > runs[j].DecodeMean })
 		representative := groupRecords[key]
-		title := representative.Device.GPU
-		if title == "" {
-			title = representative.Device.InferenceDevice
-		}
-		if title == "" {
-			title = "unknown device"
-		}
-		if representative.Device.Runtime != "" {
-			title = strings.TrimSpace(title + " | " + representative.Device.Runtime)
-		}
+		title := topBoardTitle(representative)
 		note := "same hardware, runtime, and config; rows are comparable"
-		comparableRun := true
-		if len(runs) < 2 && comparableRun {
+		if len(runs) < 2 {
 			note = "one saved model for this hardware, runtime, and config"
 		}
 		snapshot.Board = append(snapshot.Board, top.BoardGroup{
-			ID: privacyID(key), Title: title, Note: note, Comparable: comparableRun, Runs: runs,
+			ID: privacyID(key), Title: title, Note: note, Comparable: true, Runs: runs,
 		})
 	}
-	return snapshot
+}
+
+func topBoardTitle(representative *Result) string {
+	title := representative.Device.GPU
+	if title == "" {
+		title = representative.Device.InferenceDevice
+	}
+	if title == "" {
+		title = "unknown device"
+	}
+	if representative.Device.Runtime != "" {
+		title = strings.TrimSpace(title + " | " + representative.Device.Runtime)
+	}
+	return title
 }
 
 func presentTopRun(result *Result) top.Run {

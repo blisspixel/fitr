@@ -80,31 +80,50 @@ type NeedDirectionStat struct {
 	FamilyDirectionReport
 }
 
+type directionKey struct {
+	id   string
+	seed uint64
+}
+
+type directionObserved struct {
+	check CheckOutcome
+	pass  bool
+}
+
+type directionStratum struct{ need, family string }
+type directionCounts struct{ a, b int }
+
 // NeedDirections aligns scorable instances and aggregates paired pass counts
 // by family within each need. It is the claimable paired estimand: independent
 // product questions remain separate, and each family contributes at most one
 // sign inside that need.
 func NeedDirections(a, b []CheckOutcome) []NeedDirectionStat {
-	type key struct {
-		id   string
-		seed uint64
+	left := indexMeasuredDirections(a)
+	byStratum := countDirectionStrata(left, b)
+	byNeed := summarizeNeedDirections(byStratum)
+	out := make([]NeedDirectionStat, 0, len(byNeed))
+	for need, report := range byNeed {
+		out = append(out, NeedDirectionStat{Need: need, FamilyDirectionReport: report})
 	}
-	type observed struct {
-		check CheckOutcome
-		pass  bool
-	}
-	left := map[key]observed{}
-	for _, ck := range a {
+	sort.Slice(out, func(i, j int) bool { return out[i].Need < out[j].Need })
+	return out
+}
+
+func indexMeasuredDirections(checks []CheckOutcome) map[directionKey]directionObserved {
+	left := map[directionKey]directionObserved{}
+	for _, ck := range checks {
 		pass, measured := MeasuredOutcome(ck.Outcome, ck.Pass)
 		if measured {
-			left[key{ck.TaskID, ck.Seed}] = observed{check: ck, pass: pass}
+			left[directionKey{ck.TaskID, ck.Seed}] = directionObserved{check: ck, pass: pass}
 		}
 	}
-	type stratum struct{ need, family string }
-	type counts struct{ a, b int }
-	byStratum := map[stratum]counts{}
-	for _, ck := range b {
-		pa, ok := left[key{ck.TaskID, ck.Seed}]
+	return left
+}
+
+func countDirectionStrata(left map[directionKey]directionObserved, checks []CheckOutcome) map[directionStratum]directionCounts {
+	byStratum := map[directionStratum]directionCounts{}
+	for _, ck := range checks {
+		pa, ok := left[directionKey{ck.TaskID, ck.Seed}]
 		if !ok {
 			continue
 		}
@@ -120,7 +139,7 @@ func NeedDirections(a, b []CheckOutcome) []NeedDirectionStat {
 		if family == "" {
 			family = ck.TaskID
 		}
-		k := stratum{need: need, family: family}
+		k := directionStratum{need: need, family: family}
 		c := byStratum[k]
 		if pa.pass {
 			c.a++
@@ -130,6 +149,10 @@ func NeedDirections(a, b []CheckOutcome) []NeedDirectionStat {
 		}
 		byStratum[k] = c
 	}
+	return byStratum
+}
+
+func summarizeNeedDirections(byStratum map[directionStratum]directionCounts) map[string]FamilyDirectionReport {
 	byNeed := map[string]FamilyDirectionReport{}
 	for k, c := range byStratum {
 		r := byNeed[k.need]
@@ -144,12 +167,7 @@ func NeedDirections(a, b []CheckOutcome) []NeedDirectionStat {
 		}
 		byNeed[k.need] = r
 	}
-	out := make([]NeedDirectionStat, 0, len(byNeed))
-	for need, report := range byNeed {
-		out = append(out, NeedDirectionStat{Need: need, FamilyDirectionReport: report})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Need < out[j].Need })
-	return out
+	return byNeed
 }
 
 // HidesDisagreement reports that the rates are identical and the item-level

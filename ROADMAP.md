@@ -373,15 +373,19 @@ every need the code does.
       clustering. SKIP and INCONCLUSIVE never become failures. Item flips stay
       descriptive, while the exact test gives each generated family at most
       one direction.
-- [ ] Decompose the production paths far enough to turn on every complexity
-      gate. `execute` is now decomposed into phase coordinators and `main.go`
-      is 1,210 physical lines, but a clean strict audit still finds 65
-      production findings across 37 files.
-      `dupl` and `gocyclo` are now hard global gates with no production
-      exclusions; every function is at or below cyclomatic complexity 30.
-      `funlen`, `gocognit`, and `nestif` remain off with the reason recorded in
-      `.golangci.yml`. Turning them on is the exit criterion, not the line
-      count.
+- [x] Decompose the production and test paths far enough to turn on every
+      planned complexity gate. `dupl`, `gocyclo`, `funlen`, `gocognit`, and
+      `nestif` are hard global gates with no linter-specific path exclusions or
+      suppressions. Every control-flow unit is at or below cyclomatic
+      complexity 30, and the same length, cognitive-complexity, and nesting
+      limits apply to the test harness that proves the production behavior.
+- [x] Treat Linux NVIDIA GB10 and Thor as shared-memory systems when
+      `nvidia-smi` has no dedicated-memory value. Report operating-system
+      `MemTotal` as addressable capacity, never as a safe or free budget.
+      Automatic advice keeps the KV curve but marks unproved points, permits
+      only lower-bound incompatibility, and requires an exact-context runtime
+      allocation to prove compatibility. Operator `--vram-gb` budgets and
+      allocator projections remain separately labeled.
 - [ ] Complete a positive native run for llama-server, the one backend row
       still resting on automated tests alone.
 - [ ] Run the acceptance path on clean macOS and Linux installs.
@@ -401,13 +405,22 @@ or arithmetic proxies into measured facts.
       and later clients. It owns performance, capacity, model shape, placement,
       diagnoses, evidence gaps, and next actions. Clients render it and never
       recompute a verdict or bottleneck.
-- [ ] Reorganize Result into PERFORMANCE and CAPACITY. Keep TTFT, prefill,
-      decode, and load separate from resident allocation, remaining capacity,
-      context, and placement. Preserve cold, loaded-uncached, and cache-hit
-      observations as distinct evidence when the backend can identify them.
+- [ ] Version typed memory evidence and an explicit capacity policy. Keep
+      physical or addressable total, OS availability, runtime allocation,
+      accelerator allocation, process residency, and allocator projection as
+      different semantics and resource domains. Seal operator reserve, swap
+      policy, container limit, observation time, and the exact usable-budget
+      formula. A nominal vendor number never substitutes for an operating
+      system reading.
+- [ ] Complete the existing PERFORMANCE and CAPACITY split with headroom,
+      context, placement, and latency-state evidence. Keep TTFT, prefill,
+      decode, and load separate from resident allocation. Preserve cold,
+      loaded-uncached, and cache-hit observations as distinct evidence when the
+      backend can identify them.
 - [ ] Show dense versus MoE shape with total and active-per-token parameters
       only when artifact metadata supports those facts. Do not infer either
-      from a model name.
+      from a model name. Expose a compact architecture and KV-strategy label
+      in inventory only when the installed artifact supplies that metadata.
 - [ ] Add conservative diagnoses with enumerated evidence and confidence.
       Labels such as `consistent with memory-traffic pressure` are allowed;
       an unmeasured claim such as `memory-bandwidth bound` is not. Every
@@ -423,9 +436,24 @@ or arithmetic proxies into measured facts.
 - [ ] Prototype a context sweep as its own experiment schema. Each point binds
       requested/effective context, allocation, TTFT cache state, placement, and
       comparable performance. One failed point does not fabricate later ones.
+- [ ] Give saved runs stable CLI selectors and version comparison JSON before
+      adding context filters. A future `compare --ctx N` may select only
+      receipts whose requested and verified effective contexts both equal N;
+      it never relabels an existing result.
+- [ ] Prototype multi-model capacity as a separate experiment. A projection
+      binds every artifact, role, context, placement intention, and capacity
+      policy, and labels additive lower bounds as derived. It refuses a
+      co-residency claim until one runtime receipt proves simultaneous
+      residency, spill, and eviction state. Model-set results never enter the
+      ordinary single-model Board.
 - [ ] Prototype a quant and configuration frontier. Report dominance only when
       one measured option is no worse on all declared dimensions and strictly
       better on at least one. Otherwise show the tradeoff, not a winner.
+- [ ] Extend llama.cpp configuration evidence to resolved offload,
+      fitter-adjusted context, tensor or layer placement, CPU-MoE placement,
+      tensor split, and mmap/mlock policy when the runtime exposes them. Advice
+      may repeat an observed resolved setting; it must not turn a generic mmap
+      or `-ngl` guess into a remedy.
 - [ ] Produce a device requirement brief from the user's declared workloads:
       capacity window, interactive latency, prompt-processing demand,
       sustained or concurrent regime, portability, software support, and
@@ -562,7 +590,7 @@ preflight is in [doctor](docs/doctor.md).
 | OpenAI-compatible timings are client-derived | Usage supplies token counts, but the generic protocol does not expose server timing receipts. |
 | Two device profiles | `lappy` is calibrated; `default` is explicitly uncalibrated. No hardware SKU gates are invented from names. |
 | Device detection is probe-derived | Vendor tools and OS inventories disagree about what a GPU is. The fingerprint is only as good as the probe, which is why device identity gets its own gate. |
-| Conventional attention uses weights plus KV by default | `--load` or `--fit` can observe total allocation and derive an `other resident` remainder, which may include compute buffers and other overhead. It is not an independently measured buffer breakdown. Hybrid recurrent models stay SKIP without a measured allocation. |
+| Conventional attention uses weights plus KV by default | `--load` can observe runtime allocation. `--fit` reports a descriptive allocator projection but cannot establish a context-specific tier until its final context, placement, version, and resource domains are sealed. A remainder from an observed total may include compute buffers, mappings, and runtime overhead, but is not an independently measured buffer breakdown. Hybrid recurrent models stay SKIP without a load receipt. |
 | Inventory comes from the serving runtime | There is no disk crawl or internet catalog. A llama-server exposes one model row. |
 | `--full` is a long agent loop | Executable coding evidence stays SKIP until the isolated worker exists. The default battery is the first real measurement. |
 | Scored inference is single-flight | Parallel prompts would contaminate throughput and context measurements. |

@@ -16,9 +16,10 @@ const (
 
 // ContextFit is the presentation model for advise's multi-window table.
 type ContextFit struct {
-	HaveGB float64
-	Note   string
-	Points []ContextFitPoint
+	HaveGB     float64
+	HaveSource string
+	Note       string
+	Points     []ContextFitPoint
 }
 
 type ContextFitPoint struct {
@@ -37,9 +38,9 @@ type ContextFitPoint struct {
 	Note       string
 }
 
-// WriteContextFit prints weights / KV / derived other resident / headroom at
-// each ctx. State is in the tier column. Other stays "n/a" unless total
-// allocation at that exact window was observed.
+// WriteContextFit prints weights / KV / derived other allocation / headroom at
+// each ctx. State is in the tier column. Other stays "n/a" unless a runtime
+// total or allocator projection exists at that exact window.
 func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 	if len(table.Points) == 0 && table.Note == "" {
 		return
@@ -48,15 +49,7 @@ func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 	if resolved == "none" || resolved == "json" {
 		return
 	}
-	rich := resolved == "rich"
-	p := palette{}
-	g := glyphs{" | ", "-", "+/-", "..."}
-	unicode := false
-	if rich {
-		p = pickPalette(!noColor())
-		g = pickGlyphs()
-		unicode = unicodeOK()
-	}
+	p, g, unicode := contextFitStyle(resolved == "rich")
 	fmt.Fprintln(w)
 	// The tier leads. Status belongs in the leftmost column so the eye scans one
 	// vertical strip for "incompatible" instead of reading to the end of a row;
@@ -64,52 +57,73 @@ func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 	// characters against an 80-column terminal.
 	fmt.Fprintf(w, "%s\n", p.wrap(p.Head, fmt.Sprintf(fitHeaderFmt,
 		"FIT", "CTX", "WEIGHT", "KV", "OTHER", "NEED", "ROOM", "DECODE", "PREFILL", "OF HAVE")))
-	maxNeed := 0.0
+	maxNeed := contextFitMaxNeed(table)
 	for _, pt := range table.Points {
-		if pt.NeedGB > maxNeed {
-			maxNeed = pt.NeedGB
+		writeContextFitPoint(w, pt, maxNeed, p, g, unicode)
+	}
+	if table.HaveSource != "" {
+		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, fmt.Sprintf(
+			"budget %.1f GB (%s); ROOM is derived against this budget",
+			table.HaveGB, SingleLine(table.HaveSource))))
+	}
+	if table.Note != "" {
+		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, SingleLine(table.Note)))
+	}
+	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, "* suggested   > requested   ? unproven   other n/a without matched total"))
+	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, "decode/prefill only from a saved run at that exact window"+g.Dot+"never invented"))
+}
+
+func contextFitStyle(rich bool) (palette, glyphs, bool) {
+	p := palette{}
+	g := glyphs{" | ", "-", "+/-", "..."}
+	if !rich {
+		return p, g, false
+	}
+	return pickPalette(!noColor()), pickGlyphs(), unicodeOK()
+}
+
+func contextFitMaxNeed(table ContextFit) float64 {
+	maxNeed := 0.0
+	for _, point := range table.Points {
+		if point.NeedGB > maxNeed {
+			maxNeed = point.NeedGB
 		}
 	}
 	if table.HaveGB > maxNeed {
 		maxNeed = table.HaveGB
 	}
-	for _, pt := range table.Points {
-		mark := " "
-		if pt.Suggested {
-			mark = "*"
-		}
-		if pt.Requested {
-			mark = ">"
-			if pt.Suggested {
-				mark = "*"
-			}
-		}
-		other := "n/a"
-		if pt.OtherKnown {
-			other = fmt.Sprintf("%.1f", pt.OtherGB)
-		}
-		dec, pre := "-", "-"
-		if pt.DecodeTPS > 0 {
-			dec = fmt.Sprintf("%.1f", pt.DecodeTPS)
-		}
-		if pt.PrefillTPS > 0 {
-			pre = fmt.Sprintf("%.1f", pt.PrefillTPS)
-		}
-		bar := valueBar(math.Max(pt.NeedGB, 0), maxNeed, 6, unicode)
-		fmt.Fprintf(w, fitRowFmt,
-			p.wrap(fitTierColor(p, pt.Tier), pad(pt.Tier, 12, g.Ell)),
-			fmt.Sprintf("%s%d", mark, pt.Ctx),
-			pt.WeightsGB, pt.KVGB, other, pt.NeedGB, pt.HeadroomGB,
-			dec, pre, p.wrap(p.Accent, bar))
-		if pt.Note != "" && pt.OtherKnown {
-			fmt.Fprintf(w, "          %s\n", p.wrap(p.Muted, SingleLine(pt.Note)))
-		}
+	return maxNeed
+}
+
+func writeContextFitPoint(w io.Writer, point ContextFitPoint, maxNeed float64,
+	p palette, g glyphs, unicode bool) {
+	mark := " "
+	if point.Suggested {
+		mark = "*"
+	} else if point.Requested {
+		mark = ">"
 	}
-	if table.Note != "" {
-		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, SingleLine(table.Note)))
+	other := "n/a"
+	if point.OtherKnown {
+		other = fmt.Sprintf("%.1f", point.OtherGB)
 	}
-	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, "* suggested   > requested   other n/a until allocation is observed"))
-	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, "decode/prefill only from a saved run at that exact window"+g.Dot+"never invented"))
+	decode, prefill := optionalRate(point.DecodeTPS), optionalRate(point.PrefillTPS)
+	bar := valueBar(math.Max(point.NeedGB, 0), maxNeed, 6, unicode)
+	fmt.Fprintf(w, fitRowFmt,
+		p.wrap(fitTierColor(p, point.Tier), pad(point.Tier, 12, g.Ell)),
+		fmt.Sprintf("%s%d", mark, point.Ctx),
+		point.WeightsGB, point.KVGB, other, point.NeedGB, point.HeadroomGB,
+		decode, prefill, p.wrap(p.Accent, bar))
+	if point.Note != "" {
+		fmt.Fprintf(w, "          %s\n", p.wrap(p.Muted, SingleLine(point.Note)))
+	}
+}
+
+func optionalRate(value float64) string {
+	if value <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f", value)
 }
 
 func fitTierColor(p palette, tier string) string {

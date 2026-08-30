@@ -222,11 +222,27 @@ func TestAssessPairDecisionGradeControls(t *testing.T) {
 		t.Fatalf("trusted pair escaped the lineage gate: %+v", a)
 	}
 
-	tests := []struct {
-		name   string
-		mutate func(*PairReport)
-		want   string
-	}{
+	for _, tc := range decisionGradeControlCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			r := good
+			r.Items = append([]Item(nil), good.Items...)
+			tc.mutate(&r)
+			got := AssessPair(r)
+			if got.DecisionGrade || !strings.Contains(strings.Join(got.Reasons, "; "), tc.want) {
+				t.Fatalf("assessment = %+v, want reason containing %q", got, tc.want)
+			}
+		})
+	}
+}
+
+type decisionGradeControlCase struct {
+	name   string
+	mutate func(*PairReport)
+	want   string
+}
+
+func decisionGradeControlCases() []decisionGradeControlCase {
+	return []decisionGradeControlCase{
 		{
 			name: "too few instances",
 			mutate: func(r *PairReport) {
@@ -263,17 +279,6 @@ func TestAssessPairDecisionGradeControls(t *testing.T) {
 			},
 			want: "not verified",
 		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			r := good
-			r.Items = append([]Item(nil), good.Items...)
-			tc.mutate(&r)
-			got := AssessPair(r)
-			if got.DecisionGrade || !strings.Contains(strings.Join(got.Reasons, "; "), tc.want) {
-				t.Fatalf("assessment = %+v, want reason containing %q", got, tc.want)
-			}
-		})
 	}
 }
 

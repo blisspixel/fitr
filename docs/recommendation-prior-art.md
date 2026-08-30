@@ -74,8 +74,10 @@ ends; NIM hands you the flag and the resulting number.
 fit-and-fix UX in existence is gated to datacenter GPUs.
 
 We can do it *better* on the hardware NIM refuses to touch: llama.cpp's `--fit`
-measures by **dummy allocation** rather than estimating, so the number is
-observed, not modelled.
+projects through **dummy allocation** rather than metadata arithmetic. That is
+stronger than a name-based estimate, but it remains a projection rather than
+observed process residency. fitr keeps it descriptive until the fitter's final
+context, placement, version, and resource domains are captured.
 
 ## NVIDIA's consumer recommenders are both dead
 

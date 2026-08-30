@@ -699,91 +699,160 @@ func Aggregate(reports []PairReport) (Summary, error) {
 	return AggregateWithTrust(reports, TrustPolicy{})
 }
 
+type summaryItemAccumulator struct {
+	family, need                                   string
+	reports, shared, flips, discriminatedReports   int
+	decisionReports, decisionShared, decisionFlips int
+	devices, discriminatedDevices, decisionDevices map[string]bool
+}
+
+type summaryAccumulator struct {
+	specVersion      int
+	byItem           map[string]*summaryItemAccumulator
+	devices          map[string]bool
+	pairs            map[string]bool
+	decisionDevices  map[string]bool
+	decisionFamilies map[string]bool
+	decisionReports  int
+	seen             map[string]bool
+	expectedItems    map[string]bool
+}
+
+func newSummaryAccumulator(specVersion int) *summaryAccumulator {
+	return &summaryAccumulator{
+		specVersion: specVersion, byItem: map[string]*summaryItemAccumulator{},
+		devices: map[string]bool{}, pairs: map[string]bool{},
+		decisionDevices: map[string]bool{}, decisionFamilies: map[string]bool{},
+		seen: map[string]bool{},
+	}
+}
+
 // AggregateWithTrust permits readiness only for reports authenticated by a
 // caller-supplied external trust root.
 func AggregateWithTrust(reports []PairReport, trust TrustPolicy) (Summary, error) {
 	if len(reports) == 0 {
 		return Summary{}, errors.New("no calibration reports")
 	}
-	specVersion := reports[0].SpecVersion
-	type itemAcc struct {
-		family, need                                   string
-		reports, shared, flips, discriminatedReports   int
-		decisionReports, decisionShared, decisionFlips int
-		devices, discriminatedDevices, decisionDevices map[string]bool
-	}
-	byItem := map[string]*itemAcc{}
-	devices := map[string]bool{}
-	pairs := map[string]bool{}
-	decisionDevices := map[string]bool{}
-	decisionFamilies := map[string]bool{}
-	decisionReports := 0
-	seen := map[string]bool{}
-	var expectedItems map[string]bool
+	acc := newSummaryAccumulator(reports[0].SpecVersion)
 	for index, r := range reports {
-		r = normalizePair(r)
-		if err := validatePair(r); err != nil {
-			return Summary{}, fmt.Errorf("report %d: %w", index+1, err)
-		}
-		if r.SpecVersion != specVersion {
-			return Summary{}, fmt.Errorf("spec version mismatch: %d and %d", specVersion, r.SpecVersion)
-		}
-		key := strings.Join([]string{r.Device.ID, r.SeedSet, r.Reference.Model, r.Candidate.Model}, "\x00")
-		if seen[key] {
-			return Summary{}, fmt.Errorf("duplicate report for device %s, seedset %s, pair %s / %s",
-				r.Device.ID, r.SeedSet, r.Reference.Model, r.Candidate.Model)
-		}
-		seen[key] = true
-		devices[r.Device.ID] = true
-		pairs[r.Reference.Model+"\x00"+r.Candidate.Model] = true
-		decisionGrade := AssessPairWithTrust(r, trust).DecisionGrade
-		if decisionGrade {
-			decisionReports++
-			decisionDevices[r.Device.ID] = true
-			decisionFamilies[strings.ToLower(strings.TrimSpace(r.Reference.Family))] = true
-		}
-		itemSet := map[string]bool{}
-		for _, item := range r.Items {
-			if item.TaskID == "" || itemSet[item.TaskID] {
-				return Summary{}, fmt.Errorf("report has missing or duplicate task id %q", item.TaskID)
-			}
-			itemSet[item.TaskID] = true
-		}
-		if expectedItems == nil {
-			expectedItems = itemSet
-		} else if !sameSet(expectedItems, itemSet) {
-			return Summary{}, errors.New("calibration reports contain different task sets")
-		}
-		for _, item := range r.Items {
-			a := byItem[item.TaskID]
-			if a == nil {
-				a = &itemAcc{family: item.Family, need: item.Need,
-					devices: map[string]bool{}, discriminatedDevices: map[string]bool{},
-					decisionDevices: map[string]bool{}}
-				byItem[item.TaskID] = a
-			} else if a.family != item.Family || a.need != item.Need {
-				return Summary{}, fmt.Errorf("task %q changed family or need across reports", item.TaskID)
-			}
-			a.reports++
-			a.shared += item.Shared
-			a.flips += item.Flips
-			a.devices[r.Device.ID] = true
-			if item.Flips > 0 {
-				a.discriminatedReports++
-				a.discriminatedDevices[r.Device.ID] = true
-			}
-			if decisionGrade {
-				a.decisionReports++
-				a.decisionShared += item.Shared
-				a.decisionFlips += item.Flips
-				a.decisionDevices[r.Device.ID] = true
-			}
+		if err := acc.addReport(index, r, trust); err != nil {
+			return Summary{}, err
 		}
 	}
+	readiness := acc.readiness()
+	s := Summary{
+		Schema: SummarySchema, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		SpecVersion: acc.specVersion, Reports: len(reports), Devices: len(acc.devices), ModelPairs: len(acc.pairs),
+		Readiness: readiness,
+	}
+	s.Items = acc.summaryItems(readiness)
+	sort.Slice(s.Items, func(i, j int) bool {
+		if s.Items[i].DiscriminatedDevices != s.Items[j].DiscriminatedDevices {
+			return s.Items[i].DiscriminatedDevices > s.Items[j].DiscriminatedDevices
+		}
+		if s.Items[i].Flips != s.Items[j].Flips {
+			return s.Items[i].Flips > s.Items[j].Flips
+		}
+		return s.Items[i].TaskID < s.Items[j].TaskID
+	})
+	return s, nil
+}
 
+func (a *summaryAccumulator) addReport(index int, report PairReport, trust TrustPolicy) error {
+	report = normalizePair(report)
+	if err := validatePair(report); err != nil {
+		return fmt.Errorf("report %d: %w", index+1, err)
+	}
+	if report.SpecVersion != a.specVersion {
+		return fmt.Errorf("spec version mismatch: %d and %d", a.specVersion, report.SpecVersion)
+	}
+	if err := a.recordReportIdentity(report); err != nil {
+		return err
+	}
+	decisionGrade := AssessPairWithTrust(report, trust).DecisionGrade
+	a.recordDecisionGrade(report, decisionGrade)
+	itemSet, err := calibrationItemSet(report.Items)
+	if err != nil {
+		return err
+	}
+	if a.expectedItems == nil {
+		a.expectedItems = itemSet
+	} else if !sameSet(a.expectedItems, itemSet) {
+		return errors.New("calibration reports contain different task sets")
+	}
+	return a.recordItems(report, decisionGrade)
+}
+
+func (a *summaryAccumulator) recordReportIdentity(report PairReport) error {
+	key := strings.Join([]string{report.Device.ID, report.SeedSet, report.Reference.Model, report.Candidate.Model}, "\x00")
+	if a.seen[key] {
+		return fmt.Errorf("duplicate report for device %s, seedset %s, pair %s / %s",
+			report.Device.ID, report.SeedSet, report.Reference.Model, report.Candidate.Model)
+	}
+	a.seen[key] = true
+	a.devices[report.Device.ID] = true
+	a.pairs[report.Reference.Model+"\x00"+report.Candidate.Model] = true
+	return nil
+}
+
+func (a *summaryAccumulator) recordDecisionGrade(report PairReport, decisionGrade bool) {
+	if !decisionGrade {
+		return
+	}
+	a.decisionReports++
+	a.decisionDevices[report.Device.ID] = true
+	a.decisionFamilies[strings.ToLower(strings.TrimSpace(report.Reference.Family))] = true
+}
+
+func calibrationItemSet(items []Item) (map[string]bool, error) {
+	itemSet := map[string]bool{}
+	for _, item := range items {
+		if item.TaskID == "" || itemSet[item.TaskID] {
+			return nil, fmt.Errorf("report has missing or duplicate task id %q", item.TaskID)
+		}
+		itemSet[item.TaskID] = true
+	}
+	return itemSet, nil
+}
+
+func (a *summaryAccumulator) recordItems(report PairReport, decisionGrade bool) error {
+	for _, item := range report.Items {
+		acc := a.byItem[item.TaskID]
+		if acc == nil {
+			acc = &summaryItemAccumulator{family: item.Family, need: item.Need,
+				devices: map[string]bool{}, discriminatedDevices: map[string]bool{},
+				decisionDevices: map[string]bool{}}
+			a.byItem[item.TaskID] = acc
+		} else if acc.family != item.Family || acc.need != item.Need {
+			return fmt.Errorf("task %q changed family or need across reports", item.TaskID)
+		}
+		a.recordItem(acc, report.Device.ID, item, decisionGrade)
+	}
+	return nil
+}
+
+func (a *summaryAccumulator) recordItem(acc *summaryItemAccumulator, deviceID string, item Item,
+	decisionGrade bool) {
+	acc.reports++
+	acc.shared += item.Shared
+	acc.flips += item.Flips
+	acc.devices[deviceID] = true
+	if item.Flips > 0 {
+		acc.discriminatedReports++
+		acc.discriminatedDevices[deviceID] = true
+	}
+	if decisionGrade {
+		acc.decisionReports++
+		acc.decisionShared += item.Shared
+		acc.decisionFlips += item.Flips
+		acc.decisionDevices[deviceID] = true
+	}
+}
+
+func (a *summaryAccumulator) readiness() CampaignReadiness {
 	readiness := CampaignReadiness{
-		DecisionGradeReports: decisionReports,
-		Devices:              len(decisionDevices), ModelFamilies: len(decisionFamilies),
+		DecisionGradeReports: a.decisionReports,
+		Devices:              len(a.decisionDevices), ModelFamilies: len(a.decisionFamilies),
 		MinimumDevices:          DecisionGradeMinDevices,
 		MinimumModelFamilies:    DecisionGradeMinModelFamilies,
 		MinimumInstancesPerTask: DecisionGradeMinInstances,
@@ -797,45 +866,36 @@ func AggregateWithTrust(reports []PairReport, trust TrustPolicy) (Summary, error
 			fmt.Sprintf("need at least %d decision-grade model families", readiness.MinimumModelFamilies))
 	}
 	readiness.ReadyForReview = len(readiness.Missing) == 0
-	s := Summary{
-		Schema: SummarySchema, CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		SpecVersion: specVersion, Reports: len(reports), Devices: len(devices), ModelPairs: len(pairs),
-		Readiness: readiness,
-	}
-	for id, a := range byItem {
+	return readiness
+}
+
+func (a *summaryAccumulator) summaryItems(readiness CampaignReadiness) []SummaryItem {
+	items := make([]SummaryItem, 0, len(a.byItem))
+	for id, acc := range a.byItem {
 		status := "not_observed"
-		if a.flips > 0 {
+		if acc.flips > 0 {
 			status = "observed"
 		}
 		decisionStatus := "insufficient_evidence"
-		reviewCandidate := readiness.ReadyForReview && a.decisionFlips == 0
+		reviewCandidate := readiness.ReadyForReview && acc.decisionFlips == 0
 		if readiness.ReadyForReview {
 			decisionStatus = "observed"
 			if reviewCandidate {
 				decisionStatus = "review_candidate"
 			}
 		}
-		s.Items = append(s.Items, SummaryItem{
-			TaskID: id, Family: a.family, Need: a.need,
-			Reports: a.reports, Devices: len(a.devices), Shared: a.shared, Flips: a.flips,
-			DiscriminatedReports: a.discriminatedReports,
-			DiscriminatedDevices: len(a.discriminatedDevices), Status: status,
-			DecisionGradeReports: a.decisionReports,
-			DecisionGradeDevices: len(a.decisionDevices),
-			DecisionGradeShared:  a.decisionShared, DecisionGradeFlips: a.decisionFlips,
+		items = append(items, SummaryItem{
+			TaskID: id, Family: acc.family, Need: acc.need,
+			Reports: acc.reports, Devices: len(acc.devices), Shared: acc.shared, Flips: acc.flips,
+			DiscriminatedReports: acc.discriminatedReports,
+			DiscriminatedDevices: len(acc.discriminatedDevices), Status: status,
+			DecisionGradeReports: acc.decisionReports,
+			DecisionGradeDevices: len(acc.decisionDevices),
+			DecisionGradeShared:  acc.decisionShared, DecisionGradeFlips: acc.decisionFlips,
 			DecisionGradeStatus: decisionStatus, ReviewCandidate: reviewCandidate,
 		})
 	}
-	sort.Slice(s.Items, func(i, j int) bool {
-		if s.Items[i].DiscriminatedDevices != s.Items[j].DiscriminatedDevices {
-			return s.Items[i].DiscriminatedDevices > s.Items[j].DiscriminatedDevices
-		}
-		if s.Items[i].Flips != s.Items[j].Flips {
-			return s.Items[i].Flips > s.Items[j].Flips
-		}
-		return s.Items[i].TaskID < s.Items[j].TaskID
-	})
-	return s, nil
+	return items
 }
 
 func sameSet(a, b map[string]bool) bool {

@@ -354,52 +354,67 @@ func TestViewDefaultsToNewestSavedResult(t *testing.T) {
 }
 
 func TestViewReadsResultPathAndEmitsBothJSONShapes(t *testing.T) {
-	dir := t.TempDir()
-	r := golden(t)
-	path := filepath.Join(dir, "result.json")
-	b, err := json.Marshal(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	emit := func(t *testing.T, args ...string) []byte {
-		t.Helper()
-		out, err := os.CreateTemp(dir, "view-output-*.json")
-		if err != nil {
-			t.Fatal(err)
-		}
-		saved := os.Stdout
-		os.Stdout = out
-		code := cmdView(context.Background(), append([]string{path}, args...))
-		out.Close()
-		os.Stdout = saved
-		body, err := os.ReadFile(out.Name())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if code != exitOK {
-			t.Fatalf("view exited %d: %s", code, body)
-		}
-		return body
-	}
-
+	dir, path, result := writeViewResultFixture(t)
 	// --full returns the sealed record unchanged.
-	full := emit(t, "--display", "json", "--full")
-	var got Result
-	if err := json.Unmarshal(full, &got); err != nil {
-		t.Fatalf("view --full JSON is invalid: %v", err)
-	}
-	if got.Model != r.Model || got.SchemaVersion != r.SchemaVersion {
-		t.Fatalf("view --full changed the saved result: got %q schema %d", got.Model, got.SchemaVersion)
-	}
+	full := emitViewJSON(t, dir, path, "--display", "json", "--full")
+	assertFullViewJSON(t, full, result)
 
 	// The default is the scorecard the command prints. The record behind it is
 	// an order of magnitude larger and carries per-trial evidence nobody
 	// reading `view` asked for.
-	brief := emit(t, "--display", "json")
+	brief := emitViewJSON(t, dir, path, "--display", "json")
+	assertBriefViewJSON(t, brief, full, result)
+}
+
+func writeViewResultFixture(t *testing.T) (string, string, *Result) {
+	t.Helper()
+	dir := t.TempDir()
+	result := golden(t)
+	path := filepath.Join(dir, "result.json")
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir, path, result
+}
+
+func emitViewJSON(t *testing.T, dir, path string, args ...string) []byte {
+	t.Helper()
+	out, err := os.CreateTemp(dir, "view-output-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stdout
+	os.Stdout = out
+	code := cmdView(context.Background(), append([]string{path}, args...))
+	out.Close()
+	os.Stdout = saved
+	body, err := os.ReadFile(out.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != exitOK {
+		t.Fatalf("view exited %d: %s", code, body)
+	}
+	return body
+}
+
+func assertFullViewJSON(t *testing.T, full []byte, result *Result) {
+	t.Helper()
+	var got Result
+	if err := json.Unmarshal(full, &got); err != nil {
+		t.Fatalf("view --full JSON is invalid: %v", err)
+	}
+	if got.Model != result.Model || got.SchemaVersion != result.SchemaVersion {
+		t.Fatalf("view --full changed the saved result: got %q schema %d", got.Model, got.SchemaVersion)
+	}
+}
+
+func assertBriefViewJSON(t *testing.T, brief, full []byte, result *Result) {
+	t.Helper()
 	var card map[string]any
 	if err := json.Unmarshal(brief, &card); err != nil {
 		t.Fatalf("view JSON is invalid: %v", err)
@@ -407,8 +422,8 @@ func TestViewReadsResultPathAndEmitsBothJSONShapes(t *testing.T) {
 	if card["schema"] != "fitr.view.v1" {
 		t.Fatalf("view JSON does not identify itself: %v", card["schema"])
 	}
-	if card["model"] != r.Model {
-		t.Fatalf("view JSON names %v, want %q", card["model"], r.Model)
+	if card["model"] != result.Model {
+		t.Fatalf("view JSON names %v, want %q", card["model"], result.Model)
 	}
 	if card["scorecard"] == nil {
 		t.Fatalf("view JSON carries no scorecard")
@@ -584,6 +599,14 @@ func TestChecksOnlyRequiresFixedPairing(t *testing.T) {
 func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FITR_RESULTS", dir)
+	hi, pairPath := writeNeverFlippedCalibrationFixture(t, dir)
+	got, code := captureCalibrationPair(t, pairPath)
+	assertCalibrationPairOutput(t, got, code)
+	assertCalibrationPairArtifact(t, pairPath, hi.Device.Host)
+}
+
+func writeNeverFlippedCalibrationFixture(t *testing.T, dir string) (*Result, string) {
+	t.Helper()
 	hi, lo := golden(t), golden(t)
 	spec, err := eval.LoadSpec()
 	if err != nil {
@@ -604,15 +627,23 @@ func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
 	}
 	sealCurrentResult(t, hi, lo)
 	saveCurrentResults(t, hi, lo)
+	return hi, filepath.Join(dir, "pair.json")
+}
+
+func captureCalibrationPair(t *testing.T, pairPath string) (string, int) {
+	t.Helper()
 	old := os.Stdout
 	pr, pw, _ := os.Pipe()
 	os.Stdout = pw
-	pairPath := filepath.Join(dir, "pair.json")
 	code := cmdCalibrate(context.Background(), []string{"m-q8", "m-q4", "--out", pairPath})
 	pw.Close()
 	os.Stdout = old
 	out, _ := io.ReadAll(pr)
-	got := string(out)
+	return string(out), code
+}
+
+func assertCalibrationPairOutput(t *testing.T, got string, code int) {
+	t.Helper()
 	if code != exitOK {
 		t.Fatalf("code = %d\n%s", code, got)
 	}
@@ -625,6 +656,10 @@ func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
 	if strings.Contains(got, "rewrites spec") {
 		t.Fatal("must not claim to rewrite the spec")
 	}
+}
+
+func assertCalibrationPairArtifact(t *testing.T, pairPath, privateHost string) {
+	t.Helper()
 	report, err := calibration.ReadPair(pairPath)
 	if err != nil {
 		t.Fatal(err)
@@ -636,7 +671,7 @@ func TestCalibrateReportsNeverFlippedItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{hi.Device.Host, "CODE_WRITE_OK", ".fitr"} {
+	for _, forbidden := range []string{privateHost, "CODE_WRITE_OK", ".fitr"} {
 		if strings.Contains(string(raw), forbidden) {
 			t.Fatalf("pair report leaked %q: %s", forbidden, raw)
 		}
@@ -1446,14 +1481,24 @@ func TestBackendAtUsesConfiguredOpenAIURLWhenExplicit(t *testing.T) {
 }
 
 func TestNewBackendSelectsReachableExplicitRuntimes(t *testing.T) {
-	tests := []struct {
-		name    string
-		kind    string
-		model   string
-		env     string
-		handler http.Handler
-		backend string
-	}{
+	for _, tc := range explicitRuntimeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			assertExplicitRuntime(t, tc)
+		})
+	}
+}
+
+type explicitRuntimeCase struct {
+	name    string
+	kind    string
+	model   string
+	env     string
+	handler http.Handler
+	backend string
+}
+
+func explicitRuntimeCases() []explicitRuntimeCase {
+	return []explicitRuntimeCase{
 		{
 			name: "ollama", kind: "ollama", model: "model", env: "OLLAMA_BASE_URL", backend: "ollama",
 			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1483,30 +1528,32 @@ func TestNewBackendSelectsReachableExplicitRuntimes(t *testing.T) {
 			}),
 		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(tc.handler)
-			defer server.Close()
-			t.Setenv(tc.env, server.URL)
-			display := render.New("none")
-			defer display.Close()
-			var backend llm.Backend
-			var code int
-			if tc.kind == "llama-server" {
-				backend, code = newBackendWithDisplay(context.Background(), tc.model, tc.kind, false, display)
-			} else {
-				backend, code = newBackend(context.Background(), tc.model, tc.kind, false)
-			}
-			if code != exitOK || backend == nil || backend.Name() != tc.backend {
-				t.Fatalf("backend=%T name=%v code=%d", backend, func() string {
-					if backend == nil {
-						return ""
-					}
-					return backend.Name()
-				}(), code)
-			}
-		})
+}
+
+func assertExplicitRuntime(t *testing.T, tc explicitRuntimeCase) {
+	t.Helper()
+	server := httptest.NewServer(tc.handler)
+	defer server.Close()
+	t.Setenv(tc.env, server.URL)
+	display := render.New("none")
+	defer display.Close()
+	var backend llm.Backend
+	var code int
+	if tc.kind == "llama-server" {
+		backend, code = newBackendWithDisplay(context.Background(), tc.model, tc.kind, false, display)
+	} else {
+		backend, code = newBackend(context.Background(), tc.model, tc.kind, false)
 	}
+	if code != exitOK || backend == nil || backend.Name() != tc.backend {
+		t.Fatalf("backend=%T name=%v code=%d", backend, backendName(backend), code)
+	}
+}
+
+func backendName(backend llm.Backend) string {
+	if backend == nil {
+		return ""
+	}
+	return backend.Name()
 }
 
 func TestNewBackendRejectsUnknownAndInvalidDiscoveryConfiguration(t *testing.T) {

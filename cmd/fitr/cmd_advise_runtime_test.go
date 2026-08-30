@@ -97,7 +97,7 @@ func TestCmdAdviseUsesRuntimeMetadataAndResidentReceipt(t *testing.T) {
 	if report.ObservedGB != 3 || report.WeightsGB != 2 || report.Ctx != 4096 {
 		t.Fatalf("runtime receipts were not preserved: %+v", report)
 	}
-	if report.Quant != "Q4_K_M" || report.Source != "Ollama /api/show" {
+	if report.Quant != "Q4_K_M" || report.Source != "ollama runtime status" {
 		t.Fatalf("runtime metadata was not used: %+v", report)
 	}
 }
@@ -161,6 +161,38 @@ func TestCmdAdviseLoadsThenMeasuresResidentAllocation(t *testing.T) {
 	}
 }
 
+func TestCmdAdviseReloadsWhenResidentContextDoesNotMatch(t *testing.T) {
+	var resident atomic.Bool
+	var generates atomic.Int32
+	resident.Store(true)
+	server := adviseOllamaServer(t, true, &resident, &generates)
+	defer server.Close()
+	t.Setenv("OLLAMA_BASE_URL", server.URL)
+	t.Setenv("FITR_RESULTS", t.TempDir())
+
+	out, code := captureTopStdout(t, func() int {
+		return cmdAdvise(context.Background(), []string{
+			"--backend=ollama", "--vram-gb=8", "--ctx=8192", "--load", "--display=json", "model",
+		})
+	})
+	if code != exitOK {
+		t.Fatalf("advise exit=%d output=%s", code, out)
+	}
+	var report advise.Report
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, out)
+	}
+	if generates.Load() != 1 {
+		t.Fatalf("mismatched resident context generated %d time(s), want one re-observation", generates.Load())
+	}
+	if report.Source == "ollama /api/ps after --load" || report.Ctx != 8192 {
+		t.Fatalf("mismatched 4K resident receipt proved 8K: %+v", report)
+	}
+	if resident.Load() {
+		t.Fatal("advise --load left the re-observed model resident")
+	}
+}
+
 func TestCmdAdviseFitRequiresKnownGGUFPath(t *testing.T) {
 	server := adviseOllamaServer(t, true, nil, nil)
 	defer server.Close()
@@ -208,7 +240,7 @@ func TestCmdAdviseRejectsLoadForBareGGUF(t *testing.T) {
 	path := writeMiniGGUF(t)
 	stderr, code := captureTopStderr(t, func() int {
 		return cmdAdvise(context.Background(), []string{
-			"--vram-gb=8", "--load", "--display=none", path,
+			"--vram-gb=8", "--ctx=2048", "--load", "--display=none", path,
 		})
 	})
 	if code != exitUsage || !strings.Contains(stderr, "--load needs a running Ollama") {

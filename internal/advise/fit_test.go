@@ -42,40 +42,53 @@ llama_params_fit_impl: cannot fulfill margin of 1024 MiB on all devices
 	}
 }
 
+func TestParseFitLogIntermediateFailureThenSuccess(t *testing.T) {
+	log := `
+llama_params_fit_impl: projected to use 66721 MiB of device memory vs.
+llama_params_fit_impl: cannot fulfill margin of 1024 MiB on all devices
+llama_params_fit_impl: projected to use 19721 MiB of device memory vs.
+llama_params_fit: successfully fit params to free device memory
+`
+	used, cannot, ok := ParseFitLog(log)
+	if !ok || cannot || used != 19721*1024*1024 {
+		t.Fatalf("used=%d cannot=%v ok=%v, want final successful projection", used, cannot, ok)
+	}
+}
+
 func TestParseFitLogEmptyIsNotAGuess(t *testing.T) {
 	if _, _, ok := ParseFitLog("hello"); ok {
 		t.Fatal("unrelated text must not invent a GB number")
 	}
 }
 
-func TestDummyAllocationBeatsWeightsKVEstimate(t *testing.T) {
+func TestAllocatorProjectionIsDescriptiveNotAVerdict(t *testing.T) {
 	r := Evaluate(Input{
 		Model: "m.gguf", HaveGB: 24, HaveSrc: "nvidia-smi",
 		WeightsB: 10 * GiB, Arch: llama8B(), Ctx: 8192,
 		FitB: 18 * GiB, FitSrc: "llama-fit-params",
 	})
-	if r.Tier != Compatible {
-		t.Fatalf("tier = %s (%s), want compatible from dummy allocation", r.Tier, r.Why)
+	if r.Tier != Skip {
+		t.Fatalf("tier = %s (%s), want skip from unbound allocator projection", r.Tier, r.Why)
 	}
 	if r.NeedGB != 18.0 {
 		t.Fatalf("need_gb = %v, want the dummy-allocation 18, not weights+KV", r.NeedGB)
 	}
-	if !strings.Contains(strings.Join(r.Gaps, " "), "dummy allocation") {
-		t.Fatalf("must disclose dummy allocation: %v", r.Gaps)
+	if !strings.Contains(strings.Join(r.Gaps, " "), "not bound") {
+		t.Fatalf("must disclose missing projection bindings: %v", r.Gaps)
 	}
 }
 
-func TestDummyAllocationOverBudgetUsesKVRemedyWhenPossible(t *testing.T) {
+func TestAllocatorProjectionOverBudgetStillCannotProveARequestedPoint(t *testing.T) {
 	r := Evaluate(Input{
 		WeightsB: 6 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
 		Arch: llama8B(), Ctx: 131072,
 		FitB: 20 * GiB, FitSrc: "llama-fit-params",
 	})
-	if r.Tier != LowMemory && r.Tier != Incompatible {
-		t.Fatalf("tier = %s, want a negative with a remedy", r.Tier)
+	if r.Tier != Skip {
+		t.Fatalf("tier = %s, want skip from unbound allocator projection", r.Tier)
 	}
-	if r.Remedy == "" {
-		t.Fatal("dummy allocation that does not fit must still carry a remedy")
+	if r.Flag != "" || r.FlagValue != 0 || r.FitsGB != 0 {
+		t.Fatalf("unbound projection emitted a point-specific remedy: %+v", r)
 	}
 }
 

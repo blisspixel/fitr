@@ -81,17 +81,22 @@ says so and omits the caveat rather than estimating one.
 
 | | GPU name | Total budget | Free right now |
 |---|---|---|---|
-| NVIDIA, any OS | `nvidia-smi` | `nvidia-smi` | `nvidia-smi` |
+| NVIDIA discrete, any OS | `nvidia-smi` | `nvidia-smi` | `nvidia-smi` |
+| NVIDIA GB10 / Thor, Linux | `nvidia-smi` | `/proc/meminfo` `MemTotal` addressable pool | unavailable |
 | AMD, Linux | `rocm-smi`, else `lspci` | `drm sysfs` | `drm sysfs` (total minus used) |
 | AMD, Windows | `Win32_VideoController` | registry `qwMemorySize` | not available |
 | Apple Silicon | `system_profiler` | `iogpu.wired_limit_mb`, else assumed share | not applicable |
 | Intel iGPU | `lspci` / CIM | treated as unified memory | not available |
 
-Two honest gaps. AMD free VRAM on Windows needs DXGI's `QueryVideoMemoryInfo`,
-which is COM and per-adapter; the registry figure is a static capacity, not
-live state. And Apple Silicon has no separate VRAM to be free -- the GPU budget
-is a share of one pool the OS is also using, so "free system RAM" is a
-different question wearing the same words.
+Three honest gaps. AMD free VRAM on Windows needs DXGI's
+`QueryVideoMemoryInfo`, which is COM and per-adapter; the registry figure is a
+static capacity, not live state. Apple Silicon has no separate VRAM to be free.
+NVIDIA GB10 and Thor likewise share one Linux system pool, while their
+dedicated-memory fields report no usable total or free reading. On those
+systems `MemTotal` is addressable capacity, not a safe current model budget,
+and fitr does not relabel it as free memory. If a future driver reports a
+nonzero capacity through `nvidia-smi`, fitr preserves the value but labels it
+as unified capacity rather than dedicated VRAM.
 
 This is what has been exercised on real hardware so far: Windows with an
 NVIDIA card. Everything else is written from the platform's documented
@@ -106,12 +111,15 @@ and serving experiments.
 
 ### Memory budget by platform
 
-`fitr` reports the memory a model may actually use, not the memory installed.
-The source is printed beside the number everywhere it appears.
+`fitr` prints the provenance of every capacity input rather than silently
+substituting an advertised number. A dedicated-memory total can be a planning
+budget. An addressable unified pool is only physical capacity until an
+operator supplies a safe budget or a runtime receipt proves one loaded point.
 
 | Platform | Source | Kind |
 |---|---|---|
-| NVIDIA | `nvidia-smi` total, and free where a contention caveat applies | measured |
+| NVIDIA discrete | `nvidia-smi` total, and free where a contention caveat applies | measured |
+| NVIDIA GB10 / Thor on Linux | `/proc/meminfo` `MemTotal` | measured addressable pool, not safe free budget |
 | AMD on Linux | `drm sysfs` | measured |
 | Apple Silicon, limit set | `iogpu.wired_limit_mb` | measured |
 | Apple Silicon, default | 75% of `hw.memsize` | **assumed** |
@@ -119,14 +127,13 @@ The source is printed beside the number everywhere it appears.
 
 Apple Silicon shares one pool, but the GPU cannot wire all of it. Reporting
 installed RAM as GPU-available memory is the unified-memory version of grading
-against total instead of free: on a 128 GB machine it overstates the budget by
-tens of gigabytes and will certify a 111 GB model that cannot load. Raise the
-ceiling with `sudo sysctl iogpu.wired_limit_mb=N` and fitr reads it back as a
-measurement rather than an assumption.
+against total instead of the active kernel policy: it can certify a model that
+does not load. Raise the ceiling with `sudo sysctl iogpu.wired_limit_mb=N` and
+fitr reads it back as a measurement rather than an assumption.
 
 The 75% figure is kernel policy, not a published constant, so it is labelled
-assumed and errs low. It declines to certify rather than certifying something
-that will not load.
+assumed and is intended to err conservatively. It avoids treating every byte
+of installed RAM as an unconditional model budget.
 
 ## Commands
 
@@ -188,14 +195,29 @@ Ctrl-C is safe (exit 130).
   `compare` require that effective receipt and will not rank a request the
   runtime did not verify. `fitr apply` then prints the command to persist that
   setting; fitr never restarts the server.
+  `compare` never changes or reinterprets a saved context. Measure both
+  configurations with the same `--ctx`, then compare them. The current CLI
+  selects the newest exact named result; use History to select a specific
+  saved pair.
 - `--load` (advise) loads an Ollama model and reads `/api/ps` so fit includes
   the live resident allocation, including runtime-managed memory beyond
-  modeled weights and KV. `--fit` runs
-  `llama-fit-params` on a GGUF when that binary is on PATH and uses its dummy
-  allocation. The weights+KV estimate is the default for conventional
+  modeled weights and KV. It requires an explicit `--ctx`; compatibility is
+  earned only when `/api/ps` reports that same effective context. `--fit` runs
+  `llama-fit-params` on a GGUF when that binary is on PATH and reports its
+  final device-memory projection. The
+  current adapter does not capture the fitter's adjusted context, offload,
+  tensor placement, binary version, or host-memory domain, so the projection
+  is descriptive: it remains SKIP and does not enter a context row or produce
+  a fit remedy. The weights+KV lower bound remains the default for conventional
   attention and is labeled as such. Hybrid recurrent architectures stay SKIP
-  until `--load` or `--fit` measures their extra state. Split GGUF weights are
-  summed only after every declared shard is present.
+  until `--load` observes their allocation at the runtime-reported context.
+  Split GGUF weights are summed only after every declared shard is present.
+  Pass any numbered shard of a split GGUF to `fitr advise`. fitr requires the
+  complete declared set and sums every shard before evaluating capacity. A
+  local path is an advice input, not a launch request: `fitr run` measures the
+  exact model already served by the selected runtime. `--fit` invokes
+  `llama-fit-params` for that one artifact; it is not a multi-model fit-set
+  test.
 - `--pull` fetches a missing Ollama tag before measuring. Pasted Hugging
   Face GGUF URLs pull automatically (they *are* the request to fetch).
 - `--allow-unsafe-exec` runs unisolated built-in Python diagnostics after an
@@ -203,8 +225,11 @@ Ctrl-C is safe (exit 130).
   one exact verifier receipt. These defenses do not create a sandbox, so the
   observation remains INCONCLUSIVE and is excluded from rankings.
 - `--profile P` forces a device profile instead of auto-matching.
-- `--vram-gb N` (advise) supplies the memory budget when fitr cannot read
-  one. Unmeasured VRAM is a SKIP, never a guess from the GPU's name.
+- `--vram-gb N` (advise) supplies an operator-declared GPU or unified-memory
+  planning budget. Use it to encode a deliberate operating reserve, not the
+  nominal sticker capacity. Without a safe budget or a point-specific runtime
+  receipt, addressable unified capacity remains SKIP; fitr never guesses from
+  the GPU's name.
 - `--ctx N` (advise) is the context to size against; default is the model's
   max from GGUF metadata.
 - `--html` (run) writes a self-contained HTML scorecard next to the JSON.
@@ -226,6 +251,7 @@ exit 2, and do not begin runtime discovery or modify stored evidence.
 
 ```bash
 fitr run m --display json    # NDJSON on stdout, nothing else
+fitr advise qwen3:30b --display json  # one fitr.advise.v1 document
 fitr view                    # newest saved result, with repeat-shape graphs on a rich terminal
 fitr view m --display json   # privacy-safe presentation scorecard JSON
 fitr view m --display json --full  # complete sealed local record; may contain sensitive data
@@ -277,6 +303,12 @@ terminal.
 | 3 | ran fine, a need FAILED (`advise`: low memory or incompatible) |
 | 130 | interrupted |
 
+For `advise`, SKIP exits 0 because no measured need failed. Automation that
+must distinguish SKIP from compatible should read the JSON `tier`. Low-memory
+and incompatible are completed negative measurements and exit 3; they are not
+transport or parser errors. JSON is written before that semantic exit code is
+returned.
+
 Bare `fitr` and `fitr advise` with no model print the installed inventory:
 what the serving runtime already has, joined to current fitr evidence. Each
 row is **measured**, **unproven**, **incompatible**, or **stale**, with one
@@ -288,15 +320,23 @@ already serving that window. Unmeasured is a candidate, never a
 recommendation. Color does not carry the state. `fitr <model>` is named
 advise; inventory does not `Show()` every blob or pull anything.
 
+Model arguments are exact, apart from the explicit `name` and `name:latest`
+equivalence. Long names may be filtered and selected in `fitr top`, but
+truncated display text never becomes identity. fitr does not guess from a
+prefix or a row number.
+
 If a saved result cannot be decoded or trusted, inventory keeps every healthy
 row visible and prints an evidence warning. The damaged file never contributes
 to a `measured` state. `fitr top history` shows the file-level details needed
 to repair or remove it.
 
 A named `fitr advise` prints a context-fit table at 2k / 4k / 8k / 16k / 32k
-and the architecture max: weights, KV, other resident allocation, need, and
+and the architecture max: weights, KV, other allocation where its evidence is
+known, need, and
 remaining capacity. The non-weight, non-KV part is `n/a` until `--load` or
-`--fit` measured that exact window.
+another exact-context runtime receipt provides a total. `--fit` remains a
+descriptive allocator projection and is not attached to a context row until
+its final context and placement are captured.
 Decode/prefill appear only from a saved run at that ctx. Hybrid recurrent
 models skip the algebraic table until a measurement exists. The suggested
 row is the largest window that still fits when the requested one does not.
@@ -348,9 +388,10 @@ runtime owns how many threads actually decode.
 
 ## Advise
 
-`fitr advise <model>` sizes a model against this box and prints a three-tier
-verdict: **compatible**, **low memory** (`try num_ctx=4096 -> fits in 19.4 GB`),
-or **incompatible**. Negative tiers carry the flag that fixes them.
+`fitr advise <model>` sizes a model against this box and prints three decision
+tiers: **compatible**, **low memory** (`try num_ctx=4096 -> fits in 19.4 GB`),
+or **incompatible**. It prints **SKIP** when the required evidence is missing.
+Negative tiers carry a concrete remedy.
 
 If the model is already loaded, the number is the server's own resident
 bytes. The non-weight, non-KV part is a derived remainder, not an independently
@@ -361,10 +402,11 @@ the budget is the suspect number. MoE decode class uses *active* parameters,
 not total.
 
 Hybrid recurrent architectures are not conventional KV-only models. fitr does
-not project their memory from an incomplete formula: use `--load` at the
-requested context or `--fit`. For split GGUFs, every declared shard must be
-present and the weight total is the sum of the complete set; a shard header is
-never mistaken for the whole model.
+not project their memory from an incomplete formula. Use `--load` at the
+requested context for a runtime observation. `--fit` can display an unbound
+allocator projection, but it cannot establish a point-specific verdict. For
+split GGUFs, every declared shard must be present and the weight total is the
+sum of the complete set; a shard header is never mistaken for the whole model.
 
 SKIP, never a guess, when GPU memory was not measured, weights are unknown,
 or architecture metadata is missing. `--vram-gb N` supplies a budget; a GPU

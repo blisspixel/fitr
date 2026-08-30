@@ -266,7 +266,21 @@ func WriteHTML(w io.Writer, a Artifact) error {
 
 func htmlDataFrom(a Artifact) htmlData {
 	g := glyphs{" | ", "-", "+/-", "..."}
-	d := htmlData{
+	d := baseHTMLData(a)
+	d.NumCtx = htmlContext(a.Meta)
+	d.RAM = htmlRAM(a.Device.RAMGb)
+	d.SizeLine = htmlSizeLine(a.Meta)
+	if a.WallSeconds > 0 {
+		d.Wall = fmt.Sprintf("%.0fs", a.WallSeconds)
+	}
+	d.Config = htmlConfig(a.Device)
+	d.Needs, d.Gaps = htmlNeeds(a.Scorecard)
+	d.Decode, d.Prefill = htmlPerformance(a.Meta, g)
+	return d
+}
+
+func baseHTMLData(a Artifact) htmlData {
+	return htmlData{
 		CSS:           template.CSS(artifactCSS),
 		Title:         "fitr · " + a.Model,
 		Model:         a.Model,
@@ -289,48 +303,62 @@ func htmlDataFrom(a Artifact) htmlData {
 		RepeatsWarn:   a.Meta.Repeats > 0 && a.Meta.Repeats < 3,
 		Next:          a.NextCommand,
 	}
-	if a.Meta.NumCtx > 0 {
-		switch {
-		case a.Meta.EffectiveCtx > 0 && a.Meta.EffectiveCtx != a.Meta.NumCtx:
-			d.NumCtx = fmt.Sprintf("%d requested, %d effective (%s)", a.Meta.NumCtx,
-				a.Meta.EffectiveCtx, a.Meta.ContextState)
-		case a.Meta.EffectiveCtx > 0:
-			d.NumCtx = fmt.Sprintf("%d effective (%s)", a.Meta.EffectiveCtx, a.Meta.ContextState)
-		case a.Meta.ContextState != "":
-			d.NumCtx = fmt.Sprintf("%d requested, effective %s", a.Meta.NumCtx, a.Meta.ContextState)
-		default:
-			d.NumCtx = strconv.Itoa(a.Meta.NumCtx)
-		}
-	}
-	if a.Device.RAMGb > 0 {
-		d.RAM = fmt.Sprintf("%.1f GB", a.Device.RAMGb)
-	}
-	var size []string
-	if a.Meta.ParamSize != "" {
-		size = append(size, a.Meta.ParamSize)
-	}
-	if a.Meta.Quant != "" {
-		size = append(size, a.Meta.Quant)
-	}
-	if a.Meta.Family != "" {
-		size = append(size, a.Meta.Family)
-	}
-	d.SizeLine = strings.Join(size, "  ")
-	if a.WallSeconds > 0 {
-		d.Wall = fmt.Sprintf("%.0fs", a.WallSeconds)
-	}
+}
 
+func htmlContext(meta Meta) string {
+	if meta.NumCtx <= 0 {
+		return ""
+	}
+	switch {
+	case meta.EffectiveCtx > 0 && meta.EffectiveCtx != meta.NumCtx:
+		return fmt.Sprintf("%d requested, %d effective (%s)", meta.NumCtx,
+			meta.EffectiveCtx, meta.ContextState)
+	case meta.EffectiveCtx > 0:
+		return fmt.Sprintf("%d effective (%s)", meta.EffectiveCtx, meta.ContextState)
+	case meta.ContextState != "":
+		return fmt.Sprintf("%d requested, effective %s", meta.NumCtx, meta.ContextState)
+	default:
+		return strconv.Itoa(meta.NumCtx)
+	}
+}
+
+func htmlRAM(ramGB float64) string {
+	if ramGB <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.1f GB", ramGB)
+}
+
+func htmlSizeLine(meta Meta) string {
+	var size []string
+	if meta.ParamSize != "" {
+		size = append(size, meta.ParamSize)
+	}
+	if meta.Quant != "" {
+		size = append(size, meta.Quant)
+	}
+	if meta.Family != "" {
+		size = append(size, meta.Family)
+	}
+	return strings.Join(size, "  ")
+}
+
+func htmlConfig(fingerprint ShareDevice) []htmlKV {
+	var config []htmlKV
 	for _, k := range []string{
 		"OLLAMA_CONTEXT_LENGTH", "OLLAMA_FLASH_ATTENTION", "OLLAMA_KV_CACHE_TYPE", "OLLAMA_NUM_PARALLEL",
 	} {
-		v := a.Device.Config[k]
+		v := fingerprint.Config[k]
 		if v != "" {
-			d.Config = append(d.Config, htmlKV{K: k, V: v})
+			config = append(config, htmlKV{K: k, V: v})
 		}
 	}
+	return config
+}
 
-	for _, k := range score.SortedNeeds(a.Scorecard.Needs) {
-		v, ok := a.Scorecard.Needs[k]
+func htmlNeeds(card score.Scorecard) (needs, gaps []htmlNeed) {
+	for _, k := range score.SortedNeeds(card.Needs) {
+		v, ok := card.Needs[k]
 		if !ok {
 			continue
 		}
@@ -345,22 +373,25 @@ func htmlDataFrom(a Artifact) htmlData {
 		}
 		switch v.State {
 		case score.Skip, score.NA:
-			d.Gaps = append(d.Gaps, row)
+			gaps = append(gaps, row)
 		default:
-			d.Needs = append(d.Needs, row)
+			needs = append(needs, row)
 		}
 	}
+	return needs, gaps
+}
 
-	if a.Meta.DecodeN > 0 {
-		d.Decode = stat(a.Meta.DecodeMean, a.Meta.DecodeSD, a.Meta.DecodeN, g)
-		if a.Meta.DecodeMin > 0 || a.Meta.DecodeMax > 0 {
-			d.Decode += fmt.Sprintf(" min %.2f, max %.2f", a.Meta.DecodeMin, a.Meta.DecodeMax)
+func htmlPerformance(meta Meta, g glyphs) (decode, prefill string) {
+	if meta.DecodeN > 0 {
+		decode = stat(meta.DecodeMean, meta.DecodeSD, meta.DecodeN, g)
+		if meta.DecodeMin > 0 || meta.DecodeMax > 0 {
+			decode += fmt.Sprintf(" min %.2f, max %.2f", meta.DecodeMin, meta.DecodeMax)
 		}
 	}
-	if a.Meta.PrefillN > 0 {
-		d.Prefill = stat(a.Meta.PrefillMean, a.Meta.PrefillSD, a.Meta.PrefillN, g)
+	if meta.PrefillN > 0 {
+		prefill = stat(meta.PrefillMean, meta.PrefillSD, meta.PrefillN, g)
 	}
-	return d
+	return decode, prefill
 }
 
 func ShareFingerprintID(deviceKey string) string {

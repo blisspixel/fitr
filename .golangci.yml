@@ -5,10 +5,6 @@
 # learn to ignore.
 #
 # Deliberately deferred, each with a reason rather than a shrug:
-#   funlen, gocognit, nestif - findings remain spread across command, scoring,
-#     evaluation, session, and presentation paths. Enabling them before those
-#     paths are decomposed buys a wall of nolint directives, not better code.
-#     Tracked in the roadmap.
 #   recvcheck - five types mix value and pointer receivers. Correcting that
 #     changes value semantics on types that are copied deliberately, which is a
 #     considered change, not a lint sweep.
@@ -64,6 +60,9 @@ linters:
     # Hygiene.
     - dupl # duplicated production logic drifts and weakens evidence contracts
     - gocyclo # keep every control-flow unit within the project threshold
+    - funlen # keep functions and tests small enough to audit locally
+    - gocognit # bound cognitive complexity, including test harnesses
+    - nestif # keep nested decision paths explicit and reviewable
     - nolintlint
 
   settings:

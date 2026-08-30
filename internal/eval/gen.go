@@ -165,67 +165,96 @@ func strictJSON(s string) (any, error) {
 func jsonEqual(got, want any) (bool, string) {
 	switch w := want.(type) {
 	case int:
-		n, ok := got.(json.Number)
-		if !ok {
-			return false, fmt.Sprintf("want integer %d, got %T", w, got)
-		}
-		f, err := n.Float64()
-		if err != nil || f != float64(w) {
-			return false, fmt.Sprintf("want %d, got %s", w, n)
-		}
+		return jsonIntEqual(got, w)
 	case float64:
-		n, ok := got.(json.Number)
-		if !ok {
-			return false, fmt.Sprintf("want number %.2f, got %T", w, got)
-		}
-		f, err := n.Float64()
-		if err != nil || f-w > 0.005 || w-f > 0.005 {
-			return false, fmt.Sprintf("want %.2f, got %s", w, n)
-		}
+		return jsonFloatEqual(got, w)
 	case string:
-		s, ok := got.(string)
-		if !ok || s != w {
-			return false, fmt.Sprintf("want %q, got %v", w, got)
-		}
+		return jsonStringEqual(got, w)
 	case bool:
-		b, ok := got.(bool)
-		if !ok || b != w {
-			return false, fmt.Sprintf("want %v, got %v", w, got)
-		}
+		return jsonBoolEqual(got, w)
 	case []any:
-		a, ok := got.([]any)
-		if !ok {
-			return false, fmt.Sprintf("want array, got %T", got)
-		}
-		if len(a) != len(w) {
-			return false, fmt.Sprintf("want %d elements, got %d", len(w), len(a))
-		}
-		for i := range w {
-			if ok, why := jsonEqual(a[i], w[i]); !ok {
-				return false, fmt.Sprintf("index %d: %s", i, why)
-			}
-		}
+		return jsonArrayEqual(got, w)
 	case map[string]any:
-		m, ok := got.(map[string]any)
-		if !ok {
-			return false, fmt.Sprintf("want object, got %T", got)
-		}
-		for k := range m {
-			if _, ok := w[k]; !ok {
-				return false, fmt.Sprintf("unexpected field %q", k)
-			}
-		}
-		for k, wv := range w {
-			gv, ok := m[k]
-			if !ok {
-				return false, fmt.Sprintf("missing field %q", k)
-			}
-			if ok, why := jsonEqual(gv, wv); !ok {
-				return false, fmt.Sprintf("field %q: %s", k, why)
-			}
-		}
+		return jsonObjectEqual(got, w)
 	default:
 		return false, fmt.Sprintf("unsupported expected type %T", want)
+	}
+}
+
+func jsonIntEqual(got any, want int) (bool, string) {
+	n, ok := got.(json.Number)
+	if !ok {
+		return false, fmt.Sprintf("want integer %d, got %T", want, got)
+	}
+	f, err := n.Float64()
+	if err != nil || f != float64(want) {
+		return false, fmt.Sprintf("want %d, got %s", want, n)
+	}
+	return true, ""
+}
+
+func jsonFloatEqual(got any, want float64) (bool, string) {
+	n, ok := got.(json.Number)
+	if !ok {
+		return false, fmt.Sprintf("want number %.2f, got %T", want, got)
+	}
+	f, err := n.Float64()
+	if err != nil || f-want > 0.005 || want-f > 0.005 {
+		return false, fmt.Sprintf("want %.2f, got %s", want, n)
+	}
+	return true, ""
+}
+
+func jsonStringEqual(got any, want string) (bool, string) {
+	s, ok := got.(string)
+	if !ok || s != want {
+		return false, fmt.Sprintf("want %q, got %v", want, got)
+	}
+	return true, ""
+}
+
+func jsonBoolEqual(got any, want bool) (bool, string) {
+	b, ok := got.(bool)
+	if !ok || b != want {
+		return false, fmt.Sprintf("want %v, got %v", want, got)
+	}
+	return true, ""
+}
+
+func jsonArrayEqual(got any, want []any) (bool, string) {
+	a, ok := got.([]any)
+	if !ok {
+		return false, fmt.Sprintf("want array, got %T", got)
+	}
+	if len(a) != len(want) {
+		return false, fmt.Sprintf("want %d elements, got %d", len(want), len(a))
+	}
+	for i := range want {
+		if ok, why := jsonEqual(a[i], want[i]); !ok {
+			return false, fmt.Sprintf("index %d: %s", i, why)
+		}
+	}
+	return true, ""
+}
+
+func jsonObjectEqual(got any, want map[string]any) (bool, string) {
+	m, ok := got.(map[string]any)
+	if !ok {
+		return false, fmt.Sprintf("want object, got %T", got)
+	}
+	for key := range m {
+		if _, ok := want[key]; !ok {
+			return false, fmt.Sprintf("unexpected field %q", key)
+		}
+	}
+	for key, wantValue := range want {
+		gotValue, ok := m[key]
+		if !ok {
+			return false, fmt.Sprintf("missing field %q", key)
+		}
+		if ok, why := jsonEqual(gotValue, wantValue); !ok {
+			return false, fmt.Sprintf("field %q: %s", key, why)
+		}
 	}
 	return true, ""
 }
@@ -738,81 +767,88 @@ func genStatic(params map[string]any, rng *rand.Rand) Instance {
 	typ := pString(g, "type", "")
 	expected := pString(g, "expected", "")
 	ci := pBool(g, "case_insensitive")
+	return Instance{Prompt: prompt, Canon: canon, Grade: staticGrader(typ, expected, ci, g)}
+}
 
-	var grade func(string) (bool, string)
+func staticGrader(typ, expected string, ci bool, grader map[string]any) func(string) (bool, string) {
 	switch typ {
 	case "exact":
-		grade = func(text string) (bool, string) {
-			got, want := strings.TrimSpace(text), strings.TrimSpace(expected)
-			if ci {
-				got, want = strings.ToLower(got), strings.ToLower(want)
-			}
-			if got != want {
-				return false, fmt.Sprintf("want %q, got %q", want, firstLine(got))
-			}
-			return true, "exact match"
-		}
+		return staticExactGrader(expected, ci)
 	case "contains":
-		grade = func(text string) (bool, string) {
-			got, want := text, expected
-			if ci {
-				got, want = strings.ToLower(got), strings.ToLower(want)
-			}
-			if !strings.Contains(got, want) {
-				return false, fmt.Sprintf("reply does not contain %q", expected)
-			}
-			return true, "contains expected text"
-		}
+		return staticContainsGrader(expected, ci)
 	case "regex":
-		re, err := regexp.Compile(pString(g, "pattern", ""))
-		if err != nil {
-			grade = func(string) (bool, string) { return false, "invalid pattern: " + err.Error() }
-			break
-		}
-		grade = func(text string) (bool, string) {
-			if !re.MatchString(text) {
-				return false, fmt.Sprintf("reply does not match /%s/", re.String())
-			}
-			return true, "matches pattern"
-		}
+		return staticRegexGrader(pString(grader, "pattern", ""))
 	case "json_object":
-		want, _ := g["expected_object"].(map[string]any)
-		grade = func(text string) (bool, string) {
-			v, err := strictJSON(stripFence(text))
-			if err != nil {
-				return false, "not a single JSON value: " + err.Error()
-			}
-			if ok, why := jsonEqual(v, any(normalizeWant(want))); !ok {
-				return false, why
-			}
-			return true, "valid JSON, exact match"
-		}
+		want, _ := grader["expected_object"].(map[string]any)
+		return gradeJSONObject(normalizeWant(want))
 	case "number":
-		wantF, _ := toFloat(g["expected_number"])
-		tol, ok := toFloat(g["tolerance"])
-		if !ok {
-			tol = 1e-9
-		}
-		grade = func(text string) (bool, string) {
-			ans, found := lastAnswer(text)
-			if !found {
-				ans = strings.TrimSpace(text)
-			}
-			f, err := parseAnswerNumber(ans)
-			if err != nil {
-				return false, fmt.Sprintf("no parseable number (looked after `Answer:`, then at the whole reply): %q", firstLine(ans))
-			}
-			if f-wantF > tol || wantF-f > tol {
-				return false, fmt.Sprintf("want %v, got %v", wantF, f)
-			}
-			return true, "number matches"
-		}
+		return staticNumberGrader(grader)
 	default:
-		grade = func(string) (bool, string) {
+		return func(string) (bool, string) {
 			return false, fmt.Sprintf("unknown grader type %q", typ)
 		}
 	}
-	return Instance{Prompt: prompt, Canon: canon, Grade: grade}
+}
+
+func staticExactGrader(expected string, ci bool) func(string) (bool, string) {
+	return func(text string) (bool, string) {
+		got, want := strings.TrimSpace(text), strings.TrimSpace(expected)
+		if ci {
+			got, want = strings.ToLower(got), strings.ToLower(want)
+		}
+		if got != want {
+			return false, fmt.Sprintf("want %q, got %q", want, firstLine(got))
+		}
+		return true, "exact match"
+	}
+}
+
+func staticContainsGrader(expected string, ci bool) func(string) (bool, string) {
+	return func(text string) (bool, string) {
+		got, want := text, expected
+		if ci {
+			got, want = strings.ToLower(got), strings.ToLower(want)
+		}
+		if !strings.Contains(got, want) {
+			return false, fmt.Sprintf("reply does not contain %q", expected)
+		}
+		return true, "contains expected text"
+	}
+}
+
+func staticRegexGrader(pattern string) func(string) (bool, string) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return func(string) (bool, string) { return false, "invalid pattern: " + err.Error() }
+	}
+	return func(text string) (bool, string) {
+		if !re.MatchString(text) {
+			return false, fmt.Sprintf("reply does not match /%s/", re.String())
+		}
+		return true, "matches pattern"
+	}
+}
+
+func staticNumberGrader(grader map[string]any) func(string) (bool, string) {
+	wantF, _ := toFloat(grader["expected_number"])
+	tol, ok := toFloat(grader["tolerance"])
+	if !ok {
+		tol = 1e-9
+	}
+	return func(text string) (bool, string) {
+		ans, found := lastAnswer(text)
+		if !found {
+			ans = strings.TrimSpace(text)
+		}
+		f, err := parseAnswerNumber(ans)
+		if err != nil {
+			return false, fmt.Sprintf("no parseable number (looked after `Answer:`, then at the whole reply): %q", firstLine(ans))
+		}
+		if f-wantF > tol || wantF-f > tol {
+			return false, fmt.Sprintf("want %v, got %v", wantF, f)
+		}
+		return true, "number matches"
+	}
 }
 
 // normalizeWant converts a user-supplied expected object (JSON floats) into

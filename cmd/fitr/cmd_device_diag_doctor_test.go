@@ -266,65 +266,68 @@ func TestDiagReportsHealthyPlumbingAndEvidenceFailures(t *testing.T) {
 }
 
 func TestDoctorReportsHealthyFailedErroredAndCanceledRuns(t *testing.T) {
-	t.Run("healthy", func(t *testing.T) {
-		runtime := &diagnosticRuntime{t: t, capabilities: []string{"completion"}}
-		useDiagnosticRuntime(t, runtime)
-		stdout, stderr, code := captureCommandOutput(t, func() int {
-			return cmdDoctor(context.Background(), []string{"model", "--backend=ollama", "-n=2", "--ctx=4096"})
-		})
-		if code != exitOK || stderr != "" {
-			t.Fatalf("healthy doctor exit=%d stderr=%q\n%s", code, stderr, stdout)
-		}
-		for _, want := range []string{
-			"doctor: model", "real_token", "served_context", "determinism_text",
-			"determinism_json", "healthy - measurements on this box mean what they say",
-		} {
-			if !strings.Contains(stdout, want) {
-				t.Fatalf("healthy doctor missing %q:\n%s", want, stdout)
-			}
-		}
-		_, generated := runtime.calls()
-		if generated != 6 {
-			t.Fatalf("healthy doctor generation calls = %d, want 6", generated)
-		}
-	})
+	t.Run("healthy", assertHealthyDoctorRun)
+	t.Run("failed health gate", assertFailedDoctorHealthGate)
+	t.Run("late transport error", assertDoctorTransportError)
+	t.Run("canceled", assertCanceledDoctorRun)
+}
 
-	t.Run("failed health gate", func(t *testing.T) {
-		runtime := &diagnosticRuntime{t: t, capabilities: []string{"completion"}, generateEmptyAt: 1}
-		useDiagnosticRuntime(t, runtime)
-		stdout, stderr, code := captureCommandOutput(t, func() int {
-			return cmdDoctor(context.Background(), []string{"model", "--backend=ollama", "-n=2"})
-		})
-		if code != exitGates || stderr != "" || !strings.Contains(stdout, "real_token") ||
-			!strings.Contains(stdout, "emits no tokens") {
-			t.Fatalf("failed doctor exit=%d stdout=%q stderr=%q", code, stdout, stderr)
-		}
+func assertHealthyDoctorRun(t *testing.T) {
+	runtime := &diagnosticRuntime{t: t, capabilities: []string{"completion"}}
+	useDiagnosticRuntime(t, runtime)
+	stdout, stderr, code := captureCommandOutput(t, func() int {
+		return cmdDoctor(context.Background(), []string{"model", "--backend=ollama", "-n=2", "--ctx=4096"})
 	})
+	if code != exitOK || stderr != "" {
+		t.Fatalf("healthy doctor exit=%d stderr=%q\n%s", code, stderr, stdout)
+	}
+	for _, want := range []string{
+		"doctor: model", "real_token", "served_context", "determinism_text",
+		"determinism_json", "healthy - measurements on this box mean what they say",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("healthy doctor missing %q:\n%s", want, stdout)
+		}
+	}
+	_, generated := runtime.calls()
+	if generated != 6 {
+		t.Fatalf("healthy doctor generation calls = %d, want 6", generated)
+	}
+}
 
-	t.Run("late transport error", func(t *testing.T) {
-		runtime := &diagnosticRuntime{t: t, capabilities: []string{"completion"}, generateErrorAt: 3}
-		useDiagnosticRuntime(t, runtime)
-		stdout, stderr, code := captureCommandOutput(t, func() int {
-			return cmdDoctor(context.Background(), []string{"model", "--backend=ollama", "-n=2"})
-		})
-		if code != exitError || !strings.Contains(stdout, "doctor: model") ||
-			!strings.Contains(stderr, "injected generation failure") {
-			t.Fatalf("errored doctor exit=%d stdout=%q stderr=%q", code, stdout, stderr)
-		}
+func assertFailedDoctorHealthGate(t *testing.T) {
+	runtime := &diagnosticRuntime{t: t, capabilities: []string{"completion"}, generateEmptyAt: 1}
+	useDiagnosticRuntime(t, runtime)
+	stdout, stderr, code := captureCommandOutput(t, func() int {
+		return cmdDoctor(context.Background(), []string{"model", "--backend=ollama", "-n=2"})
 	})
+	if code != exitGates || stderr != "" || !strings.Contains(stdout, "real_token") ||
+		!strings.Contains(stdout, "emits no tokens") {
+		t.Fatalf("failed doctor exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
 
-	t.Run("canceled", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		runtime := &diagnosticRuntime{
-			t: t, capabilities: []string{"completion"}, cancelAt: 3, cancel: cancel,
-		}
-		useDiagnosticRuntime(t, runtime)
-		stdout, stderr, code := captureCommandOutput(t, func() int {
-			return cmdDoctor(ctx, []string{"model", "--backend=ollama", "-n=2"})
-		})
-		if code != exitInterrupt || !strings.Contains(stdout, "doctor: model") ||
-			!strings.Contains(stderr, "interrupted") {
-			t.Fatalf("canceled doctor exit=%d stdout=%q stderr=%q", code, stdout, stderr)
-		}
+func assertDoctorTransportError(t *testing.T) {
+	runtime := &diagnosticRuntime{t: t, capabilities: []string{"completion"}, generateErrorAt: 3}
+	useDiagnosticRuntime(t, runtime)
+	stdout, stderr, code := captureCommandOutput(t, func() int {
+		return cmdDoctor(context.Background(), []string{"model", "--backend=ollama", "-n=2"})
 	})
+	if code != exitError || !strings.Contains(stdout, "doctor: model") ||
+		!strings.Contains(stderr, "injected generation failure") {
+		t.Fatalf("errored doctor exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func assertCanceledDoctorRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	runtime := &diagnosticRuntime{t: t, capabilities: []string{"completion"}, cancelAt: 3, cancel: cancel}
+	useDiagnosticRuntime(t, runtime)
+	stdout, stderr, code := captureCommandOutput(t, func() int {
+		return cmdDoctor(ctx, []string{"model", "--backend=ollama", "-n=2"})
+	})
+	if code != exitInterrupt || !strings.Contains(stdout, "doctor: model") ||
+		!strings.Contains(stderr, "interrupted") {
+		t.Fatalf("canceled doctor exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
 }

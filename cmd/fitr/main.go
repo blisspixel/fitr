@@ -66,8 +66,7 @@ func errPrint(msg, note, hint string) {
 
 func terminalText(value string) string { return render.SingleLine(value) }
 
-func usage() {
-	fmt.Fprint(os.Stderr, `fitr `+version+` - is this local model any good ON THIS DEVICE?
+const usageText = ` - is this local model any good ON THIS DEVICE?
 
 usage:
   fitr [--display MODE]             installed models, evidence, next command
@@ -111,7 +110,7 @@ environment:
 examples:
   fitr
   fitr qwen3:30b
-  fitr advise --display json
+  fitr advise qwen3:30b --display json
   fitr run qwen3-coder:30b
   fitr run https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
   fitr run some-new-model:tag -k 3 --pull
@@ -129,8 +128,9 @@ examples:
   fitr run qwen3:8b-q8_0 --checks-only --seedset qwen3-8b -k 5
   fitr run qwen3:8b-q4_K_M --checks-only --seedset qwen3-8b -k 5
   fitr calibrate qwen3:8b-q8_0 qwen3:8b-q4_K_M --out pair.json --lineage conversion.json
-`)
-}
+`
+
+func usage() { fmt.Fprint(os.Stderr, "fitr "+version+usageText) }
 
 func main() { os.Exit(run()) }
 
@@ -143,37 +143,10 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	if handler := commandHandler(os.Args[1]); handler != nil {
+		return handler(ctx, os.Args[2:])
+	}
 	switch os.Args[1] {
-	case "run":
-		return cmdRun(ctx, os.Args[2:])
-	case "advise":
-		return cmdAdvise(ctx, os.Args[2:])
-	case "apply":
-		return cmdApply(ctx, os.Args[2:])
-	case "tune":
-		return cmdTune(ctx, os.Args[2:])
-	case "export":
-		return cmdExport(ctx, os.Args[2:])
-	case "view":
-		return cmdView(ctx, os.Args[2:])
-	case "board":
-		return cmdBoard(ctx, os.Args[2:])
-	case "top":
-		return cmdTop(ctx, os.Args[2:])
-	case "diag":
-		return cmdDiag(ctx, os.Args[2:])
-	case "doctor":
-		return cmdDoctor(ctx, os.Args[2:])
-	case "device":
-		return cmdDevice(ctx, os.Args[2:])
-	case "profiles":
-		return cmdProfiles(ctx, os.Args[2:])
-	case "calibrate":
-		return cmdCalibrate(ctx, os.Args[2:])
-	case "compare":
-		return cmdCompare(ctx, os.Args[2:])
-	case "screenshots": // dev-only: regenerate docs/assets from mock data
-		return cmdScreenshots(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return exitOK
@@ -187,6 +160,44 @@ func run() int {
 		// A positional that is not a command is a model: the named advise.
 		return cmdAdvise(ctx, os.Args[1:])
 	}
+}
+
+type commandFunc func(context.Context, []string) int
+
+func commandHandler(name string) commandFunc {
+	switch name {
+	case "run":
+		return cmdRun
+	case "advise":
+		return cmdAdvise
+	case "apply":
+		return cmdApply
+	case "tune":
+		return cmdTune
+	case "export":
+		return cmdExport
+	case "view":
+		return cmdView
+	case "board":
+		return cmdBoard
+	case "top":
+		return cmdTop
+	case "diag":
+		return cmdDiag
+	case "doctor":
+		return cmdDoctor
+	case "device":
+		return cmdDevice
+	case "profiles":
+		return cmdProfiles
+	case "calibrate":
+		return cmdCalibrate
+	case "compare":
+		return cmdCompare
+	case "screenshots": // dev-only: regenerate docs/assets from mock data
+		return cmdScreenshots
+	}
+	return nil
 }
 
 // permute moves positional arguments after flags.
@@ -749,6 +760,10 @@ func printInventory(ctx context.Context, backendKind, mode string) int {
 			also = append(also, f.Kind+"  "+f.URL)
 		}
 	}
+	return renderInventoryStatus(ctx, b, also, mode)
+}
+
+func renderInventoryStatus(ctx context.Context, b llm.Backend, also []string, mode string) int {
 	fp := device.Detect(ctx, b)
 	prof, err := device.SelectProfile("", fp)
 	if err != nil {
@@ -810,70 +825,99 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 	if err != nil {
 		return advise.InventoryTable{}, nil, err
 	}
-	warnings := []string{}
-	installed := make([]advise.InstalledModel, 0, len(tags))
-	for _, tag := range tags {
-		digest := tag.Digest
-		if digest == "" && tag.ReportedDigest != "" {
-			if verifier, ok := b.(llm.ModelDigestVerifier); ok {
-				verified, verifyErr := verifier.VerifyModelDigest(tag.Name, tag.ReportedDigest)
-				if verifyErr != nil {
-					warnings = append(warnings, fmt.Sprintf(
-						"model %s artifact identity could not be verified: %v", tag.Name, verifyErr))
-				} else {
-					digest = verified
-				}
-			}
-		}
-		item := advise.InstalledModel{
-			Name: tag.Name, Size: tag.Size, Quant: tag.Details.QuantizationLevel,
-			Path: tag.Path, ArtifactDigest: digest,
-		}
-		if tag.Path != "" {
-			if kvs, size, err := advise.OpenGGUF(tag.Path); err == nil {
-				item.Arch = advise.ArchFromKVs(kvs)
-				if item.Size == 0 {
-					item.Size = size
-				}
-			}
-		}
-		installed = append(installed, item)
-	}
-	var loaded []string
-	serving := map[string]int{}
-	if running, err := b.PS(listCtx); err == nil {
-		for _, m := range running {
-			loaded = append(loaded, m.Name)
-			if m.ContextLength > 0 {
-				if prior, exists := serving[m.Name]; exists && prior != m.ContextLength {
-					serving[m.Name] = 0
-				} else {
-					serving[m.Name] = m.ContextLength
-				}
-			}
-		}
-		for i := range installed {
-			if size, ok := residentSizeFromRunning(running, installed[i].Name); ok {
-				installed[i].ResidentB = size
-			}
-		}
-	}
-	var evidence []advise.InventoryEvidence
+	installed, warnings := installedInventoryModels(b, tags)
+	loaded, serving := loadedInventoryModels(listCtx, b, installed)
 	stored, err := record.NewStore(resultsDir()).LoadCurrent()
 	if err != nil {
 		return advise.InventoryTable{}, nil, fmt.Errorf("load saved evidence: %w", err)
 	}
-	evidence = evidenceFromRecords(stored.Records)
 	if len(stored.Warnings) > 0 {
 		warnings = append(warnings, fmt.Sprintf(
 			"%d saved result file(s) could not be trusted; run fitr top history for details",
 			len(stored.Warnings)))
 	}
 	return advise.Join(advise.InventoryQuery{
-		Tags: installed, Loaded: loaded, Evidence: evidence,
+		Tags: installed, Loaded: loaded, Evidence: evidenceFromRecords(stored.Records),
 		Current: fp, CurrentKey: fp.Key(), HaveGB: fp.VRAMGb, HaveSrc: fp.VRAMSource,
 		Serving: serving,
 	}), warnings, nil
+}
+
+func installedInventoryModels(b llm.Backend, tags []ollama.ModelInfo) ([]advise.InstalledModel, []string) {
+	warnings := []string{}
+	installed := make([]advise.InstalledModel, 0, len(tags))
+	for _, tag := range tags {
+		digest, warning := inventoryArtifactDigest(b, tag)
+		if warning != "" {
+			warnings = append(warnings, warning)
+		}
+		item := advise.InstalledModel{
+			Name: tag.Name, Size: tag.Size, Quant: tag.Details.QuantizationLevel,
+			Path: tag.Path, ArtifactDigest: digest,
+		}
+		enrichInstalledArtifact(&item)
+		installed = append(installed, item)
+	}
+	return installed, warnings
+}
+
+func inventoryArtifactDigest(b llm.Backend, tag ollama.ModelInfo) (string, string) {
+	if tag.Digest != "" || tag.ReportedDigest == "" {
+		return tag.Digest, ""
+	}
+	verifier, ok := b.(llm.ModelDigestVerifier)
+	if !ok {
+		return "", ""
+	}
+	verified, err := verifier.VerifyModelDigest(tag.Name, tag.ReportedDigest)
+	if err != nil {
+		return "", fmt.Sprintf("model %s artifact identity could not be verified: %v", tag.Name, err)
+	}
+	return verified, ""
+}
+
+func enrichInstalledArtifact(item *advise.InstalledModel) {
+	if item.Path == "" {
+		return
+	}
+	kvs, size, err := advise.OpenGGUF(item.Path)
+	if err != nil {
+		return
+	}
+	item.Arch = advise.ArchFromKVs(kvs)
+	if item.Size == 0 {
+		item.Size = size
+	}
+}
+
+func loadedInventoryModels(ctx context.Context, b llm.Backend, installed []advise.InstalledModel) ([]string, map[string]int) {
+	var loaded []string
+	serving := map[string]int{}
+	running, err := b.PS(ctx)
+	if err != nil {
+		return loaded, serving
+	}
+	for _, model := range running {
+		loaded = append(loaded, model.Name)
+		recordServingContext(serving, model)
+	}
+	for i := range installed {
+		if size, ok := residentSizeFromRunning(running, installed[i].Name); ok {
+			installed[i].ResidentB = size
+		}
+	}
+	return loaded, serving
+}
+
+func recordServingContext(serving map[string]int, model ollama.RunningModel) {
+	if model.ContextLength <= 0 {
+		return
+	}
+	if prior, exists := serving[model.Name]; exists && prior != model.ContextLength {
+		serving[model.Name] = 0
+		return
+	}
+	serving[model.Name] = model.ContextLength
 }
 
 func evidenceFromRecords(recs []*record.Record) []advise.InventoryEvidence {
@@ -969,52 +1013,18 @@ func profileUncalibrated(p device.Profile) bool {
 }
 
 func calibrationPair(a, b *Result, stats []eval.ItemStat) (calibration.PairReport, error) {
-	for index, result := range []*Result{a, b} {
-		label := []string{"reference", "candidate"}[index]
-		if result == nil {
-			return calibration.PairReport{}, fmt.Errorf("%s result is unavailable", label)
-		}
-		if len(result.Contamination) > 0 {
-			return calibration.PairReport{}, fmt.Errorf("%s result is contaminated by resident model(s): %s",
-				label, strings.Join(result.Contamination, ", "))
-		}
-		if issue := result.EvidenceIntegrityIssue(); issue != "" {
-			return calibration.PairReport{}, fmt.Errorf("%s result is unverified: %s", label, issue)
-		}
+	if err := validateCalibrationResults(a, b); err != nil {
+		return calibration.PairReport{}, err
 	}
-	if err := record.ProvenanceCompatibilityError(a, b); err != nil {
-		return calibration.PairReport{}, fmt.Errorf("run provenance differs: %w", err)
+	aKey, err := validateCalibrationDevice(a, b)
+	if err != nil {
+		return calibration.PairReport{}, err
 	}
-	aKey, aKeyErr := a.ComparableDeviceKey()
-	bKey, bKeyErr := b.ComparableDeviceKey()
-	if aKeyErr != nil || bKeyErr != nil {
-		return calibration.PairReport{}, fmt.Errorf("verified effective context is required: %w; %w", aKeyErr, bKeyErr)
+	if err := validateCalibrationChecks(a, b); err != nil {
+		return calibration.PairReport{}, err
 	}
-	if aKey != bKey {
-		return calibration.PairReport{}, errors.New("results were measured on different hardware or runtime configurations")
-	}
-	if diffs := a.Device.Diff(b.Device); len(diffs) > 0 {
-		names := make([]string, 0, len(diffs))
-		for _, diff := range diffs {
-			names = append(names, diff[0])
-		}
-		return calibration.PairReport{}, fmt.Errorf("resolved device configuration differs: %s", strings.Join(names, ", "))
-	}
-	if a.NumCtx != b.NumCtx {
-		return calibration.PairReport{}, fmt.Errorf("request context differs: %d vs %d", a.NumCtx, b.NumCtx)
-	}
-	paired := eval.PairFlips(a.Checks, b.Checks)
-	if len(a.Checks) != len(b.Checks) || paired.Shared != len(a.Checks) {
-		return calibration.PairReport{}, fmt.Errorf("check instances are incomplete: %d left, %d right, %d paired",
-			len(a.Checks), len(b.Checks), paired.Shared)
-	}
-	fa, fb := strings.TrimSpace(a.ModelMeta.Details.Family), strings.TrimSpace(b.ModelMeta.Details.Family)
-	if fa == "" || fb == "" || !strings.EqualFold(fa, fb) {
-		return calibration.PairReport{}, fmt.Errorf("model family differs or is unknown: %q vs %q", fa, fb)
-	}
-	pa, pb := strings.TrimSpace(a.ModelMeta.Details.ParameterSize), strings.TrimSpace(b.ModelMeta.Details.ParameterSize)
-	if pa == "" || pb == "" || !strings.EqualFold(pa, pb) {
-		return calibration.PairReport{}, fmt.Errorf("parameter size differs or is unknown: %q vs %q", pa, pb)
+	if err := validateCalibrationModelShape(a, b); err != nil {
+		return calibration.PairReport{}, err
 	}
 	spec, err := eval.LoadSpec()
 	if err != nil {
@@ -1024,27 +1034,94 @@ func calibrationPair(a, b *Result, stats []eval.ItemStat) (calibration.PairRepor
 		return calibration.PairReport{}, fmt.Errorf("result schema differs from this battery: %d, %d, current %d",
 			a.SchemaVersion, b.SchemaVersion, spec.Version.ResultSchemaVersion)
 	}
-	fp := a.Device
-	dev := calibration.Device{
-		ID: calibration.PseudonymousDeviceID(aKey),
+	return calibration.NewPair(version, spec.Version.SpecVersion, a.SeedSet,
+		calibrationDevice(a.Device, aKey), calibrationRun(a), calibrationRun(b), stats), nil
+}
+
+func validateCalibrationResults(a, b *Result) error {
+	for index, result := range []*Result{a, b} {
+		label := []string{"reference", "candidate"}[index]
+		if result == nil {
+			return fmt.Errorf("%s result is unavailable", label)
+		}
+		if len(result.Contamination) > 0 {
+			return fmt.Errorf("%s result is contaminated by resident model(s): %s",
+				label, strings.Join(result.Contamination, ", "))
+		}
+		if issue := result.EvidenceIntegrityIssue(); issue != "" {
+			return fmt.Errorf("%s result is unverified: %s", label, issue)
+		}
+	}
+	if err := record.ProvenanceCompatibilityError(a, b); err != nil {
+		return fmt.Errorf("run provenance differs: %w", err)
+	}
+	return nil
+}
+
+func validateCalibrationDevice(a, b *Result) (string, error) {
+	aKey, aKeyErr := a.ComparableDeviceKey()
+	bKey, bKeyErr := b.ComparableDeviceKey()
+	if aKeyErr != nil || bKeyErr != nil {
+		return "", fmt.Errorf("verified effective context is required: %w; %w", aKeyErr, bKeyErr)
+	}
+	if aKey != bKey {
+		return "", errors.New("results were measured on different hardware or runtime configurations")
+	}
+	if diffs := a.Device.Diff(b.Device); len(diffs) > 0 {
+		names := make([]string, 0, len(diffs))
+		for _, diff := range diffs {
+			names = append(names, diff[0])
+		}
+		return "", fmt.Errorf("resolved device configuration differs: %s", strings.Join(names, ", "))
+	}
+	if a.NumCtx != b.NumCtx {
+		return "", fmt.Errorf("request context differs: %d vs %d", a.NumCtx, b.NumCtx)
+	}
+	return aKey, nil
+}
+
+func validateCalibrationChecks(a, b *Result) error {
+	paired := eval.PairFlips(a.Checks, b.Checks)
+	if len(a.Checks) != len(b.Checks) || paired.Shared != len(a.Checks) {
+		return fmt.Errorf("check instances are incomplete: %d left, %d right, %d paired",
+			len(a.Checks), len(b.Checks), paired.Shared)
+	}
+	return nil
+}
+
+func validateCalibrationModelShape(a, b *Result) error {
+	fa, fb := strings.TrimSpace(a.ModelMeta.Details.Family), strings.TrimSpace(b.ModelMeta.Details.Family)
+	if fa == "" || fb == "" || !strings.EqualFold(fa, fb) {
+		return fmt.Errorf("model family differs or is unknown: %q vs %q", fa, fb)
+	}
+	pa, pb := strings.TrimSpace(a.ModelMeta.Details.ParameterSize), strings.TrimSpace(b.ModelMeta.Details.ParameterSize)
+	if pa == "" || pb == "" || !strings.EqualFold(pa, pb) {
+		return fmt.Errorf("parameter size differs or is unknown: %q vs %q", pa, pb)
+	}
+	return nil
+}
+
+func calibrationDevice(fp device.Fingerprint, key string) calibration.Device {
+	return calibration.Device{
+		ID: calibration.PseudonymousDeviceID(key),
 		OS: fp.OS, CPU: fp.CPU, RAMGB: fp.RAMGb, GPU: fp.GPU,
 		GPUDriver: fp.GPUDriver, GPUDriverDate: fp.GPUDriverDate,
 		GPUBackend: fp.GPUBackend, Runtime: fp.Runtime,
 		InferenceDevice: fp.InferenceDevice, Config: fp.Config,
 	}
-	toRun := func(r *Result) calibration.Run {
-		digest := ""
-		if r.Manifest != nil {
-			digest = r.Manifest.Model.RuntimeBoundDigest()
-		}
-		return calibration.Run{
-			Model: r.Model, Quant: r.ModelMeta.Details.QuantizationLevel,
-			Family: r.ModelMeta.Details.Family, ParameterSize: r.ModelMeta.Details.ParameterSize,
-			StartedAt: r.StartedAt, NumCtx: r.NumCtx, ResultSchemaVersion: r.SchemaVersion,
-			ArtifactDigest: digest,
-		}
+}
+
+func calibrationRun(r *Result) calibration.Run {
+	digest := ""
+	if r.Manifest != nil {
+		digest = r.Manifest.Model.RuntimeBoundDigest()
 	}
-	return calibration.NewPair(version, spec.Version.SpecVersion, a.SeedSet, dev, toRun(a), toRun(b), stats), nil
+	return calibration.Run{
+		Model: r.Model, Quant: r.ModelMeta.Details.QuantizationLevel,
+		Family: r.ModelMeta.Details.Family, ParameterSize: r.ModelMeta.Details.ParameterSize,
+		StartedAt: r.StartedAt, NumCtx: r.NumCtx, ResultSchemaVersion: r.SchemaVersion,
+		ArtifactDigest: digest,
+	}
 }
 
 func attachCalibrateLineage(report *calibration.PairReport, lineagePath string) error {

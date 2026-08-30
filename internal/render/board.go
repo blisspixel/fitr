@@ -67,15 +67,7 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 	if resolved == "none" {
 		return
 	}
-	rich := resolved == "rich"
-	p := palette{}
-	g := glyphs{" | ", "-", "+/-", "..."}
-	unicode := false
-	if rich {
-		p = pickPalette(!noColor())
-		g = pickGlyphs()
-		unicode = unicodeOK()
-	}
+	p, g, unicode := boardStyle(resolved == "rich")
 
 	// The board's columns are fixed, so its rule matches them rather than the
 	// terminal: a rule wider than the content is as wrong as one narrower.
@@ -86,93 +78,122 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		kv := group.KV
-		if kv == "" {
-			kv = "default"
-		}
-		ctx := fmt.Sprintf("ctx %d", group.NumCtx)
-		if group.EffectiveCtx > 0 && group.EffectiveCtx != group.NumCtx {
-			ctx = fmt.Sprintf("ctx %d -> %d effective", group.NumCtx, group.EffectiveCtx)
-		} else if group.EffectiveCtx > 0 {
-			ctx = fmt.Sprintf("ctx %d verified", group.EffectiveCtx)
-		}
-		// The GPU name comes from the machine, so this line has no bound of its
-		// own: "Microsoft Hyper-V Video" pushes it one column past the rule that
-		// a desktop card fits inside. Wrap it rather than trusting the hardware
-		// to be politely named.
-		header := fmt.Sprintf("%s%sdriver %s%sKV %s%s%s",
-			SingleLine(group.GPU), g.Dot, SingleLine(group.Driver), g.Dot, SingleLine(kv), g.Dot, SingleLine(ctx))
-		for i, l := range wrap(header, boardWidth-2) {
-			if i > 0 {
-				l = "  " + l
-			}
-			fmt.Fprintln(w, p.wrap(p.Head, l))
-		}
-		noteStyle := p.Muted
-		if strings.Contains(group.Note, "not comparable") {
-			noteStyle = p.Warn
-		}
-		fmt.Fprintf(w, "  %s\n", p.wrap(noteStyle, SingleLine(group.Note)))
-
-		maxDecode := 0.0
-		for _, row := range group.Rows {
-			if row.DecodeMean > maxDecode {
-				maxDecode = row.DecodeMean
-			}
-		}
-		fmt.Fprintf(w, "%s\n", fmt.Sprintf(boardHeaderFmt,
-			boardModelWidth, "model", "decode", "tok/s", "sd", "runs", "prefill", "GB", "k"))
-		for _, row := range group.Rows {
-			model := p.wrap(p.Head, pad(row.Model, boardModelWidth, g.Ell))
-			bar := p.wrap(p.Accent, valueBar(row.DecodeMean, maxDecode, 8, unicode))
-			// "flat" is a claim about the data. Not being able to draw -- one
-			// repeat, or no Unicode on this stream -- is not the same claim, so
-			// it prints an absence instead of asserting stability.
-			spark, informative := sparkline(row.DecodeSeries, 7, unicode)
-			switch {
-			case informative:
-			case len(row.DecodeSeries) > 1 && flatSeries(row.DecodeSeries):
-				spark = "flat"
-			default:
-				spark = "-"
-			}
-			trend := p.wrap(p.Muted, pad(spark, 8, ""))
-			sd := "-"
-			if row.Repeats > 1 && row.DecodeSD > 0 {
-				sd = fmt.Sprintf("%.2f", row.DecodeSD)
-			}
-			k := fmt.Sprintf("%2d", row.Repeats)
-			if row.Repeats < 3 {
-				k = p.wrap(p.Warn, k)
-			}
-			fmt.Fprintf(w, boardRowFmt, model, bar, row.DecodeMean, sd, trend,
-				row.PrefillMean, row.ResidentGB, k)
-			// The build and what the model serves are read once per row, not
-			// scanned down a column, so they cost a dim continuation line
-			// instead of 42 columns of table.
-			var tail []string
-			if build := strings.TrimSpace(row.ParamSize + " " + row.Quant); build != "" {
-				tail = append(tail, build)
-			}
-			if len(row.Serves) > 0 {
-				tail = append(tail, "serves "+strings.Join(row.Serves, ", "))
-			}
-			if len(tail) > 0 {
-				// Joined with the visible separator, not extra spaces: wrapping
-				// collapses runs of whitespace, so spacing cannot carry a break.
-				for _, l := range wrap(SingleLine(strings.Join(tail, g.Dot)), boardWidth-4) {
-					fmt.Fprintf(w, "    %s\n", p.wrap(p.Muted, l))
-				}
-			}
-		}
-		fmt.Fprintln(w, p.wrap(p.Muted, "  decode bars are relative only within this device/config block"))
-		fmt.Fprintln(w, p.wrap(p.Muted, "  runs is repeat shape oldest to newest; flat means repeats did not move"))
+		writeBoardGroup(w, group, p, g, unicode)
 	}
 	if len(board.Groups) > 1 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, p.wrap(p.Warn, "blocks are never ranked across hardware or request configuration"))
 	}
 	fmt.Fprintln(w, p.wrap(p.Muted, "k = repeats; k<3 is a smoke test, not a rankable result"))
+}
+
+func boardStyle(rich bool) (palette, glyphs, bool) {
+	p := palette{}
+	g := glyphs{" | ", "-", "+/-", "..."}
+	if !rich {
+		return p, g, false
+	}
+	return pickPalette(!noColor()), pickGlyphs(), unicodeOK()
+}
+
+func writeBoardGroup(w io.Writer, group BoardGroup, p palette, g glyphs, unicode bool) {
+	writeBoardGroupHeader(w, group, p, g)
+	maxDecode := boardMaxDecode(group.Rows)
+	fmt.Fprintf(w, "%s\n", fmt.Sprintf(boardHeaderFmt,
+		boardModelWidth, "model", "decode", "tok/s", "sd", "runs", "prefill", "GB", "k"))
+	for _, row := range group.Rows {
+		writeBoardRow(w, row, maxDecode, p, g, unicode)
+	}
+	fmt.Fprintln(w, p.wrap(p.Muted, "  decode bars are relative only within this device/config block"))
+	fmt.Fprintln(w, p.wrap(p.Muted, "  runs is repeat shape oldest to newest; flat means repeats did not move"))
+}
+
+func writeBoardGroupHeader(w io.Writer, group BoardGroup, p palette, g glyphs) {
+	kv := group.KV
+	if kv == "" {
+		kv = "default"
+	}
+	// The GPU name comes from the machine, so this line has no bound of its
+	// own. Wrap it rather than trusting the hardware to be politely named.
+	header := fmt.Sprintf("%s%sdriver %s%sKV %s%s%s",
+		SingleLine(group.GPU), g.Dot, SingleLine(group.Driver), g.Dot,
+		SingleLine(kv), g.Dot, SingleLine(boardContext(group)))
+	for i, line := range wrap(header, boardWidth-2) {
+		if i > 0 {
+			line = "  " + line
+		}
+		fmt.Fprintln(w, p.wrap(p.Head, line))
+	}
+	noteStyle := p.Muted
+	if strings.Contains(group.Note, "not comparable") {
+		noteStyle = p.Warn
+	}
+	fmt.Fprintf(w, "  %s\n", p.wrap(noteStyle, SingleLine(group.Note)))
+}
+
+func boardContext(group BoardGroup) string {
+	switch {
+	case group.EffectiveCtx > 0 && group.EffectiveCtx != group.NumCtx:
+		return fmt.Sprintf("ctx %d -> %d effective", group.NumCtx, group.EffectiveCtx)
+	case group.EffectiveCtx > 0:
+		return fmt.Sprintf("ctx %d verified", group.EffectiveCtx)
+	default:
+		return fmt.Sprintf("ctx %d", group.NumCtx)
+	}
+}
+
+func boardMaxDecode(rows []BoardRow) float64 {
+	maxDecode := 0.0
+	for _, row := range rows {
+		if row.DecodeMean > maxDecode {
+			maxDecode = row.DecodeMean
+		}
+	}
+	return maxDecode
+}
+
+func writeBoardRow(w io.Writer, row BoardRow, maxDecode float64, p palette, g glyphs, unicode bool) {
+	model := p.wrap(p.Head, pad(row.Model, boardModelWidth, g.Ell))
+	bar := p.wrap(p.Accent, valueBar(row.DecodeMean, maxDecode, 8, unicode))
+	trend := p.wrap(p.Muted, pad(boardSpark(row, unicode), 8, ""))
+	sd := "-"
+	if row.Repeats > 1 && row.DecodeSD > 0 {
+		sd = fmt.Sprintf("%.2f", row.DecodeSD)
+	}
+	k := fmt.Sprintf("%2d", row.Repeats)
+	if row.Repeats < 3 {
+		k = p.wrap(p.Warn, k)
+	}
+	fmt.Fprintf(w, boardRowFmt, model, bar, row.DecodeMean, sd, trend,
+		row.PrefillMean, row.ResidentGB, k)
+	writeBoardRowTail(w, row, p, g)
+}
+
+func boardSpark(row BoardRow, unicode bool) string {
+	if spark, informative := sparkline(row.DecodeSeries, 7, unicode); informative {
+		return spark
+	}
+	if len(row.DecodeSeries) > 1 && flatSeries(row.DecodeSeries) {
+		return "flat"
+	}
+	return "-"
+}
+
+func writeBoardRowTail(w io.Writer, row BoardRow, p palette, g glyphs) {
+	var tail []string
+	if build := strings.TrimSpace(row.ParamSize + " " + row.Quant); build != "" {
+		tail = append(tail, build)
+	}
+	if len(row.Serves) > 0 {
+		tail = append(tail, "serves "+strings.Join(row.Serves, ", "))
+	}
+	if len(tail) == 0 {
+		return
+	}
+	// The visible separator survives wrapping; whitespace runs do not.
+	for _, line := range wrap(SingleLine(strings.Join(tail, g.Dot)), boardWidth-4) {
+		fmt.Fprintf(w, "    %s\n", p.wrap(p.Muted, line))
+	}
 }
 
 func valueBar(value, ceiling float64, width int, unicode bool) string {

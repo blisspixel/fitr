@@ -196,6 +196,19 @@ func TestCompleteEvidenceRequiresExactProfileSnapshot(t *testing.T) {
 
 func TestLegacySchemaFiveWireShapeKeepsCompletionSignatureValid(t *testing.T) {
 	profile := device.Profile{Name: "default", Description: "test", Gates: map[string]device.Gate{}}
+	r := newLegacySchemaFiveRecord(t, profile)
+	sealLegacySchemaFiveCompletion(t, r, profile)
+	b := marshalLegacySchemaFive(t, r)
+	assertLegacyMemoryWireShape(t, b)
+	decoded := unmarshalLegacySchemaFive(t, b)
+	assertLegacySchemaFiveSignature(t, &decoded, profile)
+	if issue := decoded.EvidenceIntegrityIssue(); !strings.Contains(issue, "display-only") {
+		t.Fatalf("legacy schema-5 evidence issue = %q", issue)
+	}
+}
+
+func newLegacySchemaFiveRecord(t *testing.T, profile device.Profile) *Record {
+	t.Helper()
 	r := manifestRecord("model", "2026-08-21T12:00:00Z")
 	r.SchemaVersion = 5
 	r.TaskPlan = TaskPlan{CheckTrialsLimit: 1}
@@ -233,6 +246,11 @@ func TestLegacySchemaFiveWireShapeKeepsCompletionSignatureValid(t *testing.T) {
 	if err := r.AttachManifest(digestIdentity(t, "model", "model"), provenance); err != nil {
 		t.Fatal(err)
 	}
+	return r
+}
+
+func sealLegacySchemaFiveCompletion(t *testing.T, r *Record, profile device.Profile) {
+	t.Helper()
 	payload, err := r.completedEvidenceJSON(profile)
 	if err != nil {
 		t.Fatal(err)
@@ -243,20 +261,37 @@ func TestLegacySchemaFiveWireShapeKeepsCompletionSignatureValid(t *testing.T) {
 		Profile:   profile,
 	}
 	r.completionPrivateKey = nil
+}
 
+func marshalLegacySchemaFive(t *testing.T, r *Record) []byte {
+	t.Helper()
 	b, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return b
+}
+
+func assertLegacyMemoryWireShape(t *testing.T, b []byte) {
+	t.Helper()
 	for _, field := range []string{"requested_ctx", "effective_ctx", "resident_bytes", "accelerator_bytes"} {
 		if strings.Contains(string(b), field) {
 			t.Fatalf("legacy memory JSON gained %q: %s", field, b)
 		}
 	}
+}
+
+func unmarshalLegacySchemaFive(t *testing.T, b []byte) Record {
+	t.Helper()
 	var decoded Record
 	if err := json.Unmarshal(b, &decoded); err != nil {
 		t.Fatal(err)
 	}
+	return decoded
+}
+
+func assertLegacySchemaFiveSignature(t *testing.T, decoded *Record, profile device.Profile) {
+	t.Helper()
 	replayed, err := decoded.completedEvidenceJSON(profile)
 	if err != nil {
 		t.Fatal(err)
@@ -271,9 +306,6 @@ func TestLegacySchemaFiveWireShapeKeepsCompletionSignatureValid(t *testing.T) {
 	}
 	if !ed25519.Verify(ed25519.PublicKey(publicKey), replayed, signature) {
 		t.Fatal("legacy schema-5 completion signature no longer verifies after round trip")
-	}
-	if issue := decoded.EvidenceIntegrityIssue(); !strings.Contains(issue, "display-only") {
-		t.Fatalf("legacy schema-5 evidence issue = %q", issue)
 	}
 }
 

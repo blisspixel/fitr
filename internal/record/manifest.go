@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"math"
 	"os"
@@ -339,25 +340,17 @@ func NewModelIdentity(requested, resolved, backend, runtimeVersion, digest, loca
 		Runtime:   strings.TrimSpace(runtimeVersion),
 		SizeBytes: sizeBytes,
 	}
-	if digest = strings.ToLower(strings.TrimSpace(digest)); digest != "" {
-		if !strings.Contains(digest, ":") && len(digest) == 64 {
-			digest = "sha256:" + digest
-		}
-		if !sha256Digest.MatchString(digest) {
-			return ModelIdentity{}, fmt.Errorf("unsupported model digest %q", digest)
-		}
-		i.Kind, i.Value, i.ContentAddressed = IdentityRuntimeDigest, digest, true
-		i.Binding = IdentityBindingRuntime
-	} else if strings.TrimSpace(localPath) != "" {
-		value, observedSize, err := localFileDigest(localPath)
-		if err != nil {
-			return ModelIdentity{}, fmt.Errorf("hash local model artifact: %w", err)
-		}
-		i.Kind, i.Value, i.ContentAddressed = IdentityLocalFile, value, true
-		i.Binding = IdentityBindingObserved
-		i.SizeBytes = observedSize
-	} else {
+	var err error
+	switch {
+	case strings.TrimSpace(digest) != "":
+		err = i.bindRuntimeDigest(digest)
+	case strings.TrimSpace(localPath) != "":
+		err = i.bindLocalArtifact(localPath)
+	default:
 		return ModelIdentity{}, errors.New("runtime did not provide an immutable model digest or readable local artifact")
+	}
+	if err != nil {
+		return ModelIdentity{}, err
 	}
 	if err := i.Validate(); err != nil {
 		return ModelIdentity{}, err
@@ -365,64 +358,117 @@ func NewModelIdentity(requested, resolved, backend, runtimeVersion, digest, loca
 	return i, nil
 }
 
+func (i *ModelIdentity) bindRuntimeDigest(digest string) error {
+	digest = strings.ToLower(strings.TrimSpace(digest))
+	if !strings.Contains(digest, ":") && len(digest) == 64 {
+		digest = "sha256:" + digest
+	}
+	if !sha256Digest.MatchString(digest) {
+		return fmt.Errorf("unsupported model digest %q", digest)
+	}
+	i.Kind, i.Value, i.ContentAddressed = IdentityRuntimeDigest, digest, true
+	i.Binding = IdentityBindingRuntime
+	return nil
+}
+
+func (i *ModelIdentity) bindLocalArtifact(localPath string) error {
+	value, observedSize, err := localFileDigest(localPath)
+	if err != nil {
+		return fmt.Errorf("hash local model artifact: %w", err)
+	}
+	i.Kind, i.Value, i.ContentAddressed = IdentityLocalFile, value, true
+	i.Binding = IdentityBindingObserved
+	i.SizeBytes = observedSize
+	return nil
+}
+
 func localFileDigest(path string) (string, int64, error) {
 	paths, split, err := modelArtifactPaths(path)
 	if err != nil {
 		return "", 0, err
 	}
+	before, total, err := statModelArtifacts(paths)
+	if err != nil {
+		return "", 0, err
+	}
+	digest, err := hashModelArtifacts(paths, before, split)
+	if err != nil {
+		return "", 0, err
+	}
+	if err := verifyModelArtifactsUnchanged(paths, before); err != nil {
+		return "", 0, err
+	}
+	return "sha256:" + hex.EncodeToString(digest), total, nil
+}
+
+func statModelArtifacts(paths []string) ([]os.FileInfo, int64, error) {
 	before := make([]os.FileInfo, len(paths))
 	var total int64
 	for i, artifactPath := range paths {
 		info, statErr := os.Stat(artifactPath)
 		if statErr != nil {
-			return "", 0, fmt.Errorf("artifact shard %d of %d: %w", i+1, len(paths), statErr)
+			return nil, 0, fmt.Errorf("artifact shard %d of %d: %w", i+1, len(paths), statErr)
 		}
 		if !info.Mode().IsRegular() {
-			return "", 0, fmt.Errorf("artifact shard %d of %d is not a regular file", i+1, len(paths))
+			return nil, 0, fmt.Errorf("artifact shard %d of %d is not a regular file", i+1, len(paths))
 		}
 		if info.Size() < 0 || total > math.MaxInt64-info.Size() {
-			return "", 0, errors.New("model artifact size overflows int64")
+			return nil, 0, errors.New("model artifact size overflows int64")
 		}
 		before[i] = info
 		total += info.Size()
 	}
+	return before, total, nil
+}
 
+func hashModelArtifacts(paths []string, before []os.FileInfo, split bool) ([]byte, error) {
 	h := sha256.New()
 	if split {
 		_, _ = io.WriteString(h, "fitr.split.gguf.v1\x00")
 		_ = binary.Write(h, binary.BigEndian, uint32(len(paths)))
 	}
 	for i, artifactPath := range paths {
-		if split {
-			_ = binary.Write(h, binary.BigEndian, uint32(i+1))
-			_ = binary.Write(h, binary.BigEndian, uint64(before[i].Size()))
-		}
-		f, openErr := os.Open(artifactPath)
-		if openErr != nil {
-			return "", 0, fmt.Errorf("open artifact shard %d of %d: %w", i+1, len(paths), openErr)
-		}
-		n, copyErr := io.Copy(h, f)
-		closeErr := f.Close()
-		if copyErr != nil {
-			return "", 0, fmt.Errorf("hash artifact shard %d of %d: %w", i+1, len(paths), copyErr)
-		}
-		if closeErr != nil {
-			return "", 0, fmt.Errorf("close artifact shard %d of %d: %w", i+1, len(paths), closeErr)
-		}
-		if n != before[i].Size() {
-			return "", 0, fmt.Errorf("artifact shard %d of %d changed while it was being hashed", i+1, len(paths))
+		if err := hashModelArtifact(h, artifactPath, before[i], i, len(paths), split); err != nil {
+			return nil, err
 		}
 	}
+	return h.Sum(nil), nil
+}
+
+func hashModelArtifact(h hash.Hash, path string, before os.FileInfo, index, count int, split bool) error {
+	if split {
+		_ = binary.Write(h, binary.BigEndian, uint32(index+1))
+		_ = binary.Write(h, binary.BigEndian, uint64(before.Size()))
+	}
+	f, openErr := os.Open(path)
+	if openErr != nil {
+		return fmt.Errorf("open artifact shard %d of %d: %w", index+1, count, openErr)
+	}
+	n, copyErr := io.Copy(h, f)
+	closeErr := f.Close()
+	if copyErr != nil {
+		return fmt.Errorf("hash artifact shard %d of %d: %w", index+1, count, copyErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close artifact shard %d of %d: %w", index+1, count, closeErr)
+	}
+	if n != before.Size() {
+		return fmt.Errorf("artifact shard %d of %d changed while it was being hashed", index+1, count)
+	}
+	return nil
+}
+
+func verifyModelArtifactsUnchanged(paths []string, before []os.FileInfo) error {
 	for i, artifactPath := range paths {
 		after, statErr := os.Stat(artifactPath)
 		if statErr != nil {
-			return "", 0, fmt.Errorf("recheck artifact shard %d of %d: %w", i+1, len(paths), statErr)
+			return fmt.Errorf("recheck artifact shard %d of %d: %w", i+1, len(paths), statErr)
 		}
 		if before[i].Size() != after.Size() || !before[i].ModTime().Equal(after.ModTime()) {
-			return "", 0, fmt.Errorf("artifact shard %d of %d changed while the model was being hashed", i+1, len(paths))
+			return fmt.Errorf("artifact shard %d of %d changed while the model was being hashed", i+1, len(paths))
 		}
 	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), total, nil
+	return nil
 }
 
 func modelArtifactPaths(path string) ([]string, bool, error) {
@@ -846,6 +892,13 @@ func (r *Record) ValidateManifest() error {
 			return err
 		}
 	}
+	if err := r.validateManifestRecordFields(); err != nil {
+		return err
+	}
+	return r.validateManifestFingerprint()
+}
+
+func (r *Record) validateManifestRecordFields() error {
 	m := r.Manifest
 	switch {
 	case r.RunID != m.RunID:
@@ -871,20 +924,25 @@ func (r *Record) ValidateManifest() error {
 	case r.ContextSize() != m.NumCtx:
 		return errors.New("record context differs from its manifest")
 	}
-	if m.Schema == RunManifestSchema {
-		if r.DeviceV2 == nil {
-			return errors.New("record is missing fingerprint v2")
-		}
-		if !reflect.DeepEqual(r.Device, r.DeviceV2.Device) {
-			return errors.New("record legacy device fields differ from fingerprint v2")
-		}
-		key, err := r.DeviceV2.EvidenceKey()
-		if err != nil {
-			return fmt.Errorf("record fingerprint v2: %w", err)
-		}
-		if key != m.DeviceFingerprintSHA256 {
-			return errors.New("record fingerprint v2 differs from its manifest")
-		}
+	return nil
+}
+
+func (r *Record) validateManifestFingerprint() error {
+	if r.Manifest.Schema != RunManifestSchema {
+		return nil
+	}
+	if r.DeviceV2 == nil {
+		return errors.New("record is missing fingerprint v2")
+	}
+	if !reflect.DeepEqual(r.Device, r.DeviceV2.Device) {
+		return errors.New("record legacy device fields differ from fingerprint v2")
+	}
+	key, err := r.DeviceV2.EvidenceKey()
+	if err != nil {
+		return fmt.Errorf("record fingerprint v2: %w", err)
+	}
+	if key != r.Manifest.DeviceFingerprintSHA256 {
+		return errors.New("record fingerprint v2 differs from its manifest")
 	}
 	return nil
 }

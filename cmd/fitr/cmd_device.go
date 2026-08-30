@@ -14,19 +14,9 @@ import (
 
 // ---------------------------------------------------------------- device
 func cmdDevice(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("device", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
-	if code, ok := parseCommandFlags(fs, args); !ok {
+	mode, code, ok := parseDeviceCommand(args)
+	if !ok {
 		return code
-	}
-	if !render.ValidMode(*mode) {
-		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
-		return exitUsage
-	}
-	if fs.NArg() != 0 {
-		errPrint("unexpected argument", fs.Arg(0), "fitr device [--display MODE]")
-		return exitUsage
 	}
 	fp := device.Detect(ctx, probeBackend(ctx))
 	prof, err := device.SelectProfile("", fp)
@@ -35,7 +25,29 @@ func cmdDevice(ctx context.Context, args []string) int {
 			"repair or remove invalid files in "+device.UserProfilesDir())
 		return exitError
 	}
-	switch render.Resolve(*mode) {
+	return writeDeviceReport(ctx, mode, fp, prof)
+}
+
+func parseDeviceCommand(args []string) (string, int, bool) {
+	fs := flag.NewFlagSet("device", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return "", code, false
+	}
+	if !render.ValidMode(*mode) {
+		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
+		return "", exitUsage, false
+	}
+	if fs.NArg() != 0 {
+		errPrint("unexpected argument", fs.Arg(0), "fitr device [--display MODE]")
+		return "", exitUsage, false
+	}
+	return *mode, exitOK, true
+}
+
+func writeDeviceReport(ctx context.Context, mode string, fp device.Fingerprint, prof device.Profile) int {
+	switch render.Resolve(mode) {
 	case "json":
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
@@ -49,6 +61,13 @@ func cmdDevice(ctx context.Context, args []string) int {
 	case "none":
 		return exitOK
 	}
+	writeDeviceIdentity(ctx, fp)
+	writeDeviceConfiguration(fp)
+	writeDeviceProfile(fp, prof)
+	return exitOK
+}
+
+func writeDeviceIdentity(ctx context.Context, fp device.Fingerprint) {
 	fmt.Printf("  host               %s\n", terminalText(fp.Host))
 	fmt.Printf("  os                 %s\n", terminalText(fp.OS))
 	fmt.Printf("  cpu                %s\n", terminalText(device.FormatCPU(fp.CPU)))
@@ -68,6 +87,9 @@ func cmdDevice(ctx context.Context, args []string) int {
 	for _, conflict := range fp.IdentityConflicts() {
 		fmt.Printf("  ! identity         %s\n", terminalText(conflict))
 	}
+}
+
+func writeDeviceConfiguration(fp device.Fingerprint) {
 	fmt.Println("  config")
 	keys := make([]string, 0, len(fp.Config))
 	for k := range fp.Config {
@@ -81,6 +103,9 @@ func cmdDevice(ctx context.Context, args []string) int {
 		}
 		fmt.Printf("    %-26s %s\n", terminalText(k), terminalText(v))
 	}
+}
+
+func writeDeviceProfile(fp device.Fingerprint, prof device.Profile) {
 	// Both of these run long: a profile description is a sentence, and the
 	// comparability key is a pipe-joined record of every field that decides
 	// whether two runs may be compared. Wrapping keeps them inside the rule the
@@ -93,7 +118,6 @@ func cmdDevice(ctx context.Context, args []string) int {
 	// terminal own that decision.
 	fmt.Println("  key")
 	fmt.Printf("    %s\n", terminalText(fp.Key()))
-	return exitOK
 }
 
 // deviceLabelWidth matches the "  inference_device   " column above.

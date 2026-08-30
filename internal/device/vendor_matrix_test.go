@@ -33,7 +33,7 @@ func TestUnifiedMemoryPrefersAuthoritativeSources(t *testing.T) {
 	const ram = 128.0
 	for _, src := range []string{
 		AppleWiredLimitSource, AppleAssumedShareSource, AppleLegacyRAMSource,
-		"nvidia-smi", "drm sysfs",
+		NVIDIAUnifiedMemorySource, NVIDIAUnifiedProbeSource, "nvidia-smi", "drm sysfs",
 	} {
 		vram := ram * appleWiredLimitFraction
 		gotVRAM, gotSrc := preferUnifiedMemory("Apple M3 Max", ram, vram, src)

@@ -56,41 +56,51 @@ func scanValue(dec *json.Decoder, depth int) error {
 
 	switch delim {
 	case '{':
-		seen := make(map[string]struct{})
-		for dec.More() {
-			nameToken, err := dec.Token()
-			if err != nil {
-				return err
-			}
-			name, ok := nameToken.(string)
-			if !ok {
-				return fmt.Errorf("JSON object name has type %T", nameToken)
-			}
-			if _, duplicate := seen[name]; duplicate {
-				return fmt.Errorf("duplicate JSON object name %q", name)
-			}
-			seen[name] = struct{}{}
-			if err := scanValue(dec, depth+1); err != nil {
-				if errors.Is(err, io.EOF) {
-					return io.ErrUnexpectedEOF
-				}
-				return err
-			}
-		}
-		return consumeClosing(dec, '}')
+		return scanObject(dec, depth)
 	case '[':
-		for dec.More() {
-			if err := scanValue(dec, depth+1); err != nil {
-				if errors.Is(err, io.EOF) {
-					return io.ErrUnexpectedEOF
-				}
-				return err
-			}
-		}
-		return consumeClosing(dec, ']')
+		return scanArray(dec, depth)
 	default:
 		return fmt.Errorf("unexpected JSON delimiter %q", delim)
 	}
+}
+
+func scanObject(dec *json.Decoder, depth int) error {
+	seen := make(map[string]struct{})
+	for dec.More() {
+		nameToken, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		name, ok := nameToken.(string)
+		if !ok {
+			return fmt.Errorf("JSON object name has type %T", nameToken)
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return fmt.Errorf("duplicate JSON object name %q", name)
+		}
+		seen[name] = struct{}{}
+		if err := scanNestedValue(dec, depth); err != nil {
+			return err
+		}
+	}
+	return consumeClosing(dec, '}')
+}
+
+func scanArray(dec *json.Decoder, depth int) error {
+	for dec.More() {
+		if err := scanNestedValue(dec, depth); err != nil {
+			return err
+		}
+	}
+	return consumeClosing(dec, ']')
+}
+
+func scanNestedValue(dec *json.Decoder, depth int) error {
+	err := scanValue(dec, depth+1)
+	if errors.Is(err, io.EOF) {
+		return io.ErrUnexpectedEOF
+	}
+	return err
 }
 
 func consumeClosing(dec *json.Decoder, want json.Delim) error {

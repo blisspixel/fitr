@@ -22,34 +22,50 @@ import (
 // that half it would pass on data that never reached the pipeline, which is a
 // test that cannot fail.
 func TestExportedArtifactCarriesNoRawModelOutput(t *testing.T) {
-	const canary = "CANARY-RAW-MODEL-OUTPUT-9d4f2a"
-	const privateHost = "PRIVATE-HOST-7f31"
-	const privatePath = `C:\Users\private-user\.ollama\models`
-	const privateURL = "https://token@private.example.internal/models/secret-model.gguf"
-	const privateUNC = `\\private-fileserver\models\secret.gguf`
-	const privateSSH = "ssh://private-user@private-host.internal/models"
+	secrets := exportPrivacySecrets{
+		canary: "CANARY-RAW-MODEL-OUTPUT-9d4f2a", host: "PRIVATE-HOST-7f31",
+		path: `C:\Users\private-user\.ollama\models`,
+		url:  "https://token@private.example.internal/models/secret-model.gguf",
+		unc:  `\\private-fileserver\models\secret.gguf`,
+		ssh:  "ssh://private-user@private-host.internal/models",
+	}
+	r := exportPrivacyResult(secrets)
+	assertRawCanaryWasStored(t, r, secrets.canary)
+	assertShareableArtifactIsPrivate(t, r, secrets)
+	assertRetonrEvidenceIsPrivate(t, r, secrets.canary)
+}
+
+type exportPrivacySecrets struct {
+	canary, host, path, url, unc, ssh string
+}
+
+func exportPrivacyResult(secrets exportPrivacySecrets) *Result {
 	r := &Result{
-		Model:     privateURL,
+		Model:     secrets.url,
 		Profile:   "default",
-		Scorecard: score.Scorecard{Model: privateURL},
+		Scorecard: score.Scorecard{Model: secrets.url},
 		CodeWrite: []eval.ExecResult{{
 			Pass: false, Detail: "generated code was not executed",
-			Raw: "def solve():\n    # " + canary + "\n    return 1\n",
+			Raw: "def solve():\n    # " + secrets.canary + "\n    return 1\n",
 		}},
 		CodeFix: []eval.ExecResult{{
 			Pass: false, Detail: "generated code was not executed",
-			Raw: canary + " second occurrence",
+			Raw: secrets.canary + " second occurrence",
 		}},
 	}
-	r.Device.Host, r.Device.OS, r.Device.GPU = privateHost, "linux", "TEST GPU"
-	r.Device.CPU, r.Device.GPUDriver = privateSSH, privateUNC
-	r.Device.Runtime, r.Device.InferenceDevice = privateURL, privatePath
+	r.Device.Host, r.Device.OS, r.Device.GPU = secrets.host, "linux", "TEST GPU"
+	r.Device.CPU, r.Device.GPUDriver = secrets.ssh, secrets.unc
+	r.Device.Runtime, r.Device.InferenceDevice = secrets.url, secrets.path
 	r.Device.Config = map[string]string{
-		"OLLAMA_MODELS":         privatePath,
-		"OLLAMA_KV_CACHE_TYPE":  "token=" + privatePath,
+		"OLLAMA_MODELS":         secrets.path,
+		"OLLAMA_KV_CACHE_TYPE":  "token=" + secrets.path,
 		"OLLAMA_CONTEXT_LENGTH": "8192",
 	}
+	return r
+}
 
+func assertRawCanaryWasStored(t *testing.T, r *Result, canary string) {
+	t.Helper()
 	// Half one: the raw text really is in the stored evidence.
 	stored, err := json.Marshal(r)
 	if err != nil {
@@ -58,7 +74,10 @@ func TestExportedArtifactCarriesNoRawModelOutput(t *testing.T) {
 	if !strings.Contains(string(stored), canary) {
 		t.Fatal("canary is not in the saved result; the test would prove nothing")
 	}
+}
 
+func assertShareableArtifactIsPrivate(t *testing.T, r *Result, secrets exportPrivacySecrets) {
+	t.Helper()
 	// Half two: nothing that leaves the machine carries it.
 	a, err := artifactFrom(r)
 	if err != nil {
@@ -68,21 +87,24 @@ func TestExportedArtifactCarriesNoRawModelOutput(t *testing.T) {
 	if err := render.WriteHTML(&html, a); err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{canary, privateHost, privatePath, privateURL, privateUNC, privateSSH,
-		"private.example.internal", "private-fileserver", "private-host.internal", "private-user"} {
-		if strings.Contains(html.String(), secret) {
-			t.Fatalf("exported HTML contains private value %q", secret)
-		}
-	}
+	assertNoPrivateValues(t, html.String(), secrets, "exported HTML contains private value %q")
 	if encoded, err := json.Marshal(a); err == nil {
-		for _, secret := range []string{canary, privateHost, privatePath, privateURL, privateUNC, privateSSH,
-			"private.example.internal", "private-fileserver", "private-host.internal", "private-user"} {
-			if strings.Contains(string(encoded), secret) {
-				t.Fatalf("the export artifact structure carries private value %q", secret)
-			}
+		assertNoPrivateValues(t, string(encoded), secrets, "the export artifact structure carries private value %q")
+	}
+}
+
+func assertNoPrivateValues(t *testing.T, body string, secrets exportPrivacySecrets, message string) {
+	t.Helper()
+	for _, secret := range []string{secrets.canary, secrets.host, secrets.path, secrets.url, secrets.unc, secrets.ssh,
+		"private.example.internal", "private-fileserver", "private-host.internal", "private-user"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf(message, secret)
 		}
 	}
+}
 
+func assertRetonrEvidenceIsPrivate(t *testing.T, r *Result, canary string) {
+	t.Helper()
 	evPath := filepath.Join(t.TempDir(), record.ArtifactStem(r.Model)+".retonr.json")
 	if err := writeRetonrEvidence(r, evPath, ""); err == nil {
 		body, readErr := os.ReadFile(evPath)

@@ -66,13 +66,13 @@ type adviseCommand struct {
 func parseAdviseCommand(args []string) (adviseCommand, int, bool) {
 	fs := flag.NewFlagSet("advise", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	vram := fs.Float64("vram-gb", -1, "available GPU memory in GB (skip detection)")
+	vram := fs.Float64("vram-gb", -1, "GPU or unified-memory planning budget in GB")
 	ctxSize := fs.Int("ctx", 0, "requested context length (default: model's max)")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	pullFlag := fs.Bool("pull", false, "pull the model first if it is not installed")
-	loadFlag := fs.Bool("load", false, "load the model on Ollama and read resident size (dummy allocation)")
-	fitFlag := fs.Bool("fit", false, "run llama-fit-params on a GGUF if it is on PATH")
+	loadFlag := fs.Bool("load", false, "load the model on Ollama and observe its runtime allocation")
+	fitFlag := fs.Bool("fit", false, "report llama-fit-params device projection for a GGUF (non-verdict)")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return adviseCommand{}, code, false
 	}
@@ -103,6 +103,11 @@ func parseAdviseCommand(args []string) (adviseCommand, int, bool) {
 		}
 		return adviseCommand{backend: *backend, mode: *mode}, exitOK, true
 	}
+	if *loadFlag && *ctxSize <= 0 {
+		errPrint("--load needs an explicit context", "the runtime receipt must be bound to the requested point",
+			"fitr advise <model> --load --ctx 8192")
+		return adviseCommand{}, exitUsage, false
+	}
 	raw := fs.Arg(0)
 	return adviseCommand{
 		raw: raw, model: normalizeModelRef(raw), backend: *backend, mode: *mode,
@@ -112,7 +117,8 @@ func parseAdviseCommand(args []string) (adviseCommand, int, bool) {
 
 func initialAdviseInput(ctx context.Context, command adviseCommand) (advise.Input, device.Fingerprint) {
 	in := advise.Input{Model: command.model, Ctx: command.ctxSize}
-	currentFP := device.Fingerprint{}
+	currentFP := device.Detect(ctx, nil)
+	applyAdviseDeviceEvidence(&in, currentFP)
 	if command.backend != "" && command.backend != "auto" {
 		in.Backend = command.backend
 	}
@@ -120,13 +126,19 @@ func initialAdviseInput(ctx context.Context, command adviseCommand) (advise.Inpu
 		in.HaveGB = command.vram
 		in.HaveSrc = "--vram-gb"
 	} else {
-		fp := device.Detect(ctx, nil)
-		in.HaveGB = fp.VRAMGb
-		in.HaveSrc = fp.VRAMSource
-		currentFP = fp
+		in.HaveGB = currentFP.VRAMGb
+		in.HaveSrc = currentFP.VRAMSource
 	}
 	setAdviseKV(&in, os.Getenv("OLLAMA_KV_CACHE_TYPE"))
 	return in, currentFP
+}
+
+func applyAdviseDeviceEvidence(in *advise.Input, fp device.Fingerprint) {
+	if fp.VRAMSource == device.NVIDIAUnifiedMemorySource ||
+		fp.VRAMSource == device.NVIDIAUnifiedProbeSource ||
+		device.IsNVIDIAUnifiedMemoryGPU(fp.GPU) {
+		in.NVIDIAUnifiedMemory = true
+	}
 }
 
 func setAdviseKV(in *advise.Input, kv string) {
@@ -172,6 +184,7 @@ func readBackendAdviseSource(ctx context.Context, command adviseCommand,
 	}
 	in.Backend = c.Name()
 	fp := device.Detect(ctx, c)
+	applyAdviseDeviceEvidence(in, fp)
 	if free, ok := device.AvailableVRAM(ctx); ok {
 		in.FreeGB = free
 	}
@@ -187,7 +200,7 @@ func readBackendAdviseSource(ctx context.Context, command adviseCommand,
 	if in.Source == "" {
 		in.Source = c.Name() + " (no architecture metadata)"
 	}
-	readResidentAdviseSource(ctx, c, command.model, in, c.Name()+" /api/ps", 0)
+	readResidentAdviseSource(ctx, c, command.model, in, c.Name()+" runtime status")
 	return c, ggufPath, fp, exitOK
 }
 
@@ -223,19 +236,32 @@ func readAdviseGGUFFallback(path string, in *advise.Input) {
 }
 
 func readResidentAdviseSource(ctx context.Context, c llm.Backend, model string,
-	in *advise.Input, source string, residentCtx int) {
+	in *advise.Input, source string) {
+	in.ResidentB = 0
+	in.ResidentSrc = ""
+	in.ResidentCtx = 0
 	running, err := c.PS(ctx)
 	if err != nil {
 		return
 	}
+	var matched *ollama.RunningModel
 	for _, runningModel := range running {
 		if !modelref.SameServed(model, runningModel.Name) || runningModel.Size <= 0 {
 			continue
 		}
-		in.ResidentB = runningModel.Size
+		if matched == nil {
+			candidate := runningModel
+			matched = &candidate
+			continue
+		}
+		if matched.Size != runningModel.Size || matched.ContextLength != runningModel.ContextLength {
+			return
+		}
+	}
+	if matched != nil {
+		in.ResidentB = matched.Size
 		in.ResidentSrc = source
-		in.ResidentCtx = residentCtx
-		return
+		in.ResidentCtx = matched.ContextLength
 	}
 }
 
@@ -267,7 +293,7 @@ func measureAdviseLoad(ctx context.Context, command adviseCommand, c llm.Backend
 			"pass an Ollama model tag; llama-server is already loaded, and a bare .gguf needs --fit")
 		return nil, exitUsage
 	}
-	if in.ResidentB != 0 {
+	if in.ResidentB != 0 && in.ResidentCtx == command.ctxSize {
 		return nil, exitOK
 	}
 	if in.WeightsB > 0 && in.HaveGB > 0 && float64(in.WeightsB) > in.HaveGB*advise.GiB {
@@ -293,7 +319,7 @@ func loadAdviseResident(ctx context.Context, command adviseCommand, c llm.Backen
 	if err != nil {
 		in.LoadErr = err.Error()
 	} else {
-		readResidentAdviseSource(ctx, c, command.model, in, "ollama /api/ps after --load", ctxLen)
+		readResidentAdviseSource(ctx, c, command.model, in, "ollama /api/ps after --load")
 	}
 	if left, stopErr := c.StopAll(ctx); stopErr == nil && len(left) > 0 {
 		fmt.Fprintf(os.Stderr, " note: still resident: %s\n", terminalText(strings.Join(left, ", ")))
@@ -330,25 +356,58 @@ func writeAdviseReport(mode string, in advise.Input) int {
 // cmdApply prints the command to persist a measured context. It never
 // restarts or mutates the serving process; that is the whole point.
 func cmdApply(ctx context.Context, args []string) int {
+	command, code, ok := parseApplyCommand(args)
+	if !ok {
+		return code
+	}
+	n, code, ok := resolveApplyContext(command.model, command.numCtx)
+	if !ok {
+		return code
+	}
+	kind, code, ok := resolveApplyBackend(ctx, command.backend)
+	if !ok {
+		return code
+	}
+	if n <= 0 {
+		n = 4096
+	}
+	plan := advise.PlanApply(kind, command.model, n)
+	if command.model != "" {
+		if serving, observed := observeServingCtx(ctx, command.model, kind); observed {
+			plan.ServingCtx = serving
+			plan.ServingKnown = true
+		}
+	}
+	return writeApplyPlan(command.mode, command.model, plan)
+}
+
+type applyCommand struct {
+	model   string
+	backend string
+	mode    string
+	numCtx  int
+}
+
+func parseApplyCommand(args []string) (applyCommand, int, bool) {
 	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	ctxSize := fs.Int("ctx", 0, "context to persist (default: latest result, else 4096 as the worked example)")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {
-		return code
+		return applyCommand{}, code, false
 	}
 	if !render.ValidMode(*mode) {
 		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
-		return exitUsage
+		return applyCommand{}, exitUsage, false
 	}
 	if fs.NArg() > 1 {
 		errPrint("too many arguments", "apply accepts at most one model", "fitr apply [model] [--ctx N]")
-		return exitUsage
+		return applyCommand{}, exitUsage, false
 	}
 	if *ctxSize < 0 {
 		errPrint("invalid context size", "--ctx cannot be negative", "omit --ctx for the latest measured context, or pass a positive token count")
-		return exitUsage
+		return applyCommand{}, exitUsage, false
 	}
 	model := ""
 	if fs.NArg() > 0 {
@@ -357,9 +416,13 @@ func cmdApply(ctx context.Context, args []string) int {
 	kind, ok := canonicalBackendKind(*backend)
 	if !ok {
 		errPrint("invalid backend", *backend, "use auto, ollama, llama-server, or openai")
-		return exitUsage
+		return applyCommand{}, exitUsage, false
 	}
-	n := *ctxSize
+	return applyCommand{model: model, backend: kind, mode: *mode, numCtx: *ctxSize}, exitOK, true
+}
+
+func resolveApplyContext(model string, requested int) (int, int, bool) {
+	n := requested
 	if model != "" && n <= 0 {
 		if all, err := loadResults(); err == nil {
 			if r := latestNamed(all, model); r != nil {
@@ -369,15 +432,19 @@ func cmdApply(ctx context.Context, args []string) int {
 		if n <= 0 {
 			errPrint("no saved result for this model", "",
 				"fitr run "+model+"   or   fitr apply "+model+" --ctx 4096")
-			return exitError
+			return 0, exitError, false
 		}
 	}
+	return n, exitOK, true
+}
+
+func resolveApplyBackend(ctx context.Context, kind string) (string, int, bool) {
 	if kind == "" || kind == "auto" {
 		found, err := llm.Discover(ctx)
 		if err != nil {
 			errPrint("invalid runtime discovery configuration", err.Error(),
 				"fix FITR_DISCOVER_URLS or the configured backend URL, then re-run")
-			return exitUsage
+			return "", exitUsage, false
 		}
 		if len(found) > 0 {
 			kind = found[0].Kind
@@ -385,17 +452,11 @@ func cmdApply(ctx context.Context, args []string) int {
 			kind = ""
 		}
 	}
-	if n <= 0 {
-		n = 4096
-	}
-	plan := advise.PlanApply(kind, model, n)
-	if model != "" {
-		if serving, ok := observeServingCtx(ctx, model, kind); ok {
-			plan.ServingCtx = serving
-			plan.ServingKnown = true
-		}
-	}
-	switch render.Resolve(*mode) {
+	return kind, exitOK, true
+}
+
+func writeApplyPlan(mode, model string, plan advise.ApplyPlan) int {
+	switch render.Resolve(mode) {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")

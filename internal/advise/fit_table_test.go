@@ -3,6 +3,8 @@ package advise
 import (
 	"strings"
 	"testing"
+
+	"github.com/blisspixel/fitr/internal/device"
 )
 
 func TestContextFitPointsStopAtMaxAndIncludeRequested(t *testing.T) {
@@ -32,7 +34,7 @@ func TestContextFitLlamaTable(t *testing.T) {
 	if tble == nil || len(tble.Points) < 4 {
 		t.Fatalf("table = %+v", tble)
 	}
-	if !strings.Contains(tble.Note, "other runtime allocation") {
+	if !strings.Contains(tble.Note, "other allocation") {
 		t.Fatalf("must disclose unmeasured runtime allocation: %q", tble.Note)
 	}
 	var saw8k, saw32k FitPoint
@@ -115,8 +117,73 @@ func TestContextFitHybridSingleMeasuredPoint(t *testing.T) {
 	if len(tble.Points) != 1 || tble.Points[0].Ctx != 8192 {
 		t.Fatalf("hybrid measured table = %+v", tble.Points)
 	}
-	if tble.Points[0].Tier != Compatible || !tble.Points[0].OtherKnown {
+	if tble.Points[0].Tier != Compatible || tble.Points[0].OtherKnown ||
+		tble.Points[0].OtherGB != 0 || tble.Points[0].NeedGB != 11 ||
+		tble.Points[0].AllocationEvidence != allocationObservedTotal {
 		t.Fatalf("hybrid point = %+v", tble.Points[0])
+	}
+}
+
+func TestContextFitHybridOmitsUnboundAllocatorProjection(t *testing.T) {
+	a := llama8B()
+	a.Hybrid = true
+	tble := ContextFit(Input{
+		WeightsB: 5 * GiB, HaveGB: 24, HaveSrc: "--vram-gb", Arch: a,
+		Ctx: 8192, FitB: 10 * GiB, FitSrc: "llama-fit-params",
+	})
+	if len(tble.Points) != 0 || !strings.Contains(tble.Note, "final context and placement were not captured") {
+		t.Fatalf("hybrid unbound projection table = %+v", tble)
+	}
+}
+
+func TestContextFitDoesNotAttachAllocatorProjectionToRequestedContext(t *testing.T) {
+	tble := ContextFit(Input{
+		WeightsB: 5 * GiB, HaveGB: 16, HaveSrc: "--vram-gb",
+		Ctx: 8192, Arch: llama8B(), FitB: 8 * GiB, FitSrc: "llama-fit-params",
+	})
+	var at8 FitPoint
+	for _, p := range tble.Points {
+		if p.Ctx == 8192 {
+			at8 = p
+		}
+	}
+	if at8.OtherKnown || at8.OtherGB != 0 || at8.NeedGB != 6 ||
+		at8.AllocationEvidence != allocationLowerBound || !strings.Contains(at8.Note, "no matched total evidence") {
+		t.Fatalf("unbound projection contaminated requested point: %+v", at8)
+	}
+}
+
+func TestContextFitNVIDIAAddressableCapacityNeverSuggestsUnobservedFit(t *testing.T) {
+	tble := ContextFit(Input{
+		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: device.NVIDIAUnifiedMemorySource,
+		Ctx: 32768, Arch: llama8B(),
+	})
+	var sawSkip, sawIncompatible bool
+	for _, p := range tble.Points {
+		if p.Suggested || p.Tier == Compatible {
+			t.Fatalf("addressable-only point claimed fit: %+v", p)
+		}
+		switch p.Tier {
+		case Skip:
+			sawSkip = true
+		case Incompatible:
+			sawIncompatible = true
+		}
+	}
+	if !sawSkip || !sawIncompatible || !strings.Contains(CompactWindows(tble), "?") {
+		t.Fatalf("addressable curve = %+v compact=%q", tble, CompactWindows(tble))
+	}
+}
+
+func TestContextFitNVIDIAUnifiedIdentityConstrainsNonzeroProbe(t *testing.T) {
+	tble := ContextFit(Input{
+		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "nvidia-smi",
+		NVIDIAUnifiedMemory: true, Ctx: 8192, Arch: llama8B(),
+	})
+	for _, point := range tble.Points {
+		if point.Tier == Compatible || point.Suggested {
+			t.Fatalf("shared identity claimed automatic fit: %+v", point)
+		}
 	}
 }
 

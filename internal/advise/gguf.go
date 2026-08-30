@@ -75,6 +75,15 @@ func completeGGUFSize(path string, selected os.FileInfo) (int64, error) {
 	if match == nil {
 		return selected.Size(), nil
 	}
+	total, err := splitGGUFShardCount(path, match)
+	if err != nil {
+		return 0, err
+	}
+	results := statSplitGGUFShards(filepath.Dir(path), match, total)
+	return sumSplitGGUFSizes(results)
+}
+
+func splitGGUFShardCount(path string, match []string) (int, error) {
 	shard, shardErr := strconv.Atoi(match[2])
 	total, totalErr := strconv.Atoi(match[3])
 	if shardErr != nil || totalErr != nil || total < 1 || shard < 1 || shard > total {
@@ -83,12 +92,16 @@ func completeGGUFSize(path string, selected os.FileInfo) (int64, error) {
 	if total > maxSplitGGUFShards {
 		return 0, fmt.Errorf("split GGUF declares %d shards; limit is %d", total, maxSplitGGUFShards)
 	}
-	type shardStat struct {
-		size int64
-		err  error
-	}
+	return total, nil
+}
+
+type shardStat struct {
+	size int64
+	err  error
+}
+
+func statSplitGGUFShards(dir string, match []string, total int) []shardStat {
 	results := make([]shardStat, total)
-	dir := filepath.Dir(path)
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 	for range min(total, maxSplitGGUFStatWorkers) {
@@ -119,6 +132,10 @@ func completeGGUFSize(path string, selected os.FileInfo) (int64, error) {
 	}
 	close(jobs)
 	wg.Wait()
+	return results
+}
+
+func sumSplitGGUFSizes(results []shardStat) (int64, error) {
 	var size int64
 	for _, result := range results {
 		if result.err != nil {
@@ -278,96 +295,133 @@ func (d *metadataDecoder) readValue() (any, error) {
 }
 
 func (d *metadataDecoder) readTyped(typ uint32) (any, error) {
+	if typ == ggufArray {
+		return d.readArray()
+	}
+	value, known, err := d.readScalar(typ)
+	if known {
+		return value, err
+	}
+	return nil, fmt.Errorf("unknown GGUF type %d", typ)
+}
+
+func (d *metadataDecoder) readScalar(typ uint32) (any, bool, error) {
+	switch typ {
+	case ggufUint8, ggufInt8, ggufUint16, ggufInt16, ggufUint32, ggufInt32, ggufFloat32:
+		return d.readCompactScalar(typ)
+	case ggufBool, ggufString:
+		return d.readSpecialScalar(typ)
+	case ggufUint64, ggufInt64, ggufFloat64:
+		return d.readWideScalar(typ)
+	default:
+		return nil, false, nil
+	}
+}
+
+func (d *metadataDecoder) readCompactScalar(typ uint32) (any, bool, error) {
 	switch typ {
 	case ggufUint8:
 		var v uint8
 		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return uint64(v), err
+		return uint64(v), true, err
 	case ggufInt8:
 		var v int8
 		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return int64(v), err
+		return int64(v), true, err
 	case ggufUint16:
 		var v uint16
 		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return uint64(v), err
+		return uint64(v), true, err
 	case ggufInt16:
 		var v int16
 		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return int64(v), err
+		return int64(v), true, err
 	case ggufUint32:
 		var v uint32
 		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return uint64(v), err
+		return uint64(v), true, err
 	case ggufInt32:
 		var v int32
 		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return int64(v), err
+		return int64(v), true, err
 	case ggufFloat32:
 		var v float32
 		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return float64(v), err
-	case ggufBool:
-		var v uint8
-		if err := binary.Read(d.r, binary.LittleEndian, &v); err != nil {
-			return nil, err
-		}
-		if v > 1 {
-			return nil, fmt.Errorf("invalid GGUF boolean value %d", v)
-		}
-		return v == 1, nil
-	case ggufString:
-		return d.readString()
+		return float64(v), true, err
+	default:
+		return nil, false, nil
+	}
+}
+
+func (d *metadataDecoder) readSpecialScalar(typ uint32) (any, bool, error) {
+	if typ == ggufString {
+		v, err := d.readString()
+		return v, true, err
+	}
+	var v uint8
+	if err := binary.Read(d.r, binary.LittleEndian, &v); err != nil {
+		return nil, true, err
+	}
+	if v > 1 {
+		return nil, true, fmt.Errorf("invalid GGUF boolean value %d", v)
+	}
+	return v == 1, true, nil
+}
+
+func (d *metadataDecoder) readWideScalar(typ uint32) (any, bool, error) {
+	switch typ {
 	case ggufUint64:
 		var v uint64
 		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return v, err
+		return v, true, err
 	case ggufInt64:
 		var v int64
 		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return v, err
+		return v, true, err
 	case ggufFloat64:
 		var v float64
 		err := binary.Read(d.r, binary.LittleEndian, &v)
-		return v, err
-	case ggufArray:
-		var etype uint32
-		var n uint64
-		if err := binary.Read(d.r, binary.LittleEndian, &etype); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(d.r, binary.LittleEndian, &n); err != nil {
-			return nil, err
-		}
-		if etype == ggufArray {
-			return nil, errors.New("nested GGUF arrays are not supported")
-		}
-		storageBytes, err := arrayElementStorageBytes(etype)
-		if err != nil {
-			return nil, err
-		}
-		limit := maxArrayStorageBytes / storageBytes
-		if etype == ggufString && limit > maxStringArrayEntries {
-			limit = maxStringArrayEntries
-		}
-		if n > limit {
-			return nil, fmt.Errorf("array length %d exceeds limit %d for GGUF type %d", n, limit, etype)
-		}
-		if err := d.chargeProduct(n, storageBytes, "array storage"); err != nil {
-			return nil, err
-		}
-		out := make([]any, 0, n)
-		for i := range n {
-			v, err := d.readTyped(etype)
-			if err != nil {
-				return nil, fmt.Errorf("array element %d: %w", i, err)
-			}
-			out = append(out, v)
-		}
-		return out, nil
+		return v, true, err
 	default:
-		return nil, fmt.Errorf("unknown GGUF type %d", typ)
+		return nil, false, nil
 	}
+}
+
+func (d *metadataDecoder) readArray() ([]any, error) {
+	var etype uint32
+	var n uint64
+	if err := binary.Read(d.r, binary.LittleEndian, &etype); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(d.r, binary.LittleEndian, &n); err != nil {
+		return nil, err
+	}
+	if etype == ggufArray {
+		return nil, errors.New("nested GGUF arrays are not supported")
+	}
+	storageBytes, err := arrayElementStorageBytes(etype)
+	if err != nil {
+		return nil, err
+	}
+	limit := maxArrayStorageBytes / storageBytes
+	if etype == ggufString && limit > maxStringArrayEntries {
+		limit = maxStringArrayEntries
+	}
+	if n > limit {
+		return nil, fmt.Errorf("array length %d exceeds limit %d for GGUF type %d", n, limit, etype)
+	}
+	if err := d.chargeProduct(n, storageBytes, "array storage"); err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, n)
+	for i := range n {
+		v, err := d.readTyped(etype)
+		if err != nil {
+			return nil, fmt.Errorf("array element %d: %w", i, err)
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }
 
 func arrayElementStorageBytes(typ uint32) (uint64, error) {

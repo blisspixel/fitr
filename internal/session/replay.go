@@ -287,30 +287,13 @@ func applyRunCancelled(next *Snapshot, event Event) error {
 
 func canonicalEvent(event Event) Event {
 	if event.Run != nil {
-		v := *event.Run
-		v.Model = safeText(v.Model, 256)
-		v.ParamSize = safeText(v.ParamSize, 64)
-		v.Quant = safeText(v.Quant, 64)
-		v.Family = safeText(v.Family, 128)
-		v.GPU = safeText(v.GPU, 256)
-		v.Driver = safeText(v.Driver, 128)
-		v.Backend = safeText(v.Backend, 64)
-		v.Runtime = safeText(v.Runtime, 128)
-		v.Profile = safeText(v.Profile, 128)
-		v.Level = safeText(v.Level, 64)
-		event.Run = &v
+		event.Run = canonicalRunStarted(*event.Run)
 	}
 	if event.Phase != nil {
-		v := *event.Phase
-		v.Name = safeText(v.Name, 64)
-		v.Detail = safeText(v.Detail, 512)
-		event.Phase = &v
+		event.Phase = canonicalPhase(*event.Phase)
 	}
 	if event.Progress != nil {
-		v := *event.Progress
-		v.Phase = safeText(v.Phase, 64)
-		v.Detail = safeText(v.Detail, 512)
-		event.Progress = &v
+		event.Progress = canonicalProgress(*event.Progress)
 	}
 	if event.Metric != nil {
 		v := *event.Metric
@@ -318,18 +301,10 @@ func canonicalEvent(event Event) Event {
 		event.Metric = &v
 	}
 	if event.Notice != nil {
-		v := *event.Notice
-		v.Code = safeText(v.Code, 64)
-		v.Message = safeText(v.Message, 1024)
-		v.Remedy = safeText(v.Remedy, 1024)
-		event.Notice = &v
+		event.Notice = canonicalNotice(*event.Notice)
 	}
 	if event.Failure != nil {
-		v := *event.Failure
-		v.Code = safeText(v.Code, 64)
-		v.Summary = safeText(v.Summary, 1024)
-		v.Remedy = safeText(v.Remedy, 1024)
-		event.Failure = &v
+		event.Failure = canonicalFailure(*event.Failure)
 	}
 	if event.Cancellation != nil {
 		v := *event.Cancellation
@@ -337,6 +312,46 @@ func canonicalEvent(event Event) Event {
 		event.Cancellation = &v
 	}
 	return event
+}
+
+func canonicalRunStarted(value RunInfo) *RunInfo {
+	value.Model = safeText(value.Model, 256)
+	value.ParamSize = safeText(value.ParamSize, 64)
+	value.Quant = safeText(value.Quant, 64)
+	value.Family = safeText(value.Family, 128)
+	value.GPU = safeText(value.GPU, 256)
+	value.Driver = safeText(value.Driver, 128)
+	value.Backend = safeText(value.Backend, 64)
+	value.Runtime = safeText(value.Runtime, 128)
+	value.Profile = safeText(value.Profile, 128)
+	value.Level = safeText(value.Level, 64)
+	return &value
+}
+
+func canonicalPhase(value PhaseEvent) *PhaseEvent {
+	value.Name = safeText(value.Name, 64)
+	value.Detail = safeText(value.Detail, 512)
+	return &value
+}
+
+func canonicalProgress(value Progress) *Progress {
+	value.Phase = safeText(value.Phase, 64)
+	value.Detail = safeText(value.Detail, 512)
+	return &value
+}
+
+func canonicalNotice(value Notice) *Notice {
+	value.Code = safeText(value.Code, 64)
+	value.Message = safeText(value.Message, 1024)
+	value.Remedy = safeText(value.Remedy, 1024)
+	return &value
+}
+
+func canonicalFailure(value Failure) *Failure {
+	value.Code = safeText(value.Code, 64)
+	value.Summary = safeText(value.Summary, 1024)
+	value.Remedy = safeText(value.Remedy, 1024)
+	return &value
 }
 
 func validatePayload(event Event) error {

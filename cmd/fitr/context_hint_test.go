@@ -93,3 +93,17 @@ func TestContextHintStaysQuietWhenItCannotBeSure(t *testing.T) {
 		})
 	}
 }
+
+func TestContextHintStaysQuietForAutomaticNVIDIAUnifiedCapacity(t *testing.T) {
+	backend := &archBackend{
+		runIntegrationBackend: &runIntegrationBackend{},
+		kvs:                   llama8BKVs(), size: 5 << 30,
+	}
+	fp := device.Fingerprint{
+		GPU: "NVIDIA GB10", VRAMGb: 121.7, VRAMSource: "nvidia-smi",
+		Config: map[string]string{},
+	}
+	if got := largerFittingContext(context.Background(), backend, "model", fp, 8192); got != 0 {
+		t.Fatalf("automatic shared capacity suggested %d, want no unproved wider context", got)
+	}
+}

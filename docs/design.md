@@ -165,8 +165,9 @@ prints "not recommended."
 - **Burst, not sustained.** A thin laptop throttles under multi-hour load.
 - **Single-request regime.** The normal run deliberately avoids concurrent
   scored inference. It does not predict multi-user serving throughput.
-- **Shared memory.** On an iGPU the "GPU memory" is system RAM; a resident
-  19 GB model still costs 19 GB of your budget.
+- **Shared memory.** On an iGPU or unified-memory accelerator, model memory,
+  Linux, services, and CPU-side runtime allocation compete for one pool. An
+  addressable `MemTotal` reading is capacity, not a safe current model budget.
 - **The refusal battery is 3 sealed prompts.** The current receipt binds their
   exact canonical prompt-ID set, but it still detects only "will refuse ordinary work",
   not the full alignment surface.
@@ -175,11 +176,15 @@ prints "not recommended."
   discovery, fingerprinting, and shard stats, not for parallel scored
   inference. See [Cores, GPUs, and honesty](#cores-gpus-and-honesty).
 - **`advise` estimates by default.** The default is weights plus KV from GGUF
-  metadata, with other runtime allocation excluded and disclosed. `--load` observes an
-  Ollama resident allocation and `--fit` uses `llama-fit-params` dummy
-  allocation. Hybrid recurrent architectures require one of those measured
-  paths, and split GGUFs require every shard. Unmeasured VRAM, incomplete
-  weights, or architecture is SKIP, not a name-to-GB guess.
+  metadata, with other runtime allocation excluded and disclosed. `--load`
+  observes an Ollama resident allocation at the runtime-reported context.
+  `--fit` reports a `llama-fit-params` device-memory projection, but the
+  current adapter does not capture the fitter's adjusted context, placement,
+  version, or host-memory domain. It therefore remains descriptive and cannot
+  establish a context row or fit verdict. Hybrid recurrent architectures
+  require a load receipt, and split GGUFs require every shard. Unmeasured
+  capacity, incomplete weights, or architecture is SKIP, not a name-to-GB
+  guess.
 - **Cache state can be unknown.** TTFT and prefill are still observed, but an
   unknown state or any cache hit cannot prove an uncached timing gate or
   comparison claim.
@@ -211,8 +216,9 @@ total. The request context is on the scorecard, the HTML fingerprint, and
 the board header, because a number without its config is meaningless.
 `fitr advise` also prints a context-fit table at several windows so the
 4k / 8k / 16k choice is a row with a GB, not folklore. The derived other
-resident remainder stays `n/a` until `--load` or `--fit` observes total
-allocation at that exact ctx.
+resident remainder stays `n/a` until `--load` observes total allocation at
+that exact context. `--fit` is shown separately as an unbound projection until
+its effective context and placement can be sealed.
 
 ## Why Go
 

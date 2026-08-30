@@ -6,10 +6,12 @@ import (
 	"strings"
 )
 
-// FitTable is weights / KV / other resident allocation / headroom at several
-// context points. Other resident is a derived remainder, not an independent
-// compute-buffer measurement, and is n/a unless total allocation was observed
-// at that exact ctx. Decode/prefill overlay only from saved runs at that ctx.
+// FitTable is weights / KV / other allocation / headroom at several context
+// points. Other is a derived remainder, not an independent compute-buffer
+// measurement, and is n/a unless a runtime total is available at that exact
+// ctx. Decode/prefill overlay only from saved runs at that ctx. Allocator
+// projections are excluded until their effective context and placement are
+// sealed.
 type FitTable struct {
 	HaveGB  float64    `json:"have_gb,omitempty"`
 	HaveSrc string     `json:"have_source,omitempty"`
@@ -30,14 +32,24 @@ type FitPoint struct {
 	PrefillTPS float64 `json:"prefill_tps,omitempty"`
 	Requested  bool    `json:"requested,omitempty"`
 	Suggested  bool    `json:"suggested,omitempty"`
-	Note       string  `json:"note,omitempty"`
+	// AllocationEvidence identifies the semantics behind NeedGB and its
+	// component breakdown. It is additive so existing fitr.advise.v1 readers
+	// may ignore it.
+	AllocationEvidence string `json:"allocation_evidence,omitempty"`
+	Note               string `json:"note,omitempty"`
 }
+
+const (
+	allocationObservedTotal          = "observed_total"
+	allocationObservedTotalRemainder = "observed_total_derived_remainder"
+	allocationLowerBound             = "derived_lower_bound"
+)
 
 var defaultFitCtx = []int{2048, 4096, 8192, 16384, 32768}
 
 // ContextFit sizes the model at several windows. Hybrid recurrent models
-// stay SKIP on the algebraic path; a measured resident or dummy allocation
-// at one ctx is a single-point table, not a projection.
+// stay SKIP on the algebraic path; a measured resident at one ctx is a
+// single-point table, not a projection.
 func ContextFit(in Input) *FitTable {
 	t := &FitTable{HaveSrc: in.HaveSrc}
 	if in.HaveGB <= 0 {
@@ -52,6 +64,10 @@ func ContextFit(in Input) *FitTable {
 	if in.Arch.Hybrid {
 		return hybridFit(in, t)
 	}
+	return conventionalFit(in, t)
+}
+
+func conventionalFit(in Input, t *FitTable) *FitTable {
 	if !in.Arch.KVReady() {
 		t.Note = "KV cache not sized (no architecture metadata); pass a GGUF or --load"
 		return t
@@ -65,38 +81,40 @@ func ContextFit(in Input) *FitTable {
 	weightsB := float64(in.WeightsB)
 	haveB := in.HaveGB * GiB
 	for _, ctx := range fitCtxPoints(in.Arch.MaxCtx, in.Ctx) {
-		kvB := perTok * float64(ctx)
-		p := FitPoint{
-			Ctx:       ctx,
-			WeightsGB: round1(weightsB / GiB),
-			KVGB:      round1(kvB / GiB),
-			Requested: in.Ctx > 0 && ctx == in.Ctx,
-		}
-		otherB, known, note := otherResidentAt(in, ctx, weightsB, kvB)
-		p.OtherKnown = known
-		p.Note = note
-		needB := weightsB + kvB
-		if known {
-			p.OtherGB = round1(otherB / GiB)
-			needB += otherB
-		} else if p.Note == "" {
-			p.Note = "other resident n/a (total allocation not observed at this ctx)"
-		}
-		p.NeedGB = round1(needB / GiB)
-		p.HeadroomGB = round1((haveB - needB) / GiB)
-		if needB <= haveB {
-			p.Tier = Compatible
-		} else {
-			p.Tier = Incompatible
-		}
-		attachTiming(&p, in.Timings)
-		t.Points = append(t.Points, p)
+		t.Points = append(t.Points, makeFitPoint(in, ctx, weightsB, perTok, haveB))
 	}
 	markSuggested(t)
-	if !anyOtherKnown(t.Points) {
-		t.Note = "weights + KV only; other runtime allocation not observed until --load or --fit"
+	if automaticNVIDIAUnifiedCapacity(in) {
+		t.Note = "automatic shared-memory capacity is not a safe budget; ? is unproven"
+	} else if !anyOtherKnown(t.Points) {
+		t.Note = "weights + KV only; other allocation has no matched total evidence"
 	}
 	return t
+}
+
+func makeFitPoint(in Input, ctx int, weightsB, perTok, haveB float64) FitPoint {
+	kvB := perTok * float64(ctx)
+	p := FitPoint{
+		Ctx: ctx, WeightsGB: round1(weightsB / GiB), KVGB: round1(kvB / GiB),
+		Requested: in.Ctx > 0 && ctx == in.Ctx, AllocationEvidence: allocationLowerBound,
+	}
+	otherB, known, evidence, note := otherResidentAt(in, ctx, weightsB, kvB)
+	p.OtherKnown, p.Note = known, note
+	if evidence != "" {
+		p.AllocationEvidence = evidence
+	}
+	needB := weightsB + kvB
+	if known {
+		p.OtherGB = round1(otherB / GiB)
+		needB += otherB
+	} else if p.Note == "" {
+		p.Note = "other allocation n/a (no matched total evidence at this ctx)"
+	}
+	p.NeedGB = round1(needB / GiB)
+	p.HeadroomGB = round1((haveB - needB) / GiB)
+	p.Tier = fitPointTier(in, p.AllocationEvidence, needB, haveB)
+	attachTiming(&p, in.Timings)
+	return p
 }
 
 func hybridFit(in Input, t *FitTable) *FitTable {
@@ -107,35 +125,52 @@ func hybridFit(in Input, t *FitTable) *FitTable {
 		}
 		need := float64(allocB)
 		p := FitPoint{
-			Ctx:        ctx,
-			WeightsGB:  round1(float64(in.WeightsB) / GiB),
-			OtherKnown: true,
-			OtherGB:    round1(need / GiB),
-			NeedGB:     round1(need / GiB),
-			HeadroomGB: round1((haveB - need) / GiB),
-			Requested:  in.Ctx > 0 && ctx == in.Ctx,
-			Note:       note,
+			Ctx:                ctx,
+			WeightsGB:          round1(float64(in.WeightsB) / GiB),
+			NeedGB:             round1(need / GiB),
+			HeadroomGB:         round1((haveB - need) / GiB),
+			Requested:          in.Ctx > 0 && ctx == in.Ctx,
+			AllocationEvidence: allocationObservedTotal,
+			Note:               note,
 		}
-		if need <= haveB {
-			p.Tier = Compatible
-		} else {
-			p.Tier = Incompatible
-		}
+		p.Tier = fitPointTier(in, allocationObservedTotal, need, haveB)
 		attachTiming(&p, in.Timings)
 		t.Points = append(t.Points, p)
 	}
 	if in.ResidentB > 0 && in.ResidentCtx > 0 {
-		add(in.ResidentCtx, in.ResidentB, "hybrid: measured resident (includes recurrent state)")
-	}
-	if in.FitB > 0 && in.Ctx > 0 && (in.ResidentCtx != in.Ctx || in.ResidentB == 0) {
-		add(in.Ctx, in.FitB, "hybrid: dummy allocation (includes recurrent state)")
+		add(in.ResidentCtx, in.ResidentB,
+			"hybrid: observed total allocation; component breakdown is unknown")
 	}
 	if len(t.Points) == 0 {
-		t.Note = "hybrid recurrent architecture cannot be projected from weights plus KV; use --load or --fit"
+		if in.FitB > 0 {
+			t.Note = "allocator projection omitted: final context and placement were not captured; use --load"
+		} else {
+			t.Note = "hybrid recurrent architecture cannot be projected from weights plus KV; use --load"
+		}
 		return t
+	}
+	if automaticNVIDIAUnifiedCapacity(in) {
+		t.Note = "automatic shared-memory capacity is not a safe budget; only observed points fit"
 	}
 	markSuggested(t)
 	return t
+}
+
+func fitPointTier(in Input, evidence string, needB, haveB float64) string {
+	observed := evidence == allocationObservedTotal || evidence == allocationObservedTotalRemainder
+	if automaticNVIDIAUnifiedCapacity(in) && !observed {
+		if needB > haveB {
+			return Incompatible
+		}
+		return Skip
+	}
+	if automaticNVIDIAUnifiedCapacity(in) && observed && needB > haveB {
+		return Skip
+	}
+	if needB <= haveB {
+		return Compatible
+	}
+	return Incompatible
 }
 
 func fitCtxPoints(maxCtx, requested int) []int {
@@ -160,22 +195,16 @@ func fitCtxPoints(maxCtx, requested int) []int {
 	return out
 }
 
-func otherResidentAt(in Input, ctx int, weightsB, kvB float64) (float64, bool, string) {
+func otherResidentAt(in Input, ctx int, weightsB, kvB float64) (float64, bool, string, string) {
 	if in.ResidentB > 0 && in.ResidentCtx == ctx {
 		buf := float64(in.ResidentB) - weightsB - kvB
 		if buf < 0 {
-			return 0, false, "resident smaller than weights+KV estimate"
+			return 0, false, allocationObservedTotalRemainder, "resident smaller than weights+KV estimate"
 		}
-		return buf, true, "other resident is allocation minus modeled weights and KV"
+		return buf, true, allocationObservedTotalRemainder,
+			"other allocation is observed runtime total minus modeled weights and KV"
 	}
-	if in.FitB > 0 && in.Ctx == ctx {
-		buf := float64(in.FitB) - weightsB - kvB
-		if buf < 0 {
-			return 0, false, "dummy allocation smaller than weights+KV estimate"
-		}
-		return buf, true, "other resident is dummy allocation minus modeled weights and KV"
-	}
-	return 0, false, ""
+	return 0, false, "", ""
 }
 
 func attachTiming(p *FitPoint, timings []SavedTiming) {
@@ -217,8 +246,9 @@ func anyOtherKnown(points []FitPoint) bool {
 }
 
 // CompactWindows is the one-line context-fit graph:
-// "2k ok | 4k ok | *8k ok | >16k no". Empty when nothing was sized.
-// * is the suggested window; > is the requested window when it does not fit.
+// "2k ok | 4k ok | *8k ok | >16k no". A question mark is an unproven
+// lower-bound point. Empty when nothing was sized. * is the suggested window;
+// > is the requested window when it does not fit or remains unproven.
 func CompactWindows(t *FitTable) string {
 	if t == nil || len(t.Points) == 0 {
 		return ""
@@ -229,8 +259,11 @@ func CompactWindows(t *FitTable) string {
 		if label == "" {
 			continue
 		}
-		mark := "ok"
-		if p.Tier != Compatible {
+		mark := "?"
+		switch p.Tier {
+		case Compatible:
+			mark = "ok"
+		case Incompatible:
 			mark = "no"
 		}
 		prefix := ""

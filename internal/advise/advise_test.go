@@ -124,9 +124,11 @@ func TestEvaluateCorePreservesEvidencePrecedence(t *testing.T) {
 			tier:  Skip, why: "hybrid recurrent architecture cannot be safely projected from weights plus a conventional KV cache",
 		},
 		{
-			name:  "allocator fit precedes weight arithmetic",
-			input: Input{HaveGB: 8, FitB: 6 * GiB, WeightsB: 9 * GiB},
-			tier:  Compatible, why: "dummy allocation 6.0 GB of 8.0 GB available", needGB: 6,
+			name:   "allocator fit precedes weight arithmetic",
+			input:  Input{HaveGB: 8, FitB: 6 * GiB, WeightsB: 9 * GiB},
+			tier:   Skip,
+			why:    "llama-fit-params projected 6.0 GB of device memory, but its effective context and placement were not captured",
+			needGB: 6,
 		},
 	}
 	for _, test := range tests {
@@ -551,25 +553,17 @@ func TestKVCacheFlagNamesTheRuntimeKnob(t *testing.T) {
 	}
 }
 
-// advise --ctx defaults to 0, meaning "the model's max". The main path
-// resolves that before sizing the cache; the --fit path never did, so a
-// dtype remedy computed from a zero context offers a zero-token window.
-func TestKVCacheRemedyResolvesADefaultContextOnTheFitPath(t *testing.T) {
+func TestAllocatorProjectionAtDefaultContextCannotEmitKVRemedy(t *testing.T) {
 	r := Evaluate(Input{
 		Model: "llama3.1:8b", WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
 		Ctx: 0, Arch: llama8B(), Backend: "ollama",
 		FitB: 9 * GiB, FitSrc: "llama-fit-params",
 	})
-	if r.Tier != LowMemory {
-		t.Fatalf("tier = %s (%s), want low_memory", r.Tier, r.Why)
+	if r.Tier != Skip {
+		t.Fatalf("tier = %s (%s), want skip", r.Tier, r.Why)
 	}
-	if strings.Contains(r.KVRemedy, "keeps 0 ctx") || strings.Contains(r.KVRemedy, " 0 ") {
-		t.Fatalf("kv remedy offers a zero-token window: %q", r.KVRemedy)
-	}
-	// llama8B max ctx is the resolved request; q8_0 must beat the f16 window
-	// of 24576 or say nothing at all.
-	if r.KVRemedy != "" && !strings.Contains(r.KVRemedy, "49152") {
-		t.Fatalf("kv remedy = %q, want the q8_0 window 49152", r.KVRemedy)
+	if r.KVRemedy != "" || r.FlagValue != 0 {
+		t.Fatalf("unbound projection emitted a point-specific remedy: %+v", r)
 	}
 }
 
@@ -584,6 +578,8 @@ func TestEveryMemorySourceFitrEmitsIsTrusted(t *testing.T) {
 		device.AppleWiredLimitSource,
 		device.AppleAssumedShareSource,
 		device.AppleLegacyRAMSource, // saved results predating the correction
+		device.NVIDIAUnifiedMemorySource,
+		device.NVIDIAUnifiedProbeSource,
 		"--vram-gb 24",
 	} {
 		if !memoryBudgetTrusted(src) {
@@ -595,5 +591,109 @@ func TestEveryMemorySourceFitrEmitsIsTrusted(t *testing.T) {
 		if memoryBudgetTrusted(src) {
 			t.Errorf("%q must not be trusted enough to declare a model incompatible", src)
 		}
+	}
+}
+
+func TestNVIDIAUnifiedBudgetDisclosesUnknownCurrentAvailability(t *testing.T) {
+	r := Evaluate(Input{
+		Model: "model", WeightsB: 5 * GiB,
+		HaveGB: 121.7, HaveSrc: device.NVIDIAUnifiedMemorySource,
+		Ctx: 4096, Arch: llama8B(), Backend: "ollama",
+	})
+	if r.Tier != Skip {
+		t.Fatalf("tier = %s (%s), want skip from addressable-only capacity", r.Tier, r.Why)
+	}
+	if r.FlagValue != 0 || r.FitsGB != 0 || r.KVRemedy != "" {
+		t.Fatalf("addressable capacity emitted a fit claim: %+v", r)
+	}
+	sawAvailability, sawBudget := false, false
+	for _, gap := range r.Gaps {
+		if strings.Contains(gap, "whole-pool available memory was not measured") {
+			sawAvailability = true
+		}
+		if strings.Contains(gap, "not a safe planning budget") {
+			sawBudget = true
+		}
+	}
+	if !sawAvailability || !sawBudget {
+		t.Fatalf("unified addressable capacity gaps = %+v", r.Gaps)
+	}
+}
+
+func TestResidentAtFallbackLoadContextDoesNotProveModelMaximum(t *testing.T) {
+	r := Evaluate(Input{
+		HaveGB: 24, HaveSrc: "nvidia-smi", WeightsB: 5 * GiB,
+		Arch: llama8B(), ResidentB: 7 * GiB, ResidentCtx: 2048,
+		ResidentSrc: "ollama /api/ps after --load",
+	})
+	if r.Source == "ollama /api/ps after --load" || strings.Contains(r.Why, "resident") {
+		t.Fatalf("2K receipt proved the default max-context question: %+v", r)
+	}
+	if !strings.Contains(strings.Join(r.Gaps, " "), "does not prove") {
+		t.Fatalf("missing context-mismatch gap: %+v", r.Gaps)
+	}
+}
+
+func TestNVIDIAUnifiedBudgetKeepsOnlyLowerBoundIncompatible(t *testing.T) {
+	r := Evaluate(Input{
+		Model: "model", WeightsB: 5 * GiB,
+		HaveGB: 5.5, HaveSrc: device.NVIDIAUnifiedMemorySource,
+		Ctx: 8192, Arch: llama8B(), Backend: "ollama",
+	})
+	if r.Tier != Incompatible {
+		t.Fatalf("tier = %s (%s), want incompatible lower bound", r.Tier, r.Why)
+	}
+	if r.Flag != "" || r.FlagValue != 0 || r.FitsGB != 0 || r.KVRemedy != "" {
+		t.Fatalf("physical lower-bound failure certified a shorter fit: %+v", r)
+	}
+}
+
+func TestNVIDIAUnifiedBudgetAcceptsExactResidentReceipt(t *testing.T) {
+	r := Evaluate(Input{
+		Model: "model", WeightsB: 5 * GiB,
+		HaveGB: 121.7, HaveSrc: device.NVIDIAUnifiedMemorySource,
+		Ctx: 8192, Arch: llama8B(), Backend: "ollama",
+		ResidentB: 7 * GiB, ResidentCtx: 8192, ResidentSrc: "ollama /api/ps after --load",
+	})
+	if r.Tier != Compatible || r.NeedGB != 7 || r.Ctx != 8192 {
+		t.Fatalf("exact resident receipt = %+v, want measured compatible", r)
+	}
+}
+
+func TestSharedNVIDIAUserBudgetSeparatesProjectionKinds(t *testing.T) {
+	ordinary := Evaluate(Input{
+		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
+		NVIDIAUnifiedMemory: true, Ctx: 8192, Arch: llama8B(),
+	})
+	if ordinary.Tier != Compatible {
+		t.Fatalf("ordinary declared-budget projection = %+v, want compatible", ordinary)
+	}
+	withFit := Evaluate(Input{
+		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
+		NVIDIAUnifiedMemory: true, Ctx: 8192, Arch: llama8B(),
+		FitB: 7 * GiB, FitSrc: "llama-fit-params",
+	})
+	if withFit.Tier != Skip || !strings.Contains(withFit.Why, "effective context and placement were not captured") {
+		t.Fatalf("device-only shared-memory fit = %+v, want skip", withFit)
+	}
+}
+
+func TestNVIDIAUnifiedIdentityStaysAutomaticWithDedicatedProbeValue(t *testing.T) {
+	r := Evaluate(Input{
+		WeightsB: 5 * GiB, HaveGB: 121.7, HaveSrc: "nvidia-smi",
+		NVIDIAUnifiedMemory: true, Ctx: 8192, Arch: llama8B(),
+	})
+	if r.Tier != Skip || !strings.Contains(r.Why, "safe available shared memory was not measured") {
+		t.Fatalf("shared identity with nonzero probe = %+v, want automatic-capacity skip", r)
+	}
+}
+
+func TestSharedNVIDIAResidentNeedsReportedRequestedContext(t *testing.T) {
+	r := Evaluate(Input{
+		HaveGB: 96, HaveSrc: "--vram-gb", NVIDIAUnifiedMemory: true,
+		Ctx: 8192, ResidentB: 7 * GiB, ResidentSrc: "runtime status",
+	})
+	if r.Tier != Skip || r.Source == "runtime status" || !strings.Contains(strings.Join(r.Gaps, " "), "does not prove") {
+		t.Fatalf("contextless shared resident = %+v, want unproven", r)
 	}
 }

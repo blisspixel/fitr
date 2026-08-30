@@ -4,16 +4,18 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // ParseFitLog reads llama-fit-params / llama.cpp --fit stderr. The LAST
 // "projected to use N MiB" is the fitted figure; earlier lines are the
-// initial guess. "cannot fulfill" means even the fitter could not stay
-// inside free device memory at this context.
+// initial guess. Status is order-sensitive because the fitter may report an
+// unsuccessful intermediate attempt before a later successful adjustment.
 func ParseFitLog(log string) (usedB int64, cannot bool, ok bool) {
 	re := regexp.MustCompile(`projected to use (\d+) MiB of device memory`)
 	all := re.FindAllStringSubmatch(log, -1)
@@ -24,7 +26,9 @@ func ParseFitLog(log string) (usedB int64, cannot bool, ok bool) {
 	if err != nil || n <= 0 {
 		return 0, false, false
 	}
-	cannot = regexp.MustCompile(`cannot fulfill`).FindString(log) != ""
+	lastCannot := strings.LastIndex(log, "cannot fulfill")
+	lastSuccess := strings.LastIndex(log, "successfully fit params")
+	cannot = lastCannot >= 0 && lastCannot > lastSuccess
 	return n * 1024 * 1024, cannot, true
 }
 
@@ -45,11 +49,11 @@ func RunFitParams(ctx context.Context, gguf string, ctxSize int) (usedB int64, c
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	runErr := cmd.Run()
+	if runErr != nil {
+		return 0, false, fmt.Errorf("llama-fit-params failed: %w", runErr)
+	}
 	usedB, cannot, ok := ParseFitLog(buf.String())
 	if !ok {
-		if runErr != nil {
-			return 0, false, runErr
-		}
 		return 0, false, errors.New("llama-fit-params produced no projection")
 	}
 	return usedB, cannot, nil

@@ -6,13 +6,14 @@
 // number on the negative tiers - the consumer-grade thing NIM ships and
 // LM Studio / llmfit do not.
 //
-// Fit prefers an observed resident size (Ollama /api/ps) over the weights+KV
+// Fit prefers an exact-context observed resident size over the weights+KV
 // estimate. Observation includes runtime-managed allocation beyond modeled
-// weights and KV; the estimate does not and says so. llama.cpp --fit dummy
-// allocation is still the missing gold
-// standard. When a required input is missing the verdict is SKIP, never a
-// fabricated GB number. Decode-speed class tracks *active* parameters, so a
-// 30B MoE (~3B active) is not treated as a 30B dense model.
+// weights and KV; the estimate does not and says so. A fitter result remains a
+// descriptive allocator projection until its effective context, placement,
+// version, and resource domains are captured. When a required input is
+// missing the verdict is SKIP, never a fabricated GB number. Decode-speed
+// class tracks *active* parameters, so a 30B MoE (~3B active) is not treated
+// as a 30B dense model.
 package advise
 
 import (
@@ -21,6 +22,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/render"
 )
 
@@ -39,8 +41,12 @@ type Input struct {
 	Model    string
 	Quant    string
 	WeightsB int64   // on-disk size; 0 unknown
-	HaveGB   float64 // available GPU / unified memory; 0 unknown
+	HaveGB   float64 // capacity input; HaveSrc defines whether it is a budget
 	HaveSrc  string  // where HaveGB came from; empty if unmeasured
+	// NVIDIAUnifiedMemory is true when device detection identified an NVIDIA
+	// shared-memory SoC. It remains true when --vram-gb replaces HaveGB so a
+	// device-only allocator projection cannot be mistaken for whole-pool use.
+	NVIDIAUnifiedMemory bool
 	// FreeGB is GPU memory not currently committed elsewhere. Display only:
 	// it moves minute to minute and must never reach a comparability key.
 	FreeGB float64
@@ -57,9 +63,10 @@ type Input struct {
 	ResidentB   int64
 	ResidentSrc string
 	ResidentCtx int // nonzero only when fitr loaded the model at this exact context
-	// FitB is llama-fit-params dummy allocation at Ctx. Zero means the
-	// binary was not run. A projection from the allocator beats weights+KV
-	// and loses to a live resident.
+	// FitB is the final device-memory projection printed by llama-fit-params.
+	// Zero means the binary was not run. The current adapter does not seal the
+	// fitter's effective context or placement, so this remains descriptive and
+	// cannot establish a point-specific verdict.
 	FitB      int64
 	FitSrc    string
 	FitCannot bool // llama-fit-params could not stay inside device memory
@@ -160,9 +167,8 @@ func (a Arch) ActiveParams() (int64, bool) {
 	// as a negative model size. "Cannot be computed" is already this
 	// function's answer for that, so overflow returns it.
 	// Gated FFN: gate, up, down.
-	expertTotal, ok1 := mulInt64(int64(a.Blocks), 3, int64(a.Embed), int64(a.FFN), int64(a.Experts))
-	expertActive, ok2 := mulInt64(int64(a.Blocks), 3, int64(a.Embed), int64(a.FFN), int64(a.ExpertUsed))
-	if !ok1 || !ok2 {
+	expertTotal, expertActive, ok := a.expertParams()
+	if !ok {
 		return 0, false
 	}
 	if a.Params > 0 && a.Params > expertTotal {
@@ -172,6 +178,16 @@ func (a Arch) ActiveParams() (int64, bool) {
 		}
 		return rest, true
 	}
+	return a.reconstructActiveParams(expertActive)
+}
+
+func (a Arch) expertParams() (int64, int64, bool) {
+	expertTotal, totalOK := mulInt64(int64(a.Blocks), 3, int64(a.Embed), int64(a.FFN), int64(a.Experts))
+	expertActive, activeOK := mulInt64(int64(a.Blocks), 3, int64(a.Embed), int64(a.FFN), int64(a.ExpertUsed))
+	return expertTotal, expertActive, totalOK && activeOK
+}
+
+func (a Arch) reconstructActiveParams(expertActive int64) (int64, bool) {
 	// Reconstruct without a recorded total: attention + active FFN + embed.
 	if a.Heads <= 0 || a.headDimK() <= 0 {
 		return 0, false
@@ -430,15 +446,18 @@ func evaluateCore(in Input) Report {
 	if evaluateResident(in, haveB, &r) {
 		return r
 	}
-	if in.Arch.Hybrid && in.FitB == 0 {
+	if in.FitB > 0 {
+		return evaluateFit(in, r)
+	}
+	if automaticNVIDIAUnifiedCapacity(in) {
+		return evaluateAutomaticNVIDIAUnifiedCapacity(in, haveB, r)
+	}
+	if in.Arch.Hybrid {
 		r.Tier = Skip
 		r.Why = "hybrid recurrent architecture cannot be safely projected from weights plus a conventional KV cache"
-		r.Hint = "use --load at the requested context with Ollama, or --fit with llama-fit-params"
+		r.Hint = "use --load at the requested context with Ollama"
 		r.Gaps = append(r.Gaps, "recurrent state and other runtime allocation were not measured")
 		return r
-	}
-	if in.FitB > 0 {
-		return evaluateFit(in, haveB, r)
 	}
 	return evaluateWeightsAndKV(in, haveB, r)
 }
@@ -466,6 +485,13 @@ func newCoreReport(in Input) Report {
 	if in.ResidentB > 0 {
 		r.ObservedGB = round1(float64(in.ResidentB) / GiB)
 	}
+	if in.WeightsB > 0 {
+		r.WeightsGB = round1(float64(in.WeightsB) / GiB)
+	}
+	if automaticNVIDIAUnifiedCapacity(in) && in.FreeGB <= 0 {
+		r.Gaps = append(r.Gaps,
+			"shared pool includes Linux and other processes; whole-pool available memory was not measured")
+	}
 	return r
 }
 
@@ -486,90 +512,196 @@ func evaluateResident(in Input, haveB float64, r *Report) bool {
 		}
 		return true
 	}
+	if sharedNVIDIAUnifiedMemory(in) {
+		return evaluateSharedNVIDIAResident(in, r)
+	}
+	if requested := requestedResidentContext(in); requested > 0 {
+		if in.ResidentCtx != requested {
+			r.Gaps = append(r.Gaps,
+				"resident allocation was not observed at the requested context, so it does not prove that point")
+			return false
+		}
+		r.Tier = Compatible
+		r.NeedGB = r.ObservedGB
+		r.Ctx = requested
+		r.Why = fmt.Sprintf("resident %s GB of %s GB available at the requested %d context (measured)",
+			trim1(r.ObservedGB), trim1(r.HaveGB), requested)
+		r.Source = residentSource(in)
+		r.Gaps = append(r.Gaps,
+			"resident is total runtime allocation; its non-weight, non-KV remainder is derived")
+		if in.Arch.Hybrid {
+			r.Gaps = append(r.Gaps, "hybrid recurrent state is included in the measured allocation")
+		}
+		return true
+	}
 	// Observed fit at the current load. A requested --ctx still needs
 	// architecture to size; without one, this is the answer.
 	if in.Ctx <= 0 || !in.Arch.KVReady() {
 		r.Tier = Compatible
 		r.NeedGB = r.ObservedGB
 		r.Why = fmt.Sprintf("resident %s GB of %s GB available (measured)", trim1(r.ObservedGB), trim1(r.HaveGB))
-		r.Source = in.ResidentSrc
-		if r.Source == "" {
-			r.Source = "observed resident"
-		}
+		r.Source = residentSource(in)
 		r.Gaps = append(r.Gaps, "resident is total runtime allocation; its non-weight, non-KV remainder is derived")
 		if !in.Arch.KVReady() {
 			r.Gaps = append(r.Gaps, "other context lengths not sized (no GGUF architecture)")
 		}
 		return true
 	}
-	if in.Arch.Hybrid && in.ResidentCtx == in.Ctx {
-		r.Tier = Compatible
-		r.NeedGB = r.ObservedGB
-		r.Why = fmt.Sprintf("resident %s GB of %s GB available at the requested %d context (measured)",
-			trim1(r.ObservedGB), trim1(r.HaveGB), in.Ctx)
-		r.Source = in.ResidentSrc
-		r.Gaps = append(r.Gaps, "hybrid recurrent state is included in the measured allocation")
-		return true
-	}
 	r.Gaps = append(r.Gaps, "current resident "+trim1(r.ObservedGB)+" GB (measured)")
 	return false
 }
 
-func evaluateFit(in Input, haveB float64, r Report) Report {
+func evaluateSharedNVIDIAResident(in Input, r *Report) bool {
+	if !residentMatchesRequestedContext(in) {
+		r.Gaps = append(r.Gaps,
+			"resident allocation was not observed at the requested context, so it does not prove that point")
+		return false
+	}
+	r.Tier = Compatible
+	r.NeedGB = r.ObservedGB
+	r.Ctx = in.ResidentCtx
+	capacity := fmt.Sprintf("the %s GB declared planning budget", trim1(r.HaveGB))
+	if automaticNVIDIAUnifiedCapacity(in) {
+		capacity = fmt.Sprintf("the %s GB addressable shared pool", trim1(r.HaveGB))
+	}
+	r.Why = fmt.Sprintf("resident %s GB within %s at the requested %d context (measured)",
+		trim1(r.ObservedGB), capacity, in.ResidentCtx)
+	r.Source = residentSource(in)
+	r.Gaps = append(r.Gaps,
+		"runtime allocation proves this loaded point; it does not establish a reusable free-memory budget")
+	return true
+}
+
+func residentMatchesRequestedContext(in Input) bool {
+	if in.ResidentCtx <= 0 {
+		return false
+	}
+	requested := requestedResidentContext(in)
+	return requested > 0 && in.ResidentCtx == requested
+}
+
+func requestedResidentContext(in Input) int {
+	if in.Ctx > 0 {
+		return in.Ctx
+	}
+	return in.Arch.MaxCtx
+}
+
+func residentSource(in Input) string {
+	if in.ResidentSrc != "" {
+		return in.ResidentSrc
+	}
+	return "observed resident"
+}
+
+func sharedNVIDIAUnifiedMemory(in Input) bool {
+	return in.NVIDIAUnifiedMemory || in.HaveSrc == device.NVIDIAUnifiedMemorySource ||
+		in.HaveSrc == device.NVIDIAUnifiedProbeSource
+}
+
+func automaticNVIDIAUnifiedCapacity(in Input) bool {
+	return sharedNVIDIAUnifiedMemory(in) && !strings.HasPrefix(in.HaveSrc, "--vram-gb")
+}
+
+func evaluateAutomaticNVIDIAUnifiedCapacity(in Input, haveB float64, r Report) Report {
+	r.Gaps = append(r.Gaps,
+		"automatic shared-memory capacity is not a safe planning budget after Linux, other processes, and runtime reserve")
+	if in.Arch.Hybrid {
+		return evaluateAutomaticNVIDIAUnifiedHybrid(in, haveB, r)
+	}
+	lower := evaluateWeightsAndKV(in, haveB, r)
+	return constrainAutomaticNVIDIAUnifiedClaim(lower)
+}
+
+func evaluateAutomaticNVIDIAUnifiedHybrid(in Input, haveB float64, r Report) Report {
+	if in.WeightsB > 0 {
+		r.WeightsGB = round1(float64(in.WeightsB) / GiB)
+	}
+	if in.WeightsB > 0 && float64(in.WeightsB) > haveB {
+		r.Tier = Incompatible
+		r.NeedGB = r.WeightsGB
+		r.Why = fmt.Sprintf("weights alone are %s GB; the physical addressable pool is %s GB",
+			trim1(r.WeightsGB), trim1(r.HaveGB))
+		r.Remedy = "try a smaller quant or runtime-supported partial placement"
+		return r
+	}
+	r.Tier = Skip
+	r.Why = "the model's known allocation does not exceed physical capacity, but safe available shared memory was not measured"
+	r.Hint = "use --load at the requested context to observe runtime allocation, or pass --vram-gb N as a declared planning budget"
+	r.Gaps = append(r.Gaps,
+		"hybrid recurrent state and host/device allocation domains were not reconciled")
+	return r
+}
+
+func constrainAutomaticNVIDIAUnifiedClaim(r Report) Report {
+	switch r.Tier {
+	case Compatible:
+		r.Tier = Skip
+		r.Why = fmt.Sprintf("%d ctx has a %s GB weights-plus-KV lower bound within the %s GB addressable pool, but safe available shared memory was not measured",
+			r.Ctx, trim1(r.NeedGB), trim1(r.HaveGB))
+		r.Hint = "use --load at the requested context to observe runtime allocation, or pass --vram-gb N as a declared planning budget"
+	case LowMemory:
+		r.Tier = Incompatible
+		r.Remedy = "the requested lower bound exceeds physical capacity; try a smaller quant or shorter context, then verify with --load"
+		clearShorterContextClaim(&r)
+	case Incompatible:
+		r.Remedy = "the known lower bound exceeds physical capacity; try a smaller quant or shorter context, then verify with --load"
+		clearShorterContextClaim(&r)
+	}
+	return r
+}
+
+func clearShorterContextClaim(r *Report) {
+	r.Flag = ""
+	r.FlagValue = 0
+	r.FitsGB = 0
+	r.KVRemedy = ""
+}
+
+func evaluateFit(in Input, r Report) Report {
 	r.NeedGB = round1(float64(in.FitB) / GiB)
 	if in.FitSrc != "" {
 		r.Source = in.FitSrc
 	}
-	r.Gaps = append(r.Gaps, "dummy allocation includes runtime-managed memory beyond weights and modeled KV")
-	fits := float64(in.FitB) <= haveB && !in.FitCannot
-	if fits {
-		r.Tier = Compatible
-		r.Why = fmt.Sprintf("dummy allocation %s GB of %s GB available", trim1(r.NeedGB), trim1(r.HaveGB))
-		return r
+	r.Tier = Skip
+	r.Why = fmt.Sprintf("llama-fit-params projected %s GB of device memory, but its effective context and placement were not captured",
+		trim1(r.NeedGB))
+	r.Hint = "use --load at the requested context to observe runtime allocation; omit --fit to see the labeled weights-plus-KV lower bound"
+	r.Gaps = append(r.Gaps,
+		"allocator projection is not bound to final context, offload, tensor placement, binary version, or host-memory use")
+	if in.FitCannot {
+		r.Gaps = append(r.Gaps, "the fitter's final status did not satisfy its device-memory target")
 	}
-	r.Why = fmt.Sprintf("dummy allocation %s GB; %s GB available", trim1(r.NeedGB), trim1(r.HaveGB))
-	if in.WeightsB <= 0 || !in.Arch.KVReady() {
-		r.Tier = Incompatible
-		r.Remedy = "try a smaller quant, or a shorter context"
-		return r
+	if automaticNVIDIAUnifiedCapacity(in) {
+		r.Gaps = append(r.Gaps,
+			"automatic shared-memory capacity is not a safe whole-pool budget")
+	} else if sharedNVIDIAUnifiedMemory(in) {
+		r.Gaps = append(r.Gaps,
+			"host and device allocations share one physical pool and were not reconciled")
 	}
-	if in.Arch.Hybrid {
-		r.Tier = Incompatible
-		r.Remedy = "try a smaller quant or rerun --fit at a shorter context; hybrid recurrent state prevents a safe algebraic context remedy"
-		return r
-	}
-	// Allocator said this ctx does not fit; KV math still names a shorter window.
-	elem, _, _ := kvElemBytes(in)
-	perTok := in.Arch.kvBytesPerToken(elem)
-	if perTok <= 0 {
-		r.Tier = Incompatible
-		r.Remedy = "try a smaller quant, or a shorter context"
-		return r
-	}
-	fitCtx := ctxTokens((haveB - float64(in.WeightsB)) / perTok)
-	fitCtx = (fitCtx / 256) * 256
-	if fitCtx < 512 {
-		r.Tier = Incompatible
-		r.Remedy = "try a smaller quant; even a 512-token window does not fit next to the weights"
-		r.KVRemedy = kvCacheRemedy(in, elem, in.Ctx, fitCtx, haveB)
-		return r
-	}
-	fitB := float64(in.WeightsB) + perTok*float64(fitCtx)
-	r.Tier = LowMemory
-	r.Flag = ContextFlag(in.Backend)
-	r.FlagValue = fitCtx
-	r.FitsGB = round1(fitB / GiB)
-	r.Remedy = remedyLine(r.Flag, fitCtx, r.FitsGB)
-	r.KVRemedy = kvCacheRemedy(in, elem, in.Ctx, fitCtx, haveB)
 	return r
 }
 
 func evaluateWeightsAndKV(in Input, haveB float64, r Report) Report {
+	prepared, ok := prepareWeightsAndKV(in, haveB, r)
+	if !ok {
+		return prepared.report
+	}
+	return evaluateKVContext(in, haveB, prepared)
+}
+
+type weightsAndKVEstimate struct {
+	report Report
+	elem   float64
+	ctx    int
+}
+
+func prepareWeightsAndKV(in Input, haveB float64, r Report) (weightsAndKVEstimate, bool) {
 	if in.WeightsB <= 0 {
 		r.Tier = Skip
 		r.Why = "model weights were not measured"
 		r.Hint = "pass a .gguf path, or use Ollama so /api/show exposes size"
-		return r
+		return weightsAndKVEstimate{report: r}, false
 	}
 	r.WeightsGB = round1(float64(in.WeightsB) / GiB)
 
@@ -578,7 +710,7 @@ func evaluateWeightsAndKV(in Input, haveB float64, r Report) Report {
 		r.Why = fmt.Sprintf("weights alone are %s GB; %s GB available", trim1(r.WeightsGB), trim1(r.HaveGB))
 		r.Remedy = "try a smaller quant, or runtime-supported partial/CPU placement; performance is a separate measurement and placement must match for comparison"
 		r.Gaps = append(r.Gaps, "other runtime allocation not included")
-		return r
+		return weightsAndKVEstimate{report: r}, false
 	}
 
 	elem, kvSrc, assumed := kvElemBytes(in)
@@ -594,7 +726,7 @@ func evaluateWeightsAndKV(in Input, haveB float64, r Report) Report {
 			trim1(r.WeightsGB), trim1(r.HaveGB))
 		r.Hint = "pass a .gguf path so architecture metadata (layers, KV heads, head dim) is readable"
 		r.Gaps = append(r.Gaps, "no GGUF architecture metadata")
-		return r
+		return weightsAndKVEstimate{report: r}, false
 	}
 	if in.Arch.KeyLength == 0 {
 		r.Gaps = append(r.Gaps, "attention head dim assumed embed/heads (key_length missing)")
@@ -608,9 +740,14 @@ func evaluateWeightsAndKV(in Input, haveB float64, r Report) Report {
 		r.Tier = Skip
 		r.Why = "no context length in metadata"
 		r.Hint = "pass --ctx N"
-		return r
+		return weightsAndKVEstimate{report: r}, false
 	}
 	r.Ctx = ctx
+	return weightsAndKVEstimate{report: r, elem: elem, ctx: ctx}, true
+}
+
+func evaluateKVContext(in Input, haveB float64, prepared weightsAndKVEstimate) Report {
+	r, elem, ctx := prepared.report, prepared.elem, prepared.ctx
 	perTok := in.Arch.kvBytesPerToken(elem)
 	// The --fit branch already refuses a non-positive per-token cost; this
 	// path divided and compared without checking. An unsizable cache is a
@@ -763,7 +900,7 @@ func Write(w io.Writer, r Report) {
 }
 
 func fitPresentation(t FitTable) render.ContextFit {
-	out := render.ContextFit{HaveGB: t.HaveGB, Note: t.Note}
+	out := render.ContextFit{HaveGB: t.HaveGB, HaveSource: t.HaveSrc, Note: t.Note}
 	for _, p := range t.Points {
 		out.Points = append(out.Points, render.ContextFitPoint{
 			Ctx: p.Ctx, Tier: p.Tier, WeightsGB: p.WeightsGB, KVGB: p.KVGB,

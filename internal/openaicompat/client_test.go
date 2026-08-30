@@ -394,60 +394,63 @@ func TestModelListIdentityMatrix(t *testing.T) {
 	}
 }
 
+type protocolErrorCase struct {
+	name       string
+	path       string
+	status     int
+	body       string
+	wantStatus int
+	wantCode   string
+	invoke     func(*Client) error
+}
+
+var protocolErrorCases = []protocolErrorCase{
+	{
+		name: "models authentication", path: "/v1/models", status: http.StatusUnauthorized,
+		body:       `{"error":{"message":"bad key do-not-leak","type":"invalid_request_error","code":"invalid_api_key"}}`,
+		wantStatus: http.StatusUnauthorized, wantCode: "invalid_api_key",
+		invoke: func(c *Client) error { _, err := c.Tags(context.Background()); return err },
+	},
+	{
+		name: "chat rate limit", path: "/v1/chat/completions", status: http.StatusTooManyRequests,
+		body:       `{"error":{"message":"slow down","type":"rate_limit_error","param":null,"code":"rate_limit_exceeded"}}`,
+		wantStatus: http.StatusTooManyRequests, wantCode: "rate_limit_exceeded",
+		invoke: func(c *Client) error {
+			_, _, err := c.Chat(context.Background(), "m", nil, nil, ollama.Deterministic(8, 8192))
+			return err
+		},
+	},
+	{
+		name: "chat error envelope on success status", path: "/v1/chat/completions", status: http.StatusOK,
+		body:       `{"error":{"message":"backend rejected the request","type":"server_error","code":"backend_error"}}`,
+		wantStatus: http.StatusOK, wantCode: "backend_error",
+		invoke: func(c *Client) error {
+			_, _, err := c.Chat(context.Background(), "m", nil, nil, ollama.Deterministic(8, 8192))
+			return err
+		},
+	},
+	{
+		name: "completion plain server error", path: "/v1/completions", status: http.StatusInternalServerError,
+		body: "upstream unavailable", wantStatus: http.StatusInternalServerError,
+		invoke: func(c *Client) error {
+			_, _, err := c.Generate(context.Background(), "m", "hi", ollama.Deterministic(8, 8192))
+			return err
+		},
+	},
+	{
+		name: "stream error event", path: "/v1/completions", status: http.StatusOK,
+		body:       "data: {\"type\":\"error\",\"code\":\"stream_failed\",\"message\":\"generation failed\"}\n\n",
+		wantStatus: http.StatusOK, wantCode: "stream_failed",
+		invoke: func(c *Client) error {
+			_, _, err := c.Generate(context.Background(), "m", "hi", ollama.Deterministic(8, 8192))
+			return err
+		},
+	},
+}
+
 func TestProtocolErrorMatrix(t *testing.T) {
 	const token = "do-not-leak"
-	tests := []struct {
-		name       string
-		path       string
-		status     int
-		body       string
-		wantStatus int
-		wantCode   string
-		invoke     func(*Client) error
-	}{
-		{
-			name: "models authentication", path: "/v1/models", status: http.StatusUnauthorized,
-			body:       `{"error":{"message":"bad key do-not-leak","type":"invalid_request_error","code":"invalid_api_key"}}`,
-			wantStatus: http.StatusUnauthorized, wantCode: "invalid_api_key",
-			invoke: func(c *Client) error { _, err := c.Tags(context.Background()); return err },
-		},
-		{
-			name: "chat rate limit", path: "/v1/chat/completions", status: http.StatusTooManyRequests,
-			body:       `{"error":{"message":"slow down","type":"rate_limit_error","param":null,"code":"rate_limit_exceeded"}}`,
-			wantStatus: http.StatusTooManyRequests, wantCode: "rate_limit_exceeded",
-			invoke: func(c *Client) error {
-				_, _, err := c.Chat(context.Background(), "m", nil, nil, ollama.Deterministic(8, 8192))
-				return err
-			},
-		},
-		{
-			name: "chat error envelope on success status", path: "/v1/chat/completions", status: http.StatusOK,
-			body:       `{"error":{"message":"backend rejected the request","type":"server_error","code":"backend_error"}}`,
-			wantStatus: http.StatusOK, wantCode: "backend_error",
-			invoke: func(c *Client) error {
-				_, _, err := c.Chat(context.Background(), "m", nil, nil, ollama.Deterministic(8, 8192))
-				return err
-			},
-		},
-		{
-			name: "completion plain server error", path: "/v1/completions", status: http.StatusInternalServerError,
-			body: "upstream unavailable", wantStatus: http.StatusInternalServerError,
-			invoke: func(c *Client) error {
-				_, _, err := c.Generate(context.Background(), "m", "hi", ollama.Deterministic(8, 8192))
-				return err
-			},
-		},
-		{
-			name: "stream error event", path: "/v1/completions", status: http.StatusOK,
-			body:       "data: {\"type\":\"error\",\"code\":\"stream_failed\",\"message\":\"generation failed\"}\n\n",
-			wantStatus: http.StatusOK, wantCode: "stream_failed",
-			invoke: func(c *Client) error {
-				_, _, err := c.Generate(context.Background(), "m", "hi", ollama.Deterministic(8, 8192))
-				return err
-			},
-		},
-	}
-	for _, tc := range tests {
+	for _, tc := range protocolErrorCases {
 		t.Run(tc.name, func(t *testing.T) {
 			c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != tc.path {
@@ -664,62 +667,65 @@ func TestSuccessfulResponsesAndStreamsAreBounded(t *testing.T) {
 	})
 }
 
+type streamingConformanceCase struct {
+	name      string
+	body      string
+	chat      bool
+	wantText  string
+	wantError string
+}
+
+var streamingConformanceCases = []streamingConformanceCase{
+	{
+		name: "comments no-space data and refusal",
+		body: ": keepalive\n\ndata:{\"choices\":[{\"delta\":{\"refusal\":\"cannot comply\"},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data:{\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata:[DONE]\n\n",
+		chat: true, wantText: "cannot comply",
+	},
+	{name: "malformed chunk", body: "data: {nope}\n\n", wantError: "decode SSE chunk"},
+	{name: "duplicate chunk field", body: "data: {\"choices\":[],\"choices\":[]}\n\n", wantError: "duplicate JSON object name"},
+	{
+		name: "interrupted before done",
+		body: "data: {\"choices\":[{\"text\":\"partial\",\"finish_reason\":\"\"}]}\n\n" +
+			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n",
+		wantText: "partial", wantError: "before [DONE]",
+	},
+	{
+		name:     "done without requested usage",
+		body:     "data: {\"choices\":[{\"text\":\"partial\",\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+		wantText: "partial", wantError: "without requested usage",
+	},
+	{
+		name: "data after done",
+		body: "data: {\"choices\":[{\"text\":\"ok\",\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n" +
+			"data: [DONE]\n\ndata: {\"choices\":[{\"text\":\"spoof\"}]}\n\n",
+		wantText: "ok", wantError: "after [DONE]",
+	},
+	{
+		name: "done without finish reason",
+		body: "data: {\"choices\":[{\"text\":\"partial\"}]}\n\n" +
+			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n" +
+			"data: [DONE]\n\n",
+		wantText: "partial", wantError: "without a finish reason",
+	},
+	{
+		name: "conflicting usage receipts",
+		body: "data: {\"choices\":[{\"text\":\"ok\",\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n" +
+			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1}}\n\n" +
+			"data: [DONE]\n\n",
+		wantText: "ok", wantError: "conflicting usage",
+	},
+	{
+		name:      "multiple choices",
+		body:      "data: {\"choices\":[{\"text\":\"a\"},{\"text\":\"b\"}]}\n\n",
+		wantError: "at most one",
+	},
+}
+
 func TestStreamingConformanceMatrix(t *testing.T) {
-	tests := []struct {
-		name      string
-		body      string
-		chat      bool
-		wantText  string
-		wantError string
-	}{
-		{
-			name: "comments no-space data and refusal",
-			body: ": keepalive\n\ndata:{\"choices\":[{\"delta\":{\"refusal\":\"cannot comply\"},\"finish_reason\":\"stop\"}]}\n\n" +
-				"data:{\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata:[DONE]\n\n",
-			chat: true, wantText: "cannot comply",
-		},
-		{name: "malformed chunk", body: "data: {nope}\n\n", wantError: "decode SSE chunk"},
-		{name: "duplicate chunk field", body: "data: {\"choices\":[],\"choices\":[]}\n\n", wantError: "duplicate JSON object name"},
-		{
-			name: "interrupted before done",
-			body: "data: {\"choices\":[{\"text\":\"partial\",\"finish_reason\":\"\"}]}\n\n" +
-				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n",
-			wantText: "partial", wantError: "before [DONE]",
-		},
-		{
-			name:     "done without requested usage",
-			body:     "data: {\"choices\":[{\"text\":\"partial\",\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
-			wantText: "partial", wantError: "without requested usage",
-		},
-		{
-			name: "data after done",
-			body: "data: {\"choices\":[{\"text\":\"ok\",\"finish_reason\":\"stop\"}]}\n\n" +
-				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n" +
-				"data: [DONE]\n\ndata: {\"choices\":[{\"text\":\"spoof\"}]}\n\n",
-			wantText: "ok", wantError: "after [DONE]",
-		},
-		{
-			name: "done without finish reason",
-			body: "data: {\"choices\":[{\"text\":\"partial\"}]}\n\n" +
-				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n" +
-				"data: [DONE]\n\n",
-			wantText: "partial", wantError: "without a finish reason",
-		},
-		{
-			name: "conflicting usage receipts",
-			body: "data: {\"choices\":[{\"text\":\"ok\",\"finish_reason\":\"stop\"}]}\n\n" +
-				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}\n\n" +
-				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1}}\n\n" +
-				"data: [DONE]\n\n",
-			wantText: "ok", wantError: "conflicting usage",
-		},
-		{
-			name:      "multiple choices",
-			body:      "data: {\"choices\":[{\"text\":\"a\"},{\"text\":\"b\"}]}\n\n",
-			wantError: "at most one",
-		},
-	}
-	for _, tc := range tests {
+	for _, tc := range streamingConformanceCases {
 		t.Run(tc.name, func(t *testing.T) {
 			c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")

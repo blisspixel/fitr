@@ -68,31 +68,8 @@ type runCommand struct {
 }
 
 func parseRunCommand(args []string, supplied render.Display) (runCommand, int, bool) {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	if supplied != nil {
-		fs.SetOutput(io.Discard)
-	} else {
-		fs.SetOutput(os.Stderr)
-	}
+	fs, flags := newRunFlagSet(supplied)
 	reportError := func(message, note, hint string) { backendError(supplied, message, note, hint) }
-	quick := fs.Bool("quick", false, "speed, memory, and plumbing; executable tasks default to SKIP")
-	full := fs.Bool("full", false, "adds long-horizon tasks; executable tasks default to SKIP")
-	checksOnly := fs.Bool("checks-only", false, "generated checks only for paired hardware calibration")
-	k := fs.Int("k", 0, "repeats per noisy task")
-	profileName := fs.String("profile", "", "device profile (default: auto-match)")
-	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
-	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
-	seedset := fs.String("seedset", "", "pin the generated-instance seed set; two runs sharing "+
-		"a seedset face IDENTICAL task instances, enabling a paired comparison")
-	pullFlag := fs.Bool("pull", false, "pull the model first if it is not installed "+
-		"(Ollama; supports hf.co/... and pasted Hugging Face URLs)")
-	htmlFlag := fs.Bool("html", false, "write a self-contained HTML artifact next to the JSON")
-	ctxSize := fs.Int("ctx", 0, "request context (default 8192). Apply an advise num_ctx remedy here.")
-	allowUnsafeExec := fs.Bool("allow-unsafe-exec", false,
-		"run unisolated built-in executable diagnostics; observations remain INCONCLUSIVE")
-	var quiet countFlag
-	fs.Var(&quiet, "q", "quiet level")
-	verbose := fs.Bool("v", false, "verbose")
 	if err := fs.Parse(permute(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return runCommand{}, exitOK, false
@@ -102,59 +79,112 @@ func parseRunCommand(args []string, supplied render.Display) (runCommand, int, b
 		}
 		return runCommand{}, exitUsage, false
 	}
-	if !render.ValidMode(*mode) {
-		reportError("invalid display mode", *mode, "use auto, rich, plain, json, or none")
-		return runCommand{}, exitUsage, false
+	if code, ok := validateRunFlags(fs, flags, reportError); !ok {
+		return runCommand{}, code, false
 	}
-	if fs.NArg() < 1 {
-		reportError("missing model", "", "fitr run <model>")
-		return runCommand{}, exitUsage, false
-	}
-	if fs.NArg() > 1 {
-		reportError("too many arguments", "run accepts exactly one model", "fitr run <model> [flags]")
-		return runCommand{}, exitUsage, false
-	}
-	if *ctxSize < 0 {
-		reportError("invalid context size", "--ctx cannot be negative", "omit --ctx for the default, or pass a positive token count")
-		return runCommand{}, exitUsage, false
-	}
-	if selectedRunLevels(*quick, *full, *checksOnly) > 1 {
-		reportError("choose one run level", "--quick, --full, and --checks-only are mutually exclusive", "")
-		return runCommand{}, exitUsage, false
-	}
-	if *checksOnly && *seedset == "" {
-		reportError("--checks-only requires --seedset", "calibration pairs must face identical generated instances", "")
-		return runCommand{}, exitUsage, false
-	}
-	if *checksOnly && *htmlFlag {
-		reportError("--checks-only cannot write a scorecard HTML", "calibration is paired evidence, not a standalone product verdict", "use `fitr calibrate a b --out pair.json` after both runs")
-		return runCommand{}, exitUsage, false
-	}
-	if *checksOnly && *allowUnsafeExec {
-		reportError("--checks-only cannot enable executable diagnostics",
-			"the calibration battery is declarative and does not execute generated code", "remove --allow-unsafe-exec")
-		return runCommand{}, exitUsage, false
-	}
-	level := selectedRunLevel(*quick, *full, *checksOnly)
-	reps := runRepeats(level, *k)
+	level := selectedRunLevel(*flags.quick, *flags.full, *flags.checksOnly)
+	reps := runRepeats(level, *flags.repeats)
 	if reps < 1 {
 		reportError("invalid repeat count", "-k must be at least 1", "")
 		return runCommand{}, exitUsage, false
 	}
-	if quiet > 1 {
-		*mode = "none"
-	} else if (quiet > 0 || *verbose) && *mode == "auto" {
-		*mode = "plain"
+	if flags.quiet > 1 {
+		*flags.mode = "none"
+	} else if (flags.quiet > 0 || *flags.verbose) && *flags.mode == "auto" {
+		*flags.mode = "plain"
 	}
+	return buildRunCommand(fs.Arg(0), flags, level, reps), exitOK, true
+}
+
+type runFlags struct {
+	quick, full, checksOnly *bool
+	repeats                 *int
+	profileName             *string
+	mode                    *string
+	backend                 *string
+	seedSet                 *string
+	pull, html              *bool
+	numCtx                  *int
+	allowUnsafeExec         *bool
+	verbose                 *bool
+	quiet                   countFlag
+}
+
+func newRunFlagSet(supplied render.Display) (*flag.FlagSet, *runFlags) {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	if supplied != nil {
+		fs.SetOutput(io.Discard)
+	} else {
+		fs.SetOutput(os.Stderr)
+	}
+	flags := &runFlags{}
+	flags.quick = fs.Bool("quick", false, "speed, memory, and plumbing; executable tasks default to SKIP")
+	flags.full = fs.Bool("full", false, "adds long-horizon tasks; executable tasks default to SKIP")
+	flags.checksOnly = fs.Bool("checks-only", false, "generated checks only for paired hardware calibration")
+	flags.repeats = fs.Int("k", 0, "repeats per noisy task")
+	flags.profileName = fs.String("profile", "", "device profile (default: auto-match)")
+	flags.mode = fs.String("display", "auto", "auto|rich|plain|json|none")
+	flags.backend = fs.String("backend", "auto", "auto|ollama|llama-server|openai")
+	flags.seedSet = fs.String("seedset", "", "pin the generated-instance seed set; two runs sharing "+
+		"a seedset face IDENTICAL task instances, enabling a paired comparison")
+	flags.pull = fs.Bool("pull", false, "pull the model first if it is not installed "+
+		"(Ollama; supports hf.co/... and pasted Hugging Face URLs)")
+	flags.html = fs.Bool("html", false, "write a self-contained HTML artifact next to the JSON")
+	flags.numCtx = fs.Int("ctx", 0, "request context (default 8192). Apply an advise num_ctx remedy here.")
+	flags.allowUnsafeExec = fs.Bool("allow-unsafe-exec", false,
+		"run unisolated built-in executable diagnostics; observations remain INCONCLUSIVE")
+	fs.Var(&flags.quiet, "q", "quiet level")
+	flags.verbose = fs.Bool("v", false, "verbose")
+	return fs, flags
+}
+
+func validateRunFlags(fs *flag.FlagSet, flags *runFlags, reportError func(string, string, string)) (int, bool) {
+	if !render.ValidMode(*flags.mode) {
+		reportError("invalid display mode", *flags.mode, "use auto, rich, plain, json, or none")
+		return exitUsage, false
+	}
+	if fs.NArg() < 1 {
+		reportError("missing model", "", "fitr run <model>")
+		return exitUsage, false
+	}
+	if fs.NArg() > 1 {
+		reportError("too many arguments", "run accepts exactly one model", "fitr run <model> [flags]")
+		return exitUsage, false
+	}
+	if *flags.numCtx < 0 {
+		reportError("invalid context size", "--ctx cannot be negative", "omit --ctx for the default, or pass a positive token count")
+		return exitUsage, false
+	}
+	if selectedRunLevels(*flags.quick, *flags.full, *flags.checksOnly) > 1 {
+		reportError("choose one run level", "--quick, --full, and --checks-only are mutually exclusive", "")
+		return exitUsage, false
+	}
+	if *flags.checksOnly && *flags.seedSet == "" {
+		reportError("--checks-only requires --seedset", "calibration pairs must face identical generated instances", "")
+		return exitUsage, false
+	}
+	if *flags.checksOnly && *flags.html {
+		reportError("--checks-only cannot write a scorecard HTML", "calibration is paired evidence, not a standalone product verdict", "use `fitr calibrate a b --out pair.json` after both runs")
+		return exitUsage, false
+	}
+	if *flags.checksOnly && *flags.allowUnsafeExec {
+		reportError("--checks-only cannot enable executable diagnostics",
+			"the calibration battery is declarative and does not execute generated code", "remove --allow-unsafe-exec")
+		return exitUsage, false
+	}
+	return exitOK, true
+}
+
+func buildRunCommand(model string, flags *runFlags, level string, reps int) runCommand {
 	return runCommand{
-		model: normalizeModelRef(fs.Arg(0)), backend: *backend, mode: *mode,
-		pull: *pullFlag, html: *htmlFlag, quiet: quiet,
+		model: normalizeModelRef(model), backend: *flags.backend, mode: *flags.mode,
+		pull: *flags.pull, html: *flags.html, quiet: flags.quiet,
 		runOpts: runOpts{
-			level: level, profile: *profileName, seedSet: *seedset,
-			reps: reps, checksReps: generatedCheckRepeats(level, *k, reps),
-			numCtx: *ctxSize, allowUnsafeExec: *allowUnsafeExec,
+			level: level, profile: *flags.profileName, seedSet: *flags.seedSet,
+			reps: reps, checksReps: generatedCheckRepeats(level, *flags.repeats, reps),
+			numCtx: *flags.numCtx, allowUnsafeExec: *flags.allowUnsafeExec,
 		},
-	}, exitOK, true
+	}
 }
 
 func selectedRunLevels(quick, full, checks bool) int {
@@ -878,6 +908,9 @@ func largerFittingContext(ctx context.Context, c llm.Backend, model string, fp d
 		Model: model, Backend: c.Name(),
 		HaveGB: fp.VRAMGb, HaveSrc: fp.VRAMSource,
 		Arch: advise.ArchFromKVs(info.Info), WeightsB: info.Size,
+		NVIDIAUnifiedMemory: device.IsNVIDIAUnifiedMemoryGPU(fp.GPU) ||
+			fp.VRAMSource == device.NVIDIAUnifiedMemorySource ||
+			fp.VRAMSource == device.NVIDIAUnifiedProbeSource,
 	}
 	if in.WeightsB == 0 {
 		in.WeightsB = weightsFromTags(ctx, c, model)

@@ -356,56 +356,52 @@ func (r *Record) validateExecutorEvidence() error {
 		return nil
 	}
 	if r.Manifest.ExecutionPolicy != ExecutionUnsafe {
-		for _, result := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
-			if result.Verifier != nil {
-				return errors.New("disabled execution record contains a verifier observation")
-			}
-		}
-		toolResults := append([]eval.ToolLoopResult{}, r.Tools...)
-		if r.Withdrawal != nil {
-			toolResults = append(toolResults, *r.Withdrawal)
-		}
-		if r.Agentic != nil {
-			toolResults = append(toolResults, *r.Agentic)
-		}
-		for _, result := range toolResults {
-			if result.Verifier != nil || len(result.VerifierObservations) != 0 {
-				return errors.New("disabled execution record contains a verifier observation")
-			}
-		}
-		return nil
+		return r.validateDisabledExecutorEvidence()
 	}
 	if r.Manifest.Executor == nil {
 		return errors.New("unsafe evidence is missing its manifest executor receipt")
 	}
-	validate := func(label string, receipt *eval.VerificationReceipt) error {
-		if receipt == nil {
-			return nil
-		}
-		if err := receipt.ValidateExecutor(*r.Manifest.Executor); err != nil {
-			return fmt.Errorf("%s: %w", label, err)
-		}
-		return nil
+	return r.validateUnsafeExecutorEvidence(*r.Manifest.Executor)
+}
+
+func (r *Record) toolLoopResults() []eval.ToolLoopResult {
+	results := append([]eval.ToolLoopResult{}, r.Tools...)
+	if r.Withdrawal != nil {
+		results = append(results, *r.Withdrawal)
 	}
+	if r.Agentic != nil {
+		results = append(results, *r.Agentic)
+	}
+	return results
+}
+
+func (r *Record) validateDisabledExecutorEvidence() error {
+	for _, result := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
+		if result.Verifier != nil {
+			return errors.New("disabled execution record contains a verifier observation")
+		}
+	}
+	for _, result := range r.toolLoopResults() {
+		if result.Verifier != nil || len(result.VerifierObservations) != 0 {
+			return errors.New("disabled execution record contains a verifier observation")
+		}
+	}
+	return nil
+}
+
+func (r *Record) validateUnsafeExecutorEvidence(executor eval.ExecutorReceipt) error {
 	for i, result := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
-		if err := validate(fmt.Sprintf("coding verifier %d", i), result.Verifier); err != nil {
+		if err := validateExecutorReceipt(fmt.Sprintf("coding verifier %d", i), result.Verifier, executor); err != nil {
 			return err
 		}
 	}
-	toolResults := append([]eval.ToolLoopResult{}, r.Tools...)
-	if r.Withdrawal != nil {
-		toolResults = append(toolResults, *r.Withdrawal)
-	}
-	if r.Agentic != nil {
-		toolResults = append(toolResults, *r.Agentic)
-	}
-	for i, result := range toolResults {
-		if err := validate(fmt.Sprintf("tool verifier %d", i), result.Verifier); err != nil {
+	for i, result := range r.toolLoopResults() {
+		if err := validateExecutorReceipt(fmt.Sprintf("tool verifier %d", i), result.Verifier, executor); err != nil {
 			return err
 		}
 		for j := range result.VerifierObservations {
-			if err := validate(fmt.Sprintf("tool verifier %d observation %d", i, j),
-				&result.VerifierObservations[j]); err != nil {
+			label := fmt.Sprintf("tool verifier %d observation %d", i, j)
+			if err := validateExecutorReceipt(label, &result.VerifierObservations[j], executor); err != nil {
 				return err
 			}
 		}
@@ -416,83 +412,134 @@ func (r *Record) validateExecutorEvidence() error {
 	return nil
 }
 
+func validateExecutorReceipt(label string, receipt *eval.VerificationReceipt, executor eval.ExecutorReceipt) error {
+	if receipt == nil {
+		return nil
+	}
+	if err := receipt.ValidateExecutor(executor); err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	return nil
+}
+
 // DeriveEvidenceCounts reconstructs every immutable denominator from the raw
 // observations. The runner and the persisted-record validator call this same
 // function so the producer cannot silently use weaker counting rules than the
 // verifier.
 func (r *Record) DeriveEvidenceCounts() (map[string]eval.OutcomeCounts, error) {
-	collect := func(phase string, expected int, values []eval.Outcome) (eval.OutcomeCounts, error) {
-		for _, value := range values {
-			switch value {
-			case eval.OutcomePass, eval.OutcomeFail, eval.OutcomeInconclusive, eval.OutcomeError, eval.OutcomeSkipped:
-			default:
-				return eval.OutcomeCounts{}, fmt.Errorf("%s contains unknown outcome %q", phase, value)
-			}
-		}
-		return eval.CountOutcomes(expected, values...), nil
-	}
-	result := map[string]eval.OutcomeCounts{}
-	var coding []eval.Outcome
-	for i, value := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
-		if err := validatePassFlag(fmt.Sprintf("coding observation %d", i), value.Outcome, value.Pass); err != nil {
-			return nil, err
-		}
-		coding = append(coding, value.Outcome)
-	}
-	var checks []eval.Outcome
-	for i, value := range r.Checks {
-		if err := validatePassFlag(fmt.Sprintf("check observation %d", i), value.Outcome, value.Pass); err != nil {
-			return nil, err
-		}
-		checks = append(checks, value.Outcome)
-	}
-	var tools []eval.Outcome
-	for i, value := range r.Tools {
-		if err := validatePassFlag(fmt.Sprintf("tool observation %d", i), value.Outcome, value.Pass); err != nil {
-			return nil, err
-		}
-		tools = append(tools, value.Outcome)
-	}
-	var refusal []eval.Outcome
-	for _, value := range r.Refusal {
-		refusal = append(refusal, value.Outcome)
-	}
-	plumbing := []eval.Outcome{}
-	if r.Plumbing != nil {
-		plumbing = append(plumbing, r.Plumbing.Outcome)
-	}
-	withdrawal := []eval.Outcome{}
-	if r.Withdrawal != nil {
-		if err := validatePassFlag("withdrawal observation", r.Withdrawal.Outcome, r.Withdrawal.Pass); err != nil {
-			return nil, err
-		}
-		withdrawal = append(withdrawal, r.Withdrawal.Outcome)
-	}
-	agentic := []eval.Outcome{}
-	if r.Agentic != nil {
-		if err := validatePassFlag("agentic observation", r.Agentic.Outcome, r.Agentic.Pass); err != nil {
-			return nil, err
-		}
-		agentic = append(agentic, r.Agentic.Outcome)
+	values, err := r.deriveEvidenceOutcomes()
+	if err != nil {
+		return nil, err
 	}
 	phases := []struct {
 		name     string
 		expected int
-		values   []eval.Outcome
 	}{
-		{"coding", r.TaskPlan.CodeTrials, coding}, {"checks", r.TaskPlan.CheckTrialsLimit, checks},
-		{"tools", r.TaskPlan.ToolTrials, tools}, {"refusal", r.TaskPlan.RefusalTrials, refusal},
-		{"plumbing", boolCount(r.TaskPlan.Plumbing), plumbing}, {"withdrawal", boolCount(r.TaskPlan.Withdrawal), withdrawal},
-		{"agentic", r.TaskPlan.AgenticTrials, agentic},
+		{"coding", r.TaskPlan.CodeTrials}, {"checks", r.TaskPlan.CheckTrialsLimit},
+		{"tools", r.TaskPlan.ToolTrials}, {"refusal", r.TaskPlan.RefusalTrials},
+		{"plumbing", boolCount(r.TaskPlan.Plumbing)}, {"withdrawal", boolCount(r.TaskPlan.Withdrawal)},
+		{"agentic", r.TaskPlan.AgenticTrials},
 	}
+	result := make(map[string]eval.OutcomeCounts, len(phases))
 	for _, phase := range phases {
-		counts, err := collect(phase.name, phase.expected, phase.values)
+		counts, err := collectEvidenceOutcomes(phase.name, phase.expected, values[phase.name])
 		if err != nil {
 			return nil, err
 		}
 		result[phase.name] = counts
 	}
 	return result, nil
+}
+
+func (r *Record) deriveEvidenceOutcomes() (map[string][]eval.Outcome, error) {
+	coding, err := execOutcomes("coding", append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...))
+	if err != nil {
+		return nil, err
+	}
+	checks, err := checkOutcomes(r.Checks)
+	if err != nil {
+		return nil, err
+	}
+	tools, err := toolOutcomes("tool", r.Tools)
+	if err != nil {
+		return nil, err
+	}
+	refusal := make([]eval.Outcome, 0, len(r.Refusal))
+	for _, value := range r.Refusal {
+		refusal = append(refusal, value.Outcome)
+	}
+	values := map[string][]eval.Outcome{
+		"coding": coding, "checks": checks, "tools": tools, "refusal": refusal,
+		"plumbing": optionalPlumbingOutcome(r.Plumbing),
+	}
+	if values["withdrawal"], err = optionalToolOutcome("withdrawal observation", r.Withdrawal); err != nil {
+		return nil, err
+	}
+	if values["agentic"], err = optionalToolOutcome("agentic observation", r.Agentic); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func execOutcomes(phase string, results []eval.ExecResult) ([]eval.Outcome, error) {
+	values := make([]eval.Outcome, 0, len(results))
+	for i, result := range results {
+		if err := validatePassFlag(fmt.Sprintf("%s observation %d", phase, i), result.Outcome, result.Pass); err != nil {
+			return nil, err
+		}
+		values = append(values, result.Outcome)
+	}
+	return values, nil
+}
+
+func checkOutcomes(results []eval.CheckOutcome) ([]eval.Outcome, error) {
+	values := make([]eval.Outcome, 0, len(results))
+	for i, result := range results {
+		if err := validatePassFlag(fmt.Sprintf("check observation %d", i), result.Outcome, result.Pass); err != nil {
+			return nil, err
+		}
+		values = append(values, result.Outcome)
+	}
+	return values, nil
+}
+
+func toolOutcomes(phase string, results []eval.ToolLoopResult) ([]eval.Outcome, error) {
+	values := make([]eval.Outcome, 0, len(results))
+	for i, result := range results {
+		if err := validatePassFlag(fmt.Sprintf("%s observation %d", phase, i), result.Outcome, result.Pass); err != nil {
+			return nil, err
+		}
+		values = append(values, result.Outcome)
+	}
+	return values, nil
+}
+
+func optionalPlumbingOutcome(result *eval.PlumbingResult) []eval.Outcome {
+	if result == nil {
+		return nil
+	}
+	return []eval.Outcome{result.Outcome}
+}
+
+func optionalToolOutcome(label string, result *eval.ToolLoopResult) ([]eval.Outcome, error) {
+	if result == nil {
+		return nil, nil
+	}
+	if err := validatePassFlag(label, result.Outcome, result.Pass); err != nil {
+		return nil, err
+	}
+	return []eval.Outcome{result.Outcome}, nil
+}
+
+func collectEvidenceOutcomes(phase string, expected int, values []eval.Outcome) (eval.OutcomeCounts, error) {
+	for _, value := range values {
+		switch value {
+		case eval.OutcomePass, eval.OutcomeFail, eval.OutcomeInconclusive, eval.OutcomeError, eval.OutcomeSkipped:
+		default:
+			return eval.OutcomeCounts{}, fmt.Errorf("%s contains unknown outcome %q", phase, value)
+		}
+	}
+	return eval.CountOutcomes(expected, values...), nil
 }
 
 func validatePassFlag(label string, outcome eval.Outcome, pass bool) error {

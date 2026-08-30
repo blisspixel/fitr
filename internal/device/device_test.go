@@ -37,6 +37,38 @@ func TestPreferUnifiedMemoryOnAPU(t *testing.T) {
 	}
 }
 
+func TestPreferUnifiedMemoryOnNVIDIAUnifiedSoC(t *testing.T) {
+	for _, name := range []string{"NVIDIA GB10", "NVIDIA Thor"} {
+		gb, src := preferUnifiedMemoryForOS("linux", name, 121.7, 0, "")
+		if gb != 121.7 || src != NVIDIAUnifiedMemorySource {
+			t.Errorf("%s unified memory = %v %q", name, gb, src)
+		}
+	}
+}
+
+func TestNVIDIAUnifiedMemoryFallbackRequiresMissingDedicatedProbe(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		goos       string
+		gpu        string
+		vram       float64
+		source     string
+		wantVRAM   float64
+		wantSource string
+	}{
+		{"nonzero probe keeps value and shared semantics", "linux", "NVIDIA GB10", 96, "nvidia-smi", 96, NVIDIAUnifiedProbeSource},
+		{"other OS stays unknown", "windows", "NVIDIA GB10", 0, "", 0, ""},
+		{"discrete NVIDIA stays unknown", "linux", "NVIDIA GeForce RTX 4090", 0, "", 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gb, src := preferUnifiedMemoryForOS(tc.goos, tc.gpu, 121.7, tc.vram, tc.source)
+			if gb != tc.wantVRAM || src != tc.wantSource {
+				t.Fatalf("memory = %v %q, want %v %q", gb, src, tc.wantVRAM, tc.wantSource)
+			}
+		})
+	}
+}
+
 func TestDetectHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -376,6 +408,9 @@ func TestParseNvidiaSMIMemoryTakesLargestCard(t *testing.T) {
 	}
 	if ParseNvidiaSMIMemory("[NVIDIA]\nfailed") != 0 {
 		t.Fatal("garbage must not parse as a budget")
+	}
+	if ParseNvidiaSMIMemory("[N/A]\n") != 0 {
+		t.Fatal("GB10's N/A dedicated-memory field must trigger the unified-memory fallback")
 	}
 }
 

@@ -576,6 +576,18 @@ func TestJoinLowMemoryUnprovenUsesCtxRemedy(t *testing.T) {
 	}
 }
 
+func TestJoinNVIDIAUnifiedIdentityDoesNotTurnProbeIntoFitBudget(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:    []InstalledModel{{Name: "llama3.1:8b", Size: 5 * GiB, Arch: llama8B()}},
+		Current: device.Fingerprint{GPU: "NVIDIA GB10"},
+		HaveGB:  121.7, HaveSrc: "nvidia-smi",
+	})
+	row := table.Rows[0]
+	if row.Fit != Skip || strings.Contains(row.Windows, " ok") || row.Next != "fitr advise llama3.1:8b" {
+		t.Fatalf("automatic shared-memory inventory row = %+v", row)
+	}
+}
+
 func TestJoinCapsAtOneHundred(t *testing.T) {
 	tags := make([]InstalledModel, 120)
 	for i := range tags {

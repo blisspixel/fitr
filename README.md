@@ -8,11 +8,12 @@ gives the best validated outcome.** FIT, behavior, and burst performance ship
 today; validated-work, tradeoff, explanation, and coverage contracts are the
 pre-1.0 direction.
 
-You have a GPU with a fixed amount of VRAM. New open models come out every
-week, and it is never obvious which ones will fit, how much context you can
-give them, or whether any of them beat what you are already running. Published
-benchmarks do not answer that: they were run on someone else's hardware, often
-at a quant nobody mentions.
+You have an accelerator with a finite memory budget. That may be dedicated
+VRAM, or one unified pool shared with the operating system and every other
+process. New open models come out every week, and it is never obvious which
+ones will fit, how much context you can give them, or whether any of them beat
+what you are already running. Published benchmarks do not answer that: they
+were run on someone else's hardware, often at a quant nobody mentions.
 
 So you either spend an evening testing by hand every time something drops, or
 you keep running whatever you set up months ago and hope it is still a good
@@ -133,6 +134,9 @@ This is the part that makes the rest worth trusting.
   tag, inventory marks the prior run stale and asks for a new measurement. A
   runtime that supplies only an observed local-file hash leaves the result
   display-only.
+- **It will not add single-model estimates and call the sum co-residency.**
+  Ordinary measurements keep one model resident. A multi-model capacity claim
+  needs its own observed runtime contract.
 - **It will not touch your server.** `apply` prints a recipe; it never restarts
   or mutates a running runtime.
 - **It will not run generated code by default**, and it says so rather than

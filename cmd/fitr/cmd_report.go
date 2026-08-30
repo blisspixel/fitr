@@ -80,83 +80,122 @@ func cmdExport(ctx context.Context, args []string) int {
 // at run completion. With no model it selects the newest result, making the
 // command a quick dashboard rather than a file-hunting exercise.
 func cmdView(_ context.Context, args []string) int {
+	command, code, ok := parseViewCommand(args)
+	if !ok {
+		return code
+	}
+	selected, code, ok := selectViewResult(command.candidate, command.hasCandidate)
+	if !ok {
+		return code
+	}
+	return writeViewedResult(selected, command.mode, command.full)
+}
+
+type viewCommand struct {
+	candidate    string
+	mode         string
+	full         bool
+	hasCandidate bool
+}
+
+func parseViewCommand(args []string) (viewCommand, int, bool) {
 	fs := flag.NewFlagSet("view", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	viewFull := fs.Bool("full", false, "with --display json, emit the complete sealed result record instead of the scorecard")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {
-		return code
+		return viewCommand{}, code, false
 	}
 	if !render.ValidMode(*mode) {
 		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
-		return exitUsage
+		return viewCommand{}, exitUsage, false
 	}
 	if fs.NArg() > 1 {
 		errPrint("too many arguments", "view accepts one model or result path", "fitr view [model|result.json]")
-		return exitUsage
+		return viewCommand{}, exitUsage, false
 	}
+	return viewCommand{candidate: fs.Arg(0), mode: *mode, full: *viewFull, hasCandidate: fs.NArg() == 1}, exitOK, true
+}
 
+func selectViewResult(candidate string, hasCandidate bool) (*Result, int, bool) {
+	if !hasCandidate {
+		return selectNewestResult()
+	}
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		result, err := record.NewStore(resultsDir()).Read(candidate)
+		if err != nil {
+			errPrint("not a fitr result", "expected a saved run JSON with a model", candidate)
+			return nil, exitError, false
+		}
+		return result, exitOK, true
+	}
+	results, err := loadResults()
+	if err != nil || len(results) == 0 {
+		errPrint("no results yet", "", "fitr run "+normalizeModelRef(candidate))
+		return nil, exitError, false
+	}
+	selected := latestNamed(results, normalizeModelRef(candidate))
+	if selected == nil {
+		errPrint(fmt.Sprintf("no stored result for %q", candidate), "", "fitr board")
+		return nil, exitError, false
+	}
+	return selected, exitOK, true
+}
+
+func selectNewestResult() (*Result, int, bool) {
+	results, err := loadResults()
+	if err != nil || len(results) == 0 {
+		errPrint("no results yet", "", "run one first: fitr run <model>")
+		return nil, exitError, false
+	}
 	var selected *Result
-	if fs.NArg() == 1 {
-		candidate := fs.Arg(0)
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			r, err := record.NewStore(resultsDir()).Read(candidate)
-			if err != nil {
-				errPrint("not a fitr result", "expected a saved run JSON with a model", candidate)
-				return exitError
-			}
-			selected = r
-		} else {
-			results, err := loadResults()
-			if err != nil || len(results) == 0 {
-				errPrint("no results yet", "", "fitr run "+normalizeModelRef(candidate))
-				return exitError
-			}
-			selected = latestNamed(results, normalizeModelRef(candidate))
-			if selected == nil {
-				errPrint(fmt.Sprintf("no stored result for %q", candidate), "", "fitr board")
-				return exitError
-			}
-		}
-	} else {
-		results, err := loadResults()
-		if err != nil || len(results) == 0 {
-			errPrint("no results yet", "", "run one first: fitr run <model>")
-			return exitError
-		}
-		for _, result := range results {
-			if selected == nil || startedAfter(result.StartedAt, selected.StartedAt) {
-				selected = result
-			}
+	for _, result := range results {
+		if selected == nil || startedAfter(result.StartedAt, selected.StartedAt) {
+			selected = result
 		}
 	}
+	return selected, exitOK, true
+}
 
-	switch render.Resolve(*mode) {
+func writeViewedResult(selected *Result, mode string, full bool) int {
+	switch render.Resolve(mode) {
 	case "none":
 		return exitOK
 	case "json":
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		// The sealed record carries per-trial evidence and the run manifest,
-		// which is what `--full` is for. What a reader of `view` wants is the
-		// scorecard the command prints.
-		var payload any = selected
-		if !*viewFull {
-			card, meta := selected.Scorecard, resultMeta(selected, selected.Profile)
-			if artifact, err := artifactFrom(selected); err == nil {
-				card, meta = artifact.Scorecard, artifact.Meta
-			}
-			payload = map[string]any{
-				"schema": "fitr.view.v1", "model": selected.Model,
-				"scorecard": card, "meta": meta,
-			}
-		}
-		if err := encoder.Encode(payload); err != nil {
-			errPrint("could not render result: "+err.Error(), "", "")
-			return exitError
-		}
-		return exitOK
+		return writeViewedJSON(selected, full)
 	}
+	scorecard, meta := viewedPresentation(selected)
+	display := render.New(mode)
+	defer display.Close()
+	display.Result(scorecard, meta)
+	return exitOK
+}
+
+func writeViewedJSON(selected *Result, full bool) int {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	// The sealed record carries per-trial evidence and the run manifest,
+	// which is what `--full` is for. What a reader of `view` wants is the
+	// scorecard the command prints.
+	var payload any = selected
+	if !full {
+		card, meta := selected.Scorecard, resultMeta(selected, selected.Profile)
+		if artifact, err := artifactFrom(selected); err == nil {
+			card, meta = artifact.Scorecard, artifact.Meta
+		}
+		payload = map[string]any{
+			"schema": "fitr.view.v1", "model": selected.Model,
+			"scorecard": card, "meta": meta,
+		}
+	}
+	if err := encoder.Encode(payload); err != nil {
+		errPrint("could not render result: "+err.Error(), "", "")
+		return exitError
+	}
+	return exitOK
+}
+
+func viewedPresentation(selected *Result) (score.Scorecard, render.Meta) {
 	scorecard := selected.Scorecard
 	meta := resultMeta(selected, selected.Profile)
 	if artifact, err := artifactFrom(selected); err == nil {
@@ -165,10 +204,7 @@ func cmdView(_ context.Context, args []string) int {
 		scorecard = score.ExcludeEvidence(scorecard,
 			"the scoring profile is unavailable, so the stored verdict cannot be reproduced")
 	}
-	display := render.New(*mode)
-	defer display.Close()
-	display.Result(scorecard, meta)
-	return exitOK
+	return scorecard, meta
 }
 
 // ---------------------------------------------------------------- board
@@ -665,6 +701,12 @@ func pairedCompare(a, b *Result) {
 		fmt.Println("  identical outcomes on every shared instance - no evidence of any difference.")
 		return
 	}
+	if !writePairedDirections(a, b, width) {
+		fmt.Println("  item flips cancel within every need and family - no claimable direction.")
+	}
+}
+
+func writePairedDirections(a, b *Result, width int) bool {
 	anyDirection := false
 	for _, stratum := range eval.NeedDirections(a.Checks, b.Checks) {
 		discordantFamilies := stratum.AOnly + stratum.BOnly
@@ -672,14 +714,7 @@ func pairedCompare(a, b *Result) {
 			continue
 		}
 		anyDirection = true
-		label := stratum.Need
-		if named := score.NeedLabel[stratum.Need]; named != "" {
-			label = named
-		}
-		code := stratum.Need
-		if named := score.NeedCode[stratum.Need]; named != "" {
-			code = named
-		}
+		label, code := pairedDirectionNames(stratum.Need)
 		pExact, pMid, separable := stats.McNemarExact(stratum.AOnly, stratum.BOnly)
 		if !separable {
 			render.Field(os.Stdout, "  "+terminalText(code), pairedHang,
@@ -687,23 +722,37 @@ func pairedCompare(a, b *Result) {
 					discordantFamilies), width)
 			continue
 		}
-		winner := a.Model
-		if stratum.BOnly > stratum.AOnly {
-			winner = b.Model
-		}
-		if pExact < 0.05 {
-			render.Field(os.Stdout, "  "+terminalText(code), pairedHang,
-				fmt.Sprintf("%s separates %s family directions (exact sign p=%.3f, mid-p %.3f)",
-					terminalText(winner), terminalText(label), pExact, pMid), width)
-		} else {
-			render.Field(os.Stdout, "  "+terminalText(code), pairedHang,
-				fmt.Sprintf("family directions do not separate them (exact sign p=%.3f, mid-p %.3f)",
-					pExact, pMid), width)
-		}
+		writePairedDirection(a, b, stratum, label, code, pExact, pMid, width)
 	}
-	if !anyDirection {
-		fmt.Println("  item flips cancel within every need and family - no claimable direction.")
+	return anyDirection
+}
+
+func pairedDirectionNames(need string) (string, string) {
+	label, code := need, need
+	if named := score.NeedLabel[need]; named != "" {
+		label = named
 	}
+	if named := score.NeedCode[need]; named != "" {
+		code = named
+	}
+	return label, code
+}
+
+func writePairedDirection(a, b *Result, stratum eval.NeedDirectionStat, label, code string,
+	pExact, pMid float64, width int) {
+	winner := a.Model
+	if stratum.BOnly > stratum.AOnly {
+		winner = b.Model
+	}
+	if pExact < 0.05 {
+		render.Field(os.Stdout, "  "+terminalText(code), pairedHang,
+			fmt.Sprintf("%s separates %s family directions (exact sign p=%.3f, mid-p %.3f)",
+				terminalText(winner), terminalText(label), pExact, pMid), width)
+		return
+	}
+	render.Field(os.Stdout, "  "+terminalText(code), pairedHang,
+		fmt.Sprintf("family directions do not separate them (exact sign p=%.3f, mid-p %.3f)",
+			pExact, pMid), width)
 }
 
 func completePairedPlan(a, b *Result, flips eval.FlipReport) bool {

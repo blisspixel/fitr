@@ -308,6 +308,13 @@ func mapRuneKey(text string) (Event, bool) {
 		return InputEvent{Action: ActionViewHistory}, true
 	case "5":
 		return InputEvent{Action: ActionViewInventory}, true
+	default:
+		return mapRuneCommand(text)
+	}
+}
+
+func mapRuneCommand(text string) (Event, bool) {
+	switch text {
 	case "j", "J":
 		return InputEvent{Action: ActionDown}, true
 	case "k", "K":

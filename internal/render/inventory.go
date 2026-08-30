@@ -96,18 +96,27 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 		writeInventoryJSON(w, inv)
 		return
 	}
-	rich := resolved == "rich"
+	p, g := inventoryStyle(resolved == "rich")
+	width := Width()
+	writeInventoryHeader(w, inv, width, p, g)
+	if writeEmptyInventory(w, inv, p) {
+		return
+	}
+	writeInventoryTable(w, inv, width, p, g)
+	writeInventoryFooter(w, inv, width, p)
+}
+
+func inventoryStyle(rich bool) (palette, glyphs) {
 	p := palette{}
 	g := glyphs{" | ", "-", "+/-", "..."}
-	if rich {
-		p = pickPalette(!noColor())
-		g = pickGlyphs()
+	if !rich {
+		return p, g
 	}
+	return pickPalette(!noColor()), pickGlyphs()
+}
 
-	// CPU, GPU and runtime strings come from the machine, so none of them has a
-	// bound of its own. Wrap under the label column rather than trusting the
-	// hardware to be politely named.
-	width := Width()
+func writeInventoryHeader(w io.Writer, inv Inventory, width int, p palette, g glyphs) {
+	// Machine-provided fields are wrapped under the label column.
 	fmt.Fprintf(w, "  %s\n", p.wrap(p.Head, SingleLine("fitr "+inv.Fitr)))
 	if inv.CPU != "" {
 		Field(w, "  cpu", invHeaderLabel, inv.CPU, width)
@@ -157,53 +166,70 @@ func WriteInventory(w io.Writer, inv Inventory, mode string) {
 			fmt.Fprintf(w, "%s%s\n", lead, p.wrap(p.Warn, l))
 		}
 	}
+}
 
+func writeEmptyInventory(w io.Writer, inv Inventory, p palette) bool {
 	switch inv.Empty {
 	case "none reachable":
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, p.wrap(p.Muted, "  next      start Ollama, llama-server, or an OpenAI-compatible server"))
 		fmt.Fprintln(w, p.wrap(p.Muted, "            then: fitr advise <model>   and   fitr run <model>"))
-		return
+		return true
 	case "reachable, no models":
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, p.wrap(p.Muted, "  no models installed on this runtime"))
 		fmt.Fprintln(w, p.wrap(p.Muted, "  next      pull a model, then: fitr advise <model>"))
-		return
+		return true
+	default:
+		return false
 	}
+}
 
+func writeInventoryTable(w io.Writer, inv Inventory, width int, p palette, g glyphs) {
 	fmt.Fprintln(w)
 	modelWidth := max(width-invFixed, 12)
 	fmt.Fprintf(w, "  %s %-*s %-*s %*s  %s\n",
 		pad("MODEL", modelWidth, ""), invStateWidth, "STATE",
 		invCtxWidth, "CTX", invSizeWidth, "SIZE", "NEXT")
 	for _, row := range inv.Rows {
-		name := row.Model
-		if row.Loaded {
-			name = "* " + name
-		}
-		state, style := inventoryState(row, p)
-		ctxCol := row.Ctx
-		if ctxCol == "" {
-			ctxCol = "-"
-		}
-		size := "-"
-		if row.SizeB > 0 {
-			size = fmt.Sprintf("%.1f GB", float64(row.SizeB)/(1024*1024*1024))
-		}
-		fmt.Fprintf(w, "  %s %s %-*s %*s  %s\n",
-			pad(name, modelWidth, g.Ell), p.wrap(style, pad(state, invStateWidth, g.Ell)),
-			invCtxWidth, ctxCol, invSizeWidth, size,
-			fit(shortNext(row.Next, row.Model), invNextWidth, g.Ell))
-		for _, extra := range []string{row.Note, row.Windows} {
-			if extra == "" {
-				continue
-			}
-			for _, l := range wrap(SingleLine(extra), max(width-invNoteIndent, MinWidth)) {
-				fmt.Fprintf(w, "%s%s\n", strings.Repeat(" ", invNoteIndent), p.wrap(p.Muted, l))
-			}
-		}
+		writeInventoryRow(w, row, width, modelWidth, p, g)
 	}
 	fmt.Fprintln(w)
+}
+
+func writeInventoryRow(w io.Writer, row InventoryRow, width, modelWidth int, p palette, g glyphs) {
+	name := row.Model
+	if row.Loaded {
+		name = "* " + name
+	}
+	state, style := inventoryState(row, p)
+	ctxCol := row.Ctx
+	if ctxCol == "" {
+		ctxCol = "-"
+	}
+	size := "-"
+	if row.SizeB > 0 {
+		size = fmt.Sprintf("%.1f GB", float64(row.SizeB)/(1024*1024*1024))
+	}
+	fmt.Fprintf(w, "  %s %s %-*s %*s  %s\n",
+		pad(name, modelWidth, g.Ell), p.wrap(style, pad(state, invStateWidth, g.Ell)),
+		invCtxWidth, ctxCol, invSizeWidth, size,
+		fit(shortNext(row.Next, row.Model), invNextWidth, g.Ell))
+	for _, extra := range []string{row.Note, row.Windows} {
+		writeInventoryRowExtra(w, extra, width, p)
+	}
+}
+
+func writeInventoryRowExtra(w io.Writer, extra string, width int, p palette) {
+	if extra == "" {
+		return
+	}
+	for _, line := range wrap(SingleLine(extra), max(width-invNoteIndent, MinWidth)) {
+		fmt.Fprintf(w, "%s%s\n", strings.Repeat(" ", invNoteIndent), p.wrap(p.Muted, line))
+	}
+}
+
+func writeInventoryFooter(w io.Writer, inv Inventory, width int, p palette) {
 	if inv.Hidden > 0 {
 		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, fmt.Sprintf("showing %d of %d installed; name one with fitr advise <model>",
 			len(inv.Rows), len(inv.Rows)+inv.Hidden)))

@@ -192,9 +192,11 @@ type Fingerprint struct {
 	// API the server is actually using. The runtime version implies it
 	// poorly (a Vulkan llama-server and a CUDA one share a build number).
 	GPUBackend string `json:"gpu_backend,omitempty"`
-	// VRAMGb is the measured GPU (or unified) memory budget. Zero with an
-	// empty VRAMSource means it was not measured - callers must SKIP, not
-	// invent a card-from-name number.
+	// VRAMGb is a measured or declared GPU-memory capacity input. VRAMSource
+	// defines its semantics: a dedicated-memory total, an addressable unified
+	// pool, and an operator budget are not interchangeable. Zero with an empty
+	// source means it was not measured; callers must SKIP rather than invent a
+	// card-from-name number.
 	VRAMGb     float64           `json:"vram_gb,omitempty"`
 	VRAMSource string            `json:"vram_source,omitempty"`
 	Config     map[string]string `json:"config"`
@@ -391,9 +393,31 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 // preferUnifiedMemory replaces a discrete-carve VRAM reading on APUs with
 // system RAM. Windows registry qwMemorySize often reports ~2 GB of shared
 // graphics memory on a 32-128 GB 780M / Strix Halo box; treating that as the
-// model budget marks everything incompatible. NVIDIA remains nvidia-smi.
+// model budget marks everything incompatible. Discrete NVIDIA remains
+// nvidia-smi; GB10 and Thor use the measured Linux system pool only when the
+// dedicated-memory probe has no answer.
 func preferUnifiedMemory(gpu string, ram, vram float64, src string) (float64, string) {
-	if ram <= 0 || !unifiedMemoryGPU(gpu) {
+	return preferUnifiedMemoryForOS(runtime.GOOS, gpu, ram, vram, src)
+}
+
+func preferUnifiedMemoryForOS(goos, gpu string, ram, vram float64, src string) (float64, string) {
+	if ram <= 0 {
+		return vram, src
+	}
+	// GB10 and Thor are NVIDIA unified-memory SoCs. Their nvidia-smi
+	// dedicated-memory fields report N/A, so Linux MemTotal is the measured
+	// addressable pool. Never replace a real vendor or DRM reading, and never
+	// apply this Linux source label on another operating system.
+	if nvidiaUnifiedMemoryGPU(gpu) {
+		if goos == "linux" && vram > 0 && src == "nvidia-smi" {
+			return vram, NVIDIAUnifiedProbeSource
+		}
+		if goos == "linux" && vram <= 0 && strings.TrimSpace(src) == "" {
+			return ram, NVIDIAUnifiedMemorySource
+		}
+		return vram, src
+	}
+	if !unifiedMemoryGPU(gpu) {
 		return vram, src
 	}
 	// Sources that already know what the GPU may use. Apple Silicon is on this
@@ -401,6 +425,7 @@ func preferUnifiedMemory(gpu string, ram, vram float64, src string) (float64, st
 	// rather than installed RAM, so second-guessing it here would undo that.
 	switch src {
 	case "nvidia-smi", "drm sysfs",
+		NVIDIAUnifiedMemorySource, NVIDIAUnifiedProbeSource,
 		AppleWiredLimitSource, AppleAssumedShareSource, AppleLegacyRAMSource:
 		return vram, src
 	}
@@ -408,6 +433,19 @@ func preferUnifiedMemory(gpu string, ram, vram float64, src string) (float64, st
 		return vram, src
 	}
 	return ram, "unified memory (system RAM)"
+}
+
+func nvidiaUnifiedMemoryGPU(name string) bool {
+	u := strings.ToLower(name)
+	return strings.Contains(u, "gb10") || strings.Contains(u, "thor")
+}
+
+// IsNVIDIAUnifiedMemoryGPU reports whether a device name identifies one of
+// NVIDIA's shared-memory SoCs. Capacity-source provenance is deliberately not
+// part of this decision: a future driver may return a nonzero memory field,
+// but that does not turn the physical pool into dedicated VRAM.
+func IsNVIDIAUnifiedMemoryGPU(name string) bool {
+	return nvidiaUnifiedMemoryGPU(name)
 }
 
 func unifiedMemoryGPU(name string) bool {
@@ -445,8 +483,8 @@ func FormatCPU(name string) string {
 	return fmt.Sprintf("%s  (%d logical)", name, n)
 }
 
-// FormatVRAM renders a memory budget. Unmeasured is said out loud; 0.0 is
-// never printed as if it were a reading.
+// FormatVRAM renders a memory-capacity input with its source. Unmeasured is
+// said out loud; 0.0 is never printed as if it were a reading.
 func FormatVRAM(gb float64, source string) string {
 	if gb <= 0 || source == "" {
 		return "unknown (not measured)"
@@ -567,32 +605,53 @@ func isAlphaNum(b byte) bool {
 // are on the GPU. Log parsing is only a fallback -- it is platform-specific and
 // the startup line scrolls out of a busy log surprisingly fast.
 func inferenceDevice(ctx context.Context, b llm.Backend, model string) string {
-	if b != nil {
-		if running, err := b.PS(ctx); err == nil {
-			for _, m := range running {
-				if model != "" && m.Name != model {
-					continue
-				}
-				if m.Size > 0 {
-					if m.SizeVRAM == 0 {
-						return "CPU"
-					}
-					return fmt.Sprintf("GPU %d%%", int(100*(float64(m.SizeVRAM)/float64(m.Size))))
-				}
-			}
-		}
+	if placement := inferenceDeviceFromRuntime(ctx, b, model); placement != "" {
+		return placement
 	}
-	// Log parsing is an Ollama-only fallback; other runtimes do not write this log.
-	if b != nil && b.Name() == "ollama" {
-		if line := lastLogMatch(`msg="inference compute".*`); line != "" {
-			lib := submatch(`library=(\S+)`, line)
-			desc := submatch(`description="([^"]*)"`, line)
-			if lib != "" || desc != "" {
-				return strings.TrimSpace(lib + " / " + desc)
-			}
-		}
+	if placement := ollamaInferenceDeviceFromLog(b); placement != "" {
+		return placement
 	}
 	return "unknown"
+}
+
+func inferenceDeviceFromRuntime(ctx context.Context, b llm.Backend, model string) string {
+	if b == nil {
+		return ""
+	}
+	running, err := b.PS(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, candidate := range running {
+		if model != "" && candidate.Name != model {
+			continue
+		}
+		if candidate.Size <= 0 {
+			continue
+		}
+		if candidate.SizeVRAM == 0 {
+			return "CPU"
+		}
+		return fmt.Sprintf("GPU %d%%", int(100*(float64(candidate.SizeVRAM)/float64(candidate.Size))))
+	}
+	return ""
+}
+
+// Log parsing is an Ollama-only fallback; other runtimes do not write this log.
+func ollamaInferenceDeviceFromLog(b llm.Backend) string {
+	if b == nil || b.Name() != "ollama" {
+		return ""
+	}
+	line := lastLogMatch(`msg="inference compute".*`)
+	if line == "" {
+		return ""
+	}
+	lib := submatch(`library=(\S+)`, line)
+	desc := submatch(`description="([^"]*)"`, line)
+	if lib == "" && desc == "" {
+		return ""
+	}
+	return strings.TrimSpace(lib + " / " + desc)
 }
 
 // InferenceDeviceFor re-checks placement for a specific loaded model.
@@ -784,22 +843,27 @@ func resetHostProbes() {
 // question is what will run alongside the work already on the card, and a box
 // reporting 24 GB total with 0.7 GB free will not load a 17 GB model no matter
 // what the arithmetic says.
-// appleWiredLimitFraction is the share of system RAM Apple Silicon will let the
-// GPU wire down when iogpu.wired_limit_mb is unset, which is the default state.
+// appleWiredLimitFraction is a conservative assumed share of system RAM for
+// Apple Silicon when iogpu.wired_limit_mb is unset, which is the default state.
 //
 // The exact figure is a kernel policy, not a published constant, and it varies
 // with installed RAM. 0.75 is the widely-reported value for the large-memory
 // machines this matters on. It is applied as an ASSUMPTION and labelled as one,
-// because the alternative -- reporting installed RAM as GPU-available memory --
-// is not a smaller error, it is the same error other tools ship: on a 128 GB
-// machine it overstates the budget by tens of gigabytes and certifies a model
-// that cannot load.
+// because the alternative -- reporting all installed RAM as GPU-available --
+// can certify a model that the active kernel policy will not load.
 const appleWiredLimitFraction = 0.75
 
 // Memory-source labels for Apple Silicon. They are constants because a trust
 // decision keys on them by exact string: changing one silently turned every
 // macOS model unproven once already.
 const (
+	// NVIDIAUnifiedMemorySource is the Linux addressable-memory pool on
+	// NVIDIA GB10 and Thor SoCs, whose nvidia-smi dedicated-memory fields are
+	// unavailable. It is capacity, not a live free-memory reading.
+	NVIDIAUnifiedMemorySource = "unified memory (/proc/meminfo MemTotal)"
+	// NVIDIAUnifiedProbeSource preserves a future nonzero nvidia-smi capacity
+	// reading without presenting the physical shared pool as dedicated VRAM.
+	NVIDIAUnifiedProbeSource = "unified memory (nvidia-smi capacity)"
 	// AppleWiredLimitSource is an explicit kernel setting the user chose.
 	AppleWiredLimitSource = "iogpu.wired_limit_mb"
 	// AppleAssumedShareSource is derived. It says "assumed" because every place

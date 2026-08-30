@@ -224,56 +224,77 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling)
 	if resp.StatusCode != http.StatusOK {
 		return "", Metrics{}, nativeHTTPError(resp)
 	}
+	state, err := readGenerateStream(resp.Body, start)
+	if err != nil {
+		return state.output.String(), Metrics{}, err
+	}
+	return state.output.String(), generateMetrics(state.final, state.ttft, time.Since(start)), nil
+}
 
-	var sb strings.Builder
-	var ttft float64
-	var final genResp
-	var totalBytes, frames int
-	terminal := false
-	sc := bufio.NewScanner(resp.Body)
+type generateStreamState struct {
+	output             strings.Builder
+	ttft               float64
+	final              genResp
+	totalBytes, frames int
+	terminal           bool
+}
+
+func readGenerateStream(r io.Reader, start time.Time) (generateStreamState, error) {
+	var state generateStreamState
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxNativeLine)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
 		}
-		totalBytes += len(line) + 1
-		frames++
-		if totalBytes > maxNativeStream || frames > maxNativeFrames {
-			return sb.String(), Metrics{}, errors.New("ollama generate stream exceeds protocol limits")
-		}
-		if terminal {
-			return sb.String(), Metrics{}, errors.New("ollama generate stream contains data after the terminal frame")
-		}
-		var g genResp
-		if err := decodeJSONFrame(line, &g); err != nil {
-			return sb.String(), Metrics{}, fmt.Errorf("ollama generate frame: %w", err)
-		}
-		if err := validateGenFrame(g); err != nil {
-			return sb.String(), Metrics{}, err
-		}
-		if g.Response != "" && ttft == 0 {
-			ttft = time.Since(start).Seconds()
-		}
-		if len(g.Response) > maxGeneratedOutput-sb.Len() {
-			return sb.String(), Metrics{}, fmt.Errorf("ollama generated output exceeds %d bytes", maxGeneratedOutput)
-		}
-		sb.WriteString(g.Response)
-		if g.Done {
-			final = g
-			terminal = true
+		if err := state.accept(line, start); err != nil {
+			return state, err
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return sb.String(), Metrics{}, fmt.Errorf("ollama generate stream: %w", err)
+		return state, fmt.Errorf("ollama generate stream: %w", err)
 	}
-	if !terminal {
-		return sb.String(), Metrics{}, errors.New("ollama generate stream ended before a terminal frame")
+	if !state.terminal {
+		return state, errors.New("ollama generate stream ended before a terminal frame")
 	}
+	return state, nil
+}
 
+func (s *generateStreamState) accept(line []byte, start time.Time) error {
+	s.totalBytes += len(line) + 1
+	s.frames++
+	if s.totalBytes > maxNativeStream || s.frames > maxNativeFrames {
+		return errors.New("ollama generate stream exceeds protocol limits")
+	}
+	if s.terminal {
+		return errors.New("ollama generate stream contains data after the terminal frame")
+	}
+	var frame genResp
+	if err := decodeJSONFrame(line, &frame); err != nil {
+		return fmt.Errorf("ollama generate frame: %w", err)
+	}
+	if err := validateGenFrame(frame); err != nil {
+		return err
+	}
+	if frame.Response != "" && s.ttft == 0 {
+		s.ttft = time.Since(start).Seconds()
+	}
+	if len(frame.Response) > maxGeneratedOutput-s.output.Len() {
+		return fmt.Errorf("ollama generated output exceeds %d bytes", maxGeneratedOutput)
+	}
+	s.output.WriteString(frame.Response)
+	if frame.Done {
+		s.final = frame
+		s.terminal = true
+	}
+	return nil
+}
+
+func generateMetrics(final genResp, ttft float64, wall time.Duration) Metrics {
 	m := Metrics{
 		TTFTSeconds:  round(ttft, 3),
-		WallSeconds:  round(time.Since(start).Seconds(), 2),
+		WallSeconds:  round(wall.Seconds(), 2),
 		EvalCount:    final.EvalCount,
 		PromptTokens: final.PromptEvalCount,
 		LoadSeconds:  round(float64(final.LoadDuration)/1e9, 2),
@@ -286,7 +307,7 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling)
 	if final.PromptEvalDuration > 0 {
 		m.PrefillTPS = round(float64(final.PromptEvalCount)/(float64(final.PromptEvalDuration)/1e9), 2)
 	}
-	return sb.String(), m, nil
+	return m
 }
 
 // ---------------------------------------------------------------- chat/tools
@@ -716,71 +737,90 @@ func (c *Client) Pull(ctx context.Context, model string, progress func(status st
 	if resp.StatusCode != http.StatusOK {
 		return nativeHTTPError(resp)
 	}
-	sc := bufio.NewScanner(resp.Body)
+	return c.readPullStream(resp.Body, progress)
+}
+
+type pullFrame struct {
+	Status    string `json:"status"`
+	Error     string `json:"error"`
+	Total     int64  `json:"total"`
+	Completed int64  `json:"completed"`
+}
+
+type pullStreamState struct {
+	totalBytes, frames int
+	terminal           bool
+	sizeChecked        bool
+}
+
+func (c *Client) readPullStream(r io.Reader, progress func(status string, pct int)) error {
+	var state pullStreamState
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxNativeLine)
-	var totalBytes, frames int
-	terminal, sizeChecked := false, false
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
 		}
-		totalBytes += len(line) + 1
-		frames++
-		if totalBytes > maxNativeStream || frames > maxNativeFrames {
-			return errors.New("ollama pull stream exceeds protocol limits")
-		}
-		if terminal {
-			return errors.New("ollama pull stream contains data after the terminal frame")
-		}
-		var p struct {
-			Status    string `json:"status"`
-			Error     string `json:"error"`
-			Total     int64  `json:"total"`
-			Completed int64  `json:"completed"`
-		}
-		if err := decodeJSONFrame(line, &p); err != nil {
-			return fmt.Errorf("ollama pull frame: %w", err)
-		}
-		if p.Error != "" {
-			return fmt.Errorf("pull: %s", p.Error)
-		}
-		if p.Total < 0 || p.Completed < 0 || (p.Total > 0 && p.Completed > p.Total) {
-			return errors.New("ollama pull frame contains invalid progress")
-		}
-		if p.Status == "success" {
-			terminal = true
-		}
-		// The first frame carrying a size is the first moment the download's
-		// cost is knowable. Check it then, and abandon before writing tens of
-		// gigabytes rather than after filling the volume.
-		//
-		// Ollama reports Total per layer, not for the whole model, so this is a
-		// floor on the requirement and not the requirement. That is the right
-		// direction to be wrong in: it catches the case that matters, a pull
-		// far larger than the room left, and never invents a total it was not
-		// given.
-		if !sizeChecked && p.Total > 0 {
-			sizeChecked = true
-			if err := c.checkPullRoom(p.Total); err != nil {
-				return err
-			}
-		}
-		if progress != nil && p.Status != "" {
-			pct := -1
-			if p.Total > 0 {
-				pct = int(100 * (float64(p.Completed) / float64(p.Total)))
-			}
-			progress(p.Status, pct)
+		if err := state.accept(c, line, progress); err != nil {
+			return err
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return fmt.Errorf("ollama pull stream: %w", err)
 	}
-	if !terminal {
+	if !state.terminal {
 		return errors.New("ollama pull stream ended before a success receipt")
 	}
 	return nil
+}
+
+func (s *pullStreamState) accept(c *Client, line []byte, progress func(status string, pct int)) error {
+	s.totalBytes += len(line) + 1
+	s.frames++
+	if s.totalBytes > maxNativeStream || s.frames > maxNativeFrames {
+		return errors.New("ollama pull stream exceeds protocol limits")
+	}
+	if s.terminal {
+		return errors.New("ollama pull stream contains data after the terminal frame")
+	}
+	var frame pullFrame
+	if err := decodeJSONFrame(line, &frame); err != nil {
+		return fmt.Errorf("ollama pull frame: %w", err)
+	}
+	if err := validatePullFrame(frame); err != nil {
+		return err
+	}
+	s.terminal = frame.Status == "success"
+	if !s.sizeChecked && frame.Total > 0 {
+		s.sizeChecked = true
+		if err := c.checkPullRoom(frame.Total); err != nil {
+			return err
+		}
+	}
+	reportPullProgress(frame, progress)
+	return nil
+}
+
+func validatePullFrame(frame pullFrame) error {
+	if frame.Error != "" {
+		return fmt.Errorf("pull: %s", frame.Error)
+	}
+	if frame.Total < 0 || frame.Completed < 0 || frame.Total > 0 && frame.Completed > frame.Total {
+		return errors.New("ollama pull frame contains invalid progress")
+	}
+	return nil
+}
+
+func reportPullProgress(frame pullFrame, progress func(status string, pct int)) {
+	if progress == nil || frame.Status == "" {
+		return
+	}
+	pct := -1
+	if frame.Total > 0 {
+		pct = int(100 * (float64(frame.Completed) / float64(frame.Total)))
+	}
+	progress(frame.Status, pct)
 }
 
 // modelStoreDir is where the runtime writes weights, which is the volume that

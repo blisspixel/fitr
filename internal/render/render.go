@@ -441,36 +441,24 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	w := d.out
 	width := Width()
 	rule := strings.Repeat("-", width)
+	d.resultHeader(w, sc, m, width, rule)
+	d.resultVerdicts(w, sc, width)
+	d.resultPerformance(w, m, width)
+	d.resultCapacity(w, m)
+	d.resultEvidenceNotes(w, m, width)
+	fmt.Fprintln(w, rule)
+}
+
+func (d *textDisplay) resultHeader(w io.Writer, sc score.Scorecard, m Meta, width int, rule string) {
 	fmt.Fprintln(w, rule)
 	fmt.Fprintf(w, "model    %s\n", SingleLine(sc.Model))
 	if size := strings.TrimSpace(fmt.Sprintf("%s  %s  %s",
 		SingleLine(m.ParamSize), SingleLine(m.Quant), SingleLine(m.Family))); size != "" {
 		fmt.Fprintf(w, "size     %s\n", size)
 	}
-	if m.NumCtx > 0 {
-		switch {
-		case m.EffectiveCtx > 0 && m.EffectiveCtx != m.NumCtx:
-			fmt.Fprintf(w, "ctx      %d requested -> %d effective (%s)\n", m.NumCtx, m.EffectiveCtx, SingleLine(m.ContextState))
-		case m.EffectiveCtx > 0:
-			fmt.Fprintf(w, "ctx      %d effective (%s)\n", m.EffectiveCtx, SingleLine(m.ContextState))
-		case m.ContextState != "":
-			fmt.Fprintf(w, "ctx      %d requested; effective %s\n", m.NumCtx, SingleLine(m.ContextState))
-		default:
-			fmt.Fprintf(w, "ctx      %d\n", m.NumCtx)
-		}
-	}
+	writeResultContext(w, m)
 	if m.Level != "" {
-		run := SingleLine(m.Level)
-		if m.Repeats > 0 {
-			run += fmt.Sprintf("%sk=%d", d.g.Dot, m.Repeats)
-		}
-		if m.WallSeconds > 0 {
-			run += fmt.Sprintf("%s%.1fs", d.g.Dot, m.WallSeconds)
-		}
-		if m.StartedAt != "" {
-			run += d.g.Dot + SingleLine(m.StartedAt)
-		}
-		fmt.Fprintf(w, "run      %s\n", run)
+		fmt.Fprintf(w, "run      %s\n", resultRunLine(m, d.g))
 	}
 	useFor := sc.UseFor
 	if m.Calibration {
@@ -481,6 +469,39 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 		SingleLine(m.GPU), d.g.Dot, SingleLine(m.Driver), d.g.Dot,
 		SingleLine(m.Device), d.g.Dot, SingleLine(m.Profile)), width, "")
 	fmt.Fprintln(w, rule)
+}
+
+func writeResultContext(w io.Writer, m Meta) {
+	if m.NumCtx <= 0 {
+		return
+	}
+	switch {
+	case m.EffectiveCtx > 0 && m.EffectiveCtx != m.NumCtx:
+		fmt.Fprintf(w, "ctx      %d requested -> %d effective (%s)\n", m.NumCtx, m.EffectiveCtx, SingleLine(m.ContextState))
+	case m.EffectiveCtx > 0:
+		fmt.Fprintf(w, "ctx      %d effective (%s)\n", m.EffectiveCtx, SingleLine(m.ContextState))
+	case m.ContextState != "":
+		fmt.Fprintf(w, "ctx      %d requested; effective %s\n", m.NumCtx, SingleLine(m.ContextState))
+	default:
+		fmt.Fprintf(w, "ctx      %d\n", m.NumCtx)
+	}
+}
+
+func resultRunLine(m Meta, g glyphs) string {
+	run := SingleLine(m.Level)
+	if m.Repeats > 0 {
+		run += fmt.Sprintf("%sk=%d", g.Dot, m.Repeats)
+	}
+	if m.WallSeconds > 0 {
+		run += fmt.Sprintf("%s%.1fs", g.Dot, m.WallSeconds)
+	}
+	if m.StartedAt != "" {
+		run += g.Dot + SingleLine(m.StartedAt)
+	}
+	return run
+}
+
+func (d *textDisplay) resultVerdicts(w io.Writer, sc score.Scorecard, width int) {
 	for _, k := range score.SortedNeeds(sc.Needs) {
 		v, ok := sc.Needs[k]
 		if !ok {
@@ -488,7 +509,9 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 		}
 		d.verdictRow(w, score.NeedLabel[k], v, width)
 	}
+}
 
+func (d *textDisplay) resultPerformance(w io.Writer, m Meta, width int) {
 	if m.DecodeN > 0 || m.PrefillN > 0 || m.TTFTN > 0 {
 		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "performance"))
 		if m.DecodeN > 0 {
@@ -507,10 +530,16 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 				m.FirstRunRatio), width, 2, 4, d.pal.Warn)
 		}
 	}
+}
+
+func (d *textDisplay) resultCapacity(w io.Writer, m Meta) {
 	if m.ResidentGB > 0 {
 		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "capacity"))
 		fmt.Fprintf(w, "  %-8s %.2f GB after requested 32K load probe\n", "resident", m.ResidentGB)
 	}
+}
+
+func (d *textDisplay) resultEvidenceNotes(w io.Writer, m Meta, width int) {
 	// Each need carries its own clustered interval. Combining heterogeneous
 	// endpoints into one global MDE would invent a denominator no verdict uses.
 	if m.ShowsIntervals {
@@ -527,7 +556,6 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 		fmt.Fprintln(w)
 		d.footer(w, warning, width, 0, 2, d.pal.Warn)
 	}
-	fmt.Fprintln(w, rule)
 }
 
 // headerField prints one label/value pair from the header block, wrapping the

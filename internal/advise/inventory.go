@@ -191,6 +191,9 @@ func attachFit(row *InventoryRow, tag InstalledModel, ev *InventoryEvidence, q I
 			ctx = ev.NumCtx
 		}
 	}
+	if ev == nil && tag.ResidentB > 0 && !row.ServingKnown && !arch.KVReady() && !arch.Hybrid {
+		ctx = 0
+	}
 	if !memoryBudgetTrusted(q.HaveSrc) || q.HaveGB <= 0 {
 		return
 	}
@@ -203,6 +206,9 @@ func attachFit(row *InventoryRow, tag InstalledModel, ev *InventoryEvidence, q I
 	in := Input{
 		WeightsB: weights, HaveGB: q.HaveGB, HaveSrc: q.HaveSrc,
 		Ctx: ctx, Arch: arch,
+		NVIDIAUnifiedMemory: device.IsNVIDIAUnifiedMemoryGPU(q.Current.GPU) ||
+			q.HaveSrc == device.NVIDIAUnifiedMemorySource ||
+			q.HaveSrc == device.NVIDIAUnifiedProbeSource,
 		ResidentB: tag.ResidentB,
 	}
 	if tag.ResidentB > 0 {
@@ -416,7 +422,7 @@ func stateOrder(state string) int {
 
 func memoryBudgetTrusted(src string) bool {
 	switch src {
-	case "nvidia-smi", "drm sysfs",
+	case "nvidia-smi", "drm sysfs", device.NVIDIAUnifiedMemorySource, device.NVIDIAUnifiedProbeSource,
 		// Apple Silicon. The explicit kernel setting is a measurement. The
 		// derived share is an assumption, and it is trusted anyway because it
 		// replaced a worse one: reporting installed RAM as GPU-available memory

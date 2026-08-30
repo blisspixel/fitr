@@ -746,7 +746,14 @@ func boolInt(value bool) int {
 // renders identically in every browser and both GitHub themes (it carries
 // its own dark background).
 func ansiToSVG(text string) string {
-	colors := map[string]string{
+	rows, maxCols := parseANSIRows(text)
+	return renderANSISVG(rows, maxCols)
+}
+
+type ansiSpan struct{ color, text string }
+
+func ansiColors() map[string]string {
+	return map[string]string{
 		"":     "#e6edf3",
 		"31":   "#f85149",
 		"32":   "#3fb950",
@@ -755,48 +762,59 @@ func ansiToSVG(text string) string {
 		"90":   "#8b949e",
 		"1;34": "#79c0ff",
 	}
+}
+
+func parseANSIRows(text string) ([][]ansiSpan, int) {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	const charW, lineH, pad = 7.85, 19, 18
 	maxCols := 0
-	type span struct{ color, text string }
-	var rows [][]span
+	rows := make([][]ansiSpan, 0, len(lines))
 	for _, line := range lines {
-		var spans []span
-		cur, color, cols := strings.Builder{}, "", 0
-		flush := func() {
-			if cur.Len() > 0 {
-				spans = append(spans, span{color, cur.String()})
-				cur.Reset()
-			}
-		}
-		for i := 0; i < len(line); i++ {
-			if line[i] == 0x1b && i+1 < len(line) && line[i+1] == '[' {
-				j := strings.IndexByte(line[i:], 'm')
-				if j < 0 {
-					break
-				}
-				code := line[i+2 : i+j]
-				flush()
-				if code == "0" {
-					color = ""
-				} else {
-					color = code
-				}
-				i += j
-				continue
-			}
-			cur.WriteByte(line[i])
-			if line[i]&0xC0 != 0x80 { // count runes, not bytes
-				cols++
-			}
-		}
-		flush()
+		spans, cols := parseANSILine(line)
 		if cols > maxCols {
 			maxCols = cols
 		}
 		rows = append(rows, spans)
 	}
+	return rows, maxCols
+}
 
+func parseANSILine(line string) ([]ansiSpan, int) {
+	var spans []ansiSpan
+	cur, color, cols := strings.Builder{}, "", 0
+	flush := func() {
+		if cur.Len() == 0 {
+			return
+		}
+		spans = append(spans, ansiSpan{color, cur.String()})
+		cur.Reset()
+	}
+	for i := 0; i < len(line); i++ {
+		if line[i] == 0x1b && i+1 < len(line) && line[i+1] == '[' {
+			end := strings.IndexByte(line[i:], 'm')
+			if end < 0 {
+				break
+			}
+			code := line[i+2 : i+end]
+			flush()
+			color = code
+			if code == "0" {
+				color = ""
+			}
+			i += end
+			continue
+		}
+		cur.WriteByte(line[i])
+		if line[i]&0xC0 != 0x80 { // count runes, not bytes
+			cols++
+		}
+	}
+	flush()
+	return spans, cols
+}
+
+func renderANSISVG(rows [][]ansiSpan, maxCols int) string {
+	colors := ansiColors()
+	const charW, lineH, pad = 7.85, 19, 18
 	w := float64(maxCols)*charW + 2*pad
 	h := float64(len(rows)*lineH) + 2*pad + 6
 	var sb strings.Builder

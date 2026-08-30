@@ -162,18 +162,40 @@ type PlumbingResult struct {
 // irrelevant questions.
 func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec PlumbingSpec) (PlumbingResult, error) {
 	r := PlumbingResult{Model: model, Rungs: map[string]Rung{}}
-	fail := func(operation string, err error) (PlumbingResult, error) {
-		r.Outcome = OutcomeError
-		return r, failure(FailureTransport, operation, err)
+	ready, err := checkPlumbingCapability(ctx, c, model, &r)
+	if !ready {
+		return r, err
 	}
-	add := func(id string, pass bool, detail string) {
-		r.Rungs[id] = Rung{Pass: pass, Outcome: outcomeFor(pass), Detail: detail}
-		r.Order = append(r.Order, id)
+	msg, ask, samp, ready, err := checkPlumbingEmission(ctx, c, model, spec, &r)
+	if !ready {
+		return r, err
 	}
+	checkPlumbingArgs(msg, &r)
+	if err := checkPlumbingRoundtrip(ctx, c, model, spec, msg, ask, samp, &r); err != nil {
+		return r, err
+	}
+	spurious, err := checkPlumbingIrrelevance(ctx, c, model, spec, samp, &r)
+	if err != nil {
+		return r, err
+	}
+	finishPlumbing(spurious, &r)
+	return r, nil
+}
 
+func addPlumbingRung(r *PlumbingResult, id string, pass bool, detail string) {
+	r.Rungs[id] = Rung{Pass: pass, Outcome: outcomeFor(pass), Detail: detail}
+	r.Order = append(r.Order, id)
+}
+
+func plumbingTransportError(r *PlumbingResult, operation string, err error) error {
+	r.Outcome = OutcomeError
+	return failure(FailureTransport, operation, err)
+}
+
+func checkPlumbingCapability(ctx context.Context, c llm.Backend, model string, r *PlumbingResult) (bool, error) {
 	info, err := c.Show(ctx, model)
 	if err != nil {
-		return fail("plumbing.show", err)
+		return false, plumbingTransportError(r, "plumbing.show", err)
 	}
 	hasTools := false
 	for _, cp := range info.Capabilities {
@@ -181,49 +203,49 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 			hasTools = true
 		}
 	}
-	add("1_capability", hasTools, fmt.Sprintf("capabilities=%v", info.Capabilities))
+	addPlumbingRung(r, "1_capability", hasTools, fmt.Sprintf("capabilities=%v", info.Capabilities))
 	if !hasTools {
 		r.Outcome = OutcomeSkipped
 		r.Verdict = "no tool support advertised - not a fair tools test"
-		return r, nil
+		return false, nil
 	}
+	return true, nil
+}
 
+func checkPlumbingEmission(ctx context.Context, c llm.Backend, model string, spec PlumbingSpec,
+	r *PlumbingResult) (ollama.Message, string, ollama.Sampling, bool, error) {
 	samp := ollama.Deterministic(300, numCtx(ctx))
-	ask := "What is the temperature in Oslo right now?"
-	for _, rg := range spec.Rungs {
-		if rg.ID == "2_emits_tool_call" && rg.Prompt != "" {
-			ask = rg.Prompt
-		}
-	}
+	ask := plumbingPrompt(spec, "2_emits_tool_call", "What is the temperature in Oslo right now?")
 	msg, _, err := c.Chat(ctx, model, []ollama.Message{{Role: "user", Content: ask}}, spec.Tools, samp)
 	if err != nil {
-		return fail("plumbing.emit", err)
+		return ollama.Message{}, "", samp, false, plumbingTransportError(r, "plumbing.emit", err)
 	}
 	emits := len(msg.ToolCalls) > 0
 	detail := fmt.Sprintf("n=%d", len(msg.ToolCalls))
 	if !emits {
 		detail += " -> answered in prose: " + truncate(msg.Content, 90)
 	}
-	add("2_emits_tool_call", emits, detail)
+	addPlumbingRung(r, "2_emits_tool_call", emits, detail)
 	if !emits {
 		r.Outcome = OutcomeInconclusive
 		r.Verdict = "template/parser problem - the model answered in prose instead " +
 			"of emitting a tool_calls array"
-		return r, nil
+		return msg, ask, samp, false, nil
 	}
+	return msg, ask, samp, true, nil
+}
 
+func checkPlumbingArgs(msg ollama.Message, r *PlumbingResult) {
 	args := map[string]any{}
 	argsErr := strictjson.Unmarshal(msg.ToolCalls[0].Function.Arguments, &args)
 	_, hasCity := args["city"]
 	hasCity = hasCity && argsErr == nil
-	add("3_valid_args", hasCity, fmt.Sprintf("%v", args))
+	addPlumbingRung(r, "3_valid_args", hasCity, fmt.Sprintf("%v", args))
+}
 
-	result := "-3 degrees Celsius"
-	for _, rg := range spec.Rungs {
-		if rg.ID == "4_roundtrip" && rg.Result != "" {
-			result = rg.Result
-		}
-	}
+func checkPlumbingRoundtrip(ctx context.Context, c llm.Backend, model string, spec PlumbingSpec,
+	msg ollama.Message, ask string, samp ollama.Sampling, r *PlumbingResult) error {
+	result := plumbingResult(spec, "4_roundtrip", "-3 degrees Celsius")
 	msgs := []ollama.Message{
 		{Role: "user", Content: ask},
 		{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls},
@@ -234,30 +256,32 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 	}
 	final, _, err := c.Chat(ctx, model, msgs, spec.Tools, samp)
 	if err != nil {
-		return fail("plumbing.roundtrip", err)
+		return plumbingTransportError(r, "plumbing.roundtrip", err)
 	}
 	rt := strings.Contains(final.Content, "-3") ||
 		strings.Contains(strings.ToLower(final.Content), "minus")
-	add("4_roundtrip", rt, truncate(final.Content, 90))
+	addPlumbingRung(r, "4_roundtrip", rt, truncate(final.Content, 90))
+	return nil
+}
 
+func checkPlumbingIrrelevance(ctx context.Context, c llm.Backend, model string, spec PlumbingSpec,
+	samp ollama.Sampling, r *PlumbingResult) (int, error) {
 	// Rung 5 needs no ground truth and is the most common local failure.
-	irr := "What is the capital of France?"
-	for _, rg := range spec.Rungs {
-		if rg.ID == "5_irrelevance" && rg.Prompt != "" {
-			irr = rg.Prompt
-		}
-	}
+	irr := plumbingPrompt(spec, "5_irrelevance", "What is the capital of France?")
 	m3, _, err := c.Chat(ctx, model, []ollama.Message{{Role: "user", Content: irr}}, spec.Tools, samp)
 	if err != nil {
-		return fail("plumbing.irrelevance", err)
+		return 0, plumbingTransportError(r, "plumbing.irrelevance", err)
 	}
 	spurious := len(m3.ToolCalls)
 	if spurious == 0 {
-		add("5_irrelevance", true, "called nothing (correct)")
+		addPlumbingRung(r, "5_irrelevance", true, "called nothing (correct)")
 	} else {
-		add("5_irrelevance", false, fmt.Sprintf("wrongly fired %d tool call(s)", spurious))
+		addPlumbingRung(r, "5_irrelevance", false, fmt.Sprintf("wrongly fired %d tool call(s)", spurious))
 	}
+	return spurious, nil
+}
 
+func finishPlumbing(spurious int, r *PlumbingResult) {
 	r.Healthy = r.Rungs["1_capability"].Pass && r.Rungs["2_emits_tool_call"].Pass &&
 		r.Rungs["3_valid_args"].Pass && r.Rungs["4_roundtrip"].Pass
 	r.Outcome = outcomeFor(r.Healthy)
@@ -271,7 +295,24 @@ func RunPlumbing(ctx context.Context, c llm.Backend, model string, spec Plumbing
 	default:
 		r.Verdict = "partial"
 	}
-	return r, nil
+}
+
+func plumbingPrompt(spec PlumbingSpec, id, fallback string) string {
+	for _, rung := range spec.Rungs {
+		if rung.ID == id && rung.Prompt != "" {
+			fallback = rung.Prompt
+		}
+	}
+	return fallback
+}
+
+func plumbingResult(spec PlumbingSpec, id, fallback string) string {
+	for _, rung := range spec.Rungs {
+		if rung.ID == id && rung.Result != "" {
+			fallback = rung.Result
+		}
+	}
+	return fallback
 }
 
 // ---------------------------------------------------------------- memory

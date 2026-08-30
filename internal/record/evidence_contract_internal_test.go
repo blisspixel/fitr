@@ -13,143 +13,151 @@ import (
 )
 
 func TestValidateDerivedEvidenceRejectsForgedReceipts(t *testing.T) {
-	base := func(t *testing.T) *Record {
-		t.Helper()
-		return completedEvidenceRecord(t,
-			[]eval.ExecResult{{Outcome: eval.OutcomeInconclusive}},
-			[]eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}},
-		)
-	}
-	withSpeed := func(r *Record, sample eval.SpeedResult) {
-		sample.FirstOutputObserved = true
-		r.TaskPlan.SpeedSamples = 1
-		r.Speed = []eval.SpeedResult{sample}
-	}
-	withRefusal := func(r *Record, verdict eval.RefusalVerdict) {
-		r.TaskPlan.RefusalTrials = 1
-		r.Refusal = map[string]eval.RefusalVerdict{"refusal": verdict}
-		digest, err := ObservedRefusalPlanSHA256(r.Refusal)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r.TaskPlan.RefusalPlanSHA256 = digest
-		r.EvidenceCounts["refusal"] = eval.CountOutcomes(1, verdict.Outcome)
-	}
-	tests := []struct {
-		name   string
-		mutate func(*Record)
-		want   string
-	}{
-		{
-			name: "non-finite wall time",
-			mutate: func(r *Record) {
-				r.WallSeconds = math.NaN()
-			},
-			want: "wall time",
-		},
-		{
-			name: "speed denominator",
-			mutate: func(r *Record) {
-				r.Speed = []eval.SpeedResult{{}}
-			},
-			want: "speed observations 1 do not match planned 0",
-		},
-		{
-			name: "negative speed measurement",
-			mutate: func(r *Record) {
-				withSpeed(r, eval.SpeedResult{DecodeTPS: -1})
-			},
-			want: "negative measurement",
-		},
-		{
-			name: "missing first output receipt",
-			mutate: func(r *Record) {
-				withSpeed(r, eval.SpeedResult{DecodeTPS: 2, TTFT: 1, PrefillTPS: 3})
-				r.Speed[0].FirstOutputObserved = false
-			},
-			want: "no first-output receipt",
-		},
-		{
-			name: "non-finite speed measurement",
-			mutate: func(r *Record) {
-				withSpeed(r, eval.SpeedResult{DecodeTPS: math.Inf(1)})
-			},
-			want: "non-finite measurement",
-		},
-		{
-			name: "cold label without load receipt",
-			mutate: func(r *Record) {
-				withSpeed(r, eval.SpeedResult{ColdTTFT: 1, ColdLoad: 0.1})
-			},
-			want: "cold TTFT without a cold-load receipt",
-		},
-		{
-			name: "warm label without cache hit",
-			mutate: func(r *Record) {
-				withSpeed(r, eval.SpeedResult{WarmTTFT: 1})
-			},
-			want: "warm TTFT without a cache-hit receipt",
-		},
-		{
-			name: "cached tokens without receipt",
-			mutate: func(r *Record) {
-				withSpeed(r, eval.SpeedResult{CachedPromptTok: 1})
-			},
-			want: "cached tokens without a cache receipt",
-		},
-		{
-			name: "known empty gated cache receipt",
-			mutate: func(r *Record) {
-				withSpeed(r, eval.SpeedResult{GatedCacheKnown: true})
-			},
-			want: "empty gated cache receipt",
-		},
-		{
-			name: "forged speed summary",
-			mutate: func(r *Record) {
-				withSpeed(r, eval.SpeedResult{DecodeTPS: 2, TTFT: 1, PrefillTPS: 3})
-			},
-			want: "speed summaries",
-		},
-		{
-			name: "refusal verdict disagreement",
-			mutate: func(r *Record) {
-				withRefusal(r, eval.RefusalVerdict{Outcome: eval.OutcomePass, Verdict: "refused"})
-			},
-			want: "disagrees with its verdict",
-		},
-		{
-			name: "forged refused count",
-			mutate: func(r *Record) {
-				withRefusal(r, eval.RefusalVerdict{Outcome: eval.OutcomeFail, Verdict: "refused"})
-			},
-			want: "refused count",
-		},
-		{
-			name: "forged output summary",
-			mutate: func(r *Record) {
-				r.Rep.Words++
-			},
-			want: "output summaries",
-		},
-		{
-			name: "forged scorecard identity",
-			mutate: func(r *Record) {
-				r.Scorecard.Profile = "other"
-			},
-			want: "scorecard identity",
-		},
-	}
-
-	for _, tc := range tests {
+	for _, tc := range derivedEvidenceForgeryCases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := base(t)
-			tc.mutate(r)
+			r := derivedEvidenceBase(t)
+			tc.mutate(t, r)
 			if err := r.validateDerivedEvidence(); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("validateDerivedEvidence() error = %v, want %q", err, tc.want)
 			}
 		})
 	}
+}
+
+type derivedEvidenceForgeryCase struct {
+	name   string
+	mutate func(*testing.T, *Record)
+	want   string
+}
+
+func derivedEvidenceBase(t *testing.T) *Record {
+	t.Helper()
+	return completedEvidenceRecord(t,
+		[]eval.ExecResult{{Outcome: eval.OutcomeInconclusive}},
+		[]eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}},
+	)
+}
+
+func addDerivedSpeed(r *Record, sample eval.SpeedResult) {
+	sample.FirstOutputObserved = true
+	r.TaskPlan.SpeedSamples = 1
+	r.Speed = []eval.SpeedResult{sample}
+}
+
+func addDerivedRefusal(t *testing.T, r *Record, verdict eval.RefusalVerdict) {
+	t.Helper()
+	r.TaskPlan.RefusalTrials = 1
+	r.Refusal = map[string]eval.RefusalVerdict{"refusal": verdict}
+	digest, err := ObservedRefusalPlanSHA256(r.Refusal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.TaskPlan.RefusalPlanSHA256 = digest
+	r.EvidenceCounts["refusal"] = eval.CountOutcomes(1, verdict.Outcome)
+}
+
+var derivedEvidenceForgeryCases = []derivedEvidenceForgeryCase{
+	{
+		name: "non-finite wall time",
+		mutate: func(_ *testing.T, r *Record) {
+			r.WallSeconds = math.NaN()
+		},
+		want: "wall time",
+	},
+	{
+		name: "speed denominator",
+		mutate: func(_ *testing.T, r *Record) {
+			r.Speed = []eval.SpeedResult{{}}
+		},
+		want: "speed observations 1 do not match planned 0",
+	},
+	{
+		name: "negative speed measurement",
+		mutate: func(_ *testing.T, r *Record) {
+			addDerivedSpeed(r, eval.SpeedResult{DecodeTPS: -1})
+		},
+		want: "negative measurement",
+	},
+	{
+		name: "missing first output receipt",
+		mutate: func(_ *testing.T, r *Record) {
+			addDerivedSpeed(r, eval.SpeedResult{DecodeTPS: 2, TTFT: 1, PrefillTPS: 3})
+			r.Speed[0].FirstOutputObserved = false
+		},
+		want: "no first-output receipt",
+	},
+	{
+		name: "non-finite speed measurement",
+		mutate: func(_ *testing.T, r *Record) {
+			addDerivedSpeed(r, eval.SpeedResult{DecodeTPS: math.Inf(1)})
+		},
+		want: "non-finite measurement",
+	},
+	{
+		name: "cold label without load receipt",
+		mutate: func(_ *testing.T, r *Record) {
+			addDerivedSpeed(r, eval.SpeedResult{ColdTTFT: 1, ColdLoad: 0.1})
+		},
+		want: "cold TTFT without a cold-load receipt",
+	},
+	{
+		name: "warm label without cache hit",
+		mutate: func(_ *testing.T, r *Record) {
+			addDerivedSpeed(r, eval.SpeedResult{WarmTTFT: 1})
+		},
+		want: "warm TTFT without a cache-hit receipt",
+	},
+	{
+		name: "cached tokens without receipt",
+		mutate: func(_ *testing.T, r *Record) {
+			addDerivedSpeed(r, eval.SpeedResult{CachedPromptTok: 1})
+		},
+		want: "cached tokens without a cache receipt",
+	},
+	{
+		name: "known empty gated cache receipt",
+		mutate: func(_ *testing.T, r *Record) {
+			addDerivedSpeed(r, eval.SpeedResult{GatedCacheKnown: true})
+		},
+		want: "empty gated cache receipt",
+	},
+	{
+		name: "forged speed summary",
+		mutate: func(_ *testing.T, r *Record) {
+			addDerivedSpeed(r, eval.SpeedResult{DecodeTPS: 2, TTFT: 1, PrefillTPS: 3})
+		},
+		want: "speed summaries",
+	},
+	{
+		name: "refusal verdict disagreement",
+		mutate: func(t *testing.T, r *Record) {
+			t.Helper()
+			addDerivedRefusal(t, r, eval.RefusalVerdict{Outcome: eval.OutcomePass, Verdict: "refused"})
+		},
+		want: "disagrees with its verdict",
+	},
+	{
+		name: "forged refused count",
+		mutate: func(t *testing.T, r *Record) {
+			t.Helper()
+			addDerivedRefusal(t, r, eval.RefusalVerdict{Outcome: eval.OutcomeFail, Verdict: "refused"})
+		},
+		want: "refused count",
+	},
+	{
+		name: "forged output summary",
+		mutate: func(_ *testing.T, r *Record) {
+			r.Rep.Words++
+		},
+		want: "output summaries",
+	},
+	{
+		name: "forged scorecard identity",
+		mutate: func(_ *testing.T, r *Record) {
+			r.Scorecard.Profile = "other"
+		},
+		want: "scorecard identity",
+	},
 }
 
 func TestSealedCheckPlanRejectsReplacementReorderingAndRemoval(t *testing.T) {
@@ -223,6 +231,22 @@ func TestMeasuredPartialTTFTCacheHitCannotEstablishLoadedUncachedLatency(t *test
 }
 
 func TestExecutorEvidencePolicyCoversAllResultKinds(t *testing.T) {
+	fixture := newExecutorEvidenceFixture(t)
+	t.Run("disabled coding verifier", fixture.testDisabledCodingVerifier)
+	t.Run("disabled tool observation", fixture.testDisabledToolObservation)
+	t.Run("unsafe manifest missing executor", fixture.testUnsafeManifestMissingExecutor)
+	t.Run("unsafe receipts bind across result kinds", fixture.testUnsafeReceiptsAcrossResultKinds)
+	t.Run("tool summary requires observation history", fixture.testToolSummaryRequiresHistory)
+	t.Run("observation must bind to executor", fixture.testObservationBindsToExecutor)
+}
+
+type executorEvidenceFixture struct {
+	executor eval.ExecutorReceipt
+	receipt  eval.VerificationReceipt
+}
+
+func newExecutorEvidenceFixture(t *testing.T) executorEvidenceFixture {
+	t.Helper()
 	executor := eval.ExecutorReceipt{
 		Kind: "python", Path: filepath.Join(t.TempDir(), "python.exe"),
 		Version: "Python 3.12.7", SHA256: testArtifactDigest,
@@ -231,79 +255,81 @@ func TestExecutorEvidencePolicyCoversAllResultKinds(t *testing.T) {
 		Protocol: "fitr.verifier.v2", InterpreterPath: executor.Path,
 		InterpreterVer: executor.Version, InterpreterHash: executor.SHA256,
 	}
-	toolReceipt := func() eval.ToolLoopResult {
-		return eval.ToolLoopResult{
-			Outcome: eval.OutcomeInconclusive, Verifier: &receipt,
-			VerifierObservations: []eval.VerificationReceipt{receipt},
-		}
+	return executorEvidenceFixture{executor: executor, receipt: receipt}
+}
+
+func (fixture executorEvidenceFixture) toolReceipt() eval.ToolLoopResult {
+	return eval.ToolLoopResult{
+		Outcome: eval.OutcomeInconclusive, Verifier: &fixture.receipt,
+		VerifierObservations: []eval.VerificationReceipt{fixture.receipt},
 	}
+}
 
-	t.Run("disabled coding verifier", func(t *testing.T) {
-		r := &Record{
-			Manifest:  &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionDisabled},
-			CodeWrite: []eval.ExecResult{{Outcome: eval.OutcomeInconclusive, Verifier: &receipt}},
-		}
-		if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "disabled execution") {
-			t.Fatalf("disabled coding verifier error = %v", err)
-		}
-	})
+func (fixture executorEvidenceFixture) testDisabledCodingVerifier(t *testing.T) {
+	r := &Record{
+		Manifest:  &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionDisabled},
+		CodeWrite: []eval.ExecResult{{Outcome: eval.OutcomeInconclusive, Verifier: &fixture.receipt}},
+	}
+	if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "disabled execution") {
+		t.Fatalf("disabled coding verifier error = %v", err)
+	}
+}
 
-	t.Run("disabled tool observation", func(t *testing.T) {
-		r := &Record{
-			Manifest: &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionDisabled},
-			Agentic: &eval.ToolLoopResult{
-				Outcome:              eval.OutcomeInconclusive,
-				VerifierObservations: []eval.VerificationReceipt{receipt},
-			},
-		}
-		if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "disabled execution") {
-			t.Fatalf("disabled tool observation error = %v", err)
-		}
-	})
+func (fixture executorEvidenceFixture) testDisabledToolObservation(t *testing.T) {
+	r := &Record{
+		Manifest: &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionDisabled},
+		Agentic: &eval.ToolLoopResult{
+			Outcome:              eval.OutcomeInconclusive,
+			VerifierObservations: []eval.VerificationReceipt{fixture.receipt},
+		},
+	}
+	if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "disabled execution") {
+		t.Fatalf("disabled tool observation error = %v", err)
+	}
+}
 
-	t.Run("unsafe manifest missing executor", func(t *testing.T) {
-		r := &Record{Manifest: &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionUnsafe}}
-		if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "missing its manifest executor") {
-			t.Fatalf("missing executor error = %v", err)
-		}
-	})
+func (fixture executorEvidenceFixture) testUnsafeManifestMissingExecutor(t *testing.T) {
+	r := &Record{Manifest: &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionUnsafe}}
+	if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "missing its manifest executor") {
+		t.Fatalf("missing executor error = %v", err)
+	}
+}
 
-	t.Run("unsafe receipts bind across result kinds", func(t *testing.T) {
-		tool, withdrawal, agentic := toolReceipt(), toolReceipt(), toolReceipt()
-		r := &Record{
-			Manifest:  &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionUnsafe, Executor: &executor},
-			CodeWrite: []eval.ExecResult{{Outcome: eval.OutcomeInconclusive, Verifier: &receipt}},
-			CodeFix:   []eval.ExecResult{{Outcome: eval.OutcomeInconclusive, Verifier: &receipt}},
-			Tools:     []eval.ToolLoopResult{tool}, Withdrawal: &withdrawal, Agentic: &agentic,
-		}
-		if err := r.validateExecutorEvidence(); err != nil {
-			t.Fatalf("valid unsafe executor evidence: %v", err)
-		}
-	})
+func (fixture executorEvidenceFixture) testUnsafeReceiptsAcrossResultKinds(t *testing.T) {
+	tool, withdrawal, agentic := fixture.toolReceipt(), fixture.toolReceipt(), fixture.toolReceipt()
+	r := &Record{
+		Manifest:  &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionUnsafe, Executor: &fixture.executor},
+		CodeWrite: []eval.ExecResult{{Outcome: eval.OutcomeInconclusive, Verifier: &fixture.receipt}},
+		CodeFix:   []eval.ExecResult{{Outcome: eval.OutcomeInconclusive, Verifier: &fixture.receipt}},
+		Tools:     []eval.ToolLoopResult{tool}, Withdrawal: &withdrawal, Agentic: &agentic,
+	}
+	if err := r.validateExecutorEvidence(); err != nil {
+		t.Fatalf("valid unsafe executor evidence: %v", err)
+	}
+}
 
-	t.Run("tool summary requires observation history", func(t *testing.T) {
-		tool := toolReceipt()
-		tool.VerifierObservations = nil
-		r := &Record{
-			Manifest: &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionUnsafe, Executor: &executor},
-			Tools:    []eval.ToolLoopResult{tool},
-		}
-		if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "missing its verifier observation history") {
-			t.Fatalf("missing verifier history error = %v", err)
-		}
-	})
+func (fixture executorEvidenceFixture) testToolSummaryRequiresHistory(t *testing.T) {
+	tool := fixture.toolReceipt()
+	tool.VerifierObservations = nil
+	r := &Record{
+		Manifest: &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionUnsafe, Executor: &fixture.executor},
+		Tools:    []eval.ToolLoopResult{tool},
+	}
+	if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "missing its verifier observation history") {
+		t.Fatalf("missing verifier history error = %v", err)
+	}
+}
 
-	t.Run("observation must bind to executor", func(t *testing.T) {
-		tool := toolReceipt()
-		tool.VerifierObservations[0].InterpreterHash = "sha256:" + strings.Repeat("f", 64)
-		r := &Record{
-			Manifest: &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionUnsafe, Executor: &executor},
-			Tools:    []eval.ToolLoopResult{tool},
-		}
-		if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "observation 0") {
-			t.Fatalf("mismatched verifier observation error = %v", err)
-		}
-	})
+func (fixture executorEvidenceFixture) testObservationBindsToExecutor(t *testing.T) {
+	tool := fixture.toolReceipt()
+	tool.VerifierObservations[0].InterpreterHash = "sha256:" + strings.Repeat("f", 64)
+	r := &Record{
+		Manifest: &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionUnsafe, Executor: &fixture.executor},
+		Tools:    []eval.ToolLoopResult{tool},
+	}
+	if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "observation 0") {
+		t.Fatalf("mismatched verifier observation error = %v", err)
+	}
 }
 
 func TestRecomputeOutcomeCountsDoesNotInventMissingObservations(t *testing.T) {
@@ -390,6 +416,20 @@ func TestRecomputeOutcomeCountsRejectsInvalidRawOutcomes(t *testing.T) {
 }
 
 func TestCurrentEvidenceContractRejectsReachableInvalidStates(t *testing.T) {
+	assertCurrentContractBoundaries(t)
+	for _, tc := range currentContractInvalidCases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := completeContractRecord(t, tc.plan, tc.configure)
+			if err := r.ValidateEvidenceContract(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ValidateEvidenceContract() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	assertValidCurrentContract(t)
+}
+
+func assertCurrentContractBoundaries(t *testing.T) {
+	t.Helper()
 	if err := (*Record)(nil).ValidateEvidenceContract(); err == nil || !strings.Contains(err.Error(), "nil result") {
 		t.Fatalf("nil contract error = %v", err)
 	}
@@ -400,81 +440,77 @@ func TestCurrentEvidenceContractRejectsReachableInvalidStates(t *testing.T) {
 		!strings.Contains(err.Error(), "no sealed run manifest") {
 		t.Fatalf("missing manifest error = %v", err)
 	}
+}
 
-	tests := []struct {
-		name      string
-		plan      TaskPlan
-		configure func(*Record)
-		want      string
-	}{
-		{
-			name: "adaptive check plan",
-			plan: TaskPlan{CheckTrialsLimit: 1, AdaptiveChecks: true},
-			configure: func(r *Record) {
-				r.Checks = []eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}}
-			},
-			want: "fixed generated-check plan",
-		},
-		{
-			name: "planned memory without requested context",
-			plan: TaskPlan{Memory: true},
-			want: "planned memory probe has no requested context",
-		},
-		{
-			name: "unplanned memory outcome",
-			plan: TaskPlan{CheckTrialsLimit: 1},
-			configure: func(r *Record) {
-				r.Checks = []eval.CheckOutcome{{TaskID: "check", Outcome: eval.OutcomeSkipped}}
-				r.Memory.Outcome = eval.OutcomeSkipped
-			},
-			want: "unplanned memory probe",
-		},
-		{
-			name: "invalid memory receipt",
-			plan: TaskPlan{Memory: true},
-			configure: func(r *Record) {
-				effective := 0
-				r.Memory = eval.MemoryResult{
-					Outcome: eval.OutcomePass, RequestedCtx: 32768, EffectiveCtx: &effective,
-				}
-			},
-			want: "memory receipt",
-		},
-		{
-			name: "invalid tool termination receipt",
-			plan: TaskPlan{ToolTrials: 1},
-			configure: func(r *Record) {
-				r.Tools = []eval.ToolLoopResult{{Outcome: eval.OutcomeInconclusive}}
-			},
-			want: "missing its termination reason",
-		},
-		{
-			name: "infrastructure error",
-			plan: TaskPlan{CheckTrialsLimit: 1},
-			configure: func(r *Record) {
-				r.Checks = []eval.CheckOutcome{{TaskID: "check", Outcome: eval.OutcomeError}}
-			},
-			want: "infrastructure error outcome",
-		},
-		{
-			name: "executable evidence remains unscoreable",
-			plan: TaskPlan{CodeTrials: 1},
-			configure: func(r *Record) {
-				r.CodeWrite = []eval.ExecResult{{Pass: true, Outcome: eval.OutcomePass}}
-			},
-			want: "cannot be scoreable before isolation",
-		},
-	}
+type currentContractInvalidCase struct {
+	name      string
+	plan      TaskPlan
+	configure func(*Record)
+	want      string
+}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			r := completeContractRecord(t, tc.plan, tc.configure)
-			if err := r.ValidateEvidenceContract(); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("ValidateEvidenceContract() error = %v, want %q", err, tc.want)
+var currentContractInvalidCases = []currentContractInvalidCase{
+	{
+		name: "adaptive check plan",
+		plan: TaskPlan{CheckTrialsLimit: 1, AdaptiveChecks: true},
+		configure: func(r *Record) {
+			r.Checks = []eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}}
+		},
+		want: "fixed generated-check plan",
+	},
+	{
+		name: "planned memory without requested context",
+		plan: TaskPlan{Memory: true},
+		want: "planned memory probe has no requested context",
+	},
+	{
+		name: "unplanned memory outcome",
+		plan: TaskPlan{CheckTrialsLimit: 1},
+		configure: func(r *Record) {
+			r.Checks = []eval.CheckOutcome{{TaskID: "check", Outcome: eval.OutcomeSkipped}}
+			r.Memory.Outcome = eval.OutcomeSkipped
+		},
+		want: "unplanned memory probe",
+	},
+	{
+		name: "invalid memory receipt",
+		plan: TaskPlan{Memory: true},
+		configure: func(r *Record) {
+			effective := 0
+			r.Memory = eval.MemoryResult{
+				Outcome: eval.OutcomePass, RequestedCtx: 32768, EffectiveCtx: &effective,
 			}
-		})
-	}
+		},
+		want: "memory receipt",
+	},
+	{
+		name: "invalid tool termination receipt",
+		plan: TaskPlan{ToolTrials: 1},
+		configure: func(r *Record) {
+			r.Tools = []eval.ToolLoopResult{{Outcome: eval.OutcomeInconclusive}}
+		},
+		want: "missing its termination reason",
+	},
+	{
+		name: "infrastructure error",
+		plan: TaskPlan{CheckTrialsLimit: 1},
+		configure: func(r *Record) {
+			r.Checks = []eval.CheckOutcome{{TaskID: "check", Outcome: eval.OutcomeError}}
+		},
+		want: "infrastructure error outcome",
+	},
+	{
+		name: "executable evidence remains unscoreable",
+		plan: TaskPlan{CodeTrials: 1},
+		configure: func(r *Record) {
+			r.CodeWrite = []eval.ExecResult{{Pass: true, Outcome: eval.OutcomePass}}
+		},
+		want: "cannot be scoreable before isolation",
+	},
+}
 
+func assertValidCurrentContract(t *testing.T) {
+	t.Helper()
 	valid := completeContractRecord(t, TaskPlan{CheckTrialsLimit: 1}, func(r *Record) {
 		r.Checks = []eval.CheckOutcome{{TaskID: "check", Pass: true, Outcome: eval.OutcomePass}}
 	})
