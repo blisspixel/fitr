@@ -283,14 +283,10 @@ jobs:
               }
             }
             if (-not $ready) { throw "corrupt candidate server did not become ready" }
-            $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
-            $PSNativeCommandUseErrorActionPreference = $false
-            try {
-              & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-              $installerStatus = $LASTEXITCODE
-            } finally {
-              $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
-            }
+            $installer = Start-Process powershell.exe `
+              -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',(Resolve-Path .\install.ps1).Path `
+              -Wait -PassThru -WindowStyle Hidden
+            $installerStatus = $installer.ExitCode
             if ($installerStatus -eq 0) { throw "corrupt candidate was accepted" }
             $after = (Get-FileHash "$env:FITR_BIN\fitr.exe" -Algorithm SHA256).Hash
             if ($after -cne $before) { throw "corrupt candidate replaced the existing install" }
