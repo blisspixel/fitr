@@ -472,6 +472,17 @@ func unifiedMemoryGPU(name string) bool {
 	return false
 }
 
+func appleGPUName(displayInfo, cpuBrand string) string {
+	if m := regexp.MustCompile(`Chipset Model:\s*(.+)`).FindStringSubmatch(displayInfo); len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	cpuBrand = strings.TrimSpace(cpuBrand)
+	if strings.Contains(strings.ToLower(cpuBrand), "apple") {
+		return cpuBrand
+	}
+	return "unknown"
+}
+
 func FormatCPU(name string) string {
 	if name == "" {
 		name = "unknown"

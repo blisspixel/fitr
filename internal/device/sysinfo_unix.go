@@ -30,10 +30,8 @@ func run(ctx context.Context, name string, args ...string) string {
 func gpuInfo(ctx context.Context) (name, driver, date string) {
 	if runtime.GOOS == "darwin" {
 		raw := run(ctx, "system_profiler", "SPDisplaysDataType")
-		if m := regexp.MustCompile(`Chipset Model:\s*(.+)`).FindStringSubmatch(raw); len(m) > 1 {
-			return strings.TrimSpace(m[1]), "", ""
-		}
-		return runtime.GOARCH, "", ""
+		cpu := run(ctx, "sysctl", "-n", "machdep.cpu.brand_string")
+		return appleGPUName(raw, cpu), "", ""
 	}
 	// NVIDIA first: nvidia-smi is the most precise source when present.
 	if nv := run(ctx, "nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"); nv != "" {

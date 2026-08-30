@@ -215,6 +215,10 @@ run_fitr diag-a "0,3" "${FITR_UNDER_TEST}" diag "${model_a_name}" \
   --backend llama-server
 run_fitr device-a "0" "${FITR_UNDER_TEST}" device --display plain
 grep -F "llama-server" "${acceptance_dir}/commands/device-a.log" >/dev/null
+if grep -Eq '^  gpu[[:space:]]+(arm64|amd64|x86_64)$' "${acceptance_dir}/commands/device-a.log"; then
+  echo "device output used a CPU architecture as the GPU identity" >&2
+  exit 1
+fi
 run_fitr view-a "0,3" "${FITR_UNDER_TEST}" view "${model_a_name}"
 run_fitr export-a "0" "${FITR_UNDER_TEST}" export "${model_a_name}" \
   --out "${acceptance_dir}/scorecard-a.html"

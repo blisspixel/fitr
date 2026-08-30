@@ -209,6 +209,22 @@ func TestDeviceDisplayModesExposeOneConsistentFingerprint(t *testing.T) {
 	}
 }
 
+func TestFormatGPUDriverOmitsEmptyParentheses(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		date    string
+		want    string
+	}{
+		{want: "unknown"},
+		{version: "550.1", want: "550.1"},
+		{version: "550.1", date: "2026-08-01", want: "550.1 (2026-08-01)"},
+	} {
+		if got := formatGPUDriver(tc.version, tc.date); got != tc.want {
+			t.Errorf("formatGPUDriver(%q, %q) = %q, want %q", tc.version, tc.date, got, tc.want)
+		}
+	}
+}
+
 func TestDiagReportsHealthyPlumbingAndEvidenceFailures(t *testing.T) {
 	t.Run("healthy", func(t *testing.T) {
 		runtime := &diagnosticRuntime{t: t, capabilities: []string{"completion", "tools"}}

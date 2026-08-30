@@ -383,6 +383,22 @@ func TestNormalizeAccelPrefersGPUOverCPU(t *testing.T) {
 	}
 }
 
+func TestAppleGPUNameNeverFallsBackToArchitecture(t *testing.T) {
+	for _, tc := range []struct {
+		display string
+		cpu     string
+		want    string
+	}{
+		{display: "Chipset Model: Apple M4 Max\nMetal Support: Metal 3", cpu: "Apple M4 Max", want: "Apple M4 Max"},
+		{cpu: "Apple M1 (Virtual)", want: "Apple M1 (Virtual)"},
+		{cpu: "arm64", want: "unknown"},
+	} {
+		if got := appleGPUName(tc.display, tc.cpu); got != tc.want {
+			t.Errorf("appleGPUName(%q, %q) = %q, want %q", tc.display, tc.cpu, got, tc.want)
+		}
+	}
+}
+
 func TestGateLookupMissingIsNotZero(t *testing.T) {
 	p := Profile{Gates: map[string]Gate{"fast_chat": {"decode_tps_min": 10.0}}}
 	if v, ok := p.Float("fast_chat", "decode_tps_min"); !ok || v != 10 {

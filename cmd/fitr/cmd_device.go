@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/render"
@@ -75,7 +76,7 @@ func writeDeviceIdentity(ctx context.Context, fp device.Fingerprint) {
 	fmt.Printf("  vram_gb            %s\n", terminalText(device.FormatVRAM(fp.VRAMGb, fp.VRAMSource)))
 	fmt.Printf("  gpu                %s\n", terminalText(fp.GPU))
 	fmt.Printf("  gpu_backend        %s\n", terminalText(emptyDash(fp.GPUBackend)))
-	fmt.Printf("  gpu_driver         %s  (%s)\n", terminalText(fp.GPUDriver), terminalText(fp.GPUDriverDate))
+	fmt.Printf("  gpu_driver         %s\n", terminalText(formatGPUDriver(fp.GPUDriver, fp.GPUDriverDate)))
 	fmt.Printf("  runtime            %s\n", terminalText(fp.Runtime))
 	fmt.Printf("  inference_device   %s\n", terminalText(fp.InferenceDevice))
 	// Not part of the sealed fingerprint, but an acceptance row needs it: a
@@ -87,6 +88,17 @@ func writeDeviceIdentity(ctx context.Context, fp device.Fingerprint) {
 	for _, conflict := range fp.IdentityConflicts() {
 		fmt.Printf("  ! identity         %s\n", terminalText(conflict))
 	}
+}
+
+func formatGPUDriver(version, date string) string {
+	version, date = strings.TrimSpace(version), strings.TrimSpace(date)
+	if version == "" {
+		return "unknown"
+	}
+	if date == "" {
+		return version
+	}
+	return fmt.Sprintf("%s (%s)", version, date)
 }
 
 func writeDeviceConfiguration(fp device.Fingerprint) {
