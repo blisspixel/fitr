@@ -114,7 +114,9 @@ jobs:
       - name: binary size gate
         shell: bash
         run: |
-          max_bytes=12000000
+          # The 0.9.10 centralized evidence analyzer moved windows/amd64 to
+          # 12,034,560 bytes. Keep a narrow ceiling that still catches drift.
+          max_bytes=12200000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"
             printf '%-32s %10d bytes\n' "$binary" "$size"
