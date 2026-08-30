@@ -53,8 +53,8 @@ func TestGenerateParsesSSEStreamAndTimings(t *testing.T) {
 		// Real llama-server SSE framing: data-prefixed chunks, final carries timings.
 		w.Write([]byte(`data: {"content":"Hel","stop":false}` + "\n\n"))
 		w.Write([]byte(`data: {"content":"lo","stop":false}` + "\n\n"))
-		w.Write([]byte(`data: {"content":"","stop":true,"stop_type":"eos","tokens_cached":12,` +
-			`"timings":{"prompt_n":100,"prompt_ms":500.0,"predicted_n":50,"predicted_ms":2000.0}}` + "\n\n"))
+		w.Write([]byte(`data: {"content":"","stop":true,"stop_type":"eos","tokens_cached":112,` +
+			`"timings":{"cache_n":12,"prompt_n":100,"prompt_ms":500.0,"predicted_n":50,"predicted_ms":2000.0}}` + "\n\n"))
 	})
 	defer done()
 
@@ -72,7 +72,7 @@ func TestGenerateParsesSSEStreamAndTimings(t *testing.T) {
 		t.Fatalf("prompt=%d cached=%d", m.PromptTokens, m.CachedTokens)
 	}
 	if !m.CacheKnown {
-		t.Fatal("llama-server tokens_cached is a real receipt; CacheKnown must be set")
+		t.Fatal("llama-server timings.cache_n is a real receipt; CacheKnown must be set")
 	}
 	if m.ClientDerived {
 		t.Fatal("llama-server timings are the server's; ClientDerived must stay false")
@@ -89,11 +89,65 @@ func TestGenerateParsesSSEStreamAndTimings(t *testing.T) {
 			t.Errorf("payload missing %s", k)
 		}
 	}
+	if _, ok := gotPayload["ignore_eos"]; ok {
+		t.Fatal("ordinary generation must not suppress EOS")
+	}
 	if n, _ := gotPayload["n_ctx"].(float64); n != 8192 {
 		t.Errorf("n_ctx = %v, want 8192", gotPayload["n_ctx"])
 	}
 	if _, ok := gotPayload["json_schema"]; ok {
 		t.Error("plain generation must not be grammar-constrained")
+	}
+}
+
+func TestGenerateDoesNotTreatSlotCacheStateAsReusedPromptTokens(t *testing.T) {
+	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`data: {"content":"x","stop":false}` + "\n\n"))
+		w.Write([]byte(`data: {"stop":true,"stop_type":"eos","tokens_cached":99,` +
+			`"timings":{"prompt_n":10,"prompt_ms":1,"predicted_n":1,"predicted_ms":1}}` + "\n\n"))
+	})
+	defer done()
+	_, m, err := c.Generate(context.Background(), "m", "hi", ollama.Deterministic(1, 2048))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.CacheKnown || m.CachedTokens != 0 {
+		t.Fatalf("ambiguous top-level tokens_cached became a reuse receipt: %+v", m)
+	}
+}
+
+func TestGeneratePreservesExplicitZeroReuseReceipt(t *testing.T) {
+	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`data: {"content":"x","stop":false}` + "\n\n"))
+		w.Write([]byte(`data: {"stop":true,"stop_type":"eos",` +
+			`"timings":{"cache_n":0,"prompt_n":10,"prompt_ms":1,"predicted_n":1,"predicted_ms":1}}` + "\n\n"))
+	})
+	defer done()
+	_, m, err := c.Generate(context.Background(), "m", "hi", ollama.Deterministic(1, 2048))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.CacheKnown || m.CachedTokens != 0 {
+		t.Fatalf("explicit zero reuse receipt = %+v, want known cache miss", m)
+	}
+}
+
+func TestGenerateCanSuppressEOSForFixedLengthProbe(t *testing.T) {
+	var gotPayload map[string]any
+	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotPayload)
+		w.Write([]byte(`data: {"content":"x","stop":false}` + "\n\n"))
+		w.Write([]byte(`data: {"content":"","stop":true,"stop_type":"limit",` +
+			`"timings":{"prompt_n":1,"prompt_ms":1,"predicted_n":1,"predicted_ms":1}}` + "\n\n"))
+	})
+	defer done()
+	s := ollama.Deterministic(1, 2048)
+	s.IgnoreEOS = true
+	if _, _, err := c.Generate(context.Background(), "m", "hi", s); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := gotPayload["ignore_eos"].(bool); !ok || !got {
+		t.Fatalf("ignore_eos = %#v, want true for a fixed-length probe", gotPayload["ignore_eos"])
 	}
 }
 
@@ -443,7 +497,8 @@ func TestGenerateRejectsMalformedAndIncompleteNativeFrames(t *testing.T) {
 		{name: "early EOF", body: `data: {"content":"partial","stop":false}` + "\n", wantText: "partial", wantError: "before a terminal receipt"},
 		{name: "done before receipt", body: "data: [DONE]\n", wantError: "before a terminal receipt"},
 		{name: "data after receipt", body: `data: {"stop":true}` + "\n" + `data: {"content":"spoof"}` + "\n", wantError: "after the terminal frame"},
-		{name: "negative receipt", body: `data: {"stop":true,"tokens_cached":-1}` + "\n", wantError: "negative metric"},
+		{name: "negative slot state", body: `data: {"stop":true,"tokens_cached":-1}` + "\n", wantError: "negative metric"},
+		{name: "negative reuse receipt", body: `data: {"stop":true,"timings":{"cache_n":-1}}` + "\n", wantError: "negative metric"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, done := testClient(func(w http.ResponseWriter, r *http.Request) {

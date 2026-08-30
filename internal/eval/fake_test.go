@@ -264,7 +264,7 @@ func assertUnknownSpeedReceipt(t *testing.T, s *Spec) {
 	}
 }
 
-func TestRunSpeedRecordsWhenDecodeProducedNoOutput(t *testing.T) {
+func TestRunSpeedRejectsDecodeWithNoOutput(t *testing.T) {
 	s, err := LoadSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -277,12 +277,9 @@ func TestRunSpeedRecordsWhenDecodeProducedNoOutput(t *testing.T) {
 			{PrefillTPS: 100, PromptTokens: 100},
 		},
 	}
-	r, err := RunSpeed(context.Background(), f, "m", s, "no-output")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.FirstOutputObserved {
-		t.Fatal("empty decode output was recorded as an observed first output")
+	_, err = RunSpeed(context.Background(), f, "m", s, "no-output")
+	if err == nil || !strings.Contains(err.Error(), "speed probe produced no output") {
+		t.Fatalf("error = %v, want an immediate no-output measurement failure", err)
 	}
 }
 

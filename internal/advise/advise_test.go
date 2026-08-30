@@ -634,17 +634,20 @@ func TestResidentAtFallbackLoadContextDoesNotProveModelMaximum(t *testing.T) {
 	}
 }
 
-func TestNVIDIAUnifiedBudgetKeepsOnlyLowerBoundIncompatible(t *testing.T) {
+func TestNVIDIAUnifiedCapacityDoesNotCallFullResidencyProjectionIncompatible(t *testing.T) {
 	r := Evaluate(Input{
 		Model: "model", WeightsB: 5 * GiB,
 		HaveGB: 5.5, HaveSrc: device.NVIDIAUnifiedMemorySource,
 		Ctx: 8192, Arch: llama8B(), Backend: "ollama",
 	})
-	if r.Tier != Incompatible {
-		t.Fatalf("tier = %s (%s), want incompatible lower bound", r.Tier, r.Why)
+	if r.Tier != Skip {
+		t.Fatalf("tier = %s (%s), want skip without resolved mmap or placement", r.Tier, r.Why)
 	}
 	if r.Flag != "" || r.FlagValue != 0 || r.FitsGB != 0 || r.KVRemedy != "" {
 		t.Fatalf("physical lower-bound failure certified a shorter fit: %+v", r)
+	}
+	if !strings.Contains(r.Why, "mmap") || r.Hint == "" {
+		t.Fatalf("projection gap did not explain its missing runtime evidence: %+v", r)
 	}
 }
 

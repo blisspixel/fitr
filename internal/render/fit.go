@@ -16,10 +16,11 @@ const (
 
 // ContextFit is the presentation model for advise's multi-window table.
 type ContextFit struct {
-	HaveGB     float64
-	HaveSource string
-	Note       string
-	Points     []ContextFitPoint
+	HaveGB       float64
+	HaveSource   string
+	CapacityOnly bool
+	Note         string
+	Points       []ContextFitPoint
 }
 
 type ContextFitPoint struct {
@@ -30,7 +31,7 @@ type ContextFitPoint struct {
 	OtherGB    float64
 	OtherKnown bool
 	NeedGB     float64
-	HeadroomGB float64
+	MarginGB   float64
 	DecodeTPS  float64
 	PrefillTPS float64
 	Requested  bool
@@ -55,16 +56,24 @@ func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 	// vertical strip for "incompatible" instead of reading to the end of a row;
 	// it was last, behind eight numeric columns, which also pushed the row to 90
 	// characters against an 80-column terminal.
+	marginLabel := "ROOM"
+	if table.CapacityOnly {
+		marginLabel = "DELTA"
+	}
 	fmt.Fprintf(w, "%s\n", p.wrap(p.Head, fmt.Sprintf(fitHeaderFmt,
-		"FIT", "CTX", "WEIGHT", "KV", "OTHER", "NEED", "ROOM", "DECODE", "PREFILL", "OF HAVE")))
+		"FIT", "CTX", "WEIGHT", "KV", "OTHER", "NEED", marginLabel, "DECODE", "PREFILL", "OF HAVE")))
 	maxNeed := contextFitMaxNeed(table)
 	for _, pt := range table.Points {
 		writeContextFitPoint(w, pt, maxNeed, p, g, unicode)
 	}
 	if table.HaveSource != "" {
-		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, fmt.Sprintf(
-			"budget %.1f GB (%s); ROOM is derived against this budget",
-			table.HaveGB, SingleLine(table.HaveSource))))
+		line := fmt.Sprintf("budget %.1f GB (%s); ROOM is derived against this budget",
+			table.HaveGB, SingleLine(table.HaveSource))
+		if table.CapacityOnly {
+			line = fmt.Sprintf("addressable capacity %.1f GB (%s); DELTA is capacity minus projection, not usable room",
+				table.HaveGB, SingleLine(table.HaveSource))
+		}
+		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, line))
 	}
 	if table.Note != "" {
 		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, SingleLine(table.Note)))
@@ -112,7 +121,7 @@ func writeContextFitPoint(w io.Writer, point ContextFitPoint, maxNeed float64,
 	fmt.Fprintf(w, fitRowFmt,
 		p.wrap(fitTierColor(p, point.Tier), pad(point.Tier, 12, g.Ell)),
 		fmt.Sprintf("%s%d", mark, point.Ctx),
-		point.WeightsGB, point.KVGB, other, point.NeedGB, point.HeadroomGB,
+		point.WeightsGB, point.KVGB, other, point.NeedGB, point.MarginGB,
 		decode, prefill, p.wrap(p.Accent, bar))
 	if point.Note != "" {
 		fmt.Fprintf(w, "          %s\n", p.wrap(p.Muted, SingleLine(point.Note)))

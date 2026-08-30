@@ -61,9 +61,13 @@ own log (authoritative over your shell's environment).
 not expose: per-request **cached-token counts** (the evidence needed to
 separate loaded/uncached prompt processing from a prefix-cache hit), and a
 **capability probe** via `/props`, so tool and vision support is read from
-the endpoint, never guessed from the model's name. Resident-memory needs
-SKIP on llama-server - it does not report resident bytes, and a made-up
-number would be worse than a gap.
+the endpoint, never guessed from the model's name. Current llama-server
+builds report the prefix actually reused as `timings.cache_n`. The top-level
+`tokens_cached` field describes slot state after processing and is not a
+reuse receipt; treating it as one can label a fresh prompt as a cache hit.
+When `timings.cache_n` is absent, fitr records cache state as unknown instead
+of inferring it. Resident-memory needs SKIP on llama-server - it does not
+report resident bytes, and a made-up number would be worse than a gap.
 
 The GPU compute API (CUDA / Metal / Vulkan / ROCm) is read from `/props`
 when the build exposes it, and is part of the device fingerprint: a Vulkan

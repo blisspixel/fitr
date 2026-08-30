@@ -129,6 +129,7 @@ func runSpeedWarmup(ctx context.Context, c llm.Backend, model string, out *Speed
 	// first token IS the honest cold-start figure - record it instead of
 	// discarding it.
 	warm := ollama.Deterministic(8, numCtx(ctx))
+	warm.IgnoreEOS = true
 	_, m0, err := c.Generate(ctx, model, "Say OK.", warm)
 	if err != nil {
 		return err
@@ -143,6 +144,7 @@ func runSpeedWarmup(ctx context.Context, c llm.Backend, model string, out *Speed
 func runSpeedDecode(ctx context.Context, c llm.Backend, model string, s *Spec, nonce string,
 	out *SpeedResult) (string, ollama.Sampling, error) {
 	samp := ollama.Deterministic(s.Speed.Decode.NumPredict, numCtx(ctx))
+	samp.IgnoreEOS = true
 	tag := ""
 	if nonce != "" {
 		tag = "<!-- run " + nonce + " -->\n"
@@ -151,6 +153,9 @@ func runSpeedDecode(ctx context.Context, c llm.Backend, model string, s *Spec, n
 	text, m1, err := c.Generate(ctx, model, decodePrompt, samp)
 	if err != nil {
 		return "", samp, err
+	}
+	if text == "" {
+		return "", samp, errors.New("speed probe produced no output; decode throughput and TTFT are not measurable")
 	}
 	out.DecodeTPS, out.TTFT = m1.DecodeTPS, m1.TTFTSeconds
 	out.FirstOutputObserved = text != ""
@@ -191,6 +196,7 @@ func runSpeedWarmCache(ctx context.Context, c llm.Backend, model, decodePrompt s
 func runSpeedPrefill(ctx context.Context, c llm.Backend, model string, s *Spec, nonce string,
 	out *SpeedResult) error {
 	samp2 := ollama.Deterministic(s.Speed.Prefill.NumPredict, numCtx(ctx))
+	samp2.IgnoreEOS = true
 	_, m2, err := c.Generate(ctx, model, buildLongPrompt(nonce), samp2)
 	if err != nil {
 		return err

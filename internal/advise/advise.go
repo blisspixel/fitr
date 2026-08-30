@@ -618,11 +618,11 @@ func evaluateAutomaticNVIDIAUnifiedHybrid(in Input, haveB float64, r Report) Rep
 		r.WeightsGB = round1(float64(in.WeightsB) / GiB)
 	}
 	if in.WeightsB > 0 && float64(in.WeightsB) > haveB {
-		r.Tier = Incompatible
+		r.Tier = Skip
 		r.NeedGB = r.WeightsGB
-		r.Why = fmt.Sprintf("weights alone are %s GB; the physical addressable pool is %s GB",
+		r.Why = fmt.Sprintf("artifact bytes are %s GB, above the %s GB addressable shared pool, but mmap, paging, and partial placement were not measured",
 			trim1(r.WeightsGB), trim1(r.HaveGB))
-		r.Remedy = "try a smaller quant or runtime-supported partial placement"
+		r.Hint = "try a smaller quant, or verify a runtime-supported mmap or partial-placement configuration outside this projection"
 		return r
 	}
 	r.Tier = Skip
@@ -637,15 +637,22 @@ func constrainAutomaticNVIDIAUnifiedClaim(r Report) Report {
 	switch r.Tier {
 	case Compatible:
 		r.Tier = Skip
-		r.Why = fmt.Sprintf("%d ctx has a %s GB weights-plus-KV lower bound within the %s GB addressable pool, but safe available shared memory was not measured",
+		r.Why = fmt.Sprintf("%d ctx has a %s GB weights-plus-KV projection within the %s GB addressable pool, but safe available shared memory was not measured",
 			r.Ctx, trim1(r.NeedGB), trim1(r.HaveGB))
 		r.Hint = "use --load at the requested context to observe runtime allocation, or pass --vram-gb N as a declared planning budget"
 	case LowMemory:
-		r.Tier = Incompatible
-		r.Remedy = "the requested lower bound exceeds physical capacity; try a smaller quant or shorter context, then verify with --load"
+		r.Tier = Skip
+		r.Why = fmt.Sprintf("%d ctx projects %s GB of artifact bytes plus KV, above the %s GB addressable pool, but mmap, paging, partial placement, and safe availability were not measured",
+			r.Ctx, trim1(r.NeedGB), trim1(r.HaveGB))
+		r.Hint = "try a smaller quant or shorter context, or verify a resolved runtime configuration with an exact-context load receipt"
+		r.Remedy = ""
 		clearShorterContextClaim(&r)
 	case Incompatible:
-		r.Remedy = "the known lower bound exceeds physical capacity; try a smaller quant or shorter context, then verify with --load"
+		r.Tier = Skip
+		r.Why = fmt.Sprintf("the full-residency artifact projection is %s GB, above the %s GB addressable pool, but mmap, paging, partial placement, and safe availability were not measured",
+			trim1(r.NeedGB), trim1(r.HaveGB))
+		r.Hint = "try a smaller quant or verify a resolved runtime configuration with an exact-context load receipt"
+		r.Remedy = ""
 		clearShorterContextClaim(&r)
 	}
 	return r
@@ -666,7 +673,7 @@ func evaluateFit(in Input, r Report) Report {
 	r.Tier = Skip
 	r.Why = fmt.Sprintf("llama-fit-params projected %s GB of device memory, but its effective context and placement were not captured",
 		trim1(r.NeedGB))
-	r.Hint = "use --load at the requested context to observe runtime allocation; omit --fit to see the labeled weights-plus-KV lower bound"
+	r.Hint = "use --load at the requested context to observe runtime allocation; omit --fit to see the labeled weights-plus-KV projection"
 	r.Gaps = append(r.Gaps,
 		"allocator projection is not bound to final context, offload, tensor placement, binary version, or host-memory use")
 	if in.FitCannot {
@@ -900,12 +907,19 @@ func Write(w io.Writer, r Report) {
 }
 
 func fitPresentation(t FitTable) render.ContextFit {
-	out := render.ContextFit{HaveGB: t.HaveGB, HaveSource: t.HaveSrc, Note: t.Note}
+	out := render.ContextFit{
+		HaveGB: t.HaveGB, HaveSource: t.HaveSrc,
+		CapacityOnly: t.HaveSemantics == "addressable_capacity", Note: t.Note,
+	}
 	for _, p := range t.Points {
+		marginGB := p.HeadroomGB
+		if p.CapacityDeltaGB != nil {
+			marginGB = *p.CapacityDeltaGB
+		}
 		out.Points = append(out.Points, render.ContextFitPoint{
 			Ctx: p.Ctx, Tier: p.Tier, WeightsGB: p.WeightsGB, KVGB: p.KVGB,
 			OtherGB: p.OtherGB, OtherKnown: p.OtherKnown,
-			NeedGB: p.NeedGB, HeadroomGB: p.HeadroomGB,
+			NeedGB: p.NeedGB, MarginGB: marginGB,
 			DecodeTPS: p.DecodeTPS, PrefillTPS: p.PrefillTPS,
 			Requested: p.Requested, Suggested: p.Suggested, Note: p.Note,
 		})

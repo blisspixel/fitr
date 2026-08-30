@@ -80,6 +80,11 @@ type Sampling struct {
 	NumCtx        int     `json:"num_ctx"`
 	NumPredict    int     `json:"num_predict"`
 	RepeatPenalty float64 `json:"repeat_penalty"`
+	// IgnoreEOS is reserved for fixed-length throughput probes. Backends that
+	// expose this control may use it to prevent an immediate EOS from turning a
+	// decode benchmark into a zero-output timing receipt. Behavioral tasks must
+	// leave it false.
+	IgnoreEOS bool `json:"-"`
 
 	// Format, when "json", asks the server for grammar-constrained output.
 	// Kept OFF for every measurement task: the constrained path has its own

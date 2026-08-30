@@ -1,0 +1,142 @@
+name: native acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GOTOOLCHAIN: local
+  LLAMA_BUILD: b10700
+  MODEL_REVISION: 9e6855bc4be717fca1ef21360a1db4b29d5c559a
+  MODEL_A_SHA256: ed5fa30c487b282ec156c29062f1222e5c20875a944ac98289dbd242e947f747
+  MODEL_B_SHA256: 4ffe3cb59ea03238cea3f4a4b03fe516bcd827b6bd02c868a64cf31b2f94dab9
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.0"
+      - run: make dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-acceptance-candidate
+          path: dist/
+
+  native:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-acceptance-candidate
+          path: dist
+
+      - name: install candidate from exact build artifacts
+        shell: bash
+        env:
+          FITR_BIN: ${{ runner.temp }}/fitr-install
+          FITR_RELEASE_BASE_URL: http://127.0.0.1:8765
+          FITR_REQUIRE_BINARY: "1"
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory dist >/dev/null 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in {1..20}; do
+            curl --fail --silent http://127.0.0.1:8765/SHA256SUMS >/dev/null && break
+            if [ "$attempt" -eq 20 ]; then exit 1; fi
+            sleep 0.25
+          done
+          sh install.sh
+          expected="fitr $(tr -d '[:space:]' < internal/buildinfo/version.txt)"
+          test "$("$FITR_BIN/fitr" version)" = "$expected"
+          echo "FITR_UNDER_TEST=$FITR_BIN/fitr" >> "$GITHUB_ENV"
+
+      - name: acquire checksum-pinned runtime and models
+        shell: bash
+        run: |
+          acceptance_root="$RUNNER_TEMP/fitr-native"
+          mkdir -p "$acceptance_root/llama" "$acceptance_root/models" "$acceptance_root/evidence"
+          check_sha256() {
+            expected="$1"
+            path="$2"
+            if command -v sha256sum >/dev/null 2>&1; then
+              actual="$(sha256sum "$path" | awk '{print $1}')"
+            else
+              actual="$(shasum -a 256 "$path" | awk '{print $1}')"
+            fi
+            test "$actual" = "$expected"
+          }
+          os_name="$(uname -s)"
+          arch_name="$(uname -m)"
+          case "$os_name/$arch_name" in
+            Linux/x86_64)
+              asset="llama-$LLAMA_BUILD-bin-ubuntu-x64.tar.gz"
+              asset_sha="53ea0d05846b443414f04d7acd2a0f89b902909be1c25eea3d08f166768692ef"
+              ;;
+            Darwin/arm64)
+              asset="llama-$LLAMA_BUILD-bin-macos-arm64.tar.gz"
+              asset_sha="e2f2844b2d477d85da2c76b7b356029ce746504aaac9b624f681e6b517654ca9"
+              ;;
+            Darwin/x86_64)
+              asset="llama-$LLAMA_BUILD-bin-macos-x64.tar.gz"
+              asset_sha="b8b51e7e5a7d43aafba3bf280c7a731dca64692ac03a5409859e1a5d8db8a593"
+              ;;
+            *)
+              echo "unsupported native acceptance host: $os_name/$arch_name" >&2
+              exit 1
+              ;;
+          esac
+          archive="$acceptance_root/$asset"
+          curl --fail --location --retry 3 \
+            "https://github.com/ggml-org/llama.cpp/releases/download/$LLAMA_BUILD/$asset" \
+            --output "$archive"
+          check_sha256 "$asset_sha" "$archive"
+          tar -xzf "$archive" -C "$acceptance_root/llama"
+          llama_server="$(find "$acceptance_root/llama" -type f -name llama-server -print -quit)"
+          test -n "$llama_server"
+          chmod +x "$llama_server"
+
+          model_base="https://huggingface.co/unsloth/SmolLM2-135M-Instruct-GGUF/resolve/$MODEL_REVISION"
+          model_a="$acceptance_root/models/SmolLM2-135M-Instruct-Q4_K_M.gguf"
+          model_b="$acceptance_root/models/SmolLM2-135M-Instruct-Q5_K_M.gguf"
+          curl --fail --location --retry 3 "$model_base/$(basename "$model_a")" --output "$model_a"
+          curl --fail --location --retry 3 "$model_base/$(basename "$model_b")" --output "$model_b"
+          check_sha256 "$MODEL_A_SHA256" "$model_a"
+          check_sha256 "$MODEL_B_SHA256" "$model_b"
+
+          {
+            echo "LLAMA_SERVER_BIN=$llama_server"
+            echo "FITR_ACCEPTANCE_MODEL_A=$model_a"
+            echo "FITR_ACCEPTANCE_MODEL_B=$model_b"
+            echo "FITR_ACCEPTANCE_DIR=$acceptance_root/evidence"
+          } >> "$GITHUB_ENV"
+
+      - name: complete candidate-binary live loop
+        shell: bash
+        run: bash scripts/native-acceptance.sh
+
+      - name: upload native evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-acceptance-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/fitr-native/evidence/

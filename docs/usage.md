@@ -208,7 +208,7 @@ Ctrl-C is safe (exit 130).
   current adapter does not capture the fitter's adjusted context, offload,
   tensor placement, binary version, or host-memory domain, so the projection
   is descriptive: it remains SKIP and does not enter a context row or produce
-  a fit remedy. The weights+KV lower bound remains the default for conventional
+  a fit remedy. The weights+KV projection remains the default for conventional
   attention and is labeled as such. Hybrid recurrent architectures stay SKIP
   until `--load` observes their allocation at the runtime-reported context.
   Split GGUF weights are summed only after every declared shard is present.
@@ -218,6 +218,16 @@ Ctrl-C is safe (exit 130).
   exact model already served by the selected runtime. `--fit` invokes
   `llama-fit-params` for that one artifact; it is not a multi-model fit-set
   test.
+
+  ```bash
+  fitr advise "/models/model-Q4_K_M-00001-of-00009.gguf" \
+    --ctx 32768 --display json
+  ```
+
+  Any numbered shard may identify the set, but every declared sibling must be
+  present. The JSON reports the same evidence contract as the terminal table;
+  automation should read its `tier` because compatible and SKIP both exit 0,
+  while low-memory and incompatible exit 3.
 - `--pull` fetches a missing Ollama tag before measuring. Pasted Hugging
   Face GGUF URLs pull automatically (they *are* the request to fetch).
 - `--allow-unsafe-exec` runs unisolated built-in Python diagnostics after an

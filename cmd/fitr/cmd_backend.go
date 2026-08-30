@@ -143,6 +143,13 @@ func backendAt(kind, url string) (llm.Backend, error) {
 
 // probeBackend is the no-error variant for commands that merely display state.
 func probeBackend(ctx context.Context) llm.Backend {
+	if configured := strings.TrimSpace(os.Getenv("FITR_BACKEND")); configured != "" && configured != "auto" {
+		if kind, ok := canonicalBackendKind(configured); ok {
+			if b, err := backendAt(kind, ""); err == nil {
+				return b
+			}
+		}
+	}
 	found, _ := llm.Discover(ctx)
 	if len(found) == 0 {
 		return ollama.New()

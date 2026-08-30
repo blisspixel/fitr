@@ -148,7 +148,7 @@ func TestContextFitDoesNotAttachAllocatorProjectionToRequestedContext(t *testing
 		}
 	}
 	if at8.OtherKnown || at8.OtherGB != 0 || at8.NeedGB != 6 ||
-		at8.AllocationEvidence != allocationLowerBound || !strings.Contains(at8.Note, "no matched total evidence") {
+		at8.AllocationEvidence != allocationProjection || !strings.Contains(at8.Note, "no matched total evidence") {
 		t.Fatalf("unbound projection contaminated requested point: %+v", at8)
 	}
 }
@@ -158,7 +158,7 @@ func TestContextFitNVIDIAAddressableCapacityNeverSuggestsUnobservedFit(t *testin
 		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: device.NVIDIAUnifiedMemorySource,
 		Ctx: 32768, Arch: llama8B(),
 	})
-	var sawSkip, sawIncompatible bool
+	var sawSkip bool
 	for _, p := range tble.Points {
 		if p.Suggested || p.Tier == Compatible {
 			t.Fatalf("addressable-only point claimed fit: %+v", p)
@@ -166,11 +166,14 @@ func TestContextFitNVIDIAAddressableCapacityNeverSuggestsUnobservedFit(t *testin
 		switch p.Tier {
 		case Skip:
 			sawSkip = true
-		case Incompatible:
-			sawIncompatible = true
+		default:
+			t.Fatalf("addressable-only point had definitive tier: %+v", p)
+		}
+		if p.CapacityDeltaGB == nil || p.HeadroomGB != 0 {
+			t.Fatalf("addressable capacity must expose a delta, not headroom: %+v", p)
 		}
 	}
-	if !sawSkip || !sawIncompatible || !strings.Contains(CompactWindows(tble), "?") {
+	if !sawSkip || tble.HaveSemantics != "addressable_capacity" || !strings.Contains(CompactWindows(tble), "?") {
 		t.Fatalf("addressable curve = %+v compact=%q", tble, CompactWindows(tble))
 	}
 }

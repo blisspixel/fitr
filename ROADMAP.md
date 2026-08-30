@@ -382,10 +382,17 @@ every need the code does.
 - [x] Treat Linux NVIDIA GB10 and Thor as shared-memory systems when
       `nvidia-smi` has no dedicated-memory value. Report operating-system
       `MemTotal` as addressable capacity, never as a safe or free budget.
-      Automatic advice keeps the KV curve but marks unproved points, permits
-      only lower-bound incompatibility, and requires an exact-context runtime
-      allocation to prove compatibility. Operator `--vram-gb` budgets and
-      allocator projections remain separately labeled.
+      Automatic advice keeps the KV curve but marks every unobserved point
+      SKIP, including a full-residency artifact projection above the pool,
+      because mmap, paging, and partial placement can change what runs. An
+      exact-context runtime allocation can prove one loaded point. Operator
+      `--vram-gb` budgets and allocator projections remain separately labeled.
+- [x] Add a reproducible native candidate workflow that installs the exact
+      release artifact on clean Linux and macOS runners, executes the complete
+      llama-server loop against two pinned GGUFs, checks expected evidence
+      refusals, schema-6 cache receipts, exact context, memory SKIP, and
+      listener cleanup, then uploads hashes, `/props`, logs, command
+      transcripts, and result files for review.
 - [ ] Complete a positive native run for llama-server, the one backend row
       still resting on automated tests alone.
 - [ ] Run the acceptance path on clean macOS and Linux installs.
@@ -442,7 +449,7 @@ or arithmetic proxies into measured facts.
       it never relabels an existing result.
 - [ ] Prototype multi-model capacity as a separate experiment. A projection
       binds every artifact, role, context, placement intention, and capacity
-      policy, and labels additive lower bounds as derived. It refuses a
+      policy, and labels additive projections as derived. It refuses a
       co-residency claim until one runtime receipt proves simultaneous
       residency, spill, and eviction state. Model-set results never enter the
       ordinary single-model Board.

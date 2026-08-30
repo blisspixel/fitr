@@ -13,25 +13,27 @@ import (
 // projections are excluded until their effective context and placement are
 // sealed.
 type FitTable struct {
-	HaveGB  float64    `json:"have_gb,omitempty"`
-	HaveSrc string     `json:"have_source,omitempty"`
-	Note    string     `json:"note,omitempty"`
-	Points  []FitPoint `json:"points,omitempty"`
+	HaveGB        float64    `json:"have_gb,omitempty"`
+	HaveSrc       string     `json:"have_source,omitempty"`
+	HaveSemantics string     `json:"have_semantics,omitempty"`
+	Note          string     `json:"note,omitempty"`
+	Points        []FitPoint `json:"points,omitempty"`
 }
 
 type FitPoint struct {
-	Ctx        int     `json:"ctx"`
-	Tier       string  `json:"tier"`
-	WeightsGB  float64 `json:"weights_gb"`
-	KVGB       float64 `json:"kv_gb"`
-	OtherGB    float64 `json:"other_resident_gb,omitempty"`
-	OtherKnown bool    `json:"other_resident_known"`
-	NeedGB     float64 `json:"need_gb"`
-	HeadroomGB float64 `json:"headroom_gb"`
-	DecodeTPS  float64 `json:"decode_tps,omitempty"`
-	PrefillTPS float64 `json:"prefill_tps,omitempty"`
-	Requested  bool    `json:"requested,omitempty"`
-	Suggested  bool    `json:"suggested,omitempty"`
+	Ctx             int      `json:"ctx"`
+	Tier            string   `json:"tier"`
+	WeightsGB       float64  `json:"weights_gb"`
+	KVGB            float64  `json:"kv_gb"`
+	OtherGB         float64  `json:"other_resident_gb,omitempty"`
+	OtherKnown      bool     `json:"other_resident_known"`
+	NeedGB          float64  `json:"need_gb"`
+	HeadroomGB      float64  `json:"headroom_gb,omitempty"`
+	CapacityDeltaGB *float64 `json:"capacity_delta_gb,omitempty"`
+	DecodeTPS       float64  `json:"decode_tps,omitempty"`
+	PrefillTPS      float64  `json:"prefill_tps,omitempty"`
+	Requested       bool     `json:"requested,omitempty"`
+	Suggested       bool     `json:"suggested,omitempty"`
 	// AllocationEvidence identifies the semantics behind NeedGB and its
 	// component breakdown. It is additive so existing fitr.advise.v1 readers
 	// may ignore it.
@@ -42,7 +44,7 @@ type FitPoint struct {
 const (
 	allocationObservedTotal          = "observed_total"
 	allocationObservedTotalRemainder = "observed_total_derived_remainder"
-	allocationLowerBound             = "derived_lower_bound"
+	allocationProjection             = "derived_weights_plus_kv_projection"
 )
 
 var defaultFitCtx = []int{2048, 4096, 8192, 16384, 32768}
@@ -80,6 +82,9 @@ func conventionalFit(in Input, t *FitTable) *FitTable {
 	}
 	weightsB := float64(in.WeightsB)
 	haveB := in.HaveGB * GiB
+	if automaticNVIDIAUnifiedCapacity(in) {
+		t.HaveSemantics = "addressable_capacity"
+	}
 	for _, ctx := range fitCtxPoints(in.Arch.MaxCtx, in.Ctx) {
 		t.Points = append(t.Points, makeFitPoint(in, ctx, weightsB, perTok, haveB))
 	}
@@ -96,7 +101,7 @@ func makeFitPoint(in Input, ctx int, weightsB, perTok, haveB float64) FitPoint {
 	kvB := perTok * float64(ctx)
 	p := FitPoint{
 		Ctx: ctx, WeightsGB: round1(weightsB / GiB), KVGB: round1(kvB / GiB),
-		Requested: in.Ctx > 0 && ctx == in.Ctx, AllocationEvidence: allocationLowerBound,
+		Requested: in.Ctx > 0 && ctx == in.Ctx, AllocationEvidence: allocationProjection,
 	}
 	otherB, known, evidence, note := otherResidentAt(in, ctx, weightsB, kvB)
 	p.OtherKnown, p.Note = known, note
@@ -111,7 +116,12 @@ func makeFitPoint(in Input, ctx int, weightsB, perTok, haveB float64) FitPoint {
 		p.Note = "other allocation n/a (no matched total evidence at this ctx)"
 	}
 	p.NeedGB = round1(needB / GiB)
-	p.HeadroomGB = round1((haveB - needB) / GiB)
+	marginGB := round1((haveB - needB) / GiB)
+	if automaticNVIDIAUnifiedCapacity(in) {
+		p.CapacityDeltaGB = &marginGB
+	} else {
+		p.HeadroomGB = marginGB
+	}
 	p.Tier = fitPointTier(in, p.AllocationEvidence, needB, haveB)
 	attachTiming(&p, in.Timings)
 	return p
@@ -119,6 +129,9 @@ func makeFitPoint(in Input, ctx int, weightsB, perTok, haveB float64) FitPoint {
 
 func hybridFit(in Input, t *FitTable) *FitTable {
 	haveB := in.HaveGB * GiB
+	if automaticNVIDIAUnifiedCapacity(in) {
+		t.HaveSemantics = "addressable_capacity"
+	}
 	add := func(ctx int, allocB int64, note string) {
 		if ctx <= 0 || allocB <= 0 {
 			return
@@ -128,10 +141,15 @@ func hybridFit(in Input, t *FitTable) *FitTable {
 			Ctx:                ctx,
 			WeightsGB:          round1(float64(in.WeightsB) / GiB),
 			NeedGB:             round1(need / GiB),
-			HeadroomGB:         round1((haveB - need) / GiB),
 			Requested:          in.Ctx > 0 && ctx == in.Ctx,
 			AllocationEvidence: allocationObservedTotal,
 			Note:               note,
+		}
+		marginGB := round1((haveB - need) / GiB)
+		if automaticNVIDIAUnifiedCapacity(in) {
+			p.CapacityDeltaGB = &marginGB
+		} else {
+			p.HeadroomGB = marginGB
 		}
 		p.Tier = fitPointTier(in, allocationObservedTotal, need, haveB)
 		attachTiming(&p, in.Timings)
@@ -158,14 +176,11 @@ func hybridFit(in Input, t *FitTable) *FitTable {
 
 func fitPointTier(in Input, evidence string, needB, haveB float64) string {
 	observed := evidence == allocationObservedTotal || evidence == allocationObservedTotalRemainder
-	if automaticNVIDIAUnifiedCapacity(in) && !observed {
-		if needB > haveB {
-			return Incompatible
+	if automaticNVIDIAUnifiedCapacity(in) {
+		if !observed || needB > haveB {
+			return Skip
 		}
-		return Skip
-	}
-	if automaticNVIDIAUnifiedCapacity(in) && observed && needB > haveB {
-		return Skip
+		return Compatible
 	}
 	if needB <= haveB {
 		return Compatible

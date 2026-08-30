@@ -107,7 +107,7 @@ weights and KV estimates ignores eviction, shared runtime state, mmap policy,
 placement, compute allocation, and the contexts active at the same time. A
 future model-set experiment must bind the ordered artifacts, roles, contexts,
 placements, runtime state, and simultaneous-residency receipt. Until then, a
-sum is a projected lower bound, not proof that the set co-fits.
+sum is an additive projection, not proof that the set co-fits.
 
 Pageability and offload settings change this problem without making it simple.
 An mmap setting is not proof that pages are absent from physical memory, and a

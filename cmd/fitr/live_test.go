@@ -164,7 +164,7 @@ func (s liveLoopSmoke) advise(t *testing.T) {
 	if strings.Contains(out, "weights were not measured") {
 		t.Fatalf("advise could not size the weights of an installed model:\n%s", out)
 	}
-	if !strings.Contains(out, "WEIGHTS") {
+	if !strings.Contains(out, "WEIGHT") {
 		t.Fatalf("advise printed no context-fit table:\n%s", out)
 	}
 }
@@ -255,7 +255,10 @@ func (s liveLoopSmoke) diag(t *testing.T) {
 }
 
 func (s liveLoopSmoke) device(t *testing.T) {
-	out, code := captureTopStdout(t, func() int { return cmdDevice(s.ctx, []string{"--backend", s.backend}) })
+	// device selects a runtime through the same environment contract as the
+	// top-level command. It intentionally has no backend flag of its own.
+	t.Setenv("FITR_BACKEND", s.backend)
+	out, code := captureTopStdout(t, func() int { return cmdDevice(s.ctx, nil) })
 	s.assertRan(t, "device", code, out, "")
 	for _, field := range []string{"host", "os"} {
 		if !strings.Contains(out, field) {

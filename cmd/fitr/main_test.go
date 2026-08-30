@@ -1480,6 +1480,16 @@ func TestBackendAtUsesConfiguredOpenAIURLWhenExplicit(t *testing.T) {
 	}
 }
 
+func TestProbeBackendHonorsConfiguredRuntimeAheadOfDiscovery(t *testing.T) {
+	t.Setenv("FITR_BACKEND", "llama-server")
+	t.Setenv("LLAMA_SERVER_URL", "http://127.0.0.1:18080")
+	t.Setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+	b := probeBackend(context.Background())
+	if b.Name() != "llama-server" || b.URL() != "http://127.0.0.1:18080" {
+		t.Fatalf("probe backend = %s at %s, want configured llama-server", b.Name(), b.URL())
+	}
+}
+
 func TestNewBackendSelectsReachableExplicitRuntimes(t *testing.T) {
 	for _, tc := range explicitRuntimeCases() {
 		t.Run(tc.name, func(t *testing.T) {

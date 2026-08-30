@@ -264,6 +264,7 @@ type completionResp struct {
 	Truncated    bool   `json:"truncated"`
 	TokensCached int    `json:"tokens_cached"`
 	Timings      struct {
+		CacheN      *int    `json:"cache_n"`
 		PromptN     int     `json:"prompt_n"`
 		PromptMS    float64 `json:"prompt_ms"`
 		PredictedN  int     `json:"predicted_n"`
@@ -279,6 +280,9 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s ollama.Sa
 		"prompt": prompt, "stream": true,
 		"n_predict": s.NumPredict, "temperature": s.Temperature,
 		"top_k": s.TopK, "seed": s.Seed, "repeat_penalty": s.RepeatPenalty,
+	}
+	if s.IgnoreEOS {
+		payload["ignore_eos"] = true
 	}
 	if s.NumCtx > 0 {
 		// Sent so a --ctx run is not a silent no-op. llama-server allocates
@@ -394,6 +398,9 @@ func validateCompletionFrame(frame completionResp) error {
 		frame.Timings.PredictedN < 0 || frame.Timings.PredictedMS < 0 {
 		return errors.New("llama-server completion frame contains a negative metric")
 	}
+	if frame.Timings.CacheN != nil && *frame.Timings.CacheN < 0 {
+		return errors.New("llama-server completion frame contains a negative metric")
+	}
 	return nil
 }
 
@@ -403,10 +410,16 @@ func completionMetrics(final completionResp, ttft float64, wall time.Duration) o
 		WallSeconds:  round(wall.Seconds(), 2),
 		EvalCount:    final.Timings.PredictedN,
 		PromptTokens: final.Timings.PromptN,
-		CachedTokens: final.TokensCached,
-		CacheKnown:   true,
 		DoneReason:   final.StopType,
 		Truncated:    final.Truncated || final.StopType == "limit",
+	}
+	// Current llama-server builds define timings.cache_n as the number of
+	// prompt tokens actually reused. The older top-level tokens_cached field is
+	// slot state and can equal the whole processed prompt even on a cache miss,
+	// so it is never promoted into a cache receipt.
+	if final.Timings.CacheN != nil {
+		m.CachedTokens = *final.Timings.CacheN
+		m.CacheKnown = true
 	}
 	if final.Timings.PredictedMS > 0 {
 		m.DecodeTPS = round(float64(final.Timings.PredictedN)/(final.Timings.PredictedMS/1000), 2)

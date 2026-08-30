@@ -22,7 +22,6 @@ import (
 	"github.com/blisspixel/fitr/internal/advise"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
-	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/modelref"
 	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
@@ -670,14 +669,7 @@ func attachTopInventory(ctx context.Context, snapshot *top.Snapshot) {
 	if snapshot == nil {
 		return
 	}
-	found, _ := llm.Discover(ctx)
-	if len(found) == 0 {
-		return
-	}
-	b, err := backendAt(found[0].Kind, found[0].URL)
-	if err != nil {
-		return
-	}
+	b := probeBackend(ctx)
 	fp := device.Detect(ctx, b)
 	table, _, err := joinInstalled(ctx, b, fp)
 	if err != nil {

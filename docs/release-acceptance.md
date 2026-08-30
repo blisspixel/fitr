@@ -13,9 +13,36 @@ Last updated: 2026-08-30.
 | Public command contract | Help succeeds, malformed input fails before discovery, positional counts and numeric bounds are exact, and diagnostics include a next action. Runs on Windows, macOS, and Linux CI. |
 | Backend wire contract | Mock HTTP servers cover discovery, generation, chat and tool calls, timing receipts, artifact identity, effective context, authentication, redirects, bounded responses, and error redaction. |
 | Evidence contract | Tests cover runtime-bound model identity, context verification, device fingerprints, immutable history, signed completion records, contamination, and comparison refusal. |
+| Native candidate acceptance | A manual clean-run workflow installs the candidate artifact on ephemeral Linux and macOS runners, starts a pinned llama-server with two independently hashed GGUFs, exercises the everyday loop, checks evidence refusals, verifies cleanup, and uploads the complete transcript. |
 | Release binary smoke | The built Linux binary must pass global and subcommand help, then reject a malformed command with exit 2 and a useful hint. |
 | Installer smoke | Windows, macOS, and Linux runners install locally served candidate artifacts, bind the native asset to its exact checksum entry, and validate its version command. |
 | Release quality | Formatting, vet, unit tests, race detection, cross-compilation, reproducible Linux build comparison, static ELF verification, size limits, vulnerability scanning, fuzz smoke tests, and installer syntax checks must all pass. |
+
+### Reproducible native candidate acceptance
+
+`.github/workflows/native-acceptance.yml` is a manual release gate, not a
+mock-backend test. It builds the candidate once, installs it through the
+checksum-verifying installer on clean ephemeral Linux and macOS runners, and
+then runs `scripts/native-acceptance.sh` against a pinned llama-server build
+and two pinned GGUF artifacts. Runtime archives, model bytes, and the candidate
+binary are checked against exact SHA-256 values before any measurement.
+
+The script isolates `FITR_RESULTS`, starts a dedicated CPU-only loopback
+server at a fixed 8192-token context, and records inventory, advise, run,
+apply, doctor, diag, device, view, export, and `top --snapshot`. It also proves
+that Board and Compare refuse the observed-only llama-server artifact identity
+rather than turning a readable local file hash into a runtime binding. Every
+job stops the exact server process and verifies that its listener closed.
+The saved schema-6 records must identify the native backend, verify the exact
+context, keep resident memory SKIP, record first output, prove uncached decode
+and prefill from `timings.cache_n`, and prove the replayed prefix was reused.
+Operational exit 1 from Doctor or Diag fails the job.
+
+The uploaded evidence artifact contains the operating-system and architecture
+record, binary and model hashes, `/props`, launch and request logs, every FITR
+command transcript, isolated result JSON, and a pass summary. A green job is
+therefore a reviewable receipt for that candidate and runner, not a permanent
+claim about all llama.cpp builds or accelerators.
 
 ## Native operating-system matrix
 
