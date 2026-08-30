@@ -19,7 +19,7 @@ destination is not on `PATH`; the PowerShell installer adds its destination to
 the user `PATH`. Set `FITR_NO_PATH=1` to leave the persistent user `PATH`
 unchanged during automation or an isolated install. The current PowerShell host
 can still invoke fitr immediately. The default evidence path needs no Go,
-Python, or venv. Pin a release with `FITR_VERSION=v0.9.11`; relocate with
+Python, or venv. Pin a release with `FITR_VERSION=v0.9.12`; relocate with
 `FITR_BIN`.
 
 Both installers bind the downloaded binary to the exact asset entry in the
@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.9.11" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.9.11" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.9.11" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.9.11" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.9.12" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.9.12" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.9.12" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.9.12" alt="fitr top (demo data)" width="820">
 
 ### Disk
 

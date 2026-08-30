@@ -45,6 +45,7 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.9.9 | Evidence correctness, tool-channel behavior, internal decomposition, and the native matrix |
 | Shipped | 0.9.10 | Release and installer polish, then the first renderer-neutral explanation slice |
 | Shipped | 0.9.11 | Distinct latency states and exact-context runtime allocation attribution |
+| Shipped | 0.9.12 | Public Windows self-update completion and an end-to-end replacement gate |
 | Now | 0.10 | Explain and choose: central analysis, capacity versus performance, calibration, context and quant experiments |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
@@ -470,6 +471,23 @@ Exit criterion: CLI, TUI, and HTML use the same central latency and allocation
 semantics; unsupported zero-valued attribution stays unavailable; v3 evidence
 remains valid; the verified updater and public demos agree with the release;
 aggregate and native CI pass on the exact tagged main commit.
+
+### 0.9.12 - public Windows update completion [shipped]
+
+- [x] Remove the detached Windows helper's dependency on PowerShell module
+      auto-loading. Its pre-replacement digest guard now uses the platform
+      cryptography API directly.
+- [x] Pass the fixed helper program as an encoded command and launch it in a
+      hidden process group that survives the updating process.
+- [x] Add a Windows subprocess test that proves the helper waits for its
+      parent, verifies the current target, removes the staged file, and
+      replaces the target.
+- [x] Exercise the published Windows amd64 binary through `update --check`
+      and `update --reinstall`, then verify the replaced executable's version
+      and release checksum before closing the release.
+
+Exit criterion: a fresh public install can verify and reinstall the latest
+stable release on Windows without leaving a staged candidate behind.
 
 ### 0.10 - explain and choose
 
@@ -969,6 +987,7 @@ These features must preserve the evidence contract.
 | 0.9.9 | Evidence correctness, native tool-channel behavior, package decomposition, the Linux and macOS native acceptance matrix, and exact-commit release gates |
 | 0.9.10 | Non-persistent PowerShell installs, HTML performance and capacity parity, central validated analysis, fail-closed unified-memory advice, display-only history preservation, and hardened Board actions |
 | 0.9.11 | Distinct latency states, exact-context runtime allocation attribution, scoring-policy compatibility, secure self-update, native RTX 4090 validation, and terminal evidence polish |
+| 0.9.12 | Module-independent Windows update handoff, encoded hidden helper execution, and end-to-end deferred replacement coverage |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

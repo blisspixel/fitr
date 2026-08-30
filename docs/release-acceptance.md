@@ -16,7 +16,7 @@ Last updated: 2026-08-30.
 | Native candidate acceptance | A manual clean-run workflow installs the candidate artifact on ephemeral Linux and macOS runners, starts a pinned llama-server with two independently hashed GGUFs, exercises the everyday loop, checks evidence refusals, verifies cleanup, and uploads the complete transcript. |
 | Release binary smoke | The built Linux binary must pass global and subcommand help, then reject a malformed command with exit 2 and a useful hint. |
 | Installer smoke | Windows, macOS, and Linux runners install locally served candidate artifacts, bind the native asset to its exact checksum entry, and validate its version command. |
-| In-process updater | Unit and command-contract tests cover the six platform assets, canonical stable tags, duplicate or missing assets and checksums, bounded downloads and version output, hash mismatch cleanup, staged version identity, pre-replacement digest guards, JSON disclosure, and unsupported targets. Public replacement is verified and recorded after release publication. |
+| Updater | Unit and command-contract tests cover the six platform assets, canonical stable tags, duplicate or missing assets and checksums, bounded downloads and version output, hash mismatch cleanup, staged version identity, pre-replacement digest guards, JSON disclosure, and unsupported targets. A Windows subprocess test proves deferred replacement after the updating process exits. Public replacement is verified and recorded after release publication. |
 | Release quality | Formatting, vet, unit tests, race detection, cross-compilation, reproducible Linux build comparison, static ELF verification, size limits, vulnerability scanning, fuzz smoke tests, and installer syntax checks must all pass. |
 
 ### 0.9.10 release receipt
@@ -40,6 +40,28 @@ It verified the public binary checksum, installed to the requested directory,
 left the persistent user `PATH` byte-for-byte unchanged, made the isolated
 directory first on the current process `PATH`, and installed a binary that
 reported `fitr 0.9.10`.
+
+### 0.9.11 release receipt and public updater finding
+
+Release 0.9.11 is bound to commit
+`e364299a5177d08992a90a9152ca2725728e03d5`. The exact commit passed
+[aggregate CI run 33341787024](https://github.com/blisspixel/fitr/actions/runs/33341787024)
+and
+[native acceptance run 33341932166](https://github.com/blisspixel/fitr/actions/runs/33341932166)
+before
+[release workflow run 33342178090](https://github.com/blisspixel/fitr/actions/runs/33342178090)
+published the public
+[v0.9.11 release](https://github.com/blisspixel/fitr/releases/tag/v0.9.11).
+
+The public PowerShell installer then installed the Windows amd64 asset into an
+isolated directory, kept persistent `PATH` unchanged, and matched SHA-256
+`de3e3477d4625d7ff3937126c8c744c5d33d009e1d34abeff753481360637684`.
+`update --check` succeeded and `update --reinstall` downloaded, checked, and
+staged that exact asset. The detached helper did not complete replacement:
+Windows PowerShell did not auto-load the module providing `Get-FileHash` in
+that hidden no-profile process. The candidate remained staged and the target
+remained unchanged. This public-path finding is fixed in 0.9.12 with a
+module-independent SHA-256 implementation and a subprocess replacement test.
 
 ### Reproducible native candidate acceptance
 

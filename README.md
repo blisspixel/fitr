@@ -33,7 +33,7 @@ exact setting to change when one does not fit.
 > that still writes clean prose but emits malformed tool calls, the parser that
 > swallows them, the loop your GPU triggers and nobody else's does.
 
-<img src="docs/assets/inventory.svg?v=0.9.11" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
+<img src="docs/assets/inventory.svg?v=0.9.12" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
 
 The run capture is a deterministic reconstruction based on selected
 observations from a native RTX 4090 validation on 2026-08-30, not a sanitized
@@ -121,7 +121,7 @@ adds headroom and fit verdicts; addressable shared capacity alone stays
 unproven. Every value carries its evidence label, and every negative verdict
 ends with a flag plus resulting number.
 
-<img src="docs/assets/advise.svg?v=0.9.11" alt="fitr advise for qwen3-coder 30B on an RTX 4090" width="820">
+<img src="docs/assets/advise.svg?v=0.9.12" alt="fitr advise for qwen3-coder 30B on an RTX 4090" width="820">
 
 **What it actually does here.** Load, first-response, prompt-processing, and
 generation timings are observed from the selected runtime. Request TTFT is
@@ -150,7 +150,7 @@ template or a tool-call parser did not fire. An agent harness reads that as
 silence. fitr names it, and separates it from a model that genuinely cannot
 call tools.
 
-<img src="docs/assets/run.svg?v=0.9.11" alt="fitr reconstructed full-run demo based on selected RTX 4090 validation observations" width="820">
+<img src="docs/assets/run.svg?v=0.9.12" alt="fitr reconstructed full-run demo based on selected RTX 4090 validation observations" width="820">
 
 ## What it refuses to do
 

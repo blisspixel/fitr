@@ -4,6 +4,8 @@ package updater
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unicode/utf16"
 )
 
 const windowsReplaceScript = `$ErrorActionPreference = 'Stop'
@@ -22,7 +25,17 @@ $expected = $env:FITR_UPDATE_CURRENT_SHA256
 for ($attempt = 0; $attempt -lt 300; $attempt++) {
   if (-not (Get-Process -Id $parent -ErrorAction SilentlyContinue)) {
     try {
-	  $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash.ToLowerInvariant()
+	  $stream = [System.IO.File]::OpenRead($target)
+	  try {
+	    $hasher = [System.Security.Cryptography.SHA256]::Create()
+	    try {
+	      $actual = ([System.BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+	    } finally {
+	      $hasher.Dispose()
+	    }
+	  } finally {
+	    $stream.Dispose()
+	  }
 	  if ($actual -ne $expected) {
 	    Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
 	    exit 2
@@ -36,6 +49,15 @@ for ($attempt = 0; $attempt -lt 300; $attempt++) {
 }
 Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
 exit 1`
+
+func encodePowerShellCommand(script string) string {
+	units := utf16.Encode([]rune(script))
+	encoded := make([]byte, len(units)*2)
+	for index, unit := range units {
+		binary.LittleEndian.PutUint16(encoded[index*2:], unit)
+	}
+	return base64.StdEncoding.EncodeToString(encoded)
+}
 
 // Install launches a detached helper because Windows cannot replace the
 // currently running executable. The helper only uses literal paths supplied
@@ -58,7 +80,11 @@ func Install(stagedPath, targetPath, expectedCurrentDigest string) (deferred boo
 	defer null.Close()
 	// The helper must survive this process, so it deliberately owns a detached
 	// background context rather than inheriting the caller's cancellation.
-	cmd := exec.CommandContext(context.Background(), shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", windowsReplaceScript)
+	cmd := exec.CommandContext(
+		context.Background(), shell,
+		"-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+		"-EncodedCommand", encodePowerShellCommand(windowsReplaceScript),
+	)
 	cmd.Env = append(os.Environ(),
 		"FITR_UPDATE_PARENT_PID="+strconv.Itoa(os.Getpid()),
 		"FITR_UPDATE_SOURCE="+stagedPath,
@@ -70,7 +96,7 @@ func Install(stagedPath, targetPath, expectedCurrentDigest string) (deferred boo
 	cmd.Stderr = null
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
-		CreationFlags: 0x00000008 | 0x00000200,
+		CreationFlags: 0x08000000 | 0x00000200,
 	}
 	if err := cmd.Start(); err != nil {
 		return false, fmt.Errorf("start deferred update helper: %w", err)
