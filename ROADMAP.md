@@ -42,7 +42,8 @@ methods live in [statistics](docs/statistics.md).
 | Horizon | Release | Outcome |
 |---|---|---|
 | Shipped | 0.9.8 | Output that fits the terminal, and verdicts the renderer can lay out |
-| Now | 0.9.9 | Evidence correctness, tool-channel behavior, internal decomposition, and the native matrix |
+| Shipped | 0.9.9 | Evidence correctness, tool-channel behavior, internal decomposition, and the native matrix |
+| Now | 0.9.10 | Release and installer polish, then the first renderer-neutral explanation slice |
 | Then | 0.10 | Explain and choose: central analysis, capacity versus performance, calibration, context and quant experiments |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
@@ -272,7 +273,7 @@ one renders them with implausibly long device names so the guard does not
 depend on whose hardware runs it, and a third asserts the design doc names
 every need the code does.
 
-### 0.9.9 - tool calls in the tool channel, and the native matrix
+### 0.9.9 - tool calls in the tool channel, and the native matrix [shipped]
 
 - [x] Measure tool calls where they actually happen. `tool_args` grades a JSON
       object written as text; it never populated the `tools` parameter and
@@ -410,6 +411,22 @@ complexity linters are enabled with no suppressions in the run pipeline, and
 every rankable backend row rests on a native run. A protocol that cannot bind
 artifact identity remains explicitly unrankable instead of blocking on a
 receipt its schema cannot carry.
+
+### 0.9.10 - release and installer polish
+
+- [x] Publish 0.9.9 only after aggregate CI and native Linux/macOS acceptance
+      pass on the exact tagged main commit, then independently download and
+      verify all ten public assets and their checksums.
+- [x] Give PowerShell automation an explicit `FITR_NO_PATH=1` mode that leaves
+      the persistent user `PATH` unchanged while keeping fitr available to the
+      current host. Candidate CI and release installation assert that contract.
+- [ ] Land the smallest renderer-neutral analysis contract needed to group
+      performance, capacity, evidence gaps, and next actions without letting a
+      CLI, TUI, or HTML client recompute the conclusion.
+
+Exit criterion: the public install path is verifiable without persistent host
+mutation, main is visibly ahead of the shipped release, and one central
+analysis contract slice renders identically across its supported clients.
 
 ### 0.10 - explain and choose
 

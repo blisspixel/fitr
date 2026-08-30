@@ -6,7 +6,7 @@ one, that greedy decoding reproduces. None of that is safe to assume on a
 local stack, and nothing else checks. `fitr doctor <model>` does, in about a
 minute:
 
-<img src="assets/doctor.svg?v=0.9.9" alt="fitr doctor (mock data)" width="820">
+<img src="assets/doctor.svg?v=0.9.10" alt="fitr doctor (mock data)" width="820">
 
 - **A real generated token, not an HTTP 200.** A misconfigured offload can
   accept requests and emit nothing.

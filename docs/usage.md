@@ -16,8 +16,11 @@ irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 
 That installs one static binary. The shell installer reports when its
 destination is not on `PATH`; the PowerShell installer adds its destination to
-the user `PATH`. The default evidence path needs no Go, Python, or venv. Pin a
-release with `FITR_VERSION=v0.9.9`; relocate with `FITR_BIN`.
+the user `PATH`. Set `FITR_NO_PATH=1` to leave the persistent user `PATH`
+unchanged during automation or an isolated install. The current PowerShell host
+can still invoke fitr immediately. The default evidence path needs no Go,
+Python, or venv. Pin a release with `FITR_VERSION=v0.9.9`; relocate with
+`FITR_BIN`.
 
 Both installers bind the downloaded binary to the exact asset entry in the
 release's `SHA256SUMS` file. A missing checksum tool, manifest, or asset entry
@@ -54,10 +57,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.9.9" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.9.9" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.9.9" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.9.9" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.9.10" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.9.10" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.9.10" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.9.10" alt="fitr top (demo data)" width="820">
 
 ### Disk
 

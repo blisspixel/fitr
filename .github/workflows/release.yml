@@ -179,7 +179,9 @@ jobs:
           FITR_BIN: ${{ runner.temp }}\fitr-install
           FITR_RELEASE_BASE_URL: http://127.0.0.1:8765
           FITR_REQUIRE_BINARY: '1'
+          FITR_NO_PATH: '1'
         run: |
+          $userPathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
           $server = Start-Process python -ArgumentList '-m','http.server','8765','--bind','127.0.0.1','--directory','dist' -PassThru -WindowStyle Hidden
           try {
             $ready = $false
@@ -199,6 +201,8 @@ jobs:
             if ($installed -ne "fitr $($env:GITHUB_REF_NAME.Substring(1))") {
               throw "installed $installed from candidate"
             }
+            $userPathAfter = [Environment]::GetEnvironmentVariable('Path', 'User')
+            if ($userPathAfter -cne $userPathBefore) { throw "installer changed the persistent user PATH" }
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }

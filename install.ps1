@@ -4,7 +4,8 @@
 #
 # Downloads one static .exe. No interpreter, no package manager, no venv.
 # Set FITR_VERSION to pin, FITR_BIN to relocate. FITR_NO_VERIFY=1 skips the
-# checksum check explicitly.
+# checksum check explicitly. FITR_NO_PATH=1 leaves the persistent user PATH
+# unchanged while still making fitr available in the current PowerShell host.
 & {
 $ErrorActionPreference = "Stop"
 
@@ -134,13 +135,15 @@ foreach ($part in $userPath.Split(";")) {
         break
     }
 }
-if (-not $onPath) {
+if (-not $onPath -and $env:FITR_NO_PATH -ne "1") {
     if ($userPath) {
         [Environment]::SetEnvironmentVariable("Path", "$BinDir;$userPath", "User")
     } else {
         [Environment]::SetEnvironmentVariable("Path", $BinDir, "User")
     }
     Write-Host "  added $BinDir to your user PATH (new terminals will see it)"
+} elseif (-not $onPath) {
+    Write-Host "  left user PATH unchanged (FITR_NO_PATH=1)"
 }
 $env:Path = "$BinDir;$env:Path"
 

@@ -33,7 +33,7 @@ exact setting to change when one does not fit.
 > that still writes clean prose but emits malformed tool calls, the parser that
 > swallows them, the loop your GPU triggers and nobody else's does.
 
-<img src="docs/assets/inventory.svg?v=0.9.9" alt="fitr inventory (demo data)" width="820">
+<img src="docs/assets/inventory.svg?v=0.9.10" alt="fitr inventory (demo data)" width="820">
 
 ## Install
 
@@ -103,7 +103,7 @@ between shipped behavior and planned experiments.
 and remaining capacity at each context length, with evidence labels and a flag
 plus resulting number on every negative verdict.
 
-<img src="docs/assets/advise.svg?v=0.9.9" alt="fitr advise (demo data)" width="820">
+<img src="docs/assets/advise.svg?v=0.9.10" alt="fitr advise (demo data)" width="820">
 
 **What it actually does here.** Load, first-response, prompt-processing, and
 generation timings are observed from the selected runtime. Resident allocation
@@ -120,7 +120,7 @@ template or a tool-call parser did not fire. An agent harness reads that as
 silence. fitr names it, and separates it from a model that genuinely cannot
 call tools.
 
-<img src="docs/assets/run.svg?v=0.9.9" alt="fitr run scorecard (demo data)" width="820">
+<img src="docs/assets/run.svg?v=0.9.10" alt="fitr run scorecard (demo data)" width="820">
 
 ## What it refuses to do
 
