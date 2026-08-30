@@ -16,40 +16,7 @@ import (
 // does the arithmetic advise depends on, so a value that parses but cannot be
 // reasoned about must still not panic or produce a nonsense architecture.
 func FuzzReadMetadata(f *testing.F) {
-	valid := func(kvs map[string]any) []byte {
-		buf := new(bytes.Buffer)
-		buf.WriteString("GGUF")
-		_ = binary.Write(buf, binary.LittleEndian, uint32(3))
-		_ = binary.Write(buf, binary.LittleEndian, uint64(0))
-		_ = binary.Write(buf, binary.LittleEndian, uint64(len(kvs)))
-		for k, v := range kvs {
-			writeString(buf, k)
-			switch n := v.(type) {
-			case string:
-				_ = binary.Write(buf, binary.LittleEndian, ggufString)
-				writeString(buf, n)
-			case uint64:
-				_ = binary.Write(buf, binary.LittleEndian, ggufUint64)
-				_ = binary.Write(buf, binary.LittleEndian, n)
-			case uint32:
-				_ = binary.Write(buf, binary.LittleEndian, ggufUint32)
-				_ = binary.Write(buf, binary.LittleEndian, n)
-			case float32:
-				_ = binary.Write(buf, binary.LittleEndian, ggufFloat32)
-				_ = binary.Write(buf, binary.LittleEndian, n)
-			case bool:
-				_ = binary.Write(buf, binary.LittleEndian, ggufBool)
-				b := byte(0)
-				if n {
-					b = 1
-				}
-				buf.WriteByte(b)
-			}
-		}
-		return buf.Bytes()
-	}
-
-	f.Add(valid(map[string]any{
+	f.Add(validFuzzGGUF(map[string]any{
 		"general.architecture":          "llama",
 		"llama.block_count":             uint64(32),
 		"llama.attention.head_count_kv": uint64(8),
@@ -57,13 +24,13 @@ func FuzzReadMetadata(f *testing.F) {
 		"llama.context_length":          uint64(131072),
 		"llama.embedding_length":        uint64(4096),
 	}))
-	f.Add(valid(map[string]any{
+	f.Add(validFuzzGGUF(map[string]any{
 		"general.architecture":         "qwen3moe",
 		"qwen3moe.expert_count":        uint64(128),
 		"qwen3moe.rope.scaling.factor": float32(4),
 		"general.some_flag":            true,
 	}))
-	f.Add(valid(map[string]any{"general.architecture": "mamba"}))
+	f.Add(validFuzzGGUF(map[string]any{"general.architecture": "mamba"}))
 	f.Add([]byte("GGUF"))
 	f.Add([]byte{})
 	// Header claiming counts it does not deliver: the budget path, not the
@@ -76,31 +43,8 @@ func FuzzReadMetadata(f *testing.F) {
 	f.Add(hdr.Bytes())
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		kvs, err := ReadMetadata(bytes.NewReader(data))
-		if err != nil {
-			if kvs != nil {
-				t.Fatalf("failed decode returned %d keys; a rejected file must yield nothing", len(kvs))
-			}
+		if !validateFullFuzzDecode(t, data) {
 			return
-		}
-		if kvs == nil {
-			t.Fatal("successful decode returned a nil map")
-		}
-		if len(kvs) > maxKVs {
-			t.Fatalf("decoded %d keys, over the %d cap", len(kvs), maxKVs)
-		}
-		// The consumer must survive whatever parsed.
-		a := ArchFromKVs(kvs)
-		if a.Blocks < 0 || a.Embed < 0 || a.Heads < 0 || a.KVHeads < 0 ||
-			a.KeyLength < 0 || a.MaxCtx < 0 || a.Experts < 0 || a.ExpertUsed < 0 {
-			t.Fatalf("negative architecture field from parsed metadata: %+v", a)
-		}
-		if a.KVReady() {
-			// A ready architecture is one advise will divide by; it must not
-			// hand back a zero or negative per-token cost.
-			if got := a.kvBytesPerToken(2); got <= 0 {
-				t.Fatalf("KVReady architecture reports %v bytes per token: %+v", got, a)
-			}
 		}
 
 		// The prefix reader is a second entry point for the same hostile bytes,
@@ -108,35 +52,96 @@ func FuzzReadMetadata(f *testing.F) {
 		// it at 4 KiB fetched over HTTP from a repo it does not control. It
 		// must hold every invariant the all-or-nothing reader holds, and it
 		// must additionally never report corruption as truncation.
-		pkvs, perr := ReadMetadataPrefix(bytes.NewReader(data))
-		switch {
-		case perr == nil:
-			if pkvs == nil {
-				t.Fatal("prefix decode succeeded with a nil map")
-			}
-		case errors.Is(perr, ErrMetadataTruncated):
-			// Truncation may return keys or none, never a non-nil empty map
-			// masquerading as a usable result.
-			if pkvs != nil && len(pkvs) == 0 {
-				t.Fatal("truncated decode returned an empty non-nil map")
-			}
-		default:
-			if pkvs != nil {
-				t.Fatalf("rejected file returned %d keys from the prefix reader", len(pkvs))
-			}
-		}
-		if len(pkvs) > maxKVs {
-			t.Fatalf("prefix decoded %d keys, over the %d cap", len(pkvs), maxKVs)
-		}
-		pa := ArchFromKVs(pkvs)
-		if pa.Blocks < 0 || pa.Embed < 0 || pa.Heads < 0 || pa.KVHeads < 0 ||
-			pa.KeyLength < 0 || pa.MaxCtx < 0 || pa.Experts < 0 || pa.ExpertUsed < 0 {
-			t.Fatalf("negative architecture field from a prefix decode: %+v", pa)
-		}
-		if pa.KVReady() {
-			if got := pa.kvBytesPerToken(2); got <= 0 {
-				t.Fatalf("KVReady prefix architecture reports %v bytes per token: %+v", got, pa)
-			}
-		}
+		validatePrefixFuzzDecode(t, data)
 	})
+}
+
+func validFuzzGGUF(kvs map[string]any) []byte {
+	buf := new(bytes.Buffer)
+	buf.WriteString("GGUF")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(3))
+	_ = binary.Write(buf, binary.LittleEndian, uint64(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint64(len(kvs)))
+	for key, value := range kvs {
+		writeString(buf, key)
+		writeFuzzKV(buf, value)
+	}
+	return buf.Bytes()
+}
+
+func writeFuzzKV(buf *bytes.Buffer, value any) {
+	switch n := value.(type) {
+	case string:
+		_ = binary.Write(buf, binary.LittleEndian, ggufString)
+		writeString(buf, n)
+	case uint64:
+		_ = binary.Write(buf, binary.LittleEndian, ggufUint64)
+		_ = binary.Write(buf, binary.LittleEndian, n)
+	case uint32:
+		_ = binary.Write(buf, binary.LittleEndian, ggufUint32)
+		_ = binary.Write(buf, binary.LittleEndian, n)
+	case float32:
+		_ = binary.Write(buf, binary.LittleEndian, ggufFloat32)
+		_ = binary.Write(buf, binary.LittleEndian, n)
+	case bool:
+		_ = binary.Write(buf, binary.LittleEndian, ggufBool)
+		if n {
+			buf.WriteByte(1)
+		} else {
+			buf.WriteByte(0)
+		}
+	}
+}
+
+func validateFullFuzzDecode(t *testing.T, data []byte) bool {
+	t.Helper()
+	kvs, err := ReadMetadata(bytes.NewReader(data))
+	if err != nil {
+		if kvs != nil {
+			t.Fatalf("failed decode returned %d keys; a rejected file must yield nothing", len(kvs))
+		}
+		return false
+	}
+	if kvs == nil {
+		t.Fatal("successful decode returned a nil map")
+	}
+	validateFuzzArchitecture(t, kvs, "parsed metadata")
+	return true
+}
+
+func validatePrefixFuzzDecode(t *testing.T, data []byte) {
+	t.Helper()
+	kvs, err := ReadMetadataPrefix(bytes.NewReader(data))
+	switch {
+	case err == nil:
+		if kvs == nil {
+			t.Fatal("prefix decode succeeded with a nil map")
+		}
+	case errors.Is(err, ErrMetadataTruncated):
+		if kvs != nil && len(kvs) == 0 {
+			t.Fatal("truncated decode returned an empty non-nil map")
+		}
+	default:
+		if kvs != nil {
+			t.Fatalf("rejected file returned %d keys from the prefix reader", len(kvs))
+		}
+	}
+	validateFuzzArchitecture(t, kvs, "a prefix decode")
+}
+
+func validateFuzzArchitecture(t *testing.T, kvs map[string]any, source string) {
+	t.Helper()
+	if len(kvs) > maxKVs {
+		t.Fatalf("%s decoded %d keys, over the %d cap", source, len(kvs), maxKVs)
+	}
+	arch := ArchFromKVs(kvs)
+	if arch.Blocks < 0 || arch.Embed < 0 || arch.Heads < 0 || arch.KVHeads < 0 ||
+		arch.KeyLength < 0 || arch.MaxCtx < 0 || arch.Experts < 0 || arch.ExpertUsed < 0 {
+		t.Fatalf("negative architecture field from %s: %+v", source, arch)
+	}
+	if arch.KVReady() {
+		if got := arch.kvBytesPerToken(2); got <= 0 {
+			t.Fatalf("KVReady architecture from %s reports %v bytes per token: %+v", source, got, arch)
+		}
+	}
 }

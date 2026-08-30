@@ -94,6 +94,51 @@ func TestObservedExceedingBudgetIsSkipNotIncompatible(t *testing.T) {
 	}
 }
 
+func TestEvaluateCorePreservesEvidencePrecedence(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  Input
+		tier   string
+		why    string
+		source string
+		needGB float64
+	}{
+		{
+			name:  "unknown budget precedes load failure",
+			input: Input{LoadErr: "out of memory", ResidentB: 6 * GiB},
+			tier:  Skip, why: "GPU memory was not measured; model is resident at 6.0 GB",
+		},
+		{
+			name:  "load failure precedes resident allocation",
+			input: Input{HaveGB: 8, LoadErr: "out of memory", ResidentB: 9 * GiB},
+			tier:  Incompatible, why: "server refused the load: out of memory", source: "observed load failure",
+		},
+		{
+			name:  "resident allocation precedes hybrid projection refusal",
+			input: Input{HaveGB: 8, ResidentB: 6 * GiB, Arch: Arch{Hybrid: true}},
+			tier:  Compatible, why: "resident 6.0 GB of 8.0 GB available (measured)", source: "observed resident", needGB: 6,
+		},
+		{
+			name:  "hybrid projection refusal precedes missing weights",
+			input: Input{HaveGB: 8, Arch: Arch{Hybrid: true}},
+			tier:  Skip, why: "hybrid recurrent architecture cannot be safely projected from weights plus a conventional KV cache",
+		},
+		{
+			name:  "allocator fit precedes weight arithmetic",
+			input: Input{HaveGB: 8, FitB: 6 * GiB, WeightsB: 9 * GiB},
+			tier:  Compatible, why: "dummy allocation 6.0 GB of 8.0 GB available", needGB: 6,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := evaluateCore(test.input)
+			if got.Tier != test.tier || got.Why != test.why || got.Source != test.source || got.NeedGB != test.needGB {
+				t.Fatalf("evaluateCore() = %+v", got)
+			}
+		})
+	}
+}
+
 func TestSkipWhenVRAMUnknownMentionsResident(t *testing.T) {
 	r := Evaluate(Input{ResidentB: 19 * GiB})
 	if r.Tier != Skip || !strings.Contains(r.Why, "19.0 GB") {

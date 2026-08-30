@@ -449,6 +449,27 @@ var seqCode = map[string]string{
 // Scored on what actually breaks unattended runs: malformed calls, looping on
 // an identical action, and failing to terminate.
 func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoopSpec, dir string) (ToolLoopResult, error) {
+	r, runner, ready, err := prepareToolLoop(ctx, spec, dir)
+	if !ready {
+		return r, err
+	}
+	state := toolLoopState{
+		ctx: ctx, backend: c, model: model, spec: spec, dir: dir, runner: runner,
+		result: &r, written: map[string]bool{}, signatures: map[string]int{},
+		messages: []ollama.Message{{Role: "user", Content: spec.Prompt}},
+		sampling: ollama.Deterministic(spec.NumPredict, numCtx(ctx)),
+		deadline: time.Now().Add(time.Duration(spec.Budget) * time.Second),
+	}
+	if err := state.run(); err != nil {
+		return r, err
+	}
+	state.finishTracking()
+	return finishToolLoop(ctx, spec, dir, runner, r)
+}
+
+func prepareToolLoop(ctx context.Context, spec ToolLoopSpec, dir string) (
+	ToolLoopResult, resolvedTaskRunner, bool, error,
+) {
 	r := ToolLoopResult{Ended: "turn_cap"}
 	requiresExec := ToolLoopRequiresExecution(spec)
 	var runner resolvedTaskRunner
@@ -456,7 +477,7 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 		r.Outcome = OutcomeSkipped
 		r.Ended = "unsafe_execution_disabled"
 		r.Detail = "disabled: generated code execution requires --allow-unsafe-exec and remains unverified"
-		return r, nil
+		return r, runner, false, nil
 	}
 	if requiresExec {
 		var err error
@@ -464,136 +485,186 @@ func RunToolLoop(ctx context.Context, c llm.Backend, model string, spec ToolLoop
 		if err != nil {
 			f := failure(FailureExecutorPreflight, spec.ID, err)
 			r.Outcome, r.Failure = OutcomeError, f
-			return r, f
+			return r, runner, false, f
 		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		f := failure(FailureFixtureIO, "mkdir", err)
 		r.Outcome, r.Failure = OutcomeError, f
-		return r, f
+		return r, runner, false, f
 	}
 	for name, body := range spec.Files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			f := failure(FailureFixtureIO, "write_fixture", err)
 			r.Outcome, r.Failure = OutcomeError, f
-			return r, f
+			return r, runner, false, f
 		}
 	}
+	return r, runner, true, nil
+}
 
-	written := map[string]bool{}
-	sigCount := map[string]int{}
-	msgs := []ollama.Message{{Role: "user", Content: spec.Prompt}}
-	lastPrompt := 0
-	samp := ollama.Deterministic(spec.NumPredict, numCtx(ctx))
-	deadline := time.Now().Add(time.Duration(spec.Budget) * time.Second)
-	var seq strings.Builder
+type toolLoopState struct {
+	ctx        context.Context
+	backend    llm.Backend
+	model      string
+	spec       ToolLoopSpec
+	dir        string
+	runner     resolvedTaskRunner
+	result     *ToolLoopResult
+	written    map[string]bool
+	signatures map[string]int
+	messages   []ollama.Message
+	lastPrompt int
+	sampling   ollama.Sampling
+	deadline   time.Time
+	sequence   strings.Builder
+}
 
-	for turn := range spec.MaxTurns {
-		r.Turns = turn + 1
-		if time.Now().After(deadline) {
-			r.Ended = "time_budget"
+func (s *toolLoopState) run() error {
+	for turn := range s.spec.MaxTurns {
+		s.result.Turns = turn + 1
+		if time.Now().After(s.deadline) {
+			s.result.Ended = "time_budget"
 			break
 		}
-		// A withdrawn tool disappears from the tools parameter: the model is
-		// TOLD what exists every turn, so continuing to call it is on the model.
-		activeTools := spec.Tools
-		withdrawn := spec.WithdrawTool != "" && turn >= spec.WithdrawAfter
-		if withdrawn {
-			activeTools = nil
-			for _, t := range spec.Tools {
-				if t.Function.Name != spec.WithdrawTool {
-					activeTools = append(activeTools, t)
-				}
-			}
-		}
-		msg, tm, err := c.Chat(ctx, model, msgs, activeTools, samp)
+		stop, err := s.runTurn(turn)
 		if err != nil {
-			f := failure(FailureTransport, "tool_loop.chat", err)
-			r.Outcome, r.Failure, r.Ended = OutcomeError, f, "transport_error"
-			return r, f
+			return err
 		}
-		if tm.PromptTokens > r.MaxPromptTok {
-			r.MaxPromptTok = tm.PromptTokens
-		}
-		if lastPrompt > 0 && tm.PromptTokens > 0 && tm.PromptTokens < lastPrompt {
-			r.Compacted = true
-		}
-		if tm.PromptTokens > lastPrompt {
-			lastPrompt = tm.PromptTokens
-		}
-		if len(msg.ToolCalls) == 0 {
-			if exactDone(msg.Content) {
-				r.Ended = "clean_stop"
-			} else {
-				r.Ended = "stopped_without_done"
-			}
+		if stop {
 			break
 		}
-		msgs = append(msgs, msg)
+	}
+	return nil
+}
 
-		for _, tc := range msg.ToolCalls {
-			r.Calls++
-			name := tc.Function.Name
-			args := map[string]any{}
-			if len(tc.Function.Arguments) > 0 {
-				if err := strictjson.Unmarshal(tc.Function.Arguments, &args); err != nil {
-					// Some models emit arguments as a JSON *string*; try once more.
-					var asStr string
-					if strictjson.Unmarshal(tc.Function.Arguments, &asStr) == nil {
-						if strictjson.Unmarshal([]byte(asStr), &args) != nil {
-							r.Malformed++
-						}
-					} else {
-						r.Malformed++
-					}
-				}
-			}
-			if _, ok := seqCode[name]; !ok {
-				r.Malformed++
-			}
-			seq.WriteString(seqCode[name])
+func (s *toolLoopState) runTurn(turn int) (bool, error) {
+	activeTools, withdrawn := s.activeTools(turn)
+	msg, metrics, err := s.backend.Chat(s.ctx, s.model, s.messages, activeTools, s.sampling)
+	if err != nil {
+		f := failure(FailureTransport, "tool_loop.chat", err)
+		s.result.Outcome, s.result.Failure, s.result.Ended = OutcomeError, f, "transport_error"
+		return false, f
+	}
+	s.observePrompt(metrics.PromptTokens)
+	if len(msg.ToolCalls) == 0 {
+		if exactDone(msg.Content) {
+			s.result.Ended = "clean_stop"
+		} else {
+			s.result.Ended = "stopped_without_done"
+		}
+		return true, nil
+	}
+	s.messages = append(s.messages, msg)
+	return false, s.processToolCalls(msg.ToolCalls, withdrawn)
+}
 
-			p, _ := args["path"].(string)
-			content, _ := args["content"].(string)
-			sig := name + "|" + p + "|" + shortHash(content)
-			sigCount[sig]++
-
-			var result string
-			if withdrawn && name == spec.WithdrawTool {
-				r.DeadCalls++
-				result = "ERROR: tool " + name + " is no longer available; it has been removed"
-			} else {
-				var toolErr error
-				result, toolErr = doTool(ctx, dir, name, p, content, args, spec, written, runner, &r.VerifierObservations)
-				if toolErr != nil {
-					var typed *Failure
-					if !errors.As(toolErr, &typed) {
-						typed = failure(FailureFixtureIO, "tool_loop."+name, toolErr)
-					}
-					r.Outcome, r.Failure, r.Ended = OutcomeError, typed, "tool_error"
-					return r, typed
-				}
-			}
-			msgs = append(msgs, ollama.Message{
-				Role: "tool", ToolName: name, ToolCallID: tc.ID,
-				Content: truncate(result, 4000),
-			})
+func (s *toolLoopState) activeTools(turn int) ([]ollama.Tool, bool) {
+	withdrawn := s.spec.WithdrawTool != "" && turn >= s.spec.WithdrawAfter
+	if !withdrawn {
+		return s.spec.Tools, false
+	}
+	active := make([]ollama.Tool, 0, len(s.spec.Tools))
+	for _, tool := range s.spec.Tools {
+		if tool.Function.Name != s.spec.WithdrawTool {
+			active = append(active, tool)
 		}
 	}
+	return active, true
+}
 
-	for _, v := range sigCount {
+func (s *toolLoopState) observePrompt(promptTokens int) {
+	if promptTokens > s.result.MaxPromptTok {
+		s.result.MaxPromptTok = promptTokens
+	}
+	if s.lastPrompt > 0 && promptTokens > 0 && promptTokens < s.lastPrompt {
+		s.result.Compacted = true
+	}
+	if promptTokens > s.lastPrompt {
+		s.lastPrompt = promptTokens
+	}
+}
+
+func (s *toolLoopState) processToolCalls(calls []ollama.ToolCall, withdrawn bool) error {
+	for _, call := range calls {
+		if err := s.processToolCall(call, withdrawn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *toolLoopState) processToolCall(call ollama.ToolCall, withdrawn bool) error {
+	s.result.Calls++
+	name := call.Function.Name
+	args, malformed := decodeToolArguments(call.Function.Arguments)
+	if malformed {
+		s.result.Malformed++
+	}
+	if _, ok := seqCode[name]; !ok {
+		s.result.Malformed++
+	}
+	s.sequence.WriteString(seqCode[name])
+	p, _ := args["path"].(string)
+	content, _ := args["content"].(string)
+	s.signatures[name+"|"+p+"|"+shortHash(content)]++
+	result, err := s.invokeTool(name, p, content, args, withdrawn)
+	if err != nil {
+		return err
+	}
+	s.messages = append(s.messages, ollama.Message{
+		Role: "tool", ToolName: name, ToolCallID: call.ID, Content: truncate(result, 4000),
+	})
+	return nil
+}
+
+func decodeToolArguments(raw []byte) (map[string]any, bool) {
+	args := map[string]any{}
+	if len(raw) == 0 || strictjson.Unmarshal(raw, &args) == nil {
+		return args, false
+	}
+	var encoded string
+	if strictjson.Unmarshal(raw, &encoded) != nil || strictjson.Unmarshal([]byte(encoded), &args) != nil {
+		return args, true
+	}
+	return args, false
+}
+
+func (s *toolLoopState) invokeTool(name, path, content string, args map[string]any, withdrawn bool) (string, error) {
+	if withdrawn && name == s.spec.WithdrawTool {
+		s.result.DeadCalls++
+		return "ERROR: tool " + name + " is no longer available; it has been removed", nil
+	}
+	result, err := doTool(s.ctx, s.dir, name, path, content, args, s.spec, s.written,
+		s.runner, &s.result.VerifierObservations)
+	if err == nil {
+		return result, nil
+	}
+	var typed *Failure
+	if !errors.As(err, &typed) {
+		typed = failure(FailureFixtureIO, "tool_loop."+name, err)
+	}
+	s.result.Outcome, s.result.Failure, s.result.Ended = OutcomeError, typed, "tool_error"
+	return "", typed
+}
+
+func (s *toolLoopState) finishTracking() {
+	for _, v := range s.signatures {
 		if v > 1 {
-			r.Repeats += v - 1
+			s.result.Repeats += v - 1
 		}
 	}
-	r.Looped = r.Repeats >= 3
-	r.Sequence = seq.String()
-	r.CtxCeiling = r.MaxPromptTok > samp.NumCtx*8/10
-	for f := range written {
-		r.FilesWrote = append(r.FilesWrote, f)
+	s.result.Looped = s.result.Repeats >= 3
+	s.result.Sequence = s.sequence.String()
+	s.result.CtxCeiling = s.result.MaxPromptTok > s.sampling.NumCtx*8/10
+	for file := range s.written {
+		s.result.FilesWrote = append(s.result.FilesWrote, file)
 	}
-	sort.Strings(r.FilesWrote)
+	sort.Strings(s.result.FilesWrote)
+}
 
+func finishToolLoop(ctx context.Context, spec ToolLoopSpec, dir string, runner resolvedTaskRunner,
+	r ToolLoopResult) (ToolLoopResult, error) {
 	// Behavioral tasks (withdrawal) have no verify runner: passing means the
 	// loop terminated cleanly; the behavioral counters are judged by the scorer.
 	if len(spec.Verify.Runner) == 0 {

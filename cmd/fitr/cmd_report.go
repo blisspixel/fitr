@@ -173,21 +173,9 @@ func cmdView(_ context.Context, args []string) int {
 
 // ---------------------------------------------------------------- board
 func cmdBoard(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("board", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	current := fs.Bool("current", false, "only this machine, including its measured context variants")
-	full := fs.Bool("full", false, "with --display json, emit the complete sealed result records instead of the reported columns")
-	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
-	if code, ok := parseCommandFlags(fs, args); !ok {
+	command, code, ok := parseBoardCommand(args)
+	if !ok {
 		return code
-	}
-	if !render.ValidMode(*mode) {
-		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
-		return exitUsage
-	}
-	if fs.NArg() != 0 {
-		errPrint("unexpected argument", fs.Arg(0), "fitr board [--current] [--display MODE]")
-		return exitUsage
 	}
 	results, err := loadResults()
 	if err != nil || len(results) == 0 {
@@ -195,8 +183,49 @@ func cmdBoard(ctx context.Context, args []string) int {
 		return exitError
 	}
 	curDevice := device.Detect(ctx, probeBackend(ctx))
-	cur := curDevice.Key()
+	groups, order, excludedContext := groupBoardResults(results, command.current, curDevice)
+	board, visible, excluded := buildBoard(groups, order, curDevice)
+	excluded.context = excludedContext
+	writeBoardExclusions(excluded)
+	if len(board.Groups) == 0 {
+		return emptyBoardResult(excluded)
+	}
+	if render.Resolve(command.mode) == "json" {
+		writeBoardJSON(board, visible, curDevice.Key(), command.full, excluded)
+		return exitOK
+	}
+	render.WriteBoard(os.Stdout, board, command.mode)
+	return exitOK
+}
 
+type boardCommand struct {
+	current bool
+	full    bool
+	mode    string
+}
+
+func parseBoardCommand(args []string) (boardCommand, int, bool) {
+	fs := flag.NewFlagSet("board", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	current := fs.Bool("current", false, "only this machine, including its measured context variants")
+	full := fs.Bool("full", false, "with --display json, emit the complete sealed result records instead of the reported columns")
+	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return boardCommand{}, code, false
+	}
+	if !render.ValidMode(*mode) {
+		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
+		return boardCommand{}, exitUsage, false
+	}
+	if fs.NArg() != 0 {
+		errPrint("unexpected argument", fs.Arg(0), "fitr board [--current] [--display MODE]")
+		return boardCommand{}, exitUsage, false
+	}
+	return boardCommand{current: *current, full: *full, mode: *mode}, exitOK, true
+}
+
+func groupBoardResults(results []*Result, current bool, curDevice device.Fingerprint) (
+	map[string][]*Result, []string, int) {
 	// Group by fingerprint. Rows measured under different hardware/config are
 	// NOT comparable and must never be ranked against each other. A |ctx=N
 	// suffix is a config split, not a different box - labeled as such below.
@@ -209,7 +238,7 @@ func cmdBoard(ctx context.Context, args []string) int {
 			excludedContext++
 			continue
 		}
-		if *current && !samePhysicalMachine(r.Device, curDevice) {
+		if current && !samePhysicalMachine(r.Device, curDevice) {
 			continue
 		}
 		if _, ok := groups[key]; !ok {
@@ -218,144 +247,172 @@ func cmdBoard(ctx context.Context, args []string) int {
 		groups[key] = append(groups[key], r)
 	}
 	sort.Strings(order)
+	return groups, order, excludedContext
+}
 
+type boardExclusions struct {
+	contaminated int
+	unverified   int
+	context      int
+	unscored     int
+}
+
+func buildBoard(groups map[string][]*Result, order []string, curDevice device.Fingerprint) (
+	render.Board, map[string][]*Result, boardExclusions) {
 	board := render.Board{}
-	excludedContaminated := 0
-	excludedUnverified := 0
-	unscoredProfiles := 0
+	excluded := boardExclusions{}
 	visible := map[string][]*Result{}
 	for _, key := range order {
-		rows := groups[key]
-		clean := make([]*Result, 0, len(rows))
-		for _, result := range rows {
-			if len(result.Contamination) > 0 {
-				excludedContaminated++
-				continue
-			}
-			if result.EvidenceIntegrityIssue() != "" {
-				excludedUnverified++
-				continue
-			}
-			clean = append(clean, result)
-		}
-		if len(clean) == 0 {
+		rows := claimableBoardRows(groups[key], &excluded)
+		if len(rows) == 0 {
 			continue
 		}
-		rows = clean
-		g := rows[len(rows)-1]
-		nctx := resultNumCtx(g)
-		note := "different hardware/config or effective context; not comparable to other blocks"
-		if samePhysicalMachine(g.Device, curDevice) {
-			if nctx != eval.NumCtx {
-				note = fmt.Sprintf("this machine, requested num_ctx=%d; effective context is part of this block", nctx)
-			} else {
-				note = "this machine, verified effective context and current config"
-			}
-		}
+		group := makeBoardGroup(rows, curDevice)
 		sort.Slice(rows, func(i, j int) bool {
 			return rows[i].DecodeSum.Mean > rows[j].DecodeSum.Mean
 		})
 		visible[key] = rows
-		group := render.BoardGroup{
-			GPU: g.Device.GPU, Driver: g.Device.GPUDriver,
-			KV: g.Device.Config["OLLAMA_KV_CACHE_TYPE"], NumCtx: nctx, Note: note,
-		}
-		if g.DeviceV2 != nil {
-			group.ContextState = string(g.DeviceV2.Context.State())
-			if g.DeviceV2.Context.EffectiveTokens != nil {
-				group.EffectiveCtx = *g.DeviceV2.Context.EffectiveTokens
-			}
-		}
-		for _, r := range rows {
-			var codes []string
-			scorecard := r.Scorecard
-			if artifact, err := artifactFrom(r); err == nil {
-				scorecard = artifact.Scorecard
-			} else {
-				scorecard = score.ExcludeEvidence(scorecard,
-					"the scoring profile is unavailable, so the stored verdict cannot be reproduced")
-				unscoredProfiles++
-			}
-			for _, s := range scorecard.Serves {
-				if code := score.NeedCode[s]; code != "" {
-					codes = append(codes, code)
-				}
-			}
-			var decodes []float64
-			for _, sample := range r.Speed {
-				decodes = append(decodes, sample.DecodeTPS)
-			}
-			group.Rows = append(group.Rows, render.BoardRow{
-				Model: r.Model, ParamSize: r.ModelMeta.Details.ParameterSize,
-				Quant:      r.ModelMeta.Details.QuantizationLevel,
-				DecodeMean: r.DecodeSum.Mean, DecodeSD: r.DecodeSum.SD,
-				PrefillMean: r.PrefillSum.Mean, ResidentGB: verifiedResidentGB(r.Memory),
-				DecodeSeries: decodes, Repeats: r.Repeats, Serves: codes,
-			})
+		for _, result := range rows {
+			group.Rows = append(group.Rows, makeBoardRow(result, &excluded))
 		}
 		board.Results += len(rows)
 		board.Groups = append(board.Groups, group)
 	}
-	if excludedContaminated > 0 {
-		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d contaminated result(s) from board ranking and claims\n",
-			excludedContaminated)
-	}
-	if excludedUnverified > 0 {
-		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without a valid evidence contract from board ranking and claims\n",
-			excludedUnverified)
-	}
-	if excludedContext > 0 {
-		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without verified effective context from board ranking and claims\n",
-			excludedContext)
-	}
-	if unscoredProfiles > 0 {
-		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: %d board row(s) have no reproducible qualification because their scoring profile is unavailable\n",
-			unscoredProfiles)
-	}
-	if len(board.Groups) == 0 {
-		if excludedContaminated > 0 || excludedUnverified > 0 || excludedContext > 0 {
-			detail := "all matching results lacked claimable evidence"
-			if excludedContaminated > 0 && excludedUnverified == 0 && excludedContext == 0 {
-				detail = "all matching results were contaminated"
-			} else if excludedUnverified > 0 && excludedContaminated == 0 && excludedContext == 0 {
-				detail = "all matching results lacked a valid evidence contract"
-			} else if excludedContext > 0 && excludedContaminated == 0 && excludedUnverified == 0 {
-				detail = "all matching results lacked verified effective context"
-			}
-			errPrint("no conclusive results for this machine", detail,
-				"re-run with the current fitr version after unloading all models")
-		} else {
-			errPrint("no results for this machine", "", "run fitr run <model>")
+	return board, visible, excluded
+}
+
+func claimableBoardRows(rows []*Result, excluded *boardExclusions) []*Result {
+	clean := make([]*Result, 0, len(rows))
+	for _, result := range rows {
+		if len(result.Contamination) > 0 {
+			excluded.contaminated++
+			continue
 		}
+		if result.EvidenceIntegrityIssue() != "" {
+			excluded.unverified++
+			continue
+		}
+		clean = append(clean, result)
+	}
+	return clean
+}
+
+func makeBoardGroup(rows []*Result, curDevice device.Fingerprint) render.BoardGroup {
+	latest := rows[len(rows)-1]
+	nctx := resultNumCtx(latest)
+	group := render.BoardGroup{
+		GPU: latest.Device.GPU, Driver: latest.Device.GPUDriver,
+		KV: latest.Device.Config["OLLAMA_KV_CACHE_TYPE"], NumCtx: nctx,
+		Note: boardGroupNote(latest, curDevice, nctx),
+	}
+	if latest.DeviceV2 != nil {
+		group.ContextState = string(latest.DeviceV2.Context.State())
+		if latest.DeviceV2.Context.EffectiveTokens != nil {
+			group.EffectiveCtx = *latest.DeviceV2.Context.EffectiveTokens
+		}
+	}
+	return group
+}
+
+func boardGroupNote(result *Result, curDevice device.Fingerprint, nctx int) string {
+	if !samePhysicalMachine(result.Device, curDevice) {
+		return "different hardware/config or effective context; not comparable to other blocks"
+	}
+	if nctx != eval.NumCtx {
+		return fmt.Sprintf("this machine, requested num_ctx=%d; effective context is part of this block", nctx)
+	}
+	return "this machine, verified effective context and current config"
+}
+
+func makeBoardRow(result *Result, excluded *boardExclusions) render.BoardRow {
+	scorecard := result.Scorecard
+	if artifact, err := artifactFrom(result); err == nil {
+		scorecard = artifact.Scorecard
+	} else {
+		scorecard = score.ExcludeEvidence(scorecard,
+			"the scoring profile is unavailable, so the stored verdict cannot be reproduced")
+		excluded.unscored++
+	}
+	var codes []string
+	for _, served := range scorecard.Serves {
+		if code := score.NeedCode[served]; code != "" {
+			codes = append(codes, code)
+		}
+	}
+	decodes := make([]float64, 0, len(result.Speed))
+	for _, sample := range result.Speed {
+		decodes = append(decodes, sample.DecodeTPS)
+	}
+	return render.BoardRow{
+		Model: result.Model, ParamSize: result.ModelMeta.Details.ParameterSize,
+		Quant:      result.ModelMeta.Details.QuantizationLevel,
+		DecodeMean: result.DecodeSum.Mean, DecodeSD: result.DecodeSum.SD,
+		PrefillMean: result.PrefillSum.Mean, ResidentGB: verifiedResidentGB(result.Memory),
+		DecodeSeries: decodes, Repeats: result.Repeats, Serves: codes,
+	}
+}
+
+func writeBoardExclusions(excluded boardExclusions) {
+	if excluded.contaminated > 0 {
+		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d contaminated result(s) from board ranking and claims\n",
+			excluded.contaminated)
+	}
+	if excluded.unverified > 0 {
+		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without a valid evidence contract from board ranking and claims\n",
+			excluded.unverified)
+	}
+	if excluded.context > 0 {
+		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without verified effective context from board ranking and claims\n",
+			excluded.context)
+	}
+	if excluded.unscored > 0 {
+		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: %d board row(s) have no reproducible qualification because their scoring profile is unavailable\n",
+			excluded.unscored)
+	}
+}
+
+func emptyBoardResult(excluded boardExclusions) int {
+	if excluded.contaminated == 0 && excluded.unverified == 0 && excluded.context == 0 {
+		errPrint("no results for this machine", "", "run fitr run <model>")
 		return exitError
 	}
-	if render.Resolve(*mode) == "json" {
-		// Default to what the board reports, not the sealed records behind it.
-		// The records are an order of magnitude larger, grow without bound in
-		// the number of models, and none of the extra fields appear on screen.
-		payload := map[string]any{
-			"schema": "fitr.board.v1", "current": cur,
-			"groups": board.Groups, "results": board.Results,
-		}
-		if *full {
-			payload["groups"] = visible
-			payload["schema"] = "fitr.board.full.v1"
-		}
-		if excludedContaminated > 0 {
-			payload["inconclusive_excluded"] = excludedContaminated
-		}
-		if excludedUnverified > 0 {
-			payload["unverified_excluded"] = excludedUnverified
-		}
-		if excludedContext > 0 {
-			payload["context_unverified_excluded"] = excludedContext
-		}
-		b, _ := json.Marshal(payload)
-		fmt.Println(string(b))
-		return exitOK
+	detail := "all matching results lacked claimable evidence"
+	if excluded.contaminated > 0 && excluded.unverified == 0 && excluded.context == 0 {
+		detail = "all matching results were contaminated"
+	} else if excluded.unverified > 0 && excluded.contaminated == 0 && excluded.context == 0 {
+		detail = "all matching results lacked a valid evidence contract"
+	} else if excluded.context > 0 && excluded.contaminated == 0 && excluded.unverified == 0 {
+		detail = "all matching results lacked verified effective context"
 	}
-	render.WriteBoard(os.Stdout, board, *mode)
-	return exitOK
+	errPrint("no conclusive results for this machine", detail,
+		"re-run with the current fitr version after unloading all models")
+	return exitError
+}
+
+func writeBoardJSON(board render.Board, visible map[string][]*Result, current string,
+	full bool, excluded boardExclusions) {
+	// Default to what the board reports, not the sealed records behind it.
+	// The records are an order of magnitude larger, grow without bound in
+	// the number of models, and none of the extra fields appear on screen.
+	payload := map[string]any{
+		"schema": "fitr.board.v1", "current": current,
+		"groups": board.Groups, "results": board.Results,
+	}
+	if full {
+		payload["groups"] = visible
+		payload["schema"] = "fitr.board.full.v1"
+	}
+	if excluded.contaminated > 0 {
+		payload["inconclusive_excluded"] = excluded.contaminated
+	}
+	if excluded.unverified > 0 {
+		payload["unverified_excluded"] = excluded.unverified
+	}
+	if excluded.context > 0 {
+		payload["context_unverified_excluded"] = excluded.context
+	}
+	b, _ := json.Marshal(payload)
+	fmt.Println(string(b))
 }
 
 // ---------------------------------------------------------------- compare
@@ -368,95 +425,141 @@ func cmdCompare(ctx context.Context, args []string) int {
 		errPrint("need two models", "", "fitr compare <a> <b>")
 		return exitUsage
 	}
+	a, b, code := loadComparisonResults(args)
+	if code != exitOK {
+		return code
+	}
+	if code := validateComparison(a, b); code != exitOK {
+		return code
+	}
+
+	fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
+	writeThroughputComparison(a, b)
+	writeBehaviorComparison(a, b)
+	fmt.Println("\n  note  throughput uses 95% intervals. Behavior differences require")
+	fmt.Println("        a complete identical plan and a per-need family-level exact test.")
+	return exitOK
+}
+
+func loadComparisonResults(args []string) (*Result, *Result, int) {
 	results, err := loadResults()
 	if err != nil {
 		errPrint("no results", "", "fitr run <model>")
-		return exitError
+		return nil, nil, exitError
 	}
 	a, b := latestNamed(results, args[0]), latestNamed(results, args[1])
 	for i, r := range []*Result{a, b} {
 		if r == nil {
 			errPrint(fmt.Sprintf("no stored result for %q", args[i]), "",
 				"fitr run "+args[i])
-			return exitError
+			return nil, nil, exitError
 		}
 	}
+	return a, b, exitOK
+}
+
+func validateComparison(a, b *Result) int {
 	if len(a.Contamination) > 0 || len(b.Contamination) > 0 {
-		fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
-		fmt.Println("  INCONCLUSIVE  resident model contamination invalidates this comparison")
-		for _, result := range []*Result{a, b} {
-			if len(result.Contamination) == 0 {
-				continue
-			}
-			fmt.Printf("  %-12s %s\n", terminalText(result.Model)+":",
-				terminalText(strings.Join(result.Contamination, ", ")))
-		}
-		fmt.Println("  remedy       unload all models and re-run both measurements")
-		return exitError
+		return rejectContaminatedComparison(a, b)
 	}
 	if issueA, issueB := a.EvidenceIntegrityIssue(), b.EvidenceIntegrityIssue(); issueA != "" || issueB != "" {
-		fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
-		fmt.Println("  INCONCLUSIVE  a valid sealed evidence contract is required for comparison")
-		for i, issue := range []string{issueA, issueB} {
-			if issue == "" {
-				continue
-			}
-			result := []*Result{a, b}[i]
-			fmt.Printf("  %-12s %s\n", terminalText(result.Model)+":", terminalText(issue))
-		}
-		fmt.Println("  remedy       re-run both models with the current fitr version")
-		return exitError
+		return rejectUnverifiedComparison(a, b, issueA, issueB)
 	}
 	if err := record.ProvenanceCompatibilityError(a, b); err != nil {
-		fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
-		fmt.Println("  INCONCLUSIVE  the runs used different task, profile, specification, scoring, or protocol provenance")
-		fmt.Printf("  detail       %s\n", terminalText(err.Error()))
-		fmt.Println("  remedy       compare runs produced by the same fitr battery and effective profile")
-		return exitError
+		return rejectIncompatibleProvenance(a, b, err)
 	}
+	return validateComparisonKeys(a, b)
+}
+
+func rejectContaminatedComparison(a, b *Result) int {
+	fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
+	fmt.Println("  INCONCLUSIVE  resident model contamination invalidates this comparison")
+	for _, result := range []*Result{a, b} {
+		if len(result.Contamination) == 0 {
+			continue
+		}
+		fmt.Printf("  %-12s %s\n", terminalText(result.Model)+":",
+			terminalText(strings.Join(result.Contamination, ", ")))
+	}
+	fmt.Println("  remedy       unload all models and re-run both measurements")
+	return exitError
+}
+
+func rejectUnverifiedComparison(a, b *Result, issueA, issueB string) int {
+	fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
+	fmt.Println("  INCONCLUSIVE  a valid sealed evidence contract is required for comparison")
+	for i, issue := range []string{issueA, issueB} {
+		if issue == "" {
+			continue
+		}
+		result := []*Result{a, b}[i]
+		fmt.Printf("  %-12s %s\n", terminalText(result.Model)+":", terminalText(issue))
+	}
+	fmt.Println("  remedy       re-run both models with the current fitr version")
+	return exitError
+}
+
+func rejectIncompatibleProvenance(a, b *Result, err error) int {
+	fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
+	fmt.Println("  INCONCLUSIVE  the runs used different task, profile, specification, scoring, or protocol provenance")
+	fmt.Printf("  detail       %s\n", terminalText(err.Error()))
+	fmt.Println("  remedy       compare runs produced by the same fitr battery and effective profile")
+	return exitError
+}
+
+func validateComparisonKeys(a, b *Result) int {
 	aKey, aKeyErr := a.ComparableDeviceKey()
 	bKey, bKeyErr := b.ComparableDeviceKey()
 	if aKeyErr != nil || bKeyErr != nil {
-		fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
-		fmt.Println("  INCONCLUSIVE  verified effective context is required for comparison")
-		for i, keyErr := range []error{aKeyErr, bKeyErr} {
-			if keyErr == nil {
-				continue
-			}
-			result := []*Result{a, b}[i]
-			fmt.Printf("  %-12s %s\n", terminalText(result.Model)+":", terminalText(keyErr.Error()))
-		}
-		fmt.Println("  remedy       re-run both models on a runtime that reports its allocated context")
-		return exitError
+		return rejectUnverifiedContext(a, b, aKeyErr, bKeyErr)
 	}
-	if aKey != bKey {
-		if a.DeviceV2 != nil && b.DeviceV2 != nil && reflect.DeepEqual(a.DeviceV2.Device, b.DeviceV2.Device) {
-			aEffective, bEffective := 0, 0
-			if a.DeviceV2.Context.EffectiveTokens != nil {
-				aEffective = *a.DeviceV2.Context.EffectiveTokens
-			}
-			if b.DeviceV2.Context.EffectiveTokens != nil {
-				bEffective = *b.DeviceV2.Context.EffectiveTokens
-			}
-			errPrint("these results used different request context",
-				fmt.Sprintf("requested %d vs %d, effective %d vs %d; tok/s and quality both move with KV size",
-					resultNumCtx(a), resultNumCtx(b), aEffective, bEffective),
-				"compare two runs at the same --ctx, or re-measure")
-			return exitError
-		}
-		// Naming the machine is misleading when both runs happened on it: the
-		// usual cause is that its STATE moved between them -- a model resident
-		// from something else, so one run was partly offloaded and the other
-		// was not. Fingerprint.Diff already knows exactly which fields moved,
-		// so say them instead of sending the operator to re-measure blind.
-		note := incomparableNote(a.Device.Diff(b.Device))
-		errPrint("these results were not measured under the same conditions", note,
-			"re-measure both with the machine in the same state, then compare")
-		return exitError
+	if aKey == bKey {
+		return exitOK
 	}
+	if a.DeviceV2 != nil && b.DeviceV2 != nil && reflect.DeepEqual(a.DeviceV2.Device, b.DeviceV2.Device) {
+		return rejectDifferentComparisonContext(a, b)
+	}
+	// Naming the machine is misleading when both runs happened on it: the
+	// usual cause is that its state moved between them, such as a model
+	// resident from something else, so one run was partly offloaded and the
+	// other was not. Fingerprint.Diff already knows exactly which fields moved,
+	// so say them instead of sending the operator to re-measure blind.
+	note := incomparableNote(a.Device.Diff(b.Device))
+	errPrint("these results were not measured under the same conditions", note,
+		"re-measure both with the machine in the same state, then compare")
+	return exitError
+}
 
+func rejectUnverifiedContext(a, b *Result, aErr, bErr error) int {
 	fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
+	fmt.Println("  INCONCLUSIVE  verified effective context is required for comparison")
+	for i, keyErr := range []error{aErr, bErr} {
+		if keyErr == nil {
+			continue
+		}
+		result := []*Result{a, b}[i]
+		fmt.Printf("  %-12s %s\n", terminalText(result.Model)+":", terminalText(keyErr.Error()))
+	}
+	fmt.Println("  remedy       re-run both models on a runtime that reports its allocated context")
+	return exitError
+}
 
+func rejectDifferentComparisonContext(a, b *Result) int {
+	errPrint("these results used different request context",
+		fmt.Sprintf("requested %d vs %d, effective %d vs %d; tok/s and quality both move with KV size",
+			resultNumCtx(a), resultNumCtx(b), effectiveComparisonContext(a), effectiveComparisonContext(b)),
+		"compare two runs at the same --ctx, or re-measure")
+	return exitError
+}
+
+func effectiveComparisonContext(result *Result) int {
+	if result.DeviceV2 == nil || result.DeviceV2.Context.EffectiveTokens == nil {
+		return 0
+	}
+	return *result.DeviceV2.Context.EffectiveTokens
+}
+
+func writeThroughputComparison(a, b *Result) {
 	// Throughput: Fieller's interval is the correct one for "how many times
 	// faster". When it cannot be computed honestly (single observation, or
 	// denominator not separated from zero), the ratio prints without an
@@ -472,28 +575,34 @@ func cmdCompare(ctx context.Context, args []string) int {
 			claimable:   comparableUncachedPrefill(a) && comparableUncachedPrefill(b),
 			unclaimable: "descriptive only - uncached prefill not proven"},
 	} {
-		if !p.claimable {
-			fmt.Printf("  %-21s %7.2f vs %7.2f  %s\n", p.label, p.x.Mean, p.y.Mean, p.unclaimable)
-			continue
-		}
-		lo, hi, ratio, ok := stats.FiellerRatio(p.x, p.y)
-		if ok {
-			verdict := "cannot separate"
-			if lo > 1 {
-				verdict = "first is faster"
-			} else if hi < 1 {
-				verdict = "second is faster"
-			}
-			fmt.Printf("  %-21s %7.2f vs %7.2f  %5.2fx [%.2f-%.2f]  %s\n",
-				p.label, p.x.Mean, p.y.Mean, ratio, lo, hi, verdict)
-		} else {
-			ratio, _, _ := stats.RatioWithError(p.x, p.y)
-			fmt.Printf("  %-21s %7.2f vs %7.2f  %5.2fx  no interval - too little data\n",
-				p.label, p.x.Mean, p.y.Mean, ratio)
-		}
+		writeThroughputRow(p.label, p.x, p.y, p.claimable, p.unclaimable)
 	}
 	fmt.Println()
+}
 
+func writeThroughputRow(label string, x, y stats.Summary, claimable bool, unclaimable string) {
+	if !claimable {
+		fmt.Printf("  %-21s %7.2f vs %7.2f  %s\n", label, x.Mean, y.Mean, unclaimable)
+		return
+	}
+	lo, hi, ratio, ok := stats.FiellerRatio(x, y)
+	if !ok {
+		ratio, _, _ = stats.RatioWithError(x, y)
+		fmt.Printf("  %-21s %7.2f vs %7.2f  %5.2fx  no interval - too little data\n",
+			label, x.Mean, y.Mean, ratio)
+		return
+	}
+	verdict := "cannot separate"
+	if lo > 1 {
+		verdict = "first is faster"
+	} else if hi < 1 {
+		verdict = "second is faster"
+	}
+	fmt.Printf("  %-21s %7.2f vs %7.2f  %5.2fx [%.2f-%.2f]  %s\n",
+		label, x.Mean, y.Mean, ratio, lo, hi, verdict)
+}
+
+func writeBehaviorComparison(a, b *Result) {
 	// Paired analysis: identical instances make item flips descriptive. A
 	// significance claim aggregates those instances to one direction per
 	// generated family because repeats inside a family are clustered.
@@ -504,10 +613,6 @@ func cmdCompare(ctx context.Context, args []string) int {
 		fmt.Println("            these runs faced different instances.")
 		fmt.Println("  pair with fitr run <model> --seedset shared1  (both models)")
 	}
-
-	fmt.Println("\n  note  throughput uses 95% intervals. Behavior differences require")
-	fmt.Println("        a complete identical plan and a per-need family-level exact test.")
-	return exitOK
 }
 
 // comparableUncachedPrefill requires every persisted probe to carry an

@@ -17,11 +17,28 @@ func (r *Record) Measured() score.Measured {
 	if r == nil {
 		return score.Measured{}
 	}
-	m := score.Measured{
+	m := r.baseMeasured()
+	r.addSpeedMeasurements(&m)
+	r.addMemoryMeasurement(&m)
+	r.addCodeMeasurements(&m)
+	r.addCheckMeasurements(&m)
+	r.addRefusalMeasurements(&m)
+	r.addToolMeasurements(&m)
+	r.addAgenticMeasurements(&m)
+	r.addWithdrawalMeasurements(&m)
+	r.addPlumbingMeasurements(&m)
+	return m
+}
+
+func (r *Record) baseMeasured() score.Measured {
+	return score.Measured{
 		Model: r.Model, Capabilities: r.ModelMeta.Capabilities, Contamination: r.Contamination,
 		Rep: r.Rep, CodePlanned: r.TaskPlan.CodeTrials > 0,
 		AgenticPlanned: r.TaskPlan.AgenticTrials > 0,
 	}
+}
+
+func (r *Record) addSpeedMeasurements(m *score.Measured) {
 	if r.DecodeSum.N > 0 {
 		m.SpeedKnown = true
 		m.DecodeTPS, m.TTFT, m.PrefillTPS = r.DecodeSum.Mean, r.TTFTSum.Mean, r.PrefillSum.Mean
@@ -51,9 +68,15 @@ func (r *Record) Measured() score.Measured {
 			}
 		}
 	}
+}
+
+func (r *Record) addMemoryMeasurement(m *score.Measured) {
 	if resident, verified := r.Memory.VerifiedAt(scoredMemoryProbeCtx); verified {
 		m.MemoryKnown, m.ResidentGB32K = true, resident
 	}
+}
+
+func (r *Record) addCodeMeasurements(m *score.Measured) {
 	if len(r.CodeWrite)+len(r.CodeFix) > 0 {
 		var writeOK, fixOK []bool
 		for _, result := range r.CodeWrite {
@@ -78,8 +101,11 @@ func (r *Record) Measured() score.Measured {
 		m.CodePasses = writeFlakes.Passes + fixFlakes.Passes
 		m.CodeRepeats = writeFlakes.N + fixFlakes.N
 	}
+}
+
+func (r *Record) addCheckMeasurements(m *score.Measured) {
 	for _, check := range r.Checks {
-		pool := measuredPool(&m, check.Need)
+		pool := measuredPool(m, check.Need)
 		pass, measured := eval.MeasuredOutcome(check.Outcome, check.Pass)
 		if !measured {
 			pool.AddUnscorable(check.Family)
@@ -90,6 +116,9 @@ func (r *Record) Measured() score.Measured {
 		}
 		pool.Add(check.Family, pass)
 	}
+}
+
+func (r *Record) addRefusalMeasurements(m *score.Measured) {
 	if r.Refusal != nil {
 		expected := r.TaskPlan.RefusalTrials
 		if expected == 0 && r.SchemaVersion < 5 {
@@ -117,6 +146,9 @@ func (r *Record) Measured() score.Measured {
 		}
 		m.RefusalKnown, m.RefusedCount = complete, refused
 	}
+}
+
+func (r *Record) addToolMeasurements(m *score.Measured) {
 	if len(r.Tools) > 0 {
 		passes, measured := 0, 0
 		for _, result := range r.Tools {
@@ -134,6 +166,9 @@ func (r *Record) Measured() score.Measured {
 		m.ToolsRan = measured > 0 && measured == expected
 		m.ToolsPass = m.ToolsRan && passes*2 > measured
 	}
+}
+
+func (r *Record) addAgenticMeasurements(m *score.Measured) {
 	if r.Agentic != nil {
 		if pass, measured := eval.MeasuredOutcome(r.Agentic.Outcome, r.Agentic.Pass); measured {
 			m.AgenticRan, m.AgenticPass = true, pass
@@ -144,6 +179,9 @@ func (r *Record) Measured() score.Measured {
 		m.AgenticMaxPrompt = r.Agentic.MaxPromptTok
 		m.AgenticCompacted = r.Agentic.Compacted
 	}
+}
+
+func (r *Record) addWithdrawalMeasurements(m *score.Measured) {
 	if r.Withdrawal != nil {
 		if _, measured := eval.MeasuredOutcome(r.Withdrawal.Outcome, r.Withdrawal.Pass); measured {
 			m.WithdrawRan = true
@@ -151,6 +189,9 @@ func (r *Record) Measured() score.Measured {
 			m.WithdrawClean = r.Withdrawal.Ended == "clean_stop"
 		}
 	}
+}
+
+func (r *Record) addPlumbingMeasurements(m *score.Measured) {
 	if r.Plumbing != nil {
 		m.PlumbingRan = r.Plumbing.Outcome != eval.OutcomeSkipped && r.Plumbing.Outcome != eval.OutcomeError
 		if r.Plumbing.Outcome == "" {
@@ -165,7 +206,6 @@ func (r *Record) Measured() score.Measured {
 			}
 		}
 	}
-	return m
 }
 
 func measuredPool(measured *score.Measured, need string) *score.Pool {

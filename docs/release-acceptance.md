@@ -69,6 +69,21 @@ left no model resident and did not read or modify existing user evidence.
 
 ## Live backend matrix
 
+A backend row and an operating-system row prove different things. An operating
+system row must execute the complete everyday loop. A backend row needs one
+positive measured run with the backend selected explicitly, an isolated
+results directory, the backend's identity and context receipts, saved evidence
+reopened by `view`, and server request logs. Honest SKIP fields remain SKIP and
+do not fail the row. The exact launch command, runtime version, model digest,
+device state, FITR command, result path, and cleanup must be recorded.
+
+For llama-server, lifecycle cleanup is external because the backend cannot
+unload a server-owned model. Acceptance must start a dedicated loopback server,
+record `/props`, run with `--backend llama-server`, stop that exact process,
+and confirm the listener closed. Do not start the run while unrelated GPU work
+would contaminate timing or require killing another process. A server preloads
+its model, so its probe wall time is not an unloaded-runtime measurement.
+
 | Backend | Discovery and inventory | Positive measured run | Identity gate | Context gate | Status |
 |---|---:|---:|---:|---:|---|
 | Ollama | Pass on two Windows hosts | Pass | Runtime digest pass | `/api/ps.context_length` pass | Pass on native hosts |

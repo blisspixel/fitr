@@ -5,9 +5,10 @@
 # learn to ignore.
 #
 # Deliberately deferred, each with a reason rather than a shrug:
-#   funlen, gocognit, gocyclo, nestif, dupl - ~90 findings concentrated in the
-#     run pipeline. Enabling them before that code is decomposed buys a wall of
-#     nolint directives, not better code. Tracked in the roadmap.
+#   funlen, gocognit, nestif - findings remain spread across command, scoring,
+#     evaluation, session, and presentation paths. Enabling them before those
+#     paths are decomposed buys a wall of nolint directives, not better code.
+#     Tracked in the roadmap.
 #   recvcheck - five types mix value and pointer receivers. Correcting that
 #     changes value semantics on types that are copied deliberately, which is a
 #     considered change, not a lint sweep.
@@ -61,9 +62,14 @@ linters:
     - usetesting # t.TempDir / t.Setenv over hand-rolled equivalents
 
     # Hygiene.
+    - dupl # duplicated production logic drifts and weakens evidence contracts
+    - gocyclo # keep every control-flow unit within the project threshold
     - nolintlint
 
   settings:
+    gocyclo:
+      min-complexity: 30
+
     errcheck:
       check-type-assertions: true
       # Writing to stdout/stderr and closing a file opened for reading cannot

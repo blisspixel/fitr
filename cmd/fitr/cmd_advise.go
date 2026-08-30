@@ -23,6 +23,47 @@ import (
 // flag to try? SKIP when fit cannot be measured (no VRAM reading, no
 // weights, no architecture) - never a fabricated GB number.
 func cmdAdvise(ctx context.Context, args []string) int {
+	command, code, ok := parseAdviseCommand(args)
+	if !ok {
+		return code
+	}
+	if command.raw == "" {
+		return cmdStatus(ctx, []string{"--display", command.mode, "--backend", command.backend})
+	}
+
+	in, currentFP := initialAdviseInput(ctx, command)
+	c, ggufPath, currentFP, code := resolveAdviseSource(ctx, command, &in, currentFP)
+	if code != exitOK {
+		return code
+	}
+	if code := measureAdviseFit(ctx, command, ggufPath, &in); code != exitOK {
+		return code
+	}
+	release, code := measureAdviseLoad(ctx, command, c, &in)
+	if code != exitOK {
+		return code
+	}
+	if release != nil {
+		defer release()
+	}
+
+	in.Timings = adviseTimings(in.Model, verifiedModelArtifactDigest(ctx, c, command.model), currentFP)
+	return writeAdviseReport(command.mode, in)
+}
+
+type adviseCommand struct {
+	raw     string
+	model   string
+	backend string
+	mode    string
+	vram    float64
+	ctxSize int
+	pull    bool
+	load    bool
+	fit     bool
+}
+
+func parseAdviseCommand(args []string) (adviseCommand, int, bool) {
 	fs := flag.NewFlagSet("advise", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	vram := fs.Float64("vram-gb", -1, "available GPU memory in GB (skip detection)")
@@ -33,45 +74,50 @@ func cmdAdvise(ctx context.Context, args []string) int {
 	loadFlag := fs.Bool("load", false, "load the model on Ollama and read resident size (dummy allocation)")
 	fitFlag := fs.Bool("fit", false, "run llama-fit-params on a GGUF if it is on PATH")
 	if code, ok := parseCommandFlags(fs, args); !ok {
-		return code
+		return adviseCommand{}, code, false
 	}
 	if !render.ValidMode(*mode) {
 		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
-		return exitUsage
+		return adviseCommand{}, exitUsage, false
 	}
 	if _, ok := canonicalBackendKind(*backend); !ok {
 		errPrint("invalid backend", *backend, "use auto, ollama, llama-server, or openai")
-		return exitUsage
+		return adviseCommand{}, exitUsage, false
 	}
 	if *ctxSize < 0 {
 		errPrint("invalid context size", "--ctx cannot be negative", "omit --ctx for the model default, or pass a positive token count")
-		return exitUsage
+		return adviseCommand{}, exitUsage, false
 	}
 	if *vram < -1 {
 		errPrint("invalid VRAM size", "--vram-gb cannot be negative", "omit --vram-gb for automatic detection, or pass a non-negative size")
-		return exitUsage
+		return adviseCommand{}, exitUsage, false
 	}
 	if fs.NArg() > 1 {
 		errPrint("too many arguments", "advise accepts at most one model", "fitr advise [model] [flags]")
-		return exitUsage
+		return adviseCommand{}, exitUsage, false
 	}
 	if fs.NArg() < 1 {
 		if *loadFlag || *fitFlag || *pullFlag || *ctxSize != 0 || *vram >= 0 {
 			errPrint("missing model", "fit/load/ctx flags need a model", "fitr advise <model>  or  fitr advise ./model.gguf")
-			return exitUsage
+			return adviseCommand{}, exitUsage, false
 		}
-		return cmdStatus(ctx, []string{"--display", *mode, "--backend", *backend})
+		return adviseCommand{backend: *backend, mode: *mode}, exitOK, true
 	}
 	raw := fs.Arg(0)
-	model := normalizeModelRef(raw)
+	return adviseCommand{
+		raw: raw, model: normalizeModelRef(raw), backend: *backend, mode: *mode,
+		vram: *vram, ctxSize: *ctxSize, pull: *pullFlag, load: *loadFlag, fit: *fitFlag,
+	}, exitOK, true
+}
 
-	in := advise.Input{Model: model, Ctx: *ctxSize}
+func initialAdviseInput(ctx context.Context, command adviseCommand) (advise.Input, device.Fingerprint) {
+	in := advise.Input{Model: command.model, Ctx: command.ctxSize}
 	currentFP := device.Fingerprint{}
-	if *backend != "" && *backend != "auto" {
-		in.Backend = *backend
+	if command.backend != "" && command.backend != "auto" {
+		in.Backend = command.backend
 	}
-	if *vram >= 0 {
-		in.HaveGB = *vram
+	if command.vram >= 0 {
+		in.HaveGB = command.vram
 		in.HaveSrc = "--vram-gb"
 	} else {
 		fp := device.Detect(ctx, nil)
@@ -79,151 +125,185 @@ func cmdAdvise(ctx context.Context, args []string) int {
 		in.HaveSrc = fp.VRAMSource
 		currentFP = fp
 	}
-	if kv := os.Getenv("OLLAMA_KV_CACHE_TYPE"); kv != "" {
-		if n, ok := advise.KVElemBytes(kv); ok {
-			in.KVBytes = n
-			in.KVSrc = "OLLAMA_KV_CACHE_TYPE=" + kv
-		}
-	}
+	setAdviseKV(&in, os.Getenv("OLLAMA_KV_CACHE_TYPE"))
+	return in, currentFP
+}
 
-	var c llm.Backend
-	ggufPath := ""
-	if isLocalGGUF(raw) {
-		kvs, size, err := advise.OpenGGUF(raw)
-		if err != nil {
-			errPrint("could not read GGUF: "+err.Error(), "", "")
-			return exitError
-		}
-		in.Model = raw
-		in.Arch = advise.ArchFromKVs(kvs)
+func setAdviseKV(in *advise.Input, kv string) {
+	if kv == "" {
+		return
+	}
+	if n, ok := advise.KVElemBytes(kv); ok {
+		in.KVBytes = n
+		in.KVSrc = "OLLAMA_KV_CACHE_TYPE=" + kv
+	}
+}
+
+func resolveAdviseSource(ctx context.Context, command adviseCommand, in *advise.Input,
+	currentFP device.Fingerprint) (llm.Backend, string, device.Fingerprint, int) {
+	if isLocalGGUF(command.raw) {
+		path, code := readLocalAdviseSource(command.raw, in)
+		return nil, path, currentFP, code
+	}
+	return readBackendAdviseSource(ctx, command, in)
+}
+
+func readLocalAdviseSource(path string, in *advise.Input) (string, int) {
+	kvs, size, err := advise.OpenGGUF(path)
+	if err != nil {
+		errPrint("could not read GGUF: "+err.Error(), "", "")
+		return "", exitError
+	}
+	in.Model = path
+	in.Arch = advise.ArchFromKVs(kvs)
+	in.WeightsB = size
+	in.Source = "GGUF metadata"
+	if q := quantFromFilename(path); isQuantTag(q) {
+		in.Quant = strings.ToUpper(q)
+	}
+	return path, exitOK
+}
+
+func readBackendAdviseSource(ctx context.Context, command adviseCommand,
+	in *advise.Input) (llm.Backend, string, device.Fingerprint, int) {
+	c, code := newBackend(ctx, command.model, command.backend, command.pull)
+	if code != exitOK {
+		return nil, "", device.Fingerprint{}, code
+	}
+	in.Backend = c.Name()
+	fp := device.Detect(ctx, c)
+	if free, ok := device.AvailableVRAM(ctx); ok {
+		in.FreeGB = free
+	}
+	if command.vram < 0 {
+		in.HaveGB = fp.VRAMGb
+		in.HaveSrc = fp.VRAMSource
+	}
+	setAdviseKV(in, fp.Config["OLLAMA_KV_CACHE_TYPE"])
+	ggufPath := readShownAdviseSource(ctx, c, command.model, in)
+	if in.WeightsB == 0 {
+		in.WeightsB = weightsFromTags(ctx, c, command.model)
+	}
+	if in.Source == "" {
+		in.Source = c.Name() + " (no architecture metadata)"
+	}
+	readResidentAdviseSource(ctx, c, command.model, in, c.Name()+" /api/ps", 0)
+	return c, ggufPath, fp, exitOK
+}
+
+func readShownAdviseSource(ctx context.Context, c llm.Backend, model string, in *advise.Input) string {
+	info, err := c.Show(ctx, model)
+	if err != nil {
+		return ""
+	}
+	in.Quant = info.Details.QuantizationLevel
+	if info.Size > 0 {
+		in.WeightsB = info.Size
+	}
+	if len(info.Info) > 0 {
+		in.Arch = advise.ArchFromKVs(info.Info)
+		in.Source = "Ollama /api/show"
+	}
+	if !in.Arch.KVReady() && info.Path != "" {
+		readAdviseGGUFFallback(info.Path, in)
+	}
+	return info.Path
+}
+
+func readAdviseGGUFFallback(path string, in *advise.Input) {
+	kvs, size, err := advise.OpenGGUF(path)
+	if err != nil {
+		return
+	}
+	in.Arch = advise.ArchFromKVs(kvs)
+	if in.WeightsB == 0 {
 		in.WeightsB = size
-		in.Source = "GGUF metadata"
-		ggufPath = raw
-		if q := quantFromFilename(raw); isQuantTag(q) {
-			in.Quant = strings.ToUpper(q)
+	}
+	in.Source = "GGUF at " + path
+}
+
+func readResidentAdviseSource(ctx context.Context, c llm.Backend, model string,
+	in *advise.Input, source string, residentCtx int) {
+	running, err := c.PS(ctx)
+	if err != nil {
+		return
+	}
+	for _, runningModel := range running {
+		if !modelref.SameServed(model, runningModel.Name) || runningModel.Size <= 0 {
+			continue
 		}
+		in.ResidentB = runningModel.Size
+		in.ResidentSrc = source
+		in.ResidentCtx = residentCtx
+		return
+	}
+}
+
+func measureAdviseFit(ctx context.Context, command adviseCommand, ggufPath string, in *advise.Input) int {
+	if !command.fit {
+		return exitOK
+	}
+	if ggufPath == "" {
+		errPrint("--fit needs a GGUF path", "", "pass ./model.gguf, or an Ollama model whose blob path is known")
+		return exitUsage
+	}
+	fmt.Fprintf(os.Stderr, "  llama-fit-params %s\n", terminalText(ggufPath))
+	used, cannot, err := advise.RunFitParams(ctx, ggufPath, command.ctxSize)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, " note: llama-fit-params not used: %s\n", terminalText(err.Error()))
+		return exitOK
+	}
+	in.FitB, in.FitCannot, in.FitSrc = used, cannot, "llama-fit-params"
+	return exitOK
+}
+
+func measureAdviseLoad(ctx context.Context, command adviseCommand, c llm.Backend,
+	in *advise.Input) (func(), int) {
+	if !command.load {
+		return nil, exitOK
+	}
+	if c == nil || c.Name() != "ollama" {
+		errPrint("--load needs a running Ollama", "",
+			"pass an Ollama model tag; llama-server is already loaded, and a bare .gguf needs --fit")
+		return nil, exitUsage
+	}
+	if in.ResidentB != 0 {
+		return nil, exitOK
+	}
+	if in.WeightsB > 0 && in.HaveGB > 0 && float64(in.WeightsB) > in.HaveGB*advise.GiB {
+		fmt.Fprintln(os.Stderr, " note: not loading: weights alone exceed the budget")
+		return nil, exitOK
+	}
+	return loadAdviseResident(ctx, command, c, in)
+}
+
+func loadAdviseResident(ctx context.Context, command adviseCommand, c llm.Backend,
+	in *advise.Input) (func(), int) {
+	lk, err := lock.Acquire("eval", "advise --load "+command.model)
+	if err != nil {
+		errPrint(err.Error(), "", "")
+		return nil, exitError
+	}
+	ctxLen := command.ctxSize
+	if ctxLen <= 0 {
+		ctxLen = 2048
+	}
+	fmt.Fprintf(os.Stderr, "  loading %s at num_ctx=%d to measure resident size\n", terminalText(command.model), ctxLen)
+	_, _, err = c.Generate(ctx, command.model, ".", ollama.Deterministic(1, ctxLen))
+	if err != nil {
+		in.LoadErr = err.Error()
 	} else {
-		var code int
-		c, code = newBackend(ctx, model, *backend, *pullFlag)
-		if code != exitOK {
-			return code
-		}
-		in.Backend = c.Name()
-		fp := device.Detect(ctx, c)
-		currentFP = fp
-		if free, ok := device.AvailableVRAM(ctx); ok {
-			in.FreeGB = free
-		}
-		if *vram < 0 {
-			in.HaveGB = fp.VRAMGb
-			in.HaveSrc = fp.VRAMSource
-		}
-		if kv := fp.Config["OLLAMA_KV_CACHE_TYPE"]; kv != "" {
-			if n, ok := advise.KVElemBytes(kv); ok {
-				in.KVBytes = n
-				in.KVSrc = "OLLAMA_KV_CACHE_TYPE=" + kv
-			}
-		}
-		info, err := c.Show(ctx, model)
-		if err == nil {
-			in.Quant = info.Details.QuantizationLevel
-			if info.Size > 0 {
-				in.WeightsB = info.Size
-			}
-			if len(info.Info) > 0 {
-				in.Arch = advise.ArchFromKVs(info.Info)
-				in.Source = "Ollama /api/show"
-			}
-			if info.Path != "" {
-				ggufPath = info.Path
-			}
-			if !in.Arch.KVReady() && info.Path != "" {
-				if kvs, size, err := advise.OpenGGUF(info.Path); err == nil {
-					in.Arch = advise.ArchFromKVs(kvs)
-					if in.WeightsB == 0 {
-						in.WeightsB = size
-					}
-					in.Source = "GGUF at " + info.Path
-				}
-			}
-		}
-		if in.WeightsB == 0 {
-			in.WeightsB = weightsFromTags(ctx, c, model)
-		}
-		if in.Source == "" {
-			in.Source = c.Name() + " (no architecture metadata)"
-		}
-		if running, err := c.PS(ctx); err == nil {
-			for _, m := range running {
-				if !modelref.SameServed(model, m.Name) || m.Size <= 0 {
-					continue
-				}
-				in.ResidentB = m.Size
-				in.ResidentSrc = c.Name() + " /api/ps"
-				break
-			}
-		}
+		readResidentAdviseSource(ctx, c, command.model, in, "ollama /api/ps after --load", ctxLen)
 	}
-
-	if *fitFlag {
-		if ggufPath == "" {
-			errPrint("--fit needs a GGUF path", "", "pass ./model.gguf, or an Ollama model whose blob path is known")
-			return exitUsage
-		}
-		fmt.Fprintf(os.Stderr, "  llama-fit-params %s\n", terminalText(ggufPath))
-		used, cannot, err := advise.RunFitParams(ctx, ggufPath, *ctxSize)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, " note: llama-fit-params not used: %s\n", terminalText(err.Error()))
-		} else {
-			in.FitB, in.FitCannot, in.FitSrc = used, cannot, "llama-fit-params"
-		}
+	if left, stopErr := c.StopAll(ctx); stopErr == nil && len(left) > 0 {
+		fmt.Fprintf(os.Stderr, " note: still resident: %s\n", terminalText(strings.Join(left, ", ")))
 	}
+	return func() { _ = lk.Release() }, exitOK
+}
 
-	if *loadFlag {
-		if c == nil || c.Name() != "ollama" {
-			errPrint("--load needs a running Ollama", "",
-				"pass an Ollama model tag; llama-server is already loaded, and a bare .gguf needs --fit")
-			return exitUsage
-		}
-		if in.ResidentB == 0 {
-			if in.WeightsB > 0 && in.HaveGB > 0 && float64(in.WeightsB) > in.HaveGB*advise.GiB {
-				fmt.Fprintf(os.Stderr, " note: not loading: weights alone exceed the budget\n")
-			} else {
-				lk, err := lock.Acquire("eval", "advise --load "+model)
-				if err != nil {
-					errPrint(err.Error(), "", "")
-					return exitError
-				}
-				defer lk.Release() //nolint:errcheck // best effort on a advisory print
-				ctxLen := *ctxSize
-				if ctxLen <= 0 {
-					ctxLen = 2048
-				}
-				fmt.Fprintf(os.Stderr, "  loading %s at num_ctx=%d to measure resident size\n", terminalText(model), ctxLen)
-				_, _, err = c.Generate(ctx, model, ".", ollama.Deterministic(1, ctxLen))
-				if err != nil {
-					in.LoadErr = err.Error()
-				} else if running, err := c.PS(ctx); err == nil {
-					for _, m := range running {
-						if !modelref.SameServed(model, m.Name) || m.Size <= 0 {
-							continue
-						}
-						in.ResidentB = m.Size
-						in.ResidentSrc = "ollama /api/ps after --load"
-						in.ResidentCtx = ctxLen
-						break
-					}
-				}
-				if left, err := c.StopAll(ctx); err == nil && len(left) > 0 {
-					fmt.Fprintf(os.Stderr, " note: still resident: %s\n", terminalText(strings.Join(left, ", ")))
-				}
-			}
-		}
-	}
-
-	in.Timings = adviseTimings(in.Model, verifiedModelArtifactDigest(ctx, c, model), currentFP)
+func writeAdviseReport(mode string, in advise.Input) int {
 	rep := advise.Evaluate(in)
-	switch render.Resolve(*mode) {
+	switch render.Resolve(mode) {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")

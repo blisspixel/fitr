@@ -195,11 +195,73 @@ family, so completing every spec in a round was spec-balanced, not
 equal-family-balanced. That mismatch could not support the advertised
 anytime-valid pooled-rate claim.
 
-A future sequential design must first declare its estimand and stratified
-sampling plan. The current research direction is one fresh instance per
-distinct family per complete round, with an anytime-valid bounded-mean process
-over complete-round family averages. Until that design has replayable receipts
-and calibration tests, fixed sampling is the evidence-bearing path.
+A future sequential design now has a frozen estimand and sampling contract. It
+is still not a public mode. For need `n`, let `S_nf` be the declared specs in
+family `f`, let `m_nf` be that family's spec count, and let `M_n` be the total
+declared spec count. The target is
+
+    theta_n = (1/M_n) sum_f sum_(s in S_nf) P(pass on a fresh instance from s)
+
+This is the pass probability for a uniformly selected declared spec. It
+preserves the meaning of current gates and fixed runs. An unweighted average
+of family rates would target a different quantity and cannot silently reuse
+those gates or historical scorecards.
+
+Each complete adaptive round selects one spec uniformly within every family,
+generates one fresh instance, and observes binary outcome `X_nft`. The round
+score is
+
+    Z_nt = (1/M_n) sum_f m_nf X_nft
+
+so its mean is `theta_n` under the sealed randomized design. For the
+conditional-mean claim used by the betting process, the filtration at a round
+boundary contains completed assignments and outcomes only. The next round's
+fresh assignment and outcome are revealed together after the continue/stop
+decision. Future entries may be committed before inference for replay, but
+the stopping implementation must not inspect them. An equivalent
+implementation may commit a selector seed and derive each round only after
+the preceding decision. A user-picked deterministic seed schedule is
+ineligible for this claim. Paired compare and calibration remain fixed-plan
+only.
+
+For gate `g`, the candidate anytime-valid test is a finite mixture of bounded
+mean betting processes. With the frozen bet grid
+`C = {1/16, 1/8, 1/4, 1/2, 3/4}`:
+
+    E_plus(t,g)  = mean_(c in C) product_(i=1..t) [1 + (c/g)(Z_i-g)]
+    E_minus(t,g) = mean_(c in C) product_(i=1..t) [1 - (c/(1-g))(Z_i-g)]
+
+At per-need alpha 0.05, allocate 0.025 to each side and cross at wealth 40.
+Boundaries are evaluated only after a complete family round. The first upper
+crossing means above gate, the first lower crossing means below gate, a cap
+without crossing is inconclusive, and a same-round double crossing is a
+protocol conflict. Any SKIP, ERROR, or INCONCLUSIVE inside a round terminates
+that need as unscorable. Missing evidence is never dropped or replaced.
+
+The implementation must use exact rational arithmetic for gates, weights, bet
+fractions, wealth updates, and boundary comparisons. The maximum schedule is
+sealed before inference with ordered needs, families, task membership, spec
+weights, selection distribution, instance seeds, execution order, profile and
+policy digests, and a schedule commitment. Future assignments remain hidden
+from the stopping path until their round begins. Completion records preserve
+every schedule index and round, all outcome counts, the decision, stop reason,
+first crossing, and final wealths. Raw outcomes remain authoritative; replay
+recomputes every round and rejects gaps, duplicates, reorder, substitution,
+resampling, observations after stopping, or a stored decision that is not the
+first valid crossing.
+
+This requires result schema 7, a new manifest and completion payload, an
+adaptive-specific scorer, exact golden vectors, mutation tests, and calibrated
+false-crossing and power simulations. Fixed `ClusteredWilson` and its
+fixed-sample dead-family check are invalid after optional stopping and must not
+be reused. A need with only one family, including current `tool_restraint`, can
+establish only within-family behavior under the existing product policy.
+
+The design follows anytime-valid confidence-sequence and bounded-mean betting
+results from [Howard et al. (2021)](https://doi.org/10.1214/20-AOS1991) and
+[Waudby-Smith and Ramdas (2023)](https://doi.org/10.1093/jrsssb/qkad009).
+Until schema, scorer, replay, simulation, and policy work land together, fixed
+sampling is the only evidence-bearing path.
 
 ## 7. Zero failures observed: the exact bound behind "deterministic"
 

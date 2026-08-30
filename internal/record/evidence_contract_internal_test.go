@@ -323,7 +323,7 @@ func TestRecomputeOutcomeCountsDoesNotInventMissingObservations(t *testing.T) {
 		Withdrawal: &eval.ToolLoopResult{Outcome: eval.OutcomeSkipped},
 		Agentic:    &eval.ToolLoopResult{Outcome: eval.OutcomeInconclusive},
 	}
-	counts, err := r.recomputeOutcomeCounts()
+	counts, err := r.DeriveEvidenceCounts()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,8 +382,8 @@ func TestRecomputeOutcomeCountsRejectsInvalidRawOutcomes(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := tc.r.recomputeOutcomeCounts(); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("recomputeOutcomeCounts() error = %v, want %q", err, tc.want)
+			if _, err := tc.r.DeriveEvidenceCounts(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("DeriveEvidenceCounts() error = %v, want %q", err, tc.want)
 			}
 		})
 	}
@@ -555,7 +555,7 @@ func completeContractRecord(t *testing.T, plan TaskPlan, configure func(*Record)
 		configure(r)
 	}
 	normalizeCheckPlanForTest(t, r)
-	counts, err := r.recomputeOutcomeCounts()
+	counts, err := r.DeriveEvidenceCounts()
 	if err != nil {
 		t.Fatalf("recompute fixture counts: %v", err)
 	}

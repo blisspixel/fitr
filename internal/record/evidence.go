@@ -189,6 +189,28 @@ func (r *Record) validateDerivedEvidence() error {
 	if err := r.validateExecutorEvidence(); err != nil {
 		return err
 	}
+	if err := r.validatePlannedObservations(); err != nil {
+		return err
+	}
+	if err := r.validateEvidenceCounts(); err != nil {
+		return err
+	}
+	if err := r.validateSpeedEvidence(); err != nil {
+		return err
+	}
+	if err := r.validateRefusalEvidence(); err != nil {
+		return err
+	}
+	if err := r.validateOutputSummaries(); err != nil {
+		return err
+	}
+	if r.Scorecard.Model != r.Model || r.Scorecard.Profile != r.Profile {
+		return errors.New("scorecard identity does not match the completed run")
+	}
+	return nil
+}
+
+func (r *Record) validatePlannedObservations() error {
 	if len(r.Checks) != r.TaskPlan.CheckTrialsLimit {
 		return fmt.Errorf("check observations %d do not match planned %d", len(r.Checks), r.TaskPlan.CheckTrialsLimit)
 	}
@@ -213,61 +235,88 @@ func (r *Record) validateDerivedEvidence() error {
 			return errors.New("refusal observations do not match the sealed plan")
 		}
 	}
-	counts, err := r.recomputeOutcomeCounts()
+	return nil
+}
+
+func (r *Record) validateEvidenceCounts() error {
+	counts, err := r.DeriveEvidenceCounts()
 	if err != nil {
 		return err
 	}
 	if !reflect.DeepEqual(counts, r.EvidenceCounts) {
 		return errors.New("persisted evidence counts do not match raw observations")
 	}
+	return nil
+}
+
+func (r *Record) validateSpeedEvidence() error {
 	if len(r.Speed) != r.TaskPlan.SpeedSamples {
 		return fmt.Errorf("speed observations %d do not match planned %d", len(r.Speed), r.TaskPlan.SpeedSamples)
 	}
 	decode, ttft, prefill := make([]float64, 0, len(r.Speed)), make([]float64, 0, len(r.Speed)), make([]float64, 0, len(r.Speed))
 	for i, sample := range r.Speed {
-		measurements := []float64{
-			sample.DecodeTPS, sample.TTFT, sample.ColdTTFT, sample.ColdLoad,
-			sample.WarmTTFT, sample.PrefillTPS,
-		}
-		for _, measurement := range measurements {
-			if math.IsNaN(measurement) || math.IsInf(measurement, 0) {
-				return fmt.Errorf("speed observation %d contains a non-finite measurement", i)
-			}
-		}
-		if sample.DecodeTPS < 0 || sample.TTFT < 0 || sample.ColdTTFT < 0 || sample.ColdLoad < 0 ||
-			sample.WarmTTFT < 0 || sample.PrefillTPS < 0 || sample.PromptTok < 0 ||
-			sample.CachedPromptTok < 0 || sample.GatedCachedTok < 0 || sample.GatedPromptTok < 0 ||
-			sample.WarmPromptTok < 0 || sample.WarmCachedTok < 0 {
-			return fmt.Errorf("speed observation %d contains a negative measurement", i)
-		}
-		if !sample.FirstOutputObserved {
-			return fmt.Errorf("speed observation %d has no first-output receipt", i)
-		}
-		if sample.ColdTTFT > 0 && sample.ColdLoad <= 0.1 {
-			return fmt.Errorf("speed observation %d labels cold TTFT without a cold-load receipt", i)
-		}
-		if sample.GatedCacheKnown && !sample.GatedCacheReceiptValid() {
-			return fmt.Errorf("speed observation %d has an empty gated cache receipt", i)
-		}
-		if sample.PrefillCacheKnown && !sample.PrefillCacheReceiptValid() {
-			return fmt.Errorf("speed observation %d has an empty prefill cache receipt", i)
-		}
-		if sample.WarmCacheKnown && !sample.WarmCacheReceiptValid() {
-			return fmt.Errorf("speed observation %d has an invalid warm cache receipt", i)
-		}
-		if sample.WarmTTFT > 0 && !sample.WarmCacheReceiptValid() {
-			return fmt.Errorf("speed observation %d labels warm TTFT without a cache-hit receipt", i)
-		}
-		if !sample.GatedCacheKnown && sample.GatedCachedTok != 0 ||
-			!sample.PrefillCacheKnown && sample.CachedPromptTok != 0 ||
-			!sample.WarmCacheKnown && sample.WarmCachedTok != 0 {
-			return fmt.Errorf("speed observation %d has cached tokens without a cache receipt", i)
+		if err := validateSpeedSample(i, sample); err != nil {
+			return err
 		}
 		decode, ttft, prefill = append(decode, sample.DecodeTPS), append(ttft, sample.TTFT), append(prefill, sample.PrefillTPS)
 	}
 	if r.DecodeSum != stats.MeanSD(decode) || r.TTFTSum != stats.MeanSD(ttft) || r.PrefillSum != stats.MeanSD(prefill) {
 		return errors.New("persisted speed summaries do not match raw observations")
 	}
+	return nil
+}
+
+func validateSpeedSample(i int, sample eval.SpeedResult) error {
+	measurements := []float64{
+		sample.DecodeTPS, sample.TTFT, sample.ColdTTFT, sample.ColdLoad,
+		sample.WarmTTFT, sample.PrefillTPS,
+	}
+	for _, measurement := range measurements {
+		if math.IsNaN(measurement) || math.IsInf(measurement, 0) {
+			return fmt.Errorf("speed observation %d contains a non-finite measurement", i)
+		}
+	}
+	if hasNegativeSpeedMeasurement(sample) {
+		return fmt.Errorf("speed observation %d contains a negative measurement", i)
+	}
+	if !sample.FirstOutputObserved {
+		return fmt.Errorf("speed observation %d has no first-output receipt", i)
+	}
+	if sample.ColdTTFT > 0 && sample.ColdLoad <= 0.1 {
+		return fmt.Errorf("speed observation %d labels cold TTFT without a cold-load receipt", i)
+	}
+	if sample.GatedCacheKnown && !sample.GatedCacheReceiptValid() {
+		return fmt.Errorf("speed observation %d has an empty gated cache receipt", i)
+	}
+	if sample.PrefillCacheKnown && !sample.PrefillCacheReceiptValid() {
+		return fmt.Errorf("speed observation %d has an empty prefill cache receipt", i)
+	}
+	if sample.WarmCacheKnown && !sample.WarmCacheReceiptValid() {
+		return fmt.Errorf("speed observation %d has an invalid warm cache receipt", i)
+	}
+	if sample.WarmTTFT > 0 && !sample.WarmCacheReceiptValid() {
+		return fmt.Errorf("speed observation %d labels warm TTFT without a cache-hit receipt", i)
+	}
+	if hasUnreceiptedCachedTokens(sample) {
+		return fmt.Errorf("speed observation %d has cached tokens without a cache receipt", i)
+	}
+	return nil
+}
+
+func hasNegativeSpeedMeasurement(sample eval.SpeedResult) bool {
+	return sample.DecodeTPS < 0 || sample.TTFT < 0 || sample.ColdTTFT < 0 || sample.ColdLoad < 0 ||
+		sample.WarmTTFT < 0 || sample.PrefillTPS < 0 || sample.PromptTok < 0 ||
+		sample.CachedPromptTok < 0 || sample.GatedCachedTok < 0 || sample.GatedPromptTok < 0 ||
+		sample.WarmPromptTok < 0 || sample.WarmCachedTok < 0
+}
+
+func hasUnreceiptedCachedTokens(sample eval.SpeedResult) bool {
+	return !sample.GatedCacheKnown && sample.GatedCachedTok != 0 ||
+		!sample.PrefillCacheKnown && sample.CachedPromptTok != 0 ||
+		!sample.WarmCacheKnown && sample.WarmCachedTok != 0
+}
+
+func (r *Record) validateRefusalEvidence() error {
 	refused := 0
 	for key, verdict := range r.Refusal {
 		if verdict.Outcome == eval.OutcomePass && verdict.Verdict != "answered" ||
@@ -281,6 +330,10 @@ func (r *Record) validateDerivedEvidence() error {
 	if refused != r.Refused {
 		return errors.New("refused count does not match raw refusal outcomes")
 	}
+	return nil
+}
+
+func (r *Record) validateOutputSummaries() error {
 	longest := ""
 	for _, result := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
 		if len(result.Raw) > len(longest) {
@@ -294,9 +347,6 @@ func (r *Record) validateDerivedEvidence() error {
 	}
 	if r.Rep != score.RepetitionMetrics(longest) || r.Density != score.InformationDensity(longest) {
 		return errors.New("persisted output summaries do not match raw observations")
-	}
-	if r.Scorecard.Model != r.Model || r.Scorecard.Profile != r.Profile {
-		return errors.New("scorecard identity does not match the completed run")
 	}
 	return nil
 }
@@ -366,7 +416,11 @@ func (r *Record) validateExecutorEvidence() error {
 	return nil
 }
 
-func (r *Record) recomputeOutcomeCounts() (map[string]eval.OutcomeCounts, error) {
+// DeriveEvidenceCounts reconstructs every immutable denominator from the raw
+// observations. The runner and the persisted-record validator call this same
+// function so the producer cannot silently use weaker counting rules than the
+// verifier.
+func (r *Record) DeriveEvidenceCounts() (map[string]eval.OutcomeCounts, error) {
 	collect := func(phase string, expected int, values []eval.Outcome) (eval.OutcomeCounts, error) {
 		for _, value := range values {
 			switch value {

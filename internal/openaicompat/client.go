@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -291,140 +292,178 @@ func (c *Client) generateViaChat(ctx context.Context, model, prompt string, s ol
 // and last token, prefill tok/s from prompt tokens over TTFT.
 func (c *Client) consumeStream(resp *http.Response, start time.Time,
 	pick func(completionsChunk) (text, finish string)) (string, ollama.Metrics, error) {
-	var sb strings.Builder
-	var ttft float64
-	var lastTok time.Time
-	var usagePrompt, usageCompletion int
-	finish := ""
-	seenUsage := false
-	seenDone := false
-	var eventData []string
-	var eventBytes, eventCount, totalBytes int
+	stream := streamAccumulator{client: c, header: resp.Header, start: start, pick: pick}
+	if err := stream.read(resp.Body); err != nil {
+		return stream.text.String(), ollama.Metrics{}, err
+	}
+	metrics, err := stream.metrics()
+	return stream.text.String(), metrics, err
+}
 
-	dispatch := func() error {
-		if len(eventData) == 0 {
-			return nil
+type streamAccumulator struct {
+	client                 *Client
+	header                 http.Header
+	start                  time.Time
+	pick                   func(completionsChunk) (text, finish string)
+	text                   strings.Builder
+	ttft                   float64
+	lastTok                time.Time
+	usagePrompt            int
+	usageCompletion        int
+	finish                 string
+	seenUsage              bool
+	seenDone               bool
+	eventData              []string
+	eventBytes, eventCount int
+	totalBytes             int
+}
+
+func (s *streamAccumulator) read(body io.Reader) error {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxSSELine)
+	for scanner.Scan() {
+		if err := s.consumeLine(strings.TrimSuffix(scanner.Text(), "\r")); err != nil {
+			return err
 		}
-		eventCount++
-		if eventCount > maxSSEEvents {
-			return fmt.Errorf("openai-compat: SSE event count exceeds %d", maxSSEEvents)
-		}
-		data := []byte(strings.Join(eventData, "\n"))
-		eventData = eventData[:0]
-		eventBytes = 0
-		if seenDone {
-			return errors.New("openai-compat: SSE stream contains data after [DONE]")
-		}
-		if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
-			seenDone = true
-			return nil
-		}
-		if apiErr := c.payloadError(data, resp.Header); apiErr != nil {
-			return apiErr
-		}
-		var ch completionsChunk
-		if err := strictjson.Unmarshal(data, &ch); err != nil {
-			return fmt.Errorf("openai-compat: decode SSE chunk: %w", err)
-		}
-		if len(ch.Choices) > 1 {
-			return fmt.Errorf("openai-compat: SSE chunk contains %d choices, want at most one", len(ch.Choices))
-		}
-		text, fr := pick(ch)
-		if text != "" {
-			if len(text) > maxGeneratedOutput-sb.Len() {
-				return fmt.Errorf("openai-compat: generated output exceeds %d bytes", maxGeneratedOutput)
-			}
-			if ttft == 0 {
-				ttft = time.Since(start).Seconds()
-			}
-			lastTok = time.Now()
-			sb.WriteString(text)
-		}
-		if fr != "" {
-			if finish != "" && finish != fr {
-				return fmt.Errorf("openai-compat: conflicting finish reasons %q and %q", finish, fr)
-			}
-			finish = fr
-		}
-		if ch.Usage != nil {
-			if ch.Usage.PromptTokens < 0 || ch.Usage.CompletionTokens < 0 {
-				return errors.New("openai-compat: response contains negative token usage")
-			}
-			if seenUsage && (usagePrompt != ch.Usage.PromptTokens || usageCompletion != ch.Usage.CompletionTokens) {
-				return errors.New("openai-compat: conflicting usage receipts")
-			}
-			seenUsage = true
-			usagePrompt, usageCompletion = ch.Usage.PromptTokens, ch.Usage.CompletionTokens
-		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("openai-compat: read SSE stream: %w", err)
+	}
+	return s.dispatch()
+}
+
+func (s *streamAccumulator) consumeLine(line string) error {
+	s.totalBytes += len(line) + 1
+	if s.totalBytes > maxSSETotal {
+		return fmt.Errorf("openai-compat: SSE stream exceeds %d bytes", maxSSETotal)
+	}
+	if line == "" {
+		return s.dispatch()
+	}
+	if strings.HasPrefix(line, ":") {
 		return nil
 	}
+	field, value, ok := strings.Cut(line, ":")
+	if !ok || field != "data" {
+		return nil
+	}
+	value = strings.TrimPrefix(value, " ")
+	nextBytes := s.eventBytes + len(value)
+	if len(s.eventData) > 0 {
+		nextBytes++
+	}
+	if nextBytes > maxSSEEvent {
+		return fmt.Errorf("openai-compat: SSE event exceeds %d bytes", maxSSEEvent)
+	}
+	s.eventData = append(s.eventData, value)
+	s.eventBytes = nextBytes
+	return nil
+}
 
-	sc := bufio.NewScanner(resp.Body)
-	sc.Buffer(make([]byte, 0, 64*1024), maxSSELine)
-	for sc.Scan() {
-		line := strings.TrimSuffix(sc.Text(), "\r")
-		totalBytes += len(line) + 1
-		if totalBytes > maxSSETotal {
-			return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: SSE stream exceeds %d bytes", maxSSETotal)
-		}
-		if line == "" {
-			if err := dispatch(); err != nil {
-				return sb.String(), ollama.Metrics{}, err
-			}
-			continue
-		}
-		if strings.HasPrefix(line, ":") {
-			continue
-		}
-		field, value, ok := strings.Cut(line, ":")
-		if !ok || field != "data" {
-			continue
-		}
-		value = strings.TrimPrefix(value, " ")
-		nextBytes := eventBytes + len(value)
-		if len(eventData) > 0 {
-			nextBytes++
-		}
-		if nextBytes > maxSSEEvent {
-			return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: SSE event exceeds %d bytes", maxSSEEvent)
-		}
-		eventData = append(eventData, value)
-		eventBytes = nextBytes
+func (s *streamAccumulator) dispatch() error {
+	if len(s.eventData) == 0 {
+		return nil
 	}
-	if err := sc.Err(); err != nil {
-		return sb.String(), ollama.Metrics{}, fmt.Errorf("openai-compat: read SSE stream: %w", err)
+	s.eventCount++
+	if s.eventCount > maxSSEEvents {
+		return fmt.Errorf("openai-compat: SSE event count exceeds %d", maxSSEEvents)
 	}
-	if len(eventData) > 0 {
-		if err := dispatch(); err != nil {
-			return sb.String(), ollama.Metrics{}, err
-		}
+	data := []byte(strings.Join(s.eventData, "\n"))
+	s.eventData = s.eventData[:0]
+	s.eventBytes = 0
+	if s.seenDone {
+		return errors.New("openai-compat: SSE stream contains data after [DONE]")
 	}
-	if !seenDone {
-		return sb.String(), ollama.Metrics{}, errors.New("openai-compat: stream ended before [DONE]")
+	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		s.seenDone = true
+		return nil
 	}
-	if !seenUsage {
-		return sb.String(), ollama.Metrics{}, errors.New("openai-compat: stream ended without requested usage")
+	if apiErr := s.client.payloadError(data, s.header); apiErr != nil {
+		return apiErr
 	}
+	var chunk completionsChunk
+	if err := strictjson.Unmarshal(data, &chunk); err != nil {
+		return fmt.Errorf("openai-compat: decode SSE chunk: %w", err)
+	}
+	if len(chunk.Choices) > 1 {
+		return fmt.Errorf("openai-compat: SSE chunk contains %d choices, want at most one", len(chunk.Choices))
+	}
+	text, finish := s.pick(chunk)
+	if err := s.addText(text); err != nil {
+		return err
+	}
+	if err := s.addFinishReason(finish); err != nil {
+		return err
+	}
+	return s.addUsage(chunk.Usage)
+}
+
+func (s *streamAccumulator) addText(text string) error {
+	if text == "" {
+		return nil
+	}
+	if len(text) > maxGeneratedOutput-s.text.Len() {
+		return fmt.Errorf("openai-compat: generated output exceeds %d bytes", maxGeneratedOutput)
+	}
+	if s.ttft == 0 {
+		s.ttft = time.Since(s.start).Seconds()
+	}
+	s.lastTok = time.Now()
+	s.text.WriteString(text)
+	return nil
+}
+
+func (s *streamAccumulator) addFinishReason(finish string) error {
 	if finish == "" {
-		return sb.String(), ollama.Metrics{}, errors.New("openai-compat: stream ended without a finish reason")
+		return nil
 	}
+	if s.finish != "" && s.finish != finish {
+		return fmt.Errorf("openai-compat: conflicting finish reasons %q and %q", s.finish, finish)
+	}
+	s.finish = finish
+	return nil
+}
 
+func (s *streamAccumulator) addUsage(usage *struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}) error {
+	if usage == nil {
+		return nil
+	}
+	if usage.PromptTokens < 0 || usage.CompletionTokens < 0 {
+		return errors.New("openai-compat: response contains negative token usage")
+	}
+	if s.seenUsage && (s.usagePrompt != usage.PromptTokens || s.usageCompletion != usage.CompletionTokens) {
+		return errors.New("openai-compat: conflicting usage receipts")
+	}
+	s.seenUsage = true
+	s.usagePrompt, s.usageCompletion = usage.PromptTokens, usage.CompletionTokens
+	return nil
+}
+
+func (s *streamAccumulator) metrics() (ollama.Metrics, error) {
+	if !s.seenDone {
+		return ollama.Metrics{}, errors.New("openai-compat: stream ended before [DONE]")
+	}
+	if !s.seenUsage {
+		return ollama.Metrics{}, errors.New("openai-compat: stream ended without requested usage")
+	}
+	if s.finish == "" {
+		return ollama.Metrics{}, errors.New("openai-compat: stream ended without a finish reason")
+	}
 	m := ollama.Metrics{
-		TTFTSeconds:   round(ttft, 3),
-		WallSeconds:   round(time.Since(start).Seconds(), 2),
-		EvalCount:     usageCompletion,
-		PromptTokens:  usagePrompt,
-		DoneReason:    finish,
-		Truncated:     finish == "length",
-		ClientDerived: true,
+		TTFTSeconds: round(s.ttft, 3), WallSeconds: round(time.Since(s.start).Seconds(), 2),
+		EvalCount: s.usageCompletion, PromptTokens: s.usagePrompt, DoneReason: s.finish,
+		Truncated: s.finish == "length", ClientDerived: true,
 	}
-	if decode := lastTok.Sub(start).Seconds() - ttft; decode > 0 && usageCompletion > 1 {
-		m.DecodeTPS = round(float64(usageCompletion-1)/decode, 2)
+	if decode := s.lastTok.Sub(s.start).Seconds() - s.ttft; decode > 0 && s.usageCompletion > 1 {
+		m.DecodeTPS = round(float64(s.usageCompletion-1)/decode, 2)
 	}
-	if ttft > 0 && usagePrompt > 0 {
-		m.PrefillTPS = round(float64(usagePrompt)/ttft, 2)
+	if s.ttft > 0 && s.usagePrompt > 0 {
+		m.PrefillTPS = round(float64(s.usagePrompt)/s.ttft, 2)
 	}
-	return sb.String(), m, nil
+	return m, nil
 }
 
 // ---------------------------------------------------------------- chat

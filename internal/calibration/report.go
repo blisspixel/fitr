@@ -534,6 +534,24 @@ func normalizePair(r PairReport) PairReport {
 }
 
 func validatePair(r PairReport) error {
+	if err := validatePairHeader(r); err != nil {
+		return err
+	}
+	totals, err := validatePairItems(r.Items)
+	if err != nil {
+		return err
+	}
+	if r.Shared != totals.shared || r.Flips != totals.flips || r.Discriminated != totals.discriminated ||
+		r.NeverObserved != len(r.Items)-totals.discriminated {
+		return errors.New("pair totals do not match item outcomes")
+	}
+	if err := validatePairArtifactDigests(r); err != nil {
+		return err
+	}
+	return validatePairLineage(r)
+}
+
+func validatePairHeader(r PairReport) error {
 	if r.Schema != PairSchema && r.Schema != LegacyPairSchema {
 		return fmt.Errorf("unsupported calibration pair schema %q", r.Schema)
 	}
@@ -554,39 +572,57 @@ func validatePair(r PairReport) error {
 	if r.Reference.ResultSchemaVersion < 1 || r.Reference.ResultSchemaVersion != r.Candidate.ResultSchemaVersion {
 		return errors.New("result schema is missing or differs across the pair")
 	}
+	return nil
+}
+
+type pairTotals struct {
+	shared        int
+	flips         int
+	discriminated int
+}
+
+func validatePairItems(items []Item) (pairTotals, error) {
 	seen := map[string]bool{}
-	shared, flips, discriminated := 0, 0, 0
-	for _, item := range r.Items {
+	totals := pairTotals{}
+	for _, item := range items {
 		if item.TaskID == "" || seen[item.TaskID] {
-			return fmt.Errorf("missing or duplicate task id %q", item.TaskID)
+			return pairTotals{}, fmt.Errorf("missing or duplicate task id %q", item.TaskID)
 		}
-		if item.Shared < 1 || item.Flips < 0 || item.Flips > item.Shared ||
-			item.ReferencePasses < 0 || item.ReferencePasses > item.Shared ||
-			item.CandidatePasses < 0 || item.CandidatePasses > item.Shared {
-			return fmt.Errorf("invalid counts for task %q", item.TaskID)
+		if !validItemCounts(item) {
+			return pairTotals{}, fmt.Errorf("invalid counts for task %q", item.TaskID)
 		}
-		delta := item.ReferencePasses - item.CandidatePasses
-		if delta < 0 {
-			delta = -delta
-		}
-		maxFlips := item.ReferencePasses + item.CandidatePasses
-		if other := 2*item.Shared - item.ReferencePasses - item.CandidatePasses; other < maxFlips {
-			maxFlips = other
-		}
-		if item.Flips < delta || item.Flips > maxFlips || (item.Flips-delta)%2 != 0 {
-			return fmt.Errorf("paired flips disagree with pass counts for task %q", item.TaskID)
+		if !validPairedFlips(item) {
+			return pairTotals{}, fmt.Errorf("paired flips disagree with pass counts for task %q", item.TaskID)
 		}
 		seen[item.TaskID] = true
-		shared += item.Shared
-		flips += item.Flips
+		totals.shared += item.Shared
+		totals.flips += item.Flips
 		if item.Flips > 0 {
-			discriminated++
+			totals.discriminated++
 		}
 	}
-	if r.Shared != shared || r.Flips != flips || r.Discriminated != discriminated ||
-		r.NeverObserved != len(r.Items)-discriminated {
-		return errors.New("pair totals do not match item outcomes")
+	return totals, nil
+}
+
+func validItemCounts(item Item) bool {
+	return item.Shared >= 1 && item.Flips >= 0 && item.Flips <= item.Shared &&
+		item.ReferencePasses >= 0 && item.ReferencePasses <= item.Shared &&
+		item.CandidatePasses >= 0 && item.CandidatePasses <= item.Shared
+}
+
+func validPairedFlips(item Item) bool {
+	delta := item.ReferencePasses - item.CandidatePasses
+	if delta < 0 {
+		delta = -delta
 	}
+	maxFlips := item.ReferencePasses + item.CandidatePasses
+	if other := 2*item.Shared - item.ReferencePasses - item.CandidatePasses; other < maxFlips {
+		maxFlips = other
+	}
+	return item.Flips >= delta && item.Flips <= maxFlips && (item.Flips-delta)%2 == 0
+}
+
+func validatePairArtifactDigests(r PairReport) error {
 	for _, run := range []Run{r.Reference, r.Candidate} {
 		if strings.TrimSpace(run.ArtifactDigest) == "" {
 			continue
@@ -595,6 +631,10 @@ func validatePair(r PairReport) error {
 			return fmt.Errorf("run artifact digest: %w", err)
 		}
 	}
+	return nil
+}
+
+func validatePairLineage(r PairReport) error {
 	if r.Lineage != nil {
 		if strings.TrimSpace(r.Reference.ArtifactDigest) == "" || strings.TrimSpace(r.Candidate.ArtifactDigest) == "" {
 			return errors.New("lineage receipt requires runtime-bound artifact digests on both runs")

@@ -789,6 +789,28 @@ func buildTopSnapshotWithBoard(historyRecords, boardRecords []*Result) top.Snaps
 
 func presentTopRun(result *Result) top.Run {
 	started, _ := time.Parse(time.RFC3339Nano, result.StartedAt)
+	scorecard := topScorecard(result)
+	modelLabel := presentationModelLabel(result.Model)
+	deviceID, hardwareID := topDeviceIDs(result)
+	toolsBlocked := topToolsBlocked(scorecard)
+	return top.Run{
+		ID: result.StableRunID(), Model: modelLabel,
+		Family: result.ModelMeta.Details.Family, ParamSize: result.ModelMeta.Details.ParameterSize,
+		Quant:    result.ModelMeta.Details.QuantizationLevel,
+		DeviceID: deviceID, HardwareID: hardwareID, Device: result.Device.GPU,
+		Driver: result.Device.GPUDriver, Runtime: result.Device.Runtime,
+		Config: topRunConfig(result), Profile: result.Profile, Level: result.Level, UseFor: scorecard.UseFor,
+		StartedAt: started, Duration: time.Duration(result.WallSeconds * float64(time.Second)),
+		Context: result.ContextSize(), Repeats: result.Repeats,
+		DecodeMean: result.DecodeSum.Mean, DecodeSD: result.DecodeSum.SD,
+		PrefillMean: result.PrefillSum.Mean, TTFTMean: result.TTFTSum.Mean,
+		MemoryGB: verifiedResidentGB(result.Memory), DecodeSeries: topDecodeSeries(result),
+		Serves: topServes(scorecard), Warnings: topWarnings(result), Verdicts: topVerdicts(scorecard),
+		NextCommand: advise.ResultNext(modelLabel, result.Repeats, result.ContextSize(), result.Level, toolsBlocked),
+	}
+}
+
+func topScorecard(result *Result) score.Scorecard {
 	scorecard := result.Scorecard
 	if artifact, err := artifactFrom(result); err == nil {
 		scorecard = artifact.Scorecard
@@ -800,6 +822,10 @@ func presentTopRun(result *Result) top.Run {
 	if issue := result.EvidenceIntegrityIssue(); issue != "" {
 		scorecard = score.ExcludeEvidence(scorecard, issue)
 	}
+	return scorecard
+}
+
+func topVerdicts(scorecard score.Scorecard) []top.Verdict {
 	verdicts := make([]top.Verdict, 0, len(scorecard.Needs))
 	for _, need := range score.SortedNeeds(scorecard.Needs) {
 		verdict := scorecard.Needs[need]
@@ -809,12 +835,20 @@ func presentTopRun(result *Result) top.Run {
 		}
 		verdicts = append(verdicts, top.Verdict{Need: need, Label: label, State: string(verdict.State), Why: verdict.Why})
 	}
+	return verdicts
+}
+
+func topServes(scorecard score.Scorecard) []string {
 	serves := make([]string, 0, len(scorecard.Serves))
 	for _, need := range scorecard.Serves {
 		if code := score.NeedCode[need]; code != "" {
 			serves = append(serves, code)
 		}
 	}
+	return serves
+}
+
+func topWarnings(result *Result) []string {
 	warnings := make([]string, 0, len(result.Contamination)+2)
 	for _, contaminated := range result.Contamination {
 		warnings = append(warnings, "INCONCLUSIVE, resident model: "+presentationModelLabel(contaminated))
@@ -828,6 +862,16 @@ func presentTopRun(result *Result) top.Run {
 	if result.Profile == "default" {
 		warnings = append(warnings, "uncalibrated default profile")
 	}
+	warnings = append(warnings, topTimingWarnings(result)...)
+	warnings = append(warnings, topMemoryWarnings(result)...)
+	if result.Repeats < 3 {
+		warnings = append(warnings, "fewer than 3 repeats; this result is not rankable")
+	}
+	return warnings
+}
+
+func topTimingWarnings(result *Result) []string {
+	var warnings []string
 	clientDerived, cachedGated, cachedPrefill, gatedCacheUnknown, prefillCacheUnknown := false, false, false, false, false
 	for _, sample := range result.Speed {
 		clientDerived = clientDerived || sample.ClientDerived
@@ -851,6 +895,11 @@ func presentTopRun(result *Result) top.Run {
 	if prefillCacheUnknown && len(result.Speed) > 0 {
 		warnings = append(warnings, "the backend did not prove prefill cache state")
 	}
+	return warnings
+}
+
+func topMemoryWarnings(result *Result) []string {
+	var warnings []string
 	if result.TaskPlan.Memory && result.Memory.Outcome == eval.OutcomeSkipped {
 		reason := strings.TrimSpace(result.Memory.UnavailableReason)
 		if reason == "" {
@@ -867,13 +916,18 @@ func presentTopRun(result *Result) top.Run {
 				result.Memory.RequestedCtx, *result.Memory.EffectiveCtx))
 		}
 	}
-	if result.Repeats < 3 {
-		warnings = append(warnings, "fewer than 3 repeats; this result is not rankable")
-	}
+	return warnings
+}
+
+func topDecodeSeries(result *Result) []float64 {
 	decodeSeries := make([]float64, 0, len(result.Speed))
 	for _, sample := range result.Speed {
 		decodeSeries = append(decodeSeries, sample.DecodeTPS)
 	}
+	return decodeSeries
+}
+
+func topRunConfig(result *Result) string {
 	config := fmt.Sprintf("ctx requested=%d", result.ContextSize())
 	if result.DeviceV2 != nil {
 		if result.DeviceV2.Context.EffectiveTokens != nil {
@@ -885,41 +939,30 @@ func presentTopRun(result *Result) top.Run {
 	if backend := result.Device.GPUBackend; backend != "" {
 		config += " | " + backend
 	}
-	var configSb864 strings.Builder
+	var runtimeConfig strings.Builder
 	for _, key := range []string{"OLLAMA_KV_CACHE_TYPE", "OLLAMA_FLASH_ATTENTION"} {
 		if value := result.Device.Config[key]; value != "" {
-			configSb864.WriteString(" | " + strings.ToLower(strings.TrimPrefix(key, "OLLAMA_")) + "=" + value)
+			runtimeConfig.WriteString(" | " + strings.ToLower(strings.TrimPrefix(key, "OLLAMA_")) + "=" + value)
 		}
 	}
-	config += configSb864.String()
-	modelLabel := presentationModelLabel(result.Model)
-	toolsBlocked := false
+	return config + runtimeConfig.String()
+}
+
+func topToolsBlocked(scorecard score.Scorecard) bool {
 	for need, verdict := range scorecard.Needs {
 		if strings.Contains(need, "tool") && verdict.State == score.Blocked {
-			toolsBlocked = true
-			break
+			return true
 		}
 	}
-	nextCommand := advise.ResultNext(modelLabel, result.Repeats, result.ContextSize(), result.Level, toolsBlocked)
-	deviceID, hardwareID := "", ""
+	return false
+}
+
+func topDeviceIDs(result *Result) (deviceID, hardwareID string) {
 	if comparableKey, err := result.ComparableDeviceKey(); err == nil {
 		deviceID = privacyID(comparableKey)
 		hardwareID = privacyID(eval.HardwareKey(result.Device.Key()))
 	}
-	return top.Run{
-		ID: result.StableRunID(), Model: modelLabel,
-		Family: result.ModelMeta.Details.Family, ParamSize: result.ModelMeta.Details.ParameterSize,
-		Quant:    result.ModelMeta.Details.QuantizationLevel,
-		DeviceID: deviceID, HardwareID: hardwareID, Device: result.Device.GPU,
-		Driver: result.Device.GPUDriver, Runtime: result.Device.Runtime,
-		Config: config, Profile: result.Profile, Level: result.Level, UseFor: scorecard.UseFor,
-		StartedAt: started, Duration: time.Duration(result.WallSeconds * float64(time.Second)),
-		Context: result.ContextSize(), Repeats: result.Repeats,
-		DecodeMean: result.DecodeSum.Mean, DecodeSD: result.DecodeSum.SD,
-		PrefillMean: result.PrefillSum.Mean, TTFTMean: result.TTFTSum.Mean,
-		MemoryGB: verifiedResidentGB(result.Memory), DecodeSeries: decodeSeries,
-		Serves: serves, Warnings: warnings, Verdicts: verdicts, NextCommand: nextCommand,
-	}
+	return deviceID, hardwareID
 }
 
 func verifiedResidentGB(memory eval.MemoryResult) float64 {

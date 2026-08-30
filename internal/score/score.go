@@ -517,12 +517,63 @@ type Scorecard struct {
 
 func Score(m Measured, p device.Profile) Scorecard {
 	n := map[string]Verdict{}
+	n["fast_and_decent"] = scoreFastAndDecent(m, p)
 
-	// --- fast + pretty good
+	n["coding"] = scoreCoding(m)
+
+	// --- structured output. Quantization degrades JSON validity long before
+	// prose; this is the earliest damage signal and it gets its own need.
+	n["structured_output"] = poolVerdict(m.Structured, p, "structured_output", "valid")
+
+	// --- instruction precision: verifiable constraints, graded by code.
+	n["instruction_precision"] = poolVerdict(m.Precision, p, "instruction_precision", "held")
+
+	n["tool_calling"] = scoreToolCalling(m, p)
+
+	// --- user tasks: only present on runs that had any. The default criterion
+	// is all-must-pass -- they are the user's own requirements -- unless the
+	// profile sets a rate.
+	if v, measured := scoreUserTasks(m, p); measured {
+		n["user_tasks"] = v
+	}
+
+	n["uncensored"] = scoreUncensored(m, p)
+
+	// --- unattended agentic. Broken plumbing BLOCKS rather than fails: most
+	// "cannot use tools" results are the template, parser, quant, or context
+	// size, and a capability you could not fairly test is not a failure.
+	//
+	// "Most" rather than a ratio on purpose. This carried "roughly 4 in 5" for
+	// a long time and that figure had no source; the mechanisms are real and
+	// nameable -- lazy-grammar trigger strings, a missing PARSER directive on a
+	// side-loaded GGUF, a newline baked into a Jinja terminator -- and several
+	// reproduce byte-identically at temperature 0. The claim did not need a
+	// number to be true, and the number was not one we could stand behind.
+	n["unattended_agentic"] = scoreUnattendedAgentic(m, p)
+
+	// --- tool restraint: needs no ground truth, and it is the most common
+	// local-model tool failure. Two halves: restraint at REST (no calls on an
+	// irrelevant question) and restraint under CHANGE (a tool vanishes
+	// mid-loop; one grace call to discover that, then stop).
+	n["tool_restraint"] = scoreToolRestraint(m, p)
+
+	n["low_footprint"] = scoreFootprint(m, p)
+
+	// --- vision. Not claiming vision is NOT a deficiency; it is a different
+	// kind of model.
+	n["vision"] = scoreVision(m)
+
+	n["output_health"] = outputHealth(m, p)
+	sc := summarizeNeeds(m, p, n)
+	sc.UseFor = useFor(m, n, sc.Serves)
+	return ExcludeContamination(sc, m.Contamination)
+}
+
+func scoreFastAndDecent(m Measured, p device.Profile) Verdict {
 	if tpsMin, ok1 := p.Float("fast_chat", "decode_tps_min"); !ok1 {
-		n["fast_and_decent"] = skipped("no fast_chat gate in profile")
+		return skipped("no fast_chat gate in profile")
 	} else if !m.SpeedKnown {
-		n["fast_and_decent"] = skipped("speed not measured")
+		return skipped("speed not measured")
 	} else {
 		ttftMax, _ := p.Float("fast_chat", "ttft_s_max")
 		// A cache-hit TTFT is not a new-question measurement. Judging it
@@ -556,284 +607,249 @@ func Score(m Measured, p device.Profile) Scorecard {
 		if m.TimingsClientDerived {
 			note = joinNote(note, "client-derived wall-clock (not server timings)")
 		}
-		n["fast_and_decent"] = newVerdict(verdictState,
+		return newVerdict(verdictState,
 			fmt.Sprintf("%.2f tok/s", m.DecodeTPS),
 			fmt.Sprintf("need >=%.1f", tpsMin), detail, note)
 	}
+}
 
-	// --- coding. The gate is the executed code tasks. Generated reasoning is
-	// shown separately because it has its own clustered family structure and
-	// cannot manufacture precision for the executable write/fix contract.
+// scoreCoding keeps executable evidence separate from generated reasoning.
+// The latter has clustered families and cannot manufacture precision for the
+// executable write/fix contract.
+func scoreCoding(m Measured) Verdict {
 	if !m.CodeKnown {
 		v := skipped("executable coding not measured")
 		if m.CodePlanned {
 			v = skipped("scheduled coding task was skipped; isolated execution is unavailable")
 		}
-		if m.Reasoning.N > 0 {
-			wi := stats.ClusteredWilson(m.Reasoning.clusters())
-			note := fmt.Sprintf("reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
-				m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi)
-			if m.CodePlanned {
-				note = joinNote("scheduled coding task was skipped because isolated execution is unavailable", note)
-			}
-			v = newVerdict(Skip, "not measured", "", nil, note)
+		if m.Reasoning.N == 0 {
+			return v
 		}
-		n["coding"] = v
-	} else {
-		ok := m.CodeWritePass && m.CodeFixPass
-		measure := "write+fix"
-		if m.CodeRepeats > 0 {
-			measure = fmt.Sprintf("%d/%d executable", m.CodePasses, m.CodeRepeats)
+		wi := stats.ClusteredWilson(m.Reasoning.clusters())
+		note := fmt.Sprintf("reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
+			m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi)
+		if m.CodePlanned {
+			note = joinNote("scheduled coding task was skipped because isolated execution is unavailable", note)
 		}
-		detail := []string{fmt.Sprintf("write=%v, fix=%v", m.CodeWritePass, m.CodeFixPass)}
-		note := ""
-		if m.Reasoning.N > 0 {
-			wi := stats.ClusteredWilson(m.Reasoning.clusters())
-			detail = append(detail, fmt.Sprintf("reasoning %d/%d [%.2f-%.2f] observed separately",
-				m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi))
-		}
-		if m.CodeFlaky {
-			note = "FLAKY - the same task passed on some repeats and failed on others"
-		}
-		n["coding"] = newVerdict(state(ok), measure, "", detail, note)
+		return newVerdict(Skip, "not measured", "", nil, note)
 	}
 
-	// --- structured output. Quantization degrades JSON validity long before
-	// prose; this is the earliest damage signal and it gets its own need.
-	n["structured_output"] = poolVerdict(m.Structured, p, "structured_output", "valid")
+	measure := "write+fix"
+	if m.CodeRepeats > 0 {
+		measure = fmt.Sprintf("%d/%d executable", m.CodePasses, m.CodeRepeats)
+	}
+	detail := []string{fmt.Sprintf("write=%v, fix=%v", m.CodeWritePass, m.CodeFixPass)}
+	if m.Reasoning.N > 0 {
+		wi := stats.ClusteredWilson(m.Reasoning.clusters())
+		detail = append(detail, fmt.Sprintf("reasoning %d/%d [%.2f-%.2f] observed separately",
+			m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi))
+	}
+	note := ""
+	if m.CodeFlaky {
+		note = "FLAKY - the same task passed on some repeats and failed on others"
+	}
+	return newVerdict(state(m.CodeWritePass && m.CodeFixPass), measure, "", detail, note)
+}
 
-	// --- instruction precision: verifiable constraints, graded by code.
-	n["instruction_precision"] = poolVerdict(m.Precision, p, "instruction_precision", "held")
-
-	// --- tool calling, measured in the tool channel rather than as text.
-	//
-	// Separate from structured_output on purpose. Asking a model to "return the
-	// JSON arguments" and handing it a tool it must call are different skills
-	// that fail differently, and the second exercises the chat template and the
-	// runtime's tool-call parser as well as the weights. Plumbing that never
-	// established a usable protocol BLOCKS this rather than failing it, on the
-	// same rule the agentic needs use: a capability you could not fairly test
-	// is not a failure.
+func scoreToolCalling(m Measured, p device.Profile) Verdict {
 	switch {
 	case m.ToolsUnsupported:
-		n["tool_calling"] = newVerdict(NA, "no tool support", "", nil,
+		return newVerdict(NA, "no tool support", "", nil,
 			"the runtime reports this model does not accept tools, so there is no call to judge. "+
 				"An agent harness cannot drive it")
 	case m.PlumbingRan && !m.PlumbingHealthy:
-		n["tool_calling"] = blocked(
-			"tool plumbing did not establish a usable protocol; call fidelity was not judged")
+		return blocked("tool plumbing did not establish a usable protocol; call fidelity was not judged")
 	default:
-		n["tool_calling"] = poolVerdict(m.ToolCalling, p, "tool_calling", "correct")
+		return poolVerdict(m.ToolCalling, p, "tool_calling", "correct")
 	}
+}
 
-	// --- user tasks: only present on runs that had any. The default criterion
-	// is all-must-pass -- they are the user's own requirements -- unless the
-	// profile sets a rate.
-	if m.User.N > 0 || m.User.Planned > 0 {
-		if _, configuredRate := p.Float("user_tasks", "pass_rate_min"); configuredRate {
-			n["user_tasks"] = poolVerdict(m.User, p, "user_tasks", "passed")
-		} else if m.User.N == 0 {
-			n["user_tasks"] = newVerdict(Inconclusive, fmt.Sprintf("0/%d scorable", m.User.Planned),
-				"all must pass", familyBreakdown(m.User.Families),
-				"planned user-task evidence was unavailable; no outcome enters a denominator")
-		} else {
-			wi := stats.ClusteredWilson(m.User.clusters())
-			measure := fmt.Sprintf("%d/%d passed [%.2f-%.2f]", m.User.Passes, m.User.N, wi.Lo, wi.Hi)
-			n["user_tasks"] = newVerdict(state(m.User.Passes == m.User.N), measure,
-				"all must pass", familyBreakdown(m.User.Families),
-				"default criterion: these are your own requirements; set a user_tasks gate to loosen")
-			if m.User.Planned > m.User.N {
-				v := n["user_tasks"]
-				v.State = Inconclusive
-				v.Note = joinNote(v.Note, fmt.Sprintf(
-					"%d of %d planned user-task observations were not scorable", m.User.Planned-m.User.N, m.User.Planned))
-				v.Why = v.compose()
-				n["user_tasks"] = v
-			}
-		}
+func scoreUserTasks(m Measured, p device.Profile) (Verdict, bool) {
+	if m.User.N == 0 && m.User.Planned == 0 {
+		return Verdict{}, false
 	}
+	if _, configuredRate := p.Float("user_tasks", "pass_rate_min"); configuredRate {
+		return poolVerdict(m.User, p, "user_tasks", "passed"), true
+	}
+	if m.User.N == 0 {
+		return newVerdict(Inconclusive, fmt.Sprintf("0/%d scorable", m.User.Planned),
+			"all must pass", familyBreakdown(m.User.Families),
+			"planned user-task evidence was unavailable; no outcome enters a denominator"), true
+	}
+	wi := stats.ClusteredWilson(m.User.clusters())
+	measure := fmt.Sprintf("%d/%d passed [%.2f-%.2f]", m.User.Passes, m.User.N, wi.Lo, wi.Hi)
+	v := newVerdict(state(m.User.Passes == m.User.N), measure,
+		"all must pass", familyBreakdown(m.User.Families),
+		"default criterion: these are your own requirements; set a user_tasks gate to loosen")
+	if m.User.Planned > m.User.N {
+		v.State = Inconclusive
+		v.Note = joinNote(v.Note, fmt.Sprintf(
+			"%d of %d planned user-task observations were not scorable", m.User.Planned-m.User.N, m.User.Planned))
+		v.Why = v.compose()
+	}
+	return v, true
+}
 
-	// --- uncensored: a first-class need, not a footnote
+func scoreUncensored(m Measured, p device.Profile) Verdict {
 	if !m.RefusalKnown {
-		n["uncensored"] = skipped("refusal battery not run")
-	} else {
-		maxRef, ok := p.Float("uncensored", "refused_max")
-		if !ok {
-			maxRef = 0
-		}
-		n["uncensored"] = newVerdict(state(float64(m.RefusedCount) <= maxRef),
-			fmt.Sprintf("refused/partial %d/3", m.RefusedCount),
-			fmt.Sprintf("need <=%.0f", maxRef), nil, "")
+		return skipped("refusal battery not run")
 	}
+	maxRef, ok := p.Float("uncensored", "refused_max")
+	if !ok {
+		maxRef = 0
+	}
+	return newVerdict(state(float64(m.RefusedCount) <= maxRef),
+		fmt.Sprintf("refused/partial %d/3", m.RefusedCount),
+		fmt.Sprintf("need <=%.0f", maxRef), nil, "")
+}
 
-	// --- unattended agentic. Broken plumbing BLOCKS rather than fails: most
-	// "cannot use tools" results are the template, parser, quant, or context
-	// size, and a capability you could not fairly test is not a failure.
-	//
-	// "Most" rather than a ratio on purpose. This carried "roughly 4 in 5" for
-	// a long time and that figure had no source; the mechanisms are real and
-	// nameable -- lazy-grammar trigger strings, a missing PARSER directive on a
-	// side-loaded GGUF, a newline baked into a Jinja terminator -- and several
-	// reproduce byte-identically at temperature 0. The claim did not need a
-	// number to be true, and the number was not one we could stand behind.
+func scoreUnattendedAgentic(m Measured, p device.Profile) Verdict {
 	switch {
 	case m.PlumbingRan && !m.PlumbingHealthy:
-		n["unattended_agentic"] = blocked(
-			"tool plumbing failed before capability could be judged: " +
-				m.PlumbingVerdict + " -- fix template/parser, then re-run")
+		return blocked("tool plumbing failed before capability could be judged: " +
+			m.PlumbingVerdict + " -- fix template/parser, then re-run")
 	case !m.AgenticRan && m.AgenticPlanned:
-		n["unattended_agentic"] = skipped(
-			"scheduled long-horizon task was skipped; isolated execution is unavailable")
+		return skipped("scheduled long-horizon task was skipped; isolated execution is unavailable")
 	case !m.AgenticRan && m.ToolsRan:
-		n["unattended_agentic"] = skipped(fmt.Sprintf(
-			"only the 4-call proxy ran (tools=%v); use --full for the long-horizon verdict",
-			m.ToolsPass))
+		return skipped(fmt.Sprintf(
+			"only the 4-call proxy ran (tools=%v); use --full for the long-horizon verdict", m.ToolsPass))
 	case !m.AgenticRan:
-		n["unattended_agentic"] = skipped("not measured (use --full)")
-	default:
-		pmin, ok := p.Float("unattended_agentic", "prefill_tps_min")
-		if !ok {
-			n["unattended_agentic"] = skipped("no unattended_agentic gate in profile")
-			break
-		}
-		bmax, _ := p.Float("unattended_agentic", "malformed_tool_calls_max")
-		behaviorOK := float64(m.AgenticMalformed) <= bmax && m.AgenticPass
-		detail := []string{
-			fmt.Sprintf("unattended pass=%v in %d turns", m.AgenticPass, m.AgenticTurns),
-			fmt.Sprintf("malformed=%d", m.AgenticMalformed),
-		}
-		note := ""
-		if m.AgenticCtxCeiling && !m.AgenticCompacted {
-			behaviorOK = false
-			note = fmt.Sprintf("transcript peaked at %d tokens and never shrank - filled the window with no compaction",
-				m.AgenticMaxPrompt)
-		} else if m.AgenticCtxCeiling {
-			note = fmt.Sprintf("transcript peaked at %d tokens then compacted", m.AgenticMaxPrompt)
-		}
-		verdictState := state(behaviorOK && m.PrefillTPS >= pmin)
-		if (!m.PrefillCacheKnown || m.PrefillCacheContaminated) && behaviorOK {
-			verdictState = Inconclusive
-			if !m.PrefillCacheKnown {
-				note = joinNote(note, "prefill cache state was not proven; the uncached prompt-processing gate is unproven")
-			} else {
-				note = joinNote(note, "prefill probe observed cached tokens; the uncached prompt-processing gate is unproven")
-			}
-		}
-		n["unattended_agentic"] = newVerdict(verdictState,
-			fmt.Sprintf("prefill %.1f tok/s", m.PrefillTPS),
-			fmt.Sprintf("need >=%.0f", pmin), detail, note)
+		return skipped("not measured (use --full)")
 	}
 
-	// --- tool restraint: needs no ground truth, and it is the most common
-	// local-model tool failure. Two halves: restraint at REST (no calls on an
-	// irrelevant question) and restraint under CHANGE (a tool vanishes
-	// mid-loop; one grace call to discover that, then stop).
+	pmin, ok := p.Float("unattended_agentic", "prefill_tps_min")
+	if !ok {
+		return skipped("no unattended_agentic gate in profile")
+	}
+	bmax, _ := p.Float("unattended_agentic", "malformed_tool_calls_max")
+	behaviorOK := float64(m.AgenticMalformed) <= bmax && m.AgenticPass
+	detail := []string{
+		fmt.Sprintf("unattended pass=%v in %d turns", m.AgenticPass, m.AgenticTurns),
+		fmt.Sprintf("malformed=%d", m.AgenticMalformed),
+	}
+	note := ""
+	if m.AgenticCtxCeiling && !m.AgenticCompacted {
+		behaviorOK = false
+		note = fmt.Sprintf("transcript peaked at %d tokens and never shrank - filled the window with no compaction",
+			m.AgenticMaxPrompt)
+	} else if m.AgenticCtxCeiling {
+		note = fmt.Sprintf("transcript peaked at %d tokens then compacted", m.AgenticMaxPrompt)
+	}
+	verdictState := state(behaviorOK && m.PrefillTPS >= pmin)
+	if (!m.PrefillCacheKnown || m.PrefillCacheContaminated) && behaviorOK {
+		verdictState = Inconclusive
+		if !m.PrefillCacheKnown {
+			note = joinNote(note, "prefill cache state was not proven; the uncached prompt-processing gate is unproven")
+		} else {
+			note = joinNote(note, "prefill probe observed cached tokens; the uncached prompt-processing gate is unproven")
+		}
+	}
+	return newVerdict(verdictState, fmt.Sprintf("prefill %.1f tok/s", m.PrefillTPS),
+		fmt.Sprintf("need >=%.0f", pmin), detail, note)
+}
+
+func scoreToolRestraint(m Measured, p device.Profile) Verdict {
 	switch {
 	case m.PlumbingRan && !m.PlumbingHealthy:
-		n["tool_restraint"] = blocked(
-			"tool plumbing did not establish a usable protocol; restraint was not judged")
+		return blocked("tool plumbing did not establish a usable protocol; restraint was not judged")
 	case !m.IrrelevanceRan && !m.WithdrawRan && m.ToolRestraintPool.N == 0:
-		n["tool_restraint"] = skipped("plumbing diagnostic not run")
+		return skipped("plumbing diagnostic not run")
 	case m.ToolRestraintPool.N > 0:
-		// The pooled family is the measurement once it exists: restraint at
-		// rest used to rest on a single observation, which cannot carry an
-		// interval, and "fires tools on unrelated questions" is too common a
-		// complaint to decide on one trial.
-		//
-		// Restraint under CHANGE stays a separate binary rather than being
-		// averaged in. A model that stops cleanly when a tool is withdrawn and
-		// one that keeps calling a dead tool are not the same model, and
-		// pooling would let a good rate at rest hide it.
-		// "clean" and not "left alone": the measure column is 24 wide and
-		// "2/2 left alone [0.34-1.00]" is 26, so the interval was truncated --
-		// which is the half of the number that decides whether the verdict
-		// means anything.
-		v := poolVerdict(m.ToolRestraintPool, p, "tool_restraint", "clean")
-		if m.WithdrawRan {
-			withdrawOK := m.WithdrawDeadCalls <= 1 && m.WithdrawClean
-			switch {
-			case withdrawOK && m.WithdrawDeadCalls == 0:
-				v.Detail = append(v.Detail, "never called a withdrawn tool")
-			case withdrawOK:
-				v.Detail = append(v.Detail, "one grace call to a withdrawn tool, then stopped cleanly")
-			case m.WithdrawDeadCalls > 1:
-				v.State = Fail
-				v.Detail = append(v.Detail, fmt.Sprintf(
-					"kept calling a withdrawn tool (%d dead calls)", m.WithdrawDeadCalls))
-			default:
-				v.State = Fail
-				v.Detail = append(v.Detail, "did not stop cleanly after a tool was withdrawn")
-			}
-			v.Why = v.compose()
-		}
-		n["tool_restraint"] = v
+		return scorePooledToolRestraint(m, p)
 	default:
-		checks, clean := 0, 0
-		var detail []string
-		if m.IrrelevanceRan {
-			checks++
-			if m.IrrelevancePass {
-				clean++
-				detail = append(detail, "left tools alone on an unrelated question")
-			} else {
-				detail = append(detail, fmt.Sprintf("fired %d tool call(s) on an unrelated question", m.SpuriousCalls))
-			}
-		}
-		if m.WithdrawRan {
-			checks++
-			withdrawOK := m.WithdrawDeadCalls <= 1 && m.WithdrawClean
-			switch {
-			case withdrawOK && m.WithdrawDeadCalls == 0:
-				clean++
-				detail = append(detail, "never called a withdrawn tool")
-			case withdrawOK:
-				clean++
-				detail = append(detail, "one grace call to a withdrawn tool, then stopped cleanly")
-			case m.WithdrawDeadCalls > 1:
-				detail = append(detail, fmt.Sprintf("kept calling a withdrawn tool (%d dead calls)", m.WithdrawDeadCalls))
-			default:
-				detail = append(detail, "did not stop cleanly after a tool was withdrawn")
-			}
-		}
-		n["tool_restraint"] = newVerdict(state(clean == checks),
-			fmt.Sprintf("%d/%d clean", clean, checks),
-			fmt.Sprintf("need %d/%d", checks, checks), detail, "")
+		return scoreLegacyToolRestraint(m)
 	}
+}
 
-	// --- footprint
-	if lim, ok := p.Float("always_on_capable", "resident_gb_at_32k_max"); !ok {
-		n["low_footprint"] = skipped("no always_on_capable gate in profile")
-	} else if !m.MemoryKnown {
-		n["low_footprint"] = skipped("memory not measured")
-	} else {
-		n["low_footprint"] = newVerdict(state(m.ResidentGB32K <= lim),
-			fmt.Sprintf("resident@32K %.2f GB", m.ResidentGB32K),
-			fmt.Sprintf("need <=%.0f", lim), nil, "")
+func scorePooledToolRestraint(m Measured, p device.Profile) Verdict {
+	// The pooled family is the measurement once it exists. Restraint under
+	// change remains a separate binary so a good at-rest rate cannot hide calls
+	// to a withdrawn tool.
+	v := poolVerdict(m.ToolRestraintPool, p, "tool_restraint", "clean")
+	if !m.WithdrawRan {
+		return v
 	}
+	ok, detail := withdrawalAssessment(m)
+	if !ok {
+		v.State = Fail
+	}
+	v.Detail = append(v.Detail, detail)
+	v.Why = v.compose()
+	return v
+}
 
-	// --- vision. Not claiming vision is NOT a deficiency; it is a different
-	// kind of model.
+func scoreLegacyToolRestraint(m Measured) Verdict {
+	checks, clean := 0, 0
+	var detail []string
+	if m.IrrelevanceRan {
+		checks++
+		if m.IrrelevancePass {
+			clean++
+			detail = append(detail, "left tools alone on an unrelated question")
+		} else {
+			detail = append(detail, fmt.Sprintf("fired %d tool call(s) on an unrelated question", m.SpuriousCalls))
+		}
+	}
+	if m.WithdrawRan {
+		checks++
+		ok, assessment := withdrawalAssessment(m)
+		if ok {
+			clean++
+		}
+		detail = append(detail, assessment)
+	}
+	return newVerdict(state(clean == checks), fmt.Sprintf("%d/%d clean", clean, checks),
+		fmt.Sprintf("need %d/%d", checks, checks), detail, "")
+}
+
+func withdrawalAssessment(m Measured) (bool, string) {
+	withdrawOK := m.WithdrawDeadCalls <= 1 && m.WithdrawClean
+	switch {
+	case withdrawOK && m.WithdrawDeadCalls == 0:
+		return true, "never called a withdrawn tool"
+	case withdrawOK:
+		return true, "one grace call to a withdrawn tool, then stopped cleanly"
+	case m.WithdrawDeadCalls > 1:
+		return false, fmt.Sprintf("kept calling a withdrawn tool (%d dead calls)", m.WithdrawDeadCalls)
+	default:
+		return false, "did not stop cleanly after a tool was withdrawn"
+	}
+}
+
+func scoreFootprint(m Measured, p device.Profile) Verdict {
+	lim, ok := p.Float("always_on_capable", "resident_gb_at_32k_max")
+	if !ok {
+		return skipped("no always_on_capable gate in profile")
+	}
+	if !m.MemoryKnown {
+		return skipped("memory not measured")
+	}
+	return newVerdict(state(m.ResidentGB32K <= lim),
+		fmt.Sprintf("resident@32K %.2f GB", m.ResidentGB32K),
+		fmt.Sprintf("need <=%.0f", lim), nil, "")
+}
+
+func scoreVision(m Measured) Verdict {
 	if hasCap(m.Capabilities, "vision") {
-		n["vision"] = newVerdict(Pass, "declared", "", nil,
+		return newVerdict(Pass, "declared", "", nil,
 			fmt.Sprintf("capabilities=%v", m.Capabilities))
-	} else {
-		n["vision"] = newVerdict(NA, "text-only", "", nil,
-			"not a deficiency, just not what this model is for")
 	}
+	return newVerdict(NA, "text-only", "", nil,
+		"not a deficiency, just not what this model is for")
+}
 
-	n["output_health"] = outputHealth(m, p)
-
-	sc := Scorecard{Model: m.Model, Profile: p.Name, Needs: n}
-	for _, k := range SortedNeeds(n) {
-		v, ok := n[k]
+func summarizeNeeds(m Measured, p device.Profile, needs map[string]Verdict) Scorecard {
+	sc := Scorecard{Model: m.Model, Profile: p.Name, Needs: needs}
+	for _, need := range SortedNeeds(needs) {
+		verdict, ok := needs[need]
 		if !ok {
 			continue
 		}
-		switch v.State {
+		switch verdict.State {
 		case Pass:
 			sc.Passes++
-			if k != "output_health" {
-				sc.Serves = append(sc.Serves, k)
+			if need != "output_health" {
+				sc.Serves = append(sc.Serves, need)
 			}
 		case Fail:
 			sc.Fails++
@@ -841,8 +857,7 @@ func Score(m Measured, p device.Profile) Scorecard {
 			sc.Unproven++
 		}
 	}
-	sc.UseFor = useFor(m, n, sc.Serves)
-	return ExcludeContamination(sc, m.Contamination)
+	return sc
 }
 
 // ExcludeEvidence converts every measured PASS or FAIL into an explicit

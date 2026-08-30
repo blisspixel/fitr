@@ -1,8 +1,11 @@
 # What a local-eval tool must measure to be current, August 2026
 
-Research pass on the inference frontier. Sources are primary: llama.cpp /
-vLLM / SGLang / Ollama / MLX repos at master, HF model cards, arXiv, vendor
-docs. Verified 2026-08-18.
+Working research ledger assembled from llama.cpp, vLLM, SGLang, Ollama, and
+MLX repositories, model cards, papers, and vendor documentation on
+2026-08-18. Its source ledger is incomplete, so precise claims below are
+research leads, not FITR evidence or buying guidance. A claim can enter the
+product only after its primary source, version, protocol, and receipt are
+linked.
 
 The value of this document is mostly **negative**: it lists assumptions `fitr`
 holds that are no longer true.
@@ -17,7 +20,7 @@ Ranked by how badly each invalidates results, not by effort to fix.
 | 2 | One TTFT number | Loaded/uncached and prefix-cache-hit TTFT differed by **70-200x** in the cited Strix Halo 16k-prompt case (41 s -> 0.2 s). Runtime-unloaded latency is a third protocol. Blending these states can dominate the reported number. |
 | 3 | "Thinking" is a boolean | Graded `reasoning_effort` everywhere, with **mutually incompatible vocabularies** (`low/medium/xhigh` Qwen, `low/high/max` DeepSeek and Kimi, `no_think/low/high` Hunyuan, `enabled/adaptive/disabled` MiniMax). Kimi K3 **cannot** disable thinking. |
 | 4 | Reasoning content is cosmetic | Kimi K3 and Poolside Laguna **require** `reasoning_content` round-tripped across turns or they degrade. llama.cpp has `--reasoning-preserve` and a `supports_preserve_reasoning` capability flag. FitR now preserves it across turns. |
-| 5 | Ollama is the local runtime | llama-server is a strict superset: `/v1/responses`, Anthropic `/v1/messages`, router mode, built-in tools, an MCP stdio client, Prometheus spec-decode counters, per-slot state. |
+| 5 | Ollama is the local runtime | llama-server has a broader inference and measurement surface: `/v1/responses`, Anthropic `/v1/messages`, router mode, built-in tools, an MCP stdio client, Prometheus spec-decode counters, and per-slot state. It does not replace Ollama's model library, lifecycle, or Modelfile features. |
 | 6 | 20 turns is an agentic loop | little-coder caps Terminal-Bench at **40**; GDPval-AA v2 allows **250**. 20 turns measures early-abort behaviour. |
 | 7 | Quant = Q4_K_M vs Q8_0 | GGUF now has **NVFP4 (40), MXFP4 (39), Q1_0 (41), Q2_0 (42)**. PrismML Bonsai-27B runs on an iPhone at **1.125 bpw retaining 90%** of baseline. |
 | 8 | KLD/perplexity ranks quants | arXiv:2606.19558 tested **14 fidelity metrics**; correlation with real quality **collapses to rho ~ 0.00 in the near-baseline "silent zone"** -- exactly where you choose between Q4_K_M and UD-Q4_K_XL. They are damage detectors, not rankers. |
@@ -92,7 +95,14 @@ reproducible tool calls.
 Adopt vLLM vocabulary -- **TTFT / TPOT / ITL / E2EL / goodput**, P50 not mean --
 so numbers are comparable across tools.
 
-## The hardware table that justifies separating prefill from decode
+## A hardware research lead, not FITR evidence
+
+The figures below came from an external comparison and currently lack linked
+primary receipts, runtime versions, prompts, quant metadata, and run
+conditions. They motivate a measurement question, but they must not feed FITR
+buying guidance or a product verdict until the source and protocol are cited
+and reproducible. The durable conclusion is narrower: prefill, decode, memory
+capacity, context, and placement must be measured and presented separately.
 
 gpt-oss-120b, MXFP4:
 
@@ -103,17 +113,20 @@ gpt-oss-120b, MXFP4:
 | Mac Studio M3 Ultra | 256 GB | **819 GB/s** | - | **70.8 tok/s** |
 | 3x RTX 3090 | 72 GB | - | 1,642 tok/s | **124 tok/s** |
 
-**Identical bandwidth, 5x different prefill.** Any tool reporting one number, or
-ranking machines on decode alone, misleads everyone doing agentic or
-long-prompt work.
+The reported rows suggest that similar advertised bandwidth can coexist with
+very different prefill, but the table does not yet prove why. A single speed
+number is still inadequate for agentic or long-prompt work.
 
-Also: decode degrades **23-28% from empty to 76k context**. A single
-empty-context number overstates real use by roughly a quarter.
+The same external report claims **23-28% decode degradation from empty to 76k
+context**. Treat that as a hypothesis until its receipts are linked. FITR's
+product rule does not depend on the percentage: a speed result is meaningful
+only with its effective context attached.
 
 ## Why llama-server was the next backend, not vLLM
 
-Same audience as Ollama, strictly larger API surface, and it uniquely provides
-what Ollama cannot:
+Same audience as Ollama, with a broader inference and measurement surface for
+FITR's purposes. It does not replace Ollama's model library, lifecycle, or
+Modelfile features. For inference diagnostics it provides:
 
 - `timings.cache_n` -- prefix-cache hit rate, so loaded/uncached and prefix-cache-hit TTFT can be separated
 - `/props.chat_template_caps` -- a real capability probe
@@ -122,8 +135,9 @@ what Ollama cannot:
 - `/slots` per-slot state
 
 **Ollama OpenAI-compat gaps that silently corrupt evals:** no `logprobs`, no
-`tool_choice`, no `logit_bias`, no `n`, base64-only images. Remember llama-server
-needs `--jinja` or tool calling silently does not work.
+`tool_choice`, no `logit_bias`, no `n`, base64-only images. Pin `--jinja` in
+acceptance commands for reproducibility. Current builds enable it by default,
+while older or explicitly disabled builds may not.
 
 Then build **one generic OpenAI adapter plus a capability probe**, not N bespoke
 clients -- roughly 10 of 12 relevant runtimes are OpenAI-shaped. Do not hardcode

@@ -48,25 +48,42 @@ type App struct {
 
 // Run blocks until quit, interruption, context cancellation, or terminal
 // failure. Fini is guaranteed after successful Init, including during panics.
-func (app App) Run(ctx context.Context) (final State, err error) {
+func (app App) Run(ctx context.Context) (State, error) {
+	screen, err := app.openScreen()
+	if err != nil {
+		return app.Initial, err
+	}
+	defer finishScreen(screen)
+
+	state := app.initialState(screen)
+	ticker := time.NewTicker(app.tickInterval())
+	defer ticker.Stop()
+	return app.runEventLoop(ctx, screen, state, ticker.C)
+}
+
+func (app App) openScreen() (Screen, error) {
 	factory := app.Factory
 	if factory == nil {
 		factory = NewTCellScreen
 	}
 	screen, err := factory()
 	if err != nil {
-		return app.Initial, fmt.Errorf("create terminal screen: %w", err)
+		return nil, fmt.Errorf("create terminal screen: %w", err)
 	}
 	if err := screen.Init(); err != nil {
-		return app.Initial, fmt.Errorf("initialize terminal screen: %w", err)
+		return nil, fmt.Errorf("initialize terminal screen: %w", err)
 	}
-	defer func() {
-		screen.Fini()
-		if recovered := recover(); recovered != nil {
-			panic(recovered)
-		}
-	}()
+	return screen, nil
+}
 
+func finishScreen(screen Screen) {
+	screen.Fini()
+	if recovered := recover(); recovered != nil {
+		panic(recovered)
+	}
+}
+
+func (app App) initialState(screen Screen) State {
 	state := app.Initial
 	if state.Revision == 0 {
 		state = NewState(state.Snapshot)
@@ -76,69 +93,93 @@ func (app App) Run(ctx context.Context) (final State, err error) {
 	screen.SetStyle(styleFor(app.Theme, RoleDefault))
 	screen.HideCursor()
 	drawScreen(screen, Render(state, app.Glyphs), app.Theme, false)
+	return state
+}
 
+func (app App) tickInterval() time.Duration {
 	interval := app.TickInterval
 	if interval <= 0 {
 		interval = time.Second
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	return interval
+}
+
+func (app App) runEventLoop(ctx context.Context, screen Screen, state State, ticks <-chan time.Time) (State, error) {
 	events := app.Events
 	screenEvents := screen.EventQ()
-
 	for {
 		select {
 		case <-ctx.Done():
-			if state.Snapshot.Live.Active && !state.Snapshot.Live.Completed && app.OnEffect != nil {
-				app.OnEffect(Effect{Kind: EffectCancelRun})
-			}
+			app.notifyCancellation(state)
 			return state, ctx.Err()
 		case event, ok := <-events:
 			if !ok {
 				events = nil
 				continue
 			}
-			next, effects := Update(state, event)
-			quit, redraw := app.performEffects(effects)
+			next, quit := app.applyEvent(screen, state, event, false)
 			if quit {
 				return next, nil
-			}
-			if next.Revision != state.Revision || redraw {
-				drawScreen(screen, Render(next, app.Glyphs), app.Theme, redraw)
 			}
 			state = next
 		case event, ok := <-screenEvents:
 			if !ok {
 				return state, ErrScreenClosed
 			}
-			if terminalError, ok := event.(*tcell.EventError); ok {
-				return state, fmt.Errorf("terminal input: %w", terminalError)
+			next, quit, err := app.applyScreenEvent(screen, state, event)
+			if err != nil {
+				return state, err
 			}
-			semantic, accepted := mapTCellEvent(event, state)
-			if !accepted {
-				continue
-			}
-			next, effects := Update(state, semantic)
-			quit, redraw := app.performEffects(effects)
-			_, resized := event.(*tcell.EventResize)
 			if quit {
 				return next, nil
 			}
-			if next.Revision != state.Revision || redraw || resized {
-				drawScreen(screen, Render(next, app.Glyphs), app.Theme, redraw || resized)
-			}
 			state = next
-		case now := <-ticker.C:
-			if !state.Snapshot.Live.Active || state.Snapshot.Live.Completed || state.Paused {
-				continue
-			}
-			next, _ := Update(state, TickEvent{Now: now})
-			if next.Revision != state.Revision {
-				drawScreen(screen, Render(next, app.Glyphs), app.Theme, false)
-			}
-			state = next
+		case now := <-ticks:
+			state = app.applyTick(screen, state, now)
 		}
 	}
+}
+
+func (app App) notifyCancellation(state State) {
+	if state.Snapshot.Live.Active && !state.Snapshot.Live.Completed && app.OnEffect != nil {
+		app.OnEffect(Effect{Kind: EffectCancelRun})
+	}
+}
+
+func (app App) applyEvent(screen Screen, state State, event Event, forceRedraw bool) (State, bool) {
+	next, effects := Update(state, event)
+	quit, redraw := app.performEffects(effects)
+	if quit {
+		return next, true
+	}
+	if next.Revision != state.Revision || redraw || forceRedraw {
+		drawScreen(screen, Render(next, app.Glyphs), app.Theme, redraw || forceRedraw)
+	}
+	return next, false
+}
+
+func (app App) applyScreenEvent(screen Screen, state State, event tcell.Event) (State, bool, error) {
+	if terminalError, ok := event.(*tcell.EventError); ok {
+		return state, false, fmt.Errorf("terminal input: %w", terminalError)
+	}
+	semantic, accepted := mapTCellEvent(event, state)
+	if !accepted {
+		return state, false, nil
+	}
+	_, resized := event.(*tcell.EventResize)
+	next, quit := app.applyEvent(screen, state, semantic, resized)
+	return next, quit, nil
+}
+
+func (app App) applyTick(screen Screen, state State, now time.Time) State {
+	if !state.Snapshot.Live.Active || state.Snapshot.Live.Completed || state.Paused {
+		return state
+	}
+	next, _ := Update(state, TickEvent{Now: now})
+	if next.Revision != state.Revision {
+		drawScreen(screen, Render(next, app.Glyphs), app.Theme, false)
+	}
+	return next
 }
 
 func (app App) performEffects(effects []Effect) (quit, redraw bool) {
@@ -157,7 +198,7 @@ func (app App) performEffects(effects []Effect) (quit, redraw bool) {
 	return quit, redraw
 }
 
-func mapTCellEvent(event tcell.Event, state State) (Event, bool) { //nolint:gocyclo // one dispatch over the full key set; splitting it hides the mapping
+func mapTCellEvent(event tcell.Event, state State) (Event, bool) {
 	switch value := event.(type) {
 	case *tcell.EventInterrupt:
 		return InputEvent{Action: ActionInterrupt}, true
@@ -165,111 +206,141 @@ func mapTCellEvent(event tcell.Event, state State) (Event, bool) { //nolint:gocy
 		width, height := value.Size()
 		return ResizeEvent{Width: width, Height: height}, true
 	case *tcell.EventKey:
-		if !value.Pressed() {
-			return nil, false
-		}
-		key, modifiers := value.Key(), value.Modifiers()
-		if key == tcell.KeyCtrlC || (key == tcell.KeyRune && modifiers&tcell.ModCtrl != 0 && value.Str() == "c") {
-			return InputEvent{Action: ActionInterrupt}, true
-		}
-		if key == tcell.KeyCtrlL || (key == tcell.KeyRune && modifiers&tcell.ModCtrl != 0 && value.Str() == "l") {
-			return InputEvent{Action: ActionRedraw}, true
-		}
-		if key == tcell.KeyCtrlU && state.EditingFilter {
-			return InputEvent{Action: ActionClearFilter}, true
-		}
-		if state.ConfirmQuit {
-			switch value.Str() {
-			case "y", "Y":
-				return InputEvent{Action: ActionConfirm}, true
-			case "n", "N":
-				return InputEvent{Action: ActionReject}, true
-			}
-		}
-		switch key {
-		case tcell.KeyEscape:
-			return InputEvent{Action: ActionBack}, true
-		case tcell.KeyEnter:
-			return InputEvent{Action: ActionOpen}, true
-		case tcell.KeyBackspace, tcell.KeyBackspace2:
-			return InputEvent{Action: ActionBackspace}, true
-		case tcell.KeyTab:
-			return InputEvent{Action: ActionNextView}, true
-		case tcell.KeyBacktab:
-			return InputEvent{Action: ActionPrevView}, true
-		case tcell.KeyUp:
-			return InputEvent{Action: ActionUp}, true
-		case tcell.KeyDown:
-			return InputEvent{Action: ActionDown}, true
-		case tcell.KeyLeft:
-			return InputEvent{Action: ActionPrevView}, true
-		case tcell.KeyRight:
-			return InputEvent{Action: ActionNextView}, true
-		case tcell.KeyPgUp:
-			return InputEvent{Action: ActionPageUp}, true
-		case tcell.KeyPgDn:
-			return InputEvent{Action: ActionPageDown}, true
-		case tcell.KeyHome:
-			return InputEvent{Action: ActionHome}, true
-		case tcell.KeyEnd:
-			return InputEvent{Action: ActionEnd}, true
-		case tcell.KeyF1:
-			return InputEvent{Action: ActionHelp}, true
-		}
-		if key != tcell.KeyRune {
-			return nil, false
-		}
-		if modifiers&(tcell.ModCtrl|tcell.ModAlt|tcell.ModMeta) != 0 {
-			return nil, false
-		}
-		text := value.Str()
-		if state.EditingFilter {
-			return InputEvent{Action: ActionText, Text: text}, text != ""
-		}
-		switch text {
-		case "1":
-			return InputEvent{Action: ActionViewLive}, true
-		case "2":
-			return InputEvent{Action: ActionViewResult}, true
-		case "3":
-			return InputEvent{Action: ActionViewBoard}, true
-		case "4":
-			return InputEvent{Action: ActionViewHistory}, true
-		case "5":
-			return InputEvent{Action: ActionViewInventory}, true
-		case "j", "J":
-			return InputEvent{Action: ActionDown}, true
-		case "k", "K":
-			return InputEvent{Action: ActionUp}, true
-		case "h", "H":
-			return InputEvent{Action: ActionPrevView}, true
-		case "l", "L":
-			return InputEvent{Action: ActionNextView}, true
-		case "g":
-			return InputEvent{Action: ActionHome}, true
-		case "G":
-			return InputEvent{Action: ActionEnd}, true
-		case "/":
-			return InputEvent{Action: ActionFilter}, true
-		case "s", "S":
-			return InputEvent{Action: ActionSort}, true
-		case "c", "C":
-			return InputEvent{Action: ActionCompare}, true
-		case " ":
-			return InputEvent{Action: ActionPause}, true
-		case "r", "R":
-			return InputEvent{Action: ActionReload}, true
-		case "?":
-			return InputEvent{Action: ActionHelp}, true
-		case "q", "Q":
-			return InputEvent{Action: ActionQuit}, true
-		case "y", "Y":
-			return InputEvent{Action: ActionConfirm}, true
-		case "n", "N":
-			return InputEvent{Action: ActionReject}, true
-		}
+		return mapKeyEvent(value, state)
 	}
 	return nil, false
+}
+
+func mapKeyEvent(event *tcell.EventKey, state State) (Event, bool) {
+	if !event.Pressed() {
+		return nil, false
+	}
+	if mapped, ok := mapControlKey(event, state); ok {
+		return mapped, true
+	}
+	if state.ConfirmQuit {
+		if mapped, ok := mapConfirmationKey(event.Str()); ok {
+			return mapped, true
+		}
+	}
+	if mapped, ok := mapSpecialKey(event.Key()); ok {
+		return mapped, true
+	}
+	if event.Key() != tcell.KeyRune || event.Modifiers()&(tcell.ModCtrl|tcell.ModAlt|tcell.ModMeta) != 0 {
+		return nil, false
+	}
+	text := event.Str()
+	if state.EditingFilter {
+		return InputEvent{Action: ActionText, Text: text}, text != ""
+	}
+	return mapRuneKey(text)
+}
+
+func mapControlKey(event *tcell.EventKey, state State) (Event, bool) {
+	key, modifiers, text := event.Key(), event.Modifiers(), event.Str()
+	if key == tcell.KeyCtrlC || key == tcell.KeyRune && modifiers&tcell.ModCtrl != 0 && text == "c" {
+		return InputEvent{Action: ActionInterrupt}, true
+	}
+	if key == tcell.KeyCtrlL || key == tcell.KeyRune && modifiers&tcell.ModCtrl != 0 && text == "l" {
+		return InputEvent{Action: ActionRedraw}, true
+	}
+	if key == tcell.KeyCtrlU && state.EditingFilter {
+		return InputEvent{Action: ActionClearFilter}, true
+	}
+	return nil, false
+}
+
+func mapConfirmationKey(text string) (Event, bool) {
+	switch text {
+	case "y", "Y":
+		return InputEvent{Action: ActionConfirm}, true
+	case "n", "N":
+		return InputEvent{Action: ActionReject}, true
+	default:
+		return nil, false
+	}
+}
+
+func mapSpecialKey(key tcell.Key) (Event, bool) {
+	switch key {
+	case tcell.KeyEscape:
+		return InputEvent{Action: ActionBack}, true
+	case tcell.KeyEnter:
+		return InputEvent{Action: ActionOpen}, true
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		return InputEvent{Action: ActionBackspace}, true
+	case tcell.KeyTab:
+		return InputEvent{Action: ActionNextView}, true
+	case tcell.KeyBacktab:
+		return InputEvent{Action: ActionPrevView}, true
+	case tcell.KeyUp:
+		return InputEvent{Action: ActionUp}, true
+	case tcell.KeyDown:
+		return InputEvent{Action: ActionDown}, true
+	case tcell.KeyLeft:
+		return InputEvent{Action: ActionPrevView}, true
+	case tcell.KeyRight:
+		return InputEvent{Action: ActionNextView}, true
+	case tcell.KeyPgUp:
+		return InputEvent{Action: ActionPageUp}, true
+	case tcell.KeyPgDn:
+		return InputEvent{Action: ActionPageDown}, true
+	case tcell.KeyHome:
+		return InputEvent{Action: ActionHome}, true
+	case tcell.KeyEnd:
+		return InputEvent{Action: ActionEnd}, true
+	case tcell.KeyF1:
+		return InputEvent{Action: ActionHelp}, true
+	default:
+		return nil, false
+	}
+}
+
+func mapRuneKey(text string) (Event, bool) {
+	switch text {
+	case "1":
+		return InputEvent{Action: ActionViewLive}, true
+	case "2":
+		return InputEvent{Action: ActionViewResult}, true
+	case "3":
+		return InputEvent{Action: ActionViewBoard}, true
+	case "4":
+		return InputEvent{Action: ActionViewHistory}, true
+	case "5":
+		return InputEvent{Action: ActionViewInventory}, true
+	case "j", "J":
+		return InputEvent{Action: ActionDown}, true
+	case "k", "K":
+		return InputEvent{Action: ActionUp}, true
+	case "h", "H":
+		return InputEvent{Action: ActionPrevView}, true
+	case "l", "L":
+		return InputEvent{Action: ActionNextView}, true
+	case "g":
+		return InputEvent{Action: ActionHome}, true
+	case "G":
+		return InputEvent{Action: ActionEnd}, true
+	case "/":
+		return InputEvent{Action: ActionFilter}, true
+	case "s", "S":
+		return InputEvent{Action: ActionSort}, true
+	case "c", "C":
+		return InputEvent{Action: ActionCompare}, true
+	case " ":
+		return InputEvent{Action: ActionPause}, true
+	case "r", "R":
+		return InputEvent{Action: ActionReload}, true
+	case "?":
+		return InputEvent{Action: ActionHelp}, true
+	case "q", "Q":
+		return InputEvent{Action: ActionQuit}, true
+	case "y", "Y":
+		return InputEvent{Action: ActionConfirm}, true
+	case "n", "N":
+		return InputEvent{Action: ActionReject}, true
+	default:
+		return nil, false
+	}
 }
 
 func drawScreen(screen Screen, canvas Canvas, theme Theme, sync bool) {

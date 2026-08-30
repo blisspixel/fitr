@@ -407,6 +407,43 @@ func Evaluate(in Input) Report {
 }
 
 func evaluateCore(in Input) Report {
+	r := newCoreReport(in)
+	if in.HaveGB <= 0 {
+		r.Tier = Skip
+		r.Why = "GPU memory was not measured"
+		if r.ObservedGB > 0 {
+			r.Why = fmt.Sprintf("GPU memory was not measured; model is resident at %s GB", trim1(r.ObservedGB))
+		}
+		r.Hint = "pass --vram-gb N, or run where nvidia-smi / unified memory / drm sysfs is readable"
+		return r
+	}
+	r.HaveGB = round1(in.HaveGB)
+	haveB := in.HaveGB * GiB
+
+	if in.LoadErr != "" {
+		r.Tier = Incompatible
+		r.Why = "server refused the load: " + in.LoadErr
+		r.Remedy = "try a smaller quant, or a shorter context (num_ctx=2048)"
+		r.Source = "observed load failure"
+		return r
+	}
+	if evaluateResident(in, haveB, &r) {
+		return r
+	}
+	if in.Arch.Hybrid && in.FitB == 0 {
+		r.Tier = Skip
+		r.Why = "hybrid recurrent architecture cannot be safely projected from weights plus a conventional KV cache"
+		r.Hint = "use --load at the requested context with Ollama, or --fit with llama-fit-params"
+		r.Gaps = append(r.Gaps, "recurrent state and other runtime allocation were not measured")
+		return r
+	}
+	if in.FitB > 0 {
+		return evaluateFit(in, haveB, r)
+	}
+	return evaluateWeightsAndKV(in, haveB, r)
+}
+
+func newCoreReport(in Input) Report {
 	r := Report{
 		Model:      in.Model,
 		Quant:      in.Quant,
@@ -429,126 +466,105 @@ func evaluateCore(in Input) Report {
 	if in.ResidentB > 0 {
 		r.ObservedGB = round1(float64(in.ResidentB) / GiB)
 	}
+	return r
+}
 
-	if in.HaveGB <= 0 {
+func evaluateResident(in Input, haveB float64, r *Report) bool {
+	if in.ResidentB <= 0 {
+		return false
+	}
+	if float64(in.ResidentB) > haveB {
+		// The process is running. Calling that Incompatible would
+		// trust a budget reading over a live allocation.
 		r.Tier = Skip
-		r.Why = "GPU memory was not measured"
-		if r.ObservedGB > 0 {
-			r.Why = fmt.Sprintf("GPU memory was not measured; model is resident at %s GB", trim1(r.ObservedGB))
+		r.Why = fmt.Sprintf("resident %s GB exceeds the %s GB budget reading; the process is running, so the budget is the suspect number",
+			trim1(r.ObservedGB), trim1(r.HaveGB))
+		r.Hint = "pass --vram-gb N if the card is larger than what fitr read"
+		r.Source = in.ResidentSrc
+		if r.Source == "" {
+			r.Source = "observed resident"
 		}
-		r.Hint = "pass --vram-gb N, or run where nvidia-smi / unified memory / drm sysfs is readable"
+		return true
+	}
+	// Observed fit at the current load. A requested --ctx still needs
+	// architecture to size; without one, this is the answer.
+	if in.Ctx <= 0 || !in.Arch.KVReady() {
+		r.Tier = Compatible
+		r.NeedGB = r.ObservedGB
+		r.Why = fmt.Sprintf("resident %s GB of %s GB available (measured)", trim1(r.ObservedGB), trim1(r.HaveGB))
+		r.Source = in.ResidentSrc
+		if r.Source == "" {
+			r.Source = "observed resident"
+		}
+		r.Gaps = append(r.Gaps, "resident is total runtime allocation; its non-weight, non-KV remainder is derived")
+		if !in.Arch.KVReady() {
+			r.Gaps = append(r.Gaps, "other context lengths not sized (no GGUF architecture)")
+		}
+		return true
+	}
+	if in.Arch.Hybrid && in.ResidentCtx == in.Ctx {
+		r.Tier = Compatible
+		r.NeedGB = r.ObservedGB
+		r.Why = fmt.Sprintf("resident %s GB of %s GB available at the requested %d context (measured)",
+			trim1(r.ObservedGB), trim1(r.HaveGB), in.Ctx)
+		r.Source = in.ResidentSrc
+		r.Gaps = append(r.Gaps, "hybrid recurrent state is included in the measured allocation")
+		return true
+	}
+	r.Gaps = append(r.Gaps, "current resident "+trim1(r.ObservedGB)+" GB (measured)")
+	return false
+}
+
+func evaluateFit(in Input, haveB float64, r Report) Report {
+	r.NeedGB = round1(float64(in.FitB) / GiB)
+	if in.FitSrc != "" {
+		r.Source = in.FitSrc
+	}
+	r.Gaps = append(r.Gaps, "dummy allocation includes runtime-managed memory beyond weights and modeled KV")
+	fits := float64(in.FitB) <= haveB && !in.FitCannot
+	if fits {
+		r.Tier = Compatible
+		r.Why = fmt.Sprintf("dummy allocation %s GB of %s GB available", trim1(r.NeedGB), trim1(r.HaveGB))
 		return r
 	}
-	r.HaveGB = round1(in.HaveGB)
-	haveB := in.HaveGB * GiB
-
-	if in.LoadErr != "" {
+	r.Why = fmt.Sprintf("dummy allocation %s GB; %s GB available", trim1(r.NeedGB), trim1(r.HaveGB))
+	if in.WeightsB <= 0 || !in.Arch.KVReady() {
 		r.Tier = Incompatible
-		r.Why = "server refused the load: " + in.LoadErr
-		r.Remedy = "try a smaller quant, or a shorter context (num_ctx=2048)"
-		r.Source = "observed load failure"
+		r.Remedy = "try a smaller quant, or a shorter context"
 		return r
 	}
-
-	if in.ResidentB > 0 {
-		if float64(in.ResidentB) > haveB {
-			// The process is running. Calling that Incompatible would
-			// trust a budget reading over a live allocation.
-			r.Tier = Skip
-			r.Why = fmt.Sprintf("resident %s GB exceeds the %s GB budget reading; the process is running, so the budget is the suspect number",
-				trim1(r.ObservedGB), trim1(r.HaveGB))
-			r.Hint = "pass --vram-gb N if the card is larger than what fitr read"
-			r.Source = in.ResidentSrc
-			if r.Source == "" {
-				r.Source = "observed resident"
-			}
-			return r
-		}
-		// Observed fit at the current load. A requested --ctx still needs
-		// architecture to size; without one, this is the answer.
-		if in.Ctx <= 0 || !in.Arch.KVReady() {
-			r.Tier = Compatible
-			r.NeedGB = r.ObservedGB
-			r.Why = fmt.Sprintf("resident %s GB of %s GB available (measured)", trim1(r.ObservedGB), trim1(r.HaveGB))
-			r.Source = in.ResidentSrc
-			if r.Source == "" {
-				r.Source = "observed resident"
-			}
-			r.Gaps = append(r.Gaps, "resident is total runtime allocation; its non-weight, non-KV remainder is derived")
-			if !in.Arch.KVReady() {
-				r.Gaps = append(r.Gaps, "other context lengths not sized (no GGUF architecture)")
-			}
-			return r
-		}
-		if in.Arch.Hybrid && in.ResidentCtx == in.Ctx {
-			r.Tier = Compatible
-			r.NeedGB = r.ObservedGB
-			r.Why = fmt.Sprintf("resident %s GB of %s GB available at the requested %d context (measured)",
-				trim1(r.ObservedGB), trim1(r.HaveGB), in.Ctx)
-			r.Source = in.ResidentSrc
-			r.Gaps = append(r.Gaps, "hybrid recurrent state is included in the measured allocation")
-			return r
-		}
-		r.Gaps = append(r.Gaps, "current resident "+trim1(r.ObservedGB)+" GB (measured)")
-	}
-
-	if in.Arch.Hybrid && in.FitB == 0 {
-		r.Tier = Skip
-		r.Why = "hybrid recurrent architecture cannot be safely projected from weights plus a conventional KV cache"
-		r.Hint = "use --load at the requested context with Ollama, or --fit with llama-fit-params"
-		r.Gaps = append(r.Gaps, "recurrent state and other runtime allocation were not measured")
+	if in.Arch.Hybrid {
+		r.Tier = Incompatible
+		r.Remedy = "try a smaller quant or rerun --fit at a shorter context; hybrid recurrent state prevents a safe algebraic context remedy"
 		return r
 	}
-
-	if in.FitB > 0 {
-		r.NeedGB = round1(float64(in.FitB) / GiB)
-		if in.FitSrc != "" {
-			r.Source = in.FitSrc
-		}
-		r.Gaps = append(r.Gaps, "dummy allocation includes runtime-managed memory beyond weights and modeled KV")
-		fits := float64(in.FitB) <= haveB && !in.FitCannot
-		if fits {
-			r.Tier = Compatible
-			r.Why = fmt.Sprintf("dummy allocation %s GB of %s GB available", trim1(r.NeedGB), trim1(r.HaveGB))
-			return r
-		}
-		r.Why = fmt.Sprintf("dummy allocation %s GB; %s GB available", trim1(r.NeedGB), trim1(r.HaveGB))
-		if in.WeightsB <= 0 || !in.Arch.KVReady() {
-			r.Tier = Incompatible
-			r.Remedy = "try a smaller quant, or a shorter context"
-			return r
-		}
-		if in.Arch.Hybrid {
-			r.Tier = Incompatible
-			r.Remedy = "try a smaller quant or rerun --fit at a shorter context; hybrid recurrent state prevents a safe algebraic context remedy"
-			return r
-		}
-		// Allocator said this ctx does not fit; KV math still names a shorter window.
-		elem, _, _ := kvElemBytes(in)
-		perTok := in.Arch.kvBytesPerToken(elem)
-		if perTok <= 0 {
-			r.Tier = Incompatible
-			r.Remedy = "try a smaller quant, or a shorter context"
-			return r
-		}
-		fitCtx := ctxTokens((haveB - float64(in.WeightsB)) / perTok)
-		fitCtx = (fitCtx / 256) * 256
-		if fitCtx < 512 {
-			r.Tier = Incompatible
-			r.Remedy = "try a smaller quant; even a 512-token window does not fit next to the weights"
-			r.KVRemedy = kvCacheRemedy(in, elem, in.Ctx, fitCtx, haveB)
-			return r
-		}
-		fitB := float64(in.WeightsB) + perTok*float64(fitCtx)
-		r.Tier = LowMemory
-		r.Flag = ContextFlag(in.Backend)
-		r.FlagValue = fitCtx
-		r.FitsGB = round1(fitB / GiB)
-		r.Remedy = remedyLine(r.Flag, fitCtx, r.FitsGB)
+	// Allocator said this ctx does not fit; KV math still names a shorter window.
+	elem, _, _ := kvElemBytes(in)
+	perTok := in.Arch.kvBytesPerToken(elem)
+	if perTok <= 0 {
+		r.Tier = Incompatible
+		r.Remedy = "try a smaller quant, or a shorter context"
+		return r
+	}
+	fitCtx := ctxTokens((haveB - float64(in.WeightsB)) / perTok)
+	fitCtx = (fitCtx / 256) * 256
+	if fitCtx < 512 {
+		r.Tier = Incompatible
+		r.Remedy = "try a smaller quant; even a 512-token window does not fit next to the weights"
 		r.KVRemedy = kvCacheRemedy(in, elem, in.Ctx, fitCtx, haveB)
 		return r
 	}
+	fitB := float64(in.WeightsB) + perTok*float64(fitCtx)
+	r.Tier = LowMemory
+	r.Flag = ContextFlag(in.Backend)
+	r.FlagValue = fitCtx
+	r.FitsGB = round1(fitB / GiB)
+	r.Remedy = remedyLine(r.Flag, fitCtx, r.FitsGB)
+	r.KVRemedy = kvCacheRemedy(in, elem, in.Ctx, fitCtx, haveB)
+	return r
+}
 
+func evaluateWeightsAndKV(in Input, haveB float64, r Report) Report {
 	if in.WeightsB <= 0 {
 		r.Tier = Skip
 		r.Why = "model weights were not measured"

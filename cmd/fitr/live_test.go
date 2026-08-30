@@ -1,10 +1,13 @@
 package main
 
-// Opt-in live smoke against a running Ollama. CI never runs this - every CI
-// test is pure logic - but a human with a model can:
+// Opt-in live smoke against an explicitly selected serving runtime. CI never
+// runs this - every CI test is pure logic - but a human with a model can:
 //
 //	FITR_LIVE=qwen3-coder:30b go test ./cmd/fitr -run TestLive -v
+//	FITR_LIVE=served.gguf FITR_LIVE_BACKEND=llama-server go test ./cmd/fitr -run TestLive -v
 //
+// FITR_LIVE_BACKEND defaults to Ollama so the original invocation remains the
+// ordinary path. Live acceptance never auto-discovers a different runtime.
 // It runs one check from each need pool against the real model, and walks the
 // whole documented loop. Both assert the MACHINERY (generation, grading,
 // outcome shape, command wiring), not the model's score - a weak model failing
@@ -14,25 +17,63 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/blisspixel/fitr/internal/eval"
-	"github.com/blisspixel/fitr/internal/ollama"
+	"github.com/blisspixel/fitr/internal/llm"
 )
 
+func TestLiveBackendSelectionIsExplicit(t *testing.T) {
+	t.Run("Ollama remains the default", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/tags" {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(`{"models":[{"name":"model:latest"}]}`))
+		}))
+		defer server.Close()
+		t.Setenv("FITR_LIVE", "model:latest")
+		t.Setenv("FITR_LIVE_BACKEND", "")
+		t.Setenv("OLLAMA_BASE_URL", server.URL)
+
+		model, backend, c := liveBackend(t, context.Background())
+		if model != "model:latest" || backend != "ollama" || c.URL() != server.URL {
+			t.Fatalf("live backend = %q, %q, %q", model, backend, c.URL())
+		}
+	})
+
+	t.Run("llama-server uses only its configured endpoint", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/health":
+				_, _ = w.Write([]byte(`{"status":"ok"}`))
+			case "/props":
+				_, _ = w.Write([]byte(`{"build_info":"test","model_path":"C:\\models\\served.gguf"}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+		t.Setenv("FITR_LIVE", "operator-alias")
+		t.Setenv("FITR_LIVE_BACKEND", "llama-server")
+		t.Setenv("LLAMA_SERVER_URL", server.URL)
+
+		model, backend, c := liveBackend(t, context.Background())
+		if model != "served.gguf" || backend != "llama-server" || c.URL() != server.URL {
+			t.Fatalf("live backend = %q, %q, %q", model, backend, c.URL())
+		}
+	})
+}
+
 func TestLiveChecksSmoke(t *testing.T) {
-	model := os.Getenv("FITR_LIVE")
-	if model == "" {
-		t.Skip("set FITR_LIVE=<model> to run the live smoke")
-	}
 	ctx := context.Background()
-	c := ollama.New()
-	if !c.Reachable(ctx) {
-		t.Fatal("FITR_LIVE is set but Ollama is not reachable")
-	}
+	model, _, c := liveBackend(t, ctx)
 	spec, err := eval.LoadSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -72,14 +113,8 @@ func TestLiveChecksSmoke(t *testing.T) {
 // verdict is a real answer here: exitGates means the loop worked and a gate
 // failed, which is the outcome fitr exists to report.
 func TestLiveLoopSmoke(t *testing.T) {
-	model := os.Getenv("FITR_LIVE")
-	if model == "" {
-		t.Skip("set FITR_LIVE=<model> to run the live loop smoke")
-	}
 	ctx := context.Background()
-	if !ollama.New().Reachable(ctx) {
-		t.Fatal("FITR_LIVE is set but Ollama is not reachable")
-	}
+	model, backend, _ := liveBackend(t, ctx)
 	// Never read or write the operator's real evidence.
 	t.Setenv("FITR_RESULTS", t.TempDir())
 
@@ -94,7 +129,9 @@ func TestLiveLoopSmoke(t *testing.T) {
 	}
 
 	t.Run("inventory", func(t *testing.T) {
-		out, code := captureTopStdout(t, func() int { return cmdStatus(ctx, nil) })
+		out, code := captureTopStdout(t, func() int {
+			return cmdStatus(ctx, []string{"--backend", backend})
+		})
 		ranLoop(t, "inventory", code, out, "")
 		if !strings.Contains(out, baseTag(model)) {
 			t.Fatalf("bare fitr did not list the installed model %q:\n%s", model, out)
@@ -102,7 +139,9 @@ func TestLiveLoopSmoke(t *testing.T) {
 	})
 
 	t.Run("advise", func(t *testing.T) {
-		out, code := captureTopStdout(t, func() int { return cmdAdvise(ctx, []string{model}) })
+		out, code := captureTopStdout(t, func() int {
+			return cmdAdvise(ctx, []string{model, "--backend", backend})
+		})
 		ranLoop(t, "advise", code, out, "")
 		// The exact 0.9.6 regression: weights unknown suppresses the context
 		// table and the verdict degrades to SKIP. The table is the artifact.
@@ -121,7 +160,7 @@ func TestLiveLoopSmoke(t *testing.T) {
 		stderr, code := captureTopStderr(t, func() int {
 			var inner int
 			stdout, inner = captureTopStdout(t, func() int {
-				return cmdRun(ctx, []string{model, "--quick"})
+				return cmdRun(ctx, []string{model, "--quick", "--backend", backend})
 			})
 			return inner
 		})
@@ -134,6 +173,24 @@ func TestLiveLoopSmoke(t *testing.T) {
 	// board and apply both read the evidence run just wrote, so they prove the
 	// save/reopen seam, not only their own rendering.
 	t.Run("board", func(t *testing.T) {
+		if backend == "llama-server" {
+			stdout := ""
+			stderr, code := captureTopStderr(t, func() int {
+				var inner int
+				stdout, inner = captureTopStdout(t, func() int { return cmdBoard(ctx, nil) })
+				return inner
+			})
+			if code != exitError {
+				t.Fatalf("board exit = %d, want evidence refusal %d; stdout=%s\nstderr=%s", code, exitError, stdout, stderr)
+			}
+			if strings.Contains(stdout, baseTag(model)) {
+				t.Fatalf("board ranked llama-server's observed-only artifact identity:\n%s", stdout)
+			}
+			if !strings.Contains(stderr, "valid evidence contract") {
+				t.Fatalf("board did not explain llama-server's expected evidence exclusion:\n%s", stderr)
+			}
+			return
+		}
 		out, code := captureTopStdout(t, func() int { return cmdBoard(ctx, nil) })
 		ranLoop(t, "board", code, out, "")
 		if !strings.Contains(out, baseTag(model)) {
@@ -142,7 +199,9 @@ func TestLiveLoopSmoke(t *testing.T) {
 	})
 
 	t.Run("apply", func(t *testing.T) {
-		out, code := captureTopStdout(t, func() int { return cmdApply(ctx, []string{model}) })
+		out, code := captureTopStdout(t, func() int {
+			return cmdApply(ctx, []string{model, "--backend", backend})
+		})
 		ranLoop(t, "apply", code, out, "")
 		if !strings.Contains(out, "does not restart") {
 			t.Fatalf("apply dropped its non-mutation promise:\n%s", out)
@@ -173,15 +232,21 @@ func TestLiveLoopSmoke(t *testing.T) {
 	}
 
 	t.Run("doctor", func(t *testing.T) {
-		runsAtAll(t, "doctor", func() int { return cmdDoctor(ctx, []string{model}) })
+		runsAtAll(t, "doctor", func() int {
+			return cmdDoctor(ctx, []string{model, "--backend", backend})
+		})
 	})
 
 	t.Run("diag", func(t *testing.T) {
-		runsAtAll(t, "diag", func() int { return cmdDiag(ctx, []string{model}) })
+		runsAtAll(t, "diag", func() int {
+			return cmdDiag(ctx, []string{model, "--backend", backend})
+		})
 	})
 
 	t.Run("device", func(t *testing.T) {
-		out, code := captureTopStdout(t, func() int { return cmdDevice(ctx, nil) })
+		out, code := captureTopStdout(t, func() int {
+			return cmdDevice(ctx, []string{"--backend", backend})
+		})
 		ranLoop(t, "device", code, out, "")
 		// The fingerprint decides comparability, so it has to name the machine
 		// rather than print blanks.
@@ -244,13 +309,48 @@ func TestLiveLoopSmoke(t *testing.T) {
 		if other == "" {
 			t.Skip("set FITR_LIVE_SECOND=<model> to cover compare")
 		}
+		if backend == "llama-server" {
+			t.Skip("llama-server serves one launch-time model; restart it and record a second run separately")
+		}
 		if _, code := captureTopStdout(t, func() int {
-			return cmdRun(ctx, []string{other, "--quick"})
+			return cmdRun(ctx, []string{other, "--quick", "--backend", backend})
 		}); code != exitOK && code != exitGates {
 			t.Fatalf("measuring the second model failed: exit %d", code)
 		}
 		runsAtAll(t, "compare", func() int { return cmdCompare(ctx, []string{model, other}) })
 	})
+}
+
+func liveBackend(t *testing.T, ctx context.Context) (string, string, llm.Backend) {
+	t.Helper()
+	requested := strings.TrimSpace(os.Getenv("FITR_LIVE"))
+	if requested == "" {
+		t.Skip("set FITR_LIVE=<model> to run the live smoke")
+	}
+	rawBackend := strings.TrimSpace(os.Getenv("FITR_LIVE_BACKEND"))
+	if rawBackend == "" {
+		rawBackend = "ollama"
+	}
+	backend, ok := canonicalBackendKind(rawBackend)
+	if !ok || backend != "ollama" && backend != "llama-server" {
+		t.Fatalf("FITR_LIVE_BACKEND=%q is not a supported native live backend; use ollama or llama-server", rawBackend)
+	}
+	c, err := backendAt(backend, "")
+	if err != nil {
+		t.Fatalf("configure %s live backend: %v", backend, err)
+	}
+	if !c.Reachable(ctx) {
+		t.Fatalf("FITR_LIVE is set but %s is not reachable at %s", backend, c.URL())
+	}
+	models, err := c.Tags(ctx)
+	if err != nil {
+		t.Fatalf("list models from %s: %v", backend, err)
+	}
+	selected, err := selectResolvedModel(backend, requested, models)
+	if err != nil {
+		t.Fatalf("resolve FITR_LIVE model through %s: %v", backend, err)
+	}
+	return selected.Name, backend, c
 }
 
 // baseTag trims a registry host and namespace so an inventory row rendered as

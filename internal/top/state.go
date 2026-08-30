@@ -13,87 +13,107 @@ import (
 func Update(state State, event Event) (State, []Effect) {
 	s := state
 	var effects []Effect
-	change := func() { s.Revision++ }
+	changed := false
 
 	switch e := event.(type) {
 	case SnapshotEvent:
-		next := cloneSnapshot(e.Snapshot)
-		latestGeneration := s.Snapshot.Generation
-		if s.PendingSnapshot != nil {
-			latestGeneration = max(latestGeneration, s.PendingSnapshot.Generation)
-		}
-		if next.Generation > 0 && latestGeneration > next.Generation {
-			return s, nil
-		}
-		completedID := completedRunID(s.Snapshot, next)
-		if next.Live.RunID == "" && !next.Live.Active && !next.Live.Completed && s.Snapshot.Live.RunID != "" {
-			next.Live = cloneLive(s.Snapshot.Live)
-		}
-		if s.Paused {
-			if s.PendingLive != nil && s.PendingLive.RunID == next.Live.RunID && s.PendingLive.Sequence <= next.Live.Sequence {
-				s.PendingLive = nil
-			}
-			s.PendingSnapshot = &next
-		} else {
-			s.Snapshot = next
-			s.Error = ""
-		}
-		normalizeSelection(&s)
-		if !s.Paused && completedID != "" {
-			s.Selected[ViewHistory] = completedID
-			s.Selected[ViewResult] = completedID
-		}
-		change()
+		s, changed = applySnapshotEvent(s, e)
 	case LiveEvent:
-		next := cloneLive(e.Live)
-		latestLive := s.Snapshot.Live
-		if s.PendingSnapshot != nil && s.PendingSnapshot.Live.RunID == next.RunID && s.PendingSnapshot.Live.Sequence > latestLive.Sequence {
-			latestLive = s.PendingSnapshot.Live
-		}
-		if s.PendingLive != nil && s.PendingLive.RunID == next.RunID && s.PendingLive.Sequence > latestLive.Sequence {
-			latestLive = *s.PendingLive
-		}
-		if next.RunID != "" && next.RunID == latestLive.RunID && next.Sequence > 0 && next.Sequence < latestLive.Sequence {
-			return s, nil
-		}
-		if s.Paused {
-			s.PendingLive = &next
-		} else {
-			s.Snapshot.Live = next
-		}
-		change()
+		s, changed = applyLiveEvent(s, e)
 	case TickEvent:
-		if s.Snapshot.Live.Active && !s.Paused && !e.Now.IsZero() && !e.Now.Equal(s.Now) {
-			s.Now = e.Now
-			change()
-		}
+		s, changed = applyTickEvent(s, e)
 	case ResizeEvent:
-		width, height := max(e.Width, 1), max(e.Height, 1)
-		if width != s.Width || height != s.Height {
-			s.Width, s.Height = width, height
-			clampOffset(&s, s.View)
-			change()
-		}
+		s, changed = applyResizeEvent(s, e)
 	case ErrorEvent:
-		latestGeneration := s.Snapshot.Generation
-		if s.PendingSnapshot != nil {
-			latestGeneration = max(latestGeneration, s.PendingSnapshot.Generation)
-		}
-		if e.Generation > 0 && latestGeneration > e.Generation {
-			return s, nil
-		}
-		if e.Err != nil {
-			s.Error = Sanitize(e.Err.Error())
-			change()
-		}
+		s, changed = applyErrorEvent(s, e)
 	case InputEvent:
-		var changed bool
 		s, effects, changed = applyInput(s, e)
-		if changed {
-			change()
-		}
+	}
+	if changed {
+		s.Revision++
 	}
 	return s, effects
+}
+
+func applySnapshotEvent(s State, event SnapshotEvent) (State, bool) {
+	next := cloneSnapshot(event.Snapshot)
+	latestGeneration := s.Snapshot.Generation
+	if s.PendingSnapshot != nil {
+		latestGeneration = max(latestGeneration, s.PendingSnapshot.Generation)
+	}
+	if next.Generation > 0 && latestGeneration > next.Generation {
+		return s, false
+	}
+	completedID := completedRunID(s.Snapshot, next)
+	if next.Live.RunID == "" && !next.Live.Active && !next.Live.Completed && s.Snapshot.Live.RunID != "" {
+		next.Live = cloneLive(s.Snapshot.Live)
+	}
+	if s.Paused {
+		if s.PendingLive != nil && s.PendingLive.RunID == next.Live.RunID && s.PendingLive.Sequence <= next.Live.Sequence {
+			s.PendingLive = nil
+		}
+		s.PendingSnapshot = &next
+	} else {
+		s.Snapshot = next
+		s.Error = ""
+	}
+	normalizeSelection(&s)
+	if !s.Paused && completedID != "" {
+		s.Selected[ViewHistory] = completedID
+		s.Selected[ViewResult] = completedID
+	}
+	return s, true
+}
+
+func applyLiveEvent(s State, event LiveEvent) (State, bool) {
+	next := cloneLive(event.Live)
+	latestLive := s.Snapshot.Live
+	if s.PendingSnapshot != nil && s.PendingSnapshot.Live.RunID == next.RunID &&
+		s.PendingSnapshot.Live.Sequence > latestLive.Sequence {
+		latestLive = s.PendingSnapshot.Live
+	}
+	if s.PendingLive != nil && s.PendingLive.RunID == next.RunID && s.PendingLive.Sequence > latestLive.Sequence {
+		latestLive = *s.PendingLive
+	}
+	if next.RunID != "" && next.RunID == latestLive.RunID && next.Sequence > 0 && next.Sequence < latestLive.Sequence {
+		return s, false
+	}
+	if s.Paused {
+		s.PendingLive = &next
+	} else {
+		s.Snapshot.Live = next
+	}
+	return s, true
+}
+
+func applyTickEvent(s State, event TickEvent) (State, bool) {
+	if !s.Snapshot.Live.Active || s.Paused || event.Now.IsZero() || event.Now.Equal(s.Now) {
+		return s, false
+	}
+	s.Now = event.Now
+	return s, true
+}
+
+func applyResizeEvent(s State, event ResizeEvent) (State, bool) {
+	width, height := max(event.Width, 1), max(event.Height, 1)
+	if width == s.Width && height == s.Height {
+		return s, false
+	}
+	s.Width, s.Height = width, height
+	clampOffset(&s, s.View)
+	return s, true
+}
+
+func applyErrorEvent(s State, event ErrorEvent) (State, bool) {
+	latestGeneration := s.Snapshot.Generation
+	if s.PendingSnapshot != nil {
+		latestGeneration = max(latestGeneration, s.PendingSnapshot.Generation)
+	}
+	if event.Generation > 0 && latestGeneration > event.Generation || event.Err == nil {
+		return s, false
+	}
+	s.Error = Sanitize(event.Err.Error())
+	return s, true
 }
 
 // completedRunID recognizes the saved result created by a live-to-complete
@@ -137,82 +157,108 @@ func completedRunID(previous, next Snapshot) string {
 	return ""
 }
 
-func applyInput(s State, event InputEvent) (State, []Effect, bool) { //nolint:gocyclo // one dispatch over the full key set; splitting it hides the mapping
-	var effects []Effect
+func applyInput(s State, event InputEvent) (State, []Effect, bool) {
 	if s.ConfirmQuit {
-		switch event.Action {
-		case ActionConfirm:
-			s.ConfirmQuit = false
-			if s.Snapshot.Live.Active && !s.Snapshot.Live.Completed {
-				effects = append(effects, Effect{Kind: EffectCancelRun})
-			}
-			effects = append(effects, Effect{Kind: EffectQuit})
-			return s, effects, true
-		case ActionReject, ActionBack, ActionQuit:
-			s.ConfirmQuit = false
-			return s, effects, true
-		default:
-			return s, effects, false
-		}
+		return applyQuitConfirmation(s, event.Action)
 	}
-
 	if s.EditingFilter {
-		switch event.Action {
-		case ActionText:
-			text := Sanitize(event.Text)
-			if text != "" {
-				s.Filter += text
-				normalizeSelection(&s)
-				return s, nil, true
-			}
-		case ActionBackspace:
-			r := []rune(s.Filter)
-			if len(r) > 0 {
-				s.Filter = string(r[:len(r)-1])
-				normalizeSelection(&s)
-				return s, nil, true
-			}
-		case ActionClearFilter:
-			if s.Filter != "" {
-				s.Filter = ""
-				normalizeSelection(&s)
-				return s, nil, true
-			}
-		case ActionOpen, ActionConfirm:
-			s.EditingFilter = false
-			s.FilterBeforeEdit = ""
-			return s, nil, true
-		case ActionBack, ActionReject:
-			s.EditingFilter = false
-			s.Filter = s.FilterBeforeEdit
-			s.FilterBeforeEdit = ""
+		return applyFilterEditing(s, event)
+	}
+	if s.Help {
+		return applyHelpInput(s, event.Action)
+	}
+	if closeComparison(event.Action) && s.Comparison != nil {
+		s.Comparison = nil
+		return s, nil, true
+	}
+	if isNavigationAction(event.Action) {
+		return applyNavigationInput(s, event.Action)
+	}
+	if isContentAction(event.Action) {
+		return applyContentInput(s, event.Action)
+	}
+	return applyGlobalInput(s, event.Action)
+}
+
+func applyQuitConfirmation(s State, action Action) (State, []Effect, bool) {
+	switch action {
+	case ActionConfirm:
+		s.ConfirmQuit = false
+		effects := make([]Effect, 0, 2)
+		if s.Snapshot.Live.Active && !s.Snapshot.Live.Completed {
+			effects = append(effects, Effect{Kind: EffectCancelRun})
+		}
+		effects = append(effects, Effect{Kind: EffectQuit})
+		return s, effects, true
+	case ActionReject, ActionBack, ActionQuit:
+		s.ConfirmQuit = false
+		return s, nil, true
+	default:
+		return s, nil, false
+	}
+}
+
+func applyFilterEditing(s State, event InputEvent) (State, []Effect, bool) {
+	switch event.Action {
+	case ActionText:
+		text := Sanitize(event.Text)
+		if text != "" {
+			s.Filter += text
 			normalizeSelection(&s)
 			return s, nil, true
 		}
+	case ActionBackspace:
+		runes := []rune(s.Filter)
+		if len(runes) > 0 {
+			s.Filter = string(runes[:len(runes)-1])
+			normalizeSelection(&s)
+			return s, nil, true
+		}
+	case ActionClearFilter:
+		if s.Filter != "" {
+			s.Filter = ""
+			normalizeSelection(&s)
+			return s, nil, true
+		}
+	case ActionOpen, ActionConfirm:
+		s.EditingFilter = false
+		s.FilterBeforeEdit = ""
+		return s, nil, true
+	case ActionBack, ActionReject:
+		s.EditingFilter = false
+		s.Filter = s.FilterBeforeEdit
+		s.FilterBeforeEdit = ""
+		normalizeSelection(&s)
+		return s, nil, true
+	}
+	return s, nil, false
+}
+
+func applyHelpInput(s State, action Action) (State, []Effect, bool) {
+	switch action {
+	case ActionHelp, ActionBack, ActionReject, ActionOpen, ActionQuit:
+		s.Help = false
+		return s, nil, true
+	default:
 		return s, nil, false
 	}
+}
 
-	if s.Help {
-		switch event.Action {
-		case ActionHelp, ActionBack, ActionReject, ActionOpen:
-			s.Help = false
-			return s, nil, true
-		case ActionQuit:
-			s.Help = false
-			return s, nil, true
-		default:
-			return s, nil, false
-		}
+func closeComparison(action Action) bool {
+	switch action {
+	case ActionBack, ActionOpen, ActionCompare, ActionReject:
+		return true
+	default:
+		return false
 	}
-	if s.Comparison != nil {
-		switch event.Action {
-		case ActionBack, ActionOpen, ActionCompare, ActionReject:
-			s.Comparison = nil
-			return s, nil, true
-		}
-	}
+}
 
-	switch event.Action {
+func isNavigationAction(action Action) bool {
+	return action >= ActionViewLive && action <= ActionEnd
+}
+
+func applyNavigationInput(s State, action Action) (State, []Effect, bool) {
+	switch action {
 	case ActionViewLive:
 		return switchView(s, ViewLive), nil, s.View != ViewLive
 	case ActionViewResult:
@@ -242,114 +288,170 @@ func applyInput(s State, event InputEvent) (State, []Effect, bool) { //nolint:go
 	case ActionEnd:
 		ids := orderedIDs(s, s.View)
 		return selectIndex(s, len(ids)-1), nil, len(ids) > 0
+	default:
+		return s, nil, false
+	}
+}
+
+func isContentAction(action Action) bool {
+	switch action {
+	case ActionOpen, ActionBack, ActionFilter, ActionSort, ActionPause, ActionCompare:
+		return true
+	default:
+		return false
+	}
+}
+
+func applyContentInput(s State, action Action) (State, []Effect, bool) {
+	switch action {
 	case ActionOpen:
-		if s.View == ViewLive && s.Snapshot.Live.Completed && s.Selected[ViewResult] != "" {
+		return applyOpenInput(s)
+	case ActionBack:
+		return applyBackInput(s)
+	case ActionFilter:
+		return applyBeginFilter(s)
+	case ActionSort:
+		return applySortInput(s)
+	case ActionPause:
+		return applyPauseInput(s)
+	case ActionCompare:
+		return applyCompareInput(s)
+	default:
+		return s, nil, false
+	}
+}
+
+func applyOpenInput(s State) (State, []Effect, bool) {
+	if s.View == ViewLive && s.Snapshot.Live.Completed && s.Selected[ViewResult] != "" {
+		s.View = ViewResult
+		return s, nil, true
+	}
+	if s.View == ViewBoard || s.View == ViewHistory {
+		if id := s.Selected[s.View]; id != "" {
+			s.Selected[ViewResult] = id
 			s.View = ViewResult
 			return s, nil, true
 		}
-		if s.View == ViewBoard || s.View == ViewHistory {
-			id := s.Selected[s.View]
-			if id != "" {
-				s.Selected[ViewResult] = id
-				s.View = ViewResult
-				return s, nil, true
-			}
-		}
-		if s.View == ViewInventory {
-			id := s.Selected[ViewInventory]
-			if run, ok := inventoryRun(s, id); ok {
-				s.Selected[ViewResult] = run.ID
-				s.View = ViewResult
-				return s, nil, true
-			}
-		}
-	case ActionBack:
-		if s.Filter != "" {
-			s.Filter = ""
-			normalizeSelection(&s)
+	}
+	if s.View == ViewInventory {
+		if run, ok := inventoryRun(s, s.Selected[ViewInventory]); ok {
+			s.Selected[ViewResult] = run.ID
+			s.View = ViewResult
 			return s, nil, true
 		}
-		if s.View == ViewResult {
-			s.View = ViewHistory
-			return s, nil, true
-		}
-	case ActionFilter:
-		if s.View == ViewBoard || s.View == ViewHistory || s.View == ViewInventory {
-			s.FilterBeforeEdit = s.Filter
-			s.EditingFilter = true
-			return s, nil, true
-		}
-	case ActionSort:
-		if s.View == ViewBoard {
-			s.BoardSort = Sort((int(s.BoardSort) + 1) % int(sortCount))
-			normalizeSelection(&s)
-			return s, nil, true
-		}
-		if s.View == ViewHistory {
-			s.HistorySort = Sort((int(s.HistorySort) + 1) % int(sortCount))
-			normalizeSelection(&s)
-			return s, nil, true
-		}
-	case ActionPause:
-		if s.View == ViewHistory {
-			selected := s.Selected[ViewHistory]
-			if selected == "" {
-				return s, nil, false
-			}
-			if s.BaselineID == selected {
-				s.BaselineID = ""
-			} else {
-				s.BaselineID = selected
-			}
-			s.Comparison = nil
-			s.Error = ""
-			return s, nil, true
-		}
-		if s.View != ViewLive {
-			return s, nil, false
-		}
-		s.Paused = !s.Paused
-		if !s.Paused {
-			completedID := ""
-			if s.PendingSnapshot != nil {
-				completedID = completedRunID(s.Snapshot, *s.PendingSnapshot)
-				s.Snapshot = cloneSnapshot(*s.PendingSnapshot)
-				s.PendingSnapshot = nil
-			}
-			if s.PendingLive != nil {
-				s.Snapshot.Live = cloneLive(*s.PendingLive)
-				s.PendingLive = nil
-			}
-			normalizeSelection(&s)
-			if completedID != "" {
-				s.Selected[ViewHistory] = completedID
-				s.Selected[ViewResult] = completedID
-			}
-		}
+	}
+	return s, nil, false
+}
+
+func applyBackInput(s State) (State, []Effect, bool) {
+	if s.Filter != "" {
+		s.Filter = ""
+		normalizeSelection(&s)
 		return s, nil, true
-	case ActionCompare:
-		if s.View != ViewHistory {
-			return s, nil, false
-		}
-		selected := s.Selected[ViewHistory]
-		if s.BaselineID == "" {
-			s.Error = "mark a History baseline with Space first"
-			return s, nil, true
-		}
-		if selected == "" || selected == s.BaselineID {
-			s.Error = "select a different History run to compare"
-			return s, nil, true
-		}
-		baseline, baselineOK := FindRun(s.Snapshot, s.BaselineID)
-		candidate, candidateOK := FindRun(s.Snapshot, selected)
-		if !baselineOK || !candidateOK {
-			s.Error = "one comparison run disappeared; reload and mark the baseline again"
-			return s, nil, true
-		}
-		comparison := compareRuns(baseline, candidate)
-		s.Comparison = &comparison
-		s.Error = ""
+	}
+	if s.View == ViewResult {
+		s.View = ViewHistory
 		return s, nil, true
+	}
+	return s, nil, false
+}
+
+func applyBeginFilter(s State) (State, []Effect, bool) {
+	if s.View != ViewBoard && s.View != ViewHistory && s.View != ViewInventory {
+		return s, nil, false
+	}
+	s.FilterBeforeEdit = s.Filter
+	s.EditingFilter = true
+	return s, nil, true
+}
+
+func applySortInput(s State) (State, []Effect, bool) {
+	switch s.View {
+	case ViewBoard:
+		s.BoardSort = Sort((int(s.BoardSort) + 1) % int(sortCount))
+	case ViewHistory:
+		s.HistorySort = Sort((int(s.HistorySort) + 1) % int(sortCount))
+	default:
+		return s, nil, false
+	}
+	normalizeSelection(&s)
+	return s, nil, true
+}
+
+func applyPauseInput(s State) (State, []Effect, bool) {
+	if s.View == ViewHistory {
+		return applyBaselineInput(s)
+	}
+	if s.View != ViewLive {
+		return s, nil, false
+	}
+	s.Paused = !s.Paused
+	if !s.Paused {
+		applyPendingState(&s)
+	}
+	return s, nil, true
+}
+
+func applyBaselineInput(s State) (State, []Effect, bool) {
+	selected := s.Selected[ViewHistory]
+	if selected == "" {
+		return s, nil, false
+	}
+	if s.BaselineID == selected {
+		s.BaselineID = ""
+	} else {
+		s.BaselineID = selected
+	}
+	s.Comparison = nil
+	s.Error = ""
+	return s, nil, true
+}
+
+func applyPendingState(s *State) {
+	completedID := ""
+	if s.PendingSnapshot != nil {
+		completedID = completedRunID(s.Snapshot, *s.PendingSnapshot)
+		s.Snapshot = cloneSnapshot(*s.PendingSnapshot)
+		s.PendingSnapshot = nil
+	}
+	if s.PendingLive != nil {
+		s.Snapshot.Live = cloneLive(*s.PendingLive)
+		s.PendingLive = nil
+	}
+	normalizeSelection(s)
+	if completedID != "" {
+		s.Selected[ViewHistory] = completedID
+		s.Selected[ViewResult] = completedID
+	}
+}
+
+func applyCompareInput(s State) (State, []Effect, bool) {
+	if s.View != ViewHistory {
+		return s, nil, false
+	}
+	selected := s.Selected[ViewHistory]
+	if s.BaselineID == "" {
+		s.Error = "mark a History baseline with Space first"
+		return s, nil, true
+	}
+	if selected == "" || selected == s.BaselineID {
+		s.Error = "select a different History run to compare"
+		return s, nil, true
+	}
+	baseline, baselineOK := FindRun(s.Snapshot, s.BaselineID)
+	candidate, candidateOK := FindRun(s.Snapshot, selected)
+	if !baselineOK || !candidateOK {
+		s.Error = "one comparison run disappeared; reload and mark the baseline again"
+		return s, nil, true
+	}
+	comparison := compareRuns(baseline, candidate)
+	s.Comparison = &comparison
+	s.Error = ""
+	return s, nil, true
+}
+
+func applyGlobalInput(s State, action Action) (State, []Effect, bool) {
+	switch action {
 	case ActionReload:
 		return s, []Effect{{Kind: EffectReload}}, false
 	case ActionHelp:
@@ -367,6 +469,7 @@ func applyInput(s State, event InputEvent) (State, []Effect, bool) { //nolint:go
 		return s, nil, false
 	case ActionInterrupt:
 		s.Interrupted = true
+		effects := make([]Effect, 0, 2)
 		if s.Snapshot.Live.Active && !s.Snapshot.Live.Completed {
 			effects = append(effects, Effect{Kind: EffectCancelRun})
 		}
@@ -374,8 +477,9 @@ func applyInput(s State, event InputEvent) (State, []Effect, bool) { //nolint:go
 		return s, effects, true
 	case ActionRedraw:
 		return s, []Effect{{Kind: EffectRedraw}}, false
+	default:
+		return s, nil, false
 	}
-	return s, effects, false
 }
 
 func switchView(s State, view View) State {

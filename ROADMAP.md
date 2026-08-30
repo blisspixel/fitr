@@ -319,12 +319,20 @@ every need the code does.
       share a family. Current runs use fixed, sealed denominators and the
       cluster-adjusted fixed-sample interval. Legacy Wald receipts remain
       readable only in display-only schema-5 history.
-- [ ] Design adaptive sampling around an explicit stratified estimand before
-      exposing it again. The candidate protocol draws one fresh instance per
-      distinct family per complete round and applies an anytime-valid bounded
-      mean process to complete-round family averages. It must persist the
-      stratum plan, observed and scorable counts, skips, round boundaries,
-      stopping rule, and replay to the first crossed boundary.
+- [x] Freeze the statistical contract for any future adaptive mode before
+      exposing it again. The estimand remains the current equal-spec pass
+      probability, not an accidental equal-family average. Each complete round
+      selects one spec uniformly within every family and weights that binary
+      observation by the family's declared spec count. A two-sided mixture
+      betting process is evaluated only at complete-round boundaries. Exact
+      gates, weights, bet fractions, the maximum schedule, every terminal
+      outcome, and the first crossing must be sealed and replayable. The full
+      contract and references are in `docs/statistics.md`.
+- [x] Keep adaptive sampling unavailable for 0.9.9. Reintroduction requires
+      result schema 7, an adaptive-specific score path, exact-rational replay,
+      boundary and mutation tests, and power and false-crossing simulations.
+      Fixed `ClusteredWilson`, its dead-family rule, compare, and calibration
+      must never consume optionally stopped evidence.
 - [x] Bind inventory reuse to the model artifact without putting the digest in
       the device comparability key. Different models still share a board block,
       while a saved run is reusable only when the current runtime-bound digest
@@ -365,12 +373,15 @@ every need the code does.
       clustering. SKIP and INCONCLUSIVE never become failures. Item flips stay
       descriptive, while the exact test gives each generated family at most
       one direction.
-- [ ] Decompose the run pipeline far enough to turn on the complexity gates.
-      `execute` went from 571 lines to 463 by extracting the measurement
-      phases, and `main.go` from 4,074 to 1,199, but `funlen`, `gocognit`,
-      `gocyclo`, `nestif` and `dupl` are still off in `.golangci.yml` with the
-      reason recorded there. Turning them on is the exit criterion, not the
-      line count.
+- [ ] Decompose the production paths far enough to turn on every complexity
+      gate. `execute` is now decomposed into phase coordinators and `main.go`
+      is 1,210 physical lines, but a clean strict audit still finds 65
+      production findings across 37 files.
+      `dupl` and `gocyclo` are now hard global gates with no production
+      exclusions; every function is at or below cyclomatic complexity 30.
+      `funlen`, `gocognit`, and `nestif` remain off with the reason recorded in
+      `.golangci.yml`. Turning them on is the exit criterion, not the line
+      count.
 - [ ] Complete a positive native run for llama-server, the one backend row
       still resting on automated tests alone.
 - [ ] Run the acceptance path on clean macOS and Linux installs.

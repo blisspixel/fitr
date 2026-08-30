@@ -653,6 +653,25 @@ func (m RunManifest) Verify() error {
 }
 
 func (m RunManifest) validateFields() error {
+	if err := m.validateSchemaFields(); err != nil {
+		return err
+	}
+	if err := m.validateRequiredFields(); err != nil {
+		return err
+	}
+	if err := m.validateExecutionFields(); err != nil {
+		return err
+	}
+	if err := m.validatePlanFields(); err != nil {
+		return err
+	}
+	if err := m.validateOptionalReceipts(); err != nil {
+		return err
+	}
+	return m.Model.Validate()
+}
+
+func (m RunManifest) validateSchemaFields() error {
 	switch {
 	case m.Schema != LegacyRunManifestSchema && m.Schema != RunManifestSchema:
 		return fmt.Errorf("unsupported run manifest schema %q", m.Schema)
@@ -670,6 +689,12 @@ func (m RunManifest) validateFields() error {
 		return errors.New("legacy run manifest cannot contain a completion public key")
 	case m.Schema == LegacyRunManifestSchema && m.Executor != nil:
 		return errors.New("legacy run manifest cannot contain an executor receipt")
+	}
+	return nil
+}
+
+func (m RunManifest) validateRequiredFields() error {
+	switch {
 	case !validRunID.MatchString(m.RunID):
 		return errors.New("run manifest has an invalid run ID")
 	case strings.TrimSpace(m.StartedAt) == "":
@@ -680,12 +705,24 @@ func (m RunManifest) validateFields() error {
 		return errors.New("run manifest is missing the profile")
 	case strings.TrimSpace(m.Level) == "":
 		return errors.New("run manifest is missing the level")
+	}
+	return nil
+}
+
+func (m RunManifest) validateExecutionFields() error {
+	switch {
 	case m.ExecutionPolicy != ExecutionDisabled && m.ExecutionPolicy != ExecutionUnsafe:
 		return fmt.Errorf("unknown execution policy %q", m.ExecutionPolicy)
 	case m.Schema == RunManifestSchema && m.ExecutionPolicy == ExecutionUnsafe && m.Executor == nil:
 		return errors.New("unsafe run manifest is missing its executor receipt")
 	case m.ExecutionPolicy == ExecutionDisabled && m.Executor != nil:
 		return errors.New("disabled execution manifest cannot contain an executor receipt")
+	}
+	return nil
+}
+
+func (m RunManifest) validatePlanFields() error {
+	switch {
 	case strings.TrimSpace(m.SeedSet) == "":
 		return errors.New("run manifest is missing the seed set")
 	case m.Repeats < 1:
@@ -699,6 +736,10 @@ func (m RunManifest) validateFields() error {
 	if err := m.TaskPlan.Validate(); err != nil {
 		return fmt.Errorf("run manifest task plan: %w", err)
 	}
+	return nil
+}
+
+func (m RunManifest) validateOptionalReceipts() error {
 	if m.Provenance != nil {
 		if err := m.Provenance.Validate(); err != nil {
 			return err
@@ -713,7 +754,7 @@ func (m RunManifest) validateFields() error {
 			return fmt.Errorf("run manifest executor: %w", err)
 		}
 	}
-	return m.Model.Validate()
+	return nil
 }
 
 func validCompletionPublicKey(encoded string) bool {

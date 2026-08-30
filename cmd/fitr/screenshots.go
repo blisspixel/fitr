@@ -423,6 +423,23 @@ func prepareMockEvidence(r *Result) error {
 	if r == nil {
 		return errors.New("nil mock result")
 	}
+	prepareMockDefaults(r)
+	prepareMockTaskPlan(r)
+	if err := prepareMockCheckPlan(r); err != nil {
+		return err
+	}
+	if err := prepareMockOutcomeEvidence(r); err != nil {
+		return err
+	}
+	prepareMockMeasurements(r)
+	prepareMockTextMetrics(r)
+	if err := prepareMockDeviceReceipt(r); err != nil {
+		return err
+	}
+	return completeMockEvidence(r)
+}
+
+func prepareMockDefaults(r *Result) {
 	if r.Profile == "" {
 		r.Profile = "default"
 	}
@@ -455,6 +472,9 @@ func prepareMockEvidence(r *Result) error {
 	}
 	r.SchemaVersion = record.EvidenceSchemaVersion
 	r.ExecutionPolicy = record.ExecutionDisabled
+}
+
+func prepareMockTaskPlan(r *Result) {
 	r.TaskPlan = record.TaskPlan{
 		SpeedSamples:     len(r.Speed),
 		Memory:           true,
@@ -466,6 +486,9 @@ func prepareMockEvidence(r *Result) error {
 		RefusalTrials:    len(r.Refusal),
 		AgenticTrials:    boolInt(r.Agentic != nil),
 	}
+}
+
+func prepareMockCheckPlan(r *Result) error {
 	for i := range r.Checks {
 		if r.Checks[i].TaskID == "" {
 			r.Checks[i].TaskID = fmt.Sprintf("mock-check-%02d", i)
@@ -487,36 +510,14 @@ func prepareMockEvidence(r *Result) error {
 		}
 		r.TaskPlan.CheckPlanSHA256 = checkPlanSHA256
 	}
+	return nil
+}
 
-	coding := make([]eval.Outcome, 0, r.TaskPlan.CodeTrials)
-	for i := range r.CodeWrite {
-		r.CodeWrite[i].Outcome = eval.OutcomeInconclusive
-		coding = append(coding, eval.OutcomeInconclusive)
-	}
-	for i := range r.CodeFix {
-		r.CodeFix[i].Outcome = eval.OutcomeInconclusive
-		coding = append(coding, eval.OutcomeInconclusive)
-	}
-	checks := make([]eval.Outcome, 0, len(r.Checks))
-	for i := range r.Checks {
-		if r.Checks[i].Outcome == "" {
-			r.Checks[i].Outcome = mockBinaryOutcome(r.Checks[i].Pass)
-		}
-		checks = append(checks, r.Checks[i].Outcome)
-	}
-	tools := make([]eval.Outcome, len(r.Tools))
-	for i := range r.Tools {
-		r.Tools[i].Outcome = eval.OutcomeInconclusive
-		tools[i] = eval.OutcomeInconclusive
-	}
-	refusal := make([]eval.Outcome, 0, len(r.Refusal))
-	for key, verdict := range r.Refusal {
-		if verdict.Outcome == "" {
-			verdict.Outcome = mockBinaryOutcome(verdict.Verdict == "answered")
-			r.Refusal[key] = verdict
-		}
-		refusal = append(refusal, verdict.Outcome)
-	}
+func prepareMockOutcomeEvidence(r *Result) error {
+	coding := mockCodingOutcomes(r)
+	checks := mockCheckOutcomes(r)
+	tools := mockToolOutcomes(r)
+	refusal := mockRefusalOutcomes(r)
 	if r.TaskPlan.RefusalTrials > 0 {
 		refusalPlanSHA256, err := record.ObservedRefusalPlanSHA256(r.Refusal)
 		if err != nil {
@@ -524,25 +525,7 @@ func prepareMockEvidence(r *Result) error {
 		}
 		r.TaskPlan.RefusalPlanSHA256 = refusalPlanSHA256
 	}
-	plumbing := []eval.Outcome{}
-	if r.Plumbing != nil {
-		if r.Plumbing.Outcome == "" {
-			r.Plumbing.Outcome = mockBinaryOutcome(r.Plumbing.Healthy)
-		}
-		plumbing = append(plumbing, r.Plumbing.Outcome)
-	}
-	withdrawal := []eval.Outcome{}
-	if r.Withdrawal != nil {
-		if r.Withdrawal.Outcome == "" {
-			r.Withdrawal.Outcome = mockBinaryOutcome(r.Withdrawal.Pass)
-		}
-		withdrawal = append(withdrawal, r.Withdrawal.Outcome)
-	}
-	agentic := []eval.Outcome{}
-	if r.Agentic != nil {
-		r.Agentic.Outcome = eval.OutcomeInconclusive
-		agentic = append(agentic, eval.OutcomeInconclusive)
-	}
+	plumbing, withdrawal, agentic := mockOptionalOutcomes(r)
 	r.EvidenceCounts = map[string]eval.OutcomeCounts{
 		"coding":     eval.CountOutcomes(r.TaskPlan.CodeTrials, coding...),
 		"checks":     eval.CountOutcomes(r.TaskPlan.CheckTrialsLimit, checks...),
@@ -552,6 +535,78 @@ func prepareMockEvidence(r *Result) error {
 		"withdrawal": eval.CountOutcomes(boolInt(r.TaskPlan.Withdrawal), withdrawal...),
 		"agentic":    eval.CountOutcomes(r.TaskPlan.AgenticTrials, agentic...),
 	}
+	return nil
+}
+
+func mockCodingOutcomes(r *Result) []eval.Outcome {
+	coding := make([]eval.Outcome, 0, r.TaskPlan.CodeTrials)
+	for i := range r.CodeWrite {
+		r.CodeWrite[i].Outcome = eval.OutcomeInconclusive
+		coding = append(coding, eval.OutcomeInconclusive)
+	}
+	for i := range r.CodeFix {
+		r.CodeFix[i].Outcome = eval.OutcomeInconclusive
+		coding = append(coding, eval.OutcomeInconclusive)
+	}
+	return coding
+}
+
+func mockCheckOutcomes(r *Result) []eval.Outcome {
+	checks := make([]eval.Outcome, 0, len(r.Checks))
+	for i := range r.Checks {
+		if r.Checks[i].Outcome == "" {
+			r.Checks[i].Outcome = mockBinaryOutcome(r.Checks[i].Pass)
+		}
+		checks = append(checks, r.Checks[i].Outcome)
+	}
+	return checks
+}
+
+func mockToolOutcomes(r *Result) []eval.Outcome {
+	tools := make([]eval.Outcome, len(r.Tools))
+	for i := range r.Tools {
+		r.Tools[i].Outcome = eval.OutcomeInconclusive
+		tools[i] = eval.OutcomeInconclusive
+	}
+	return tools
+}
+
+func mockRefusalOutcomes(r *Result) []eval.Outcome {
+	refusal := make([]eval.Outcome, 0, len(r.Refusal))
+	for key, verdict := range r.Refusal {
+		if verdict.Outcome == "" {
+			verdict.Outcome = mockBinaryOutcome(verdict.Verdict == "answered")
+			r.Refusal[key] = verdict
+		}
+		refusal = append(refusal, verdict.Outcome)
+	}
+	return refusal
+}
+
+func mockOptionalOutcomes(r *Result) (plumbing, withdrawal, agentic []eval.Outcome) {
+	plumbing = []eval.Outcome{}
+	if r.Plumbing != nil {
+		if r.Plumbing.Outcome == "" {
+			r.Plumbing.Outcome = mockBinaryOutcome(r.Plumbing.Healthy)
+		}
+		plumbing = append(plumbing, r.Plumbing.Outcome)
+	}
+	withdrawal = []eval.Outcome{}
+	if r.Withdrawal != nil {
+		if r.Withdrawal.Outcome == "" {
+			r.Withdrawal.Outcome = mockBinaryOutcome(r.Withdrawal.Pass)
+		}
+		withdrawal = append(withdrawal, r.Withdrawal.Outcome)
+	}
+	agentic = []eval.Outcome{}
+	if r.Agentic != nil {
+		r.Agentic.Outcome = eval.OutcomeInconclusive
+		agentic = append(agentic, eval.OutcomeInconclusive)
+	}
+	return plumbing, withdrawal, agentic
+}
+
+func prepareMockMeasurements(r *Result) {
 	decode, ttft, prefill := make([]float64, 0, len(r.Speed)), make([]float64, 0, len(r.Speed)), make([]float64, 0, len(r.Speed))
 	for _, sample := range r.Speed {
 		decode = append(decode, sample.DecodeTPS)
@@ -576,6 +631,11 @@ func prepareMockEvidence(r *Result) error {
 			r.Speed[i].WarmCachedTok = 1
 		}
 	}
+	prepareMockMemory(r)
+	r.DecodeSum, r.TTFTSum, r.PrefillSum = stats.MeanSD(decode), stats.MeanSD(ttft), stats.MeanSD(prefill)
+}
+
+func prepareMockMemory(r *Result) {
 	if r.Memory.ResidentGB > 0 {
 		r.Memory.Outcome = eval.OutcomePass
 		r.Memory.UnavailableReason = ""
@@ -590,7 +650,9 @@ func prepareMockEvidence(r *Result) error {
 		r.Memory.RequestedCtx = memoryProbeCtx
 		r.Memory.UnavailableReason = "demo runtime did not report a resident allocation"
 	}
-	r.DecodeSum, r.TTFTSum, r.PrefillSum = stats.MeanSD(decode), stats.MeanSD(ttft), stats.MeanSD(prefill)
+}
+
+func prepareMockTextMetrics(r *Result) {
 	longest := ""
 	for _, result := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
 		if len(result.Raw) > len(longest) {
@@ -607,6 +669,9 @@ func prepareMockEvidence(r *Result) error {
 		}
 	}
 	r.Rep, r.Density = score.RepetitionMetrics(longest), score.InformationDensity(longest)
+}
+
+func prepareMockDeviceReceipt(r *Result) error {
 	effective := r.ContextSize()
 	fingerprintV2, err := device.NewFingerprintV2(r.Device, device.ContextVerification{
 		RequestedTokens: effective, EffectiveTokens: &effective,
@@ -620,7 +685,10 @@ func prepareMockEvidence(r *Result) error {
 	if err != nil {
 		return err
 	}
+	return nil
+}
 
+func completeMockEvidence(r *Result) error {
 	sum := sha256.Sum256([]byte("fitr mock artifact\x00" + r.Model))
 	identity, err := record.NewModelIdentity(r.Model, r.Model, "mock", "mock-runtime-v1",
 		"sha256:"+hex.EncodeToString(sum[:]), "", 0)

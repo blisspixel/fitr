@@ -424,3 +424,34 @@ func TestAggregateRejectsRawDeviceIdentifier(t *testing.T) {
 		t.Fatal("raw device identifier was accepted")
 	}
 }
+
+func TestValidatePairPreservesErrorPrecedence(t *testing.T) {
+	base := func() PairReport { return pair("1111111111111111", "s1", 1) }
+	tests := []struct {
+		name string
+		edit func(*PairReport)
+		want string
+	}{
+		{"schema before incomplete", func(r *PairReport) { r.Schema = "bad"; r.Device.ID = "" }, "unsupported calibration pair schema"},
+		{"incomplete before device format", func(r *PairReport) { r.Device.ID = ""; r.Reference.Model = "" }, "incomplete calibration report"},
+		{"device before model pair", func(r *PairReport) { r.Device.ID = "zzzzzzzzzzzzzzzz"; r.Reference.Family = "" }, "device id is not a fitr pseudonymous identifier"},
+		{"model pair before result schema", func(r *PairReport) { r.Reference.Family = ""; r.Reference.ResultSchemaVersion = 0 }, "report is not a same-family, same-size model pair"},
+		{"result schema before items", func(r *PairReport) { r.Reference.ResultSchemaVersion = 0; r.Items[0].TaskID = "" }, "result schema is missing or differs across the pair"},
+		{"item identity before counts", func(r *PairReport) { r.Items[0].TaskID = ""; r.Items[0].Shared = 0 }, "missing or duplicate task id"},
+		{"counts before paired flips", func(r *PairReport) { r.Items[0].Shared = 0; r.Items[0].Flips = 2 }, "invalid counts for task"},
+		{"paired flips before totals", func(r *PairReport) { r.Items[0].CandidatePasses = r.Items[0].ReferencePasses; r.Shared++ }, "paired flips disagree with pass counts"},
+		{"totals before artifact digest", func(r *PairReport) { r.Shared++; r.Reference.ArtifactDigest = "bad" }, "pair totals do not match item outcomes"},
+		{"artifact before lineage", func(r *PairReport) { r.Reference.ArtifactDigest = "bad"; r.Lineage = &LineageReceipt{} }, "run artifact digest"},
+		{"lineage last", func(r *PairReport) { r.Lineage = &LineageReceipt{} }, "lineage receipt requires runtime-bound artifact digests"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r := base()
+			test.edit(&r)
+			err := validatePair(r)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("validatePair() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}

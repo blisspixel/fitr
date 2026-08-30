@@ -295,6 +295,16 @@ func (r MemoryResult) ValidateReceipt() error {
 	if r.RequestedCtx == 0 {
 		return nil
 	}
+	if err := r.validateRequestAndNumbers(); err != nil {
+		return err
+	}
+	if err := r.validateOutcome(); err != nil {
+		return err
+	}
+	return r.validateDerivedAllocation()
+}
+
+func (r MemoryResult) validateRequestAndNumbers() error {
 	switch {
 	case r.RequestedCtx < 0:
 		return errors.New("memory probe requested context is negative")
@@ -312,6 +322,10 @@ func (r MemoryResult) ValidateReceipt() error {
 	case r.PctOnGPU < 0 || r.PctOnGPU > 100:
 		return errors.New("memory probe accelerator percentage is invalid")
 	}
+	return nil
+}
+
+func (r MemoryResult) validateOutcome() error {
 	switch r.Outcome {
 	case OutcomePass:
 		if r.ResidentBytes <= 0 {
@@ -330,6 +344,10 @@ func (r MemoryResult) ValidateReceipt() error {
 	default:
 		return fmt.Errorf("memory probe has unsupported outcome %q", r.Outcome)
 	}
+	return nil
+}
+
+func (r MemoryResult) validateDerivedAllocation() error {
 	if r.ResidentBytes > 0 {
 		if r.ResidentGB != round2(float64(r.ResidentBytes)/(1024*1024*1024)) {
 			return errors.New("memory probe resident GiB does not match exact bytes")
@@ -359,6 +377,15 @@ func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (Me
 	r := MemoryResult{
 		Outcome: OutcomeSkipped, RequestedCtx: numCtx,
 		UnavailableReason: "runtime did not report a resident allocation for the requested model",
+	}
+	// llama-server exposes context and timing receipts but no resident byte
+	// allocation over HTTP. Its model is already loaded at process start, so a
+	// fixed-32K generation cannot make that missing receipt appear and may ask
+	// for more context than the launch-time allocation. Preserve the explicit
+	// gap without issuing inference solely for an unavailable measurement.
+	if c.Name() == "llama-server" {
+		r.UnavailableReason = "llama-server does not report resident allocation bytes"
+		return r, nil
 	}
 	// Leftovers are recorded by the caller as a contamination warning; a model
 	// that will not unload must not abort the whole run.

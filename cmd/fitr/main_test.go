@@ -1745,12 +1745,19 @@ func TestRunTaskPlanAndEvidenceCountsKeepImmutableDenominators(t *testing.T) {
 
 	r := &Result{SchemaVersion: 5, TaskPlan: record.TaskPlan{CodeTrials: 2}}
 	r.CodeWrite = []eval.ExecResult{{Outcome: eval.OutcomeSkipped}}
-	counts := buildEvidenceCounts(r)
+	counts, err := r.DeriveEvidenceCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if counts["coding"].Complete() {
 		t.Fatalf("one of two planned coding trials disappeared: %+v", counts["coding"])
 	}
 	r.CodeFix = []eval.ExecResult{{Outcome: eval.OutcomeSkipped}}
-	if got := buildEvidenceCounts(r)["coding"]; !got.Complete() || got.Skipped != 2 || got.Scorable != 0 {
+	counts, err = r.DeriveEvidenceCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := counts["coding"]; !got.Complete() || got.Skipped != 2 || got.Scorable != 0 {
 		t.Fatalf("explicitly skipped denominator = %+v", got)
 	}
 }

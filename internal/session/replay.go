@@ -72,6 +72,28 @@ func Replay(events []Event) (Snapshot, error) {
 
 // ApplyEvent returns a new snapshot and never mutates current.
 func ApplyEvent(current Snapshot, event Event) (Snapshot, error) {
+	current, err := validateEventEnvelope(current, event)
+	if err != nil {
+		return current, err
+	}
+	event = canonicalEvent(event)
+	if err := validatePayload(event); err != nil {
+		return current, err
+	}
+	next := current.Clone()
+	if event.Kind != KindRunStarted && next.State == StatePending {
+		return current, ErrNotStarted
+	}
+	if err := applyEventKind(&next, event); err != nil {
+		return current, err
+	}
+	next.LastSequence = event.Sequence
+	next.UpdatedAt = event.At
+	next.ElapsedMillis = event.ElapsedMillis
+	return next, nil
+}
+
+func validateEventEnvelope(current Snapshot, event Event) (Snapshot, error) {
 	if current.Schema == "" {
 		current = NewSnapshot()
 	}
@@ -101,132 +123,166 @@ func ApplyEvent(current Snapshot, event Event) (Snapshot, error) {
 	if isTerminal(current.State) {
 		return current, ErrTerminal
 	}
+	return current, nil
+}
 
-	event = canonicalEvent(event)
-	if err := validatePayload(event); err != nil {
-		return current, err
-	}
-	next := current.Clone()
-	if event.Kind != KindRunStarted && next.State == StatePending {
-		return current, ErrNotStarted
-	}
-
+func applyEventKind(next *Snapshot, event Event) error {
 	switch event.Kind {
 	case KindRunStarted:
-		if next.State != StatePending || next.LastSequence != 0 {
-			return current, ErrAlreadyStarted
-		}
-		if event.ElapsedMillis != 0 || event.Run.Model == "" || event.Run.NumCtx < 0 || event.Run.Repeats < 0 {
-			return current, fmt.Errorf("%w: invalid run start", ErrInvalidEvent)
-		}
-		next.RunID = event.RunID
-		next.State = StateRunning
-		next.StartedAt = event.At
-		next.Run = cloneRun(event.Run)
+		return applyRunStarted(next, event)
 	case KindPhaseStarted:
-		if activePhase(next.Phases) >= 0 {
-			return current, ErrPhaseActive
-		}
-		if event.Phase.Name == "" || event.Phase.Total < 0 || phaseIndex(next.Phases, event.Phase.Name) >= 0 {
-			return current, fmt.Errorf("%w: invalid or duplicate phase", ErrInvalidEvent)
-		}
-		next.Phases = append(next.Phases, PhaseSnapshot{
-			Name: event.Phase.Name, Detail: event.Phase.Detail, State: PhaseRunning,
-			Total: event.Phase.Total, StartedSequence: event.Sequence,
-			StartedElapsedMillis: event.ElapsedMillis,
-		})
+		return applyPhaseStarted(next, event)
 	case KindPhaseProgress:
-		i := activePhase(next.Phases)
-		if i < 0 || next.Phases[i].Name != event.Progress.Phase {
-			return current, ErrPhaseNotActive
-		}
-		phase := &next.Phases[i]
-		if event.Progress.Total <= 0 || event.Progress.Completed < phase.Completed ||
-			event.Progress.Completed > event.Progress.Total || (phase.Total > 0 && phase.Total != event.Progress.Total) {
-			return current, fmt.Errorf("%w: invalid phase progress", ErrInvalidEvent)
-		}
-		phase.Completed = event.Progress.Completed
-		phase.Total = event.Progress.Total
-		if event.Progress.Detail != "" {
-			phase.Detail = event.Progress.Detail
-		}
+		return applyPhaseProgress(next, event)
 	case KindMetricSample:
-		i := activePhase(next.Phases)
-		if i < 0 || next.Phases[i].Name != event.Metric.Phase {
-			return current, ErrPhaseNotActive
-		}
-		if err := validateMetric(*event.Metric); err != nil {
-			return current, err
-		}
-		appendMetric(&next, event)
+		return applyMetricSample(next, event)
 	case KindNotice:
-		if event.Notice.Level != NoticeInfo && event.Notice.Level != NoticeWarning {
-			return current, fmt.Errorf("%w: invalid notice level", ErrInvalidEvent)
-		}
-		if event.Notice.Code != "" && !tokenPattern.MatchString(event.Notice.Code) {
-			return current, fmt.Errorf("%w: invalid notice code", ErrInvalidEvent)
-		}
-		if event.Notice.Message == "" {
-			return current, fmt.Errorf("%w: empty notice", ErrInvalidEvent)
-		}
-		next.Notices = append(next.Notices, NoticeRecord{
-			Sequence: event.Sequence, ElapsedMillis: event.ElapsedMillis, Notice: *event.Notice,
-		})
-		if len(next.Notices) > MaxNotices {
-			drop := len(next.Notices) - MaxNotices
-			next.Notices = append([]NoticeRecord(nil), next.Notices[drop:]...)
-			next.NoticesDropped += uint64(drop)
-		}
+		return applyNotice(next, event)
 	case KindPhaseCompleted:
-		i := activePhase(next.Phases)
-		if i < 0 || next.Phases[i].Name != event.Phase.Name {
-			return current, ErrPhaseNotActive
-		}
-		phase := &next.Phases[i]
-		phase.State = PhaseCompleted
-		phase.EndedSequence = event.Sequence
-		phase.EndedElapsedMillis = event.ElapsedMillis
-		if phase.Total > 0 {
-			phase.Completed = phase.Total
-		}
+		return applyPhaseCompleted(next, event)
 	case KindRunCompleted:
-		if activePhase(next.Phases) >= 0 {
-			return current, ErrPhaseActive
-		}
-		if err := validateCompletion(*event.Completion); err != nil {
-			return current, err
-		}
-		next.State = StateCompleted
-		next.FinishedAt = event.At
-		v := *event.Completion
-		next.Completion = &v
+		return applyRunCompleted(next, event)
 	case KindRunFailed:
-		if event.Failure.Code == "" || !tokenPattern.MatchString(event.Failure.Code) ||
-			event.Failure.Summary == "" || event.Failure.ExitCode != 1 {
-			return current, fmt.Errorf("%w: invalid failure", ErrInvalidEvent)
-		}
-		finishActivePhase(&next, event, PhaseFailed)
-		next.State = StateFailed
-		next.FinishedAt = event.At
-		v := *event.Failure
-		next.Failure = &v
+		return applyRunFailed(next, event)
 	case KindRunCancelled:
-		if !validCancelReason(event.Cancellation.Reason) || event.Cancellation.ExitCode != 130 {
-			return current, fmt.Errorf("%w: invalid cancellation", ErrInvalidEvent)
-		}
-		finishActivePhase(&next, event, PhaseCancelled)
-		next.State = StateCancelled
-		next.FinishedAt = event.At
-		v := *event.Cancellation
-		next.Cancellation = &v
+		return applyRunCancelled(next, event)
 	default:
-		return current, fmt.Errorf("%w: unknown kind %q", ErrInvalidEvent, event.Kind)
+		return fmt.Errorf("%w: unknown kind %q", ErrInvalidEvent, event.Kind)
 	}
+}
 
-	next.LastSequence = event.Sequence
-	next.UpdatedAt = event.At
-	next.ElapsedMillis = event.ElapsedMillis
-	return next, nil
+func applyRunStarted(next *Snapshot, event Event) error {
+	if next.State != StatePending || next.LastSequence != 0 {
+		return ErrAlreadyStarted
+	}
+	if event.ElapsedMillis != 0 || event.Run.Model == "" || event.Run.NumCtx < 0 || event.Run.Repeats < 0 {
+		return fmt.Errorf("%w: invalid run start", ErrInvalidEvent)
+	}
+	next.RunID = event.RunID
+	next.State = StateRunning
+	next.StartedAt = event.At
+	next.Run = cloneRun(event.Run)
+	return nil
+}
+
+func applyPhaseStarted(next *Snapshot, event Event) error {
+	if activePhase(next.Phases) >= 0 {
+		return ErrPhaseActive
+	}
+	if event.Phase.Name == "" || event.Phase.Total < 0 || phaseIndex(next.Phases, event.Phase.Name) >= 0 {
+		return fmt.Errorf("%w: invalid or duplicate phase", ErrInvalidEvent)
+	}
+	next.Phases = append(next.Phases, PhaseSnapshot{
+		Name: event.Phase.Name, Detail: event.Phase.Detail, State: PhaseRunning,
+		Total: event.Phase.Total, StartedSequence: event.Sequence,
+		StartedElapsedMillis: event.ElapsedMillis,
+	})
+	return nil
+}
+
+func applyPhaseProgress(next *Snapshot, event Event) error {
+	i := activePhase(next.Phases)
+	if i < 0 || next.Phases[i].Name != event.Progress.Phase {
+		return ErrPhaseNotActive
+	}
+	phase := &next.Phases[i]
+	if event.Progress.Total <= 0 || event.Progress.Completed < phase.Completed ||
+		event.Progress.Completed > event.Progress.Total || (phase.Total > 0 && phase.Total != event.Progress.Total) {
+		return fmt.Errorf("%w: invalid phase progress", ErrInvalidEvent)
+	}
+	phase.Completed = event.Progress.Completed
+	phase.Total = event.Progress.Total
+	if event.Progress.Detail != "" {
+		phase.Detail = event.Progress.Detail
+	}
+	return nil
+}
+
+func applyMetricSample(next *Snapshot, event Event) error {
+	i := activePhase(next.Phases)
+	if i < 0 || next.Phases[i].Name != event.Metric.Phase {
+		return ErrPhaseNotActive
+	}
+	if err := validateMetric(*event.Metric); err != nil {
+		return err
+	}
+	appendMetric(next, event)
+	return nil
+}
+
+func applyNotice(next *Snapshot, event Event) error {
+	if event.Notice.Level != NoticeInfo && event.Notice.Level != NoticeWarning {
+		return fmt.Errorf("%w: invalid notice level", ErrInvalidEvent)
+	}
+	if event.Notice.Code != "" && !tokenPattern.MatchString(event.Notice.Code) {
+		return fmt.Errorf("%w: invalid notice code", ErrInvalidEvent)
+	}
+	if event.Notice.Message == "" {
+		return fmt.Errorf("%w: empty notice", ErrInvalidEvent)
+	}
+	next.Notices = append(next.Notices, NoticeRecord{
+		Sequence: event.Sequence, ElapsedMillis: event.ElapsedMillis, Notice: *event.Notice,
+	})
+	if len(next.Notices) > MaxNotices {
+		drop := len(next.Notices) - MaxNotices
+		next.Notices = append([]NoticeRecord(nil), next.Notices[drop:]...)
+		next.NoticesDropped += uint64(drop)
+	}
+	return nil
+}
+
+func applyPhaseCompleted(next *Snapshot, event Event) error {
+	i := activePhase(next.Phases)
+	if i < 0 || next.Phases[i].Name != event.Phase.Name {
+		return ErrPhaseNotActive
+	}
+	phase := &next.Phases[i]
+	phase.State = PhaseCompleted
+	phase.EndedSequence = event.Sequence
+	phase.EndedElapsedMillis = event.ElapsedMillis
+	if phase.Total > 0 {
+		phase.Completed = phase.Total
+	}
+	return nil
+}
+
+func applyRunCompleted(next *Snapshot, event Event) error {
+	if activePhase(next.Phases) >= 0 {
+		return ErrPhaseActive
+	}
+	if err := validateCompletion(*event.Completion); err != nil {
+		return err
+	}
+	next.State = StateCompleted
+	next.FinishedAt = event.At
+	v := *event.Completion
+	next.Completion = &v
+	return nil
+}
+
+func applyRunFailed(next *Snapshot, event Event) error {
+	if event.Failure.Code == "" || !tokenPattern.MatchString(event.Failure.Code) ||
+		event.Failure.Summary == "" || event.Failure.ExitCode != 1 {
+		return fmt.Errorf("%w: invalid failure", ErrInvalidEvent)
+	}
+	finishActivePhase(next, event, PhaseFailed)
+	next.State = StateFailed
+	next.FinishedAt = event.At
+	v := *event.Failure
+	next.Failure = &v
+	return nil
+}
+
+func applyRunCancelled(next *Snapshot, event Event) error {
+	if !validCancelReason(event.Cancellation.Reason) || event.Cancellation.ExitCode != 130 {
+		return fmt.Errorf("%w: invalid cancellation", ErrInvalidEvent)
+	}
+	finishActivePhase(next, event, PhaseCancelled)
+	next.State = StateCancelled
+	next.FinishedAt = event.At
+	v := *event.Cancellation
+	next.Cancellation = &v
+	return nil
 }
 
 func canonicalEvent(event Event) Event {
