@@ -4,7 +4,7 @@ BUILD_FLAGS := -trimpath
 CGO := 0
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: all build test coverage vet fmt fmt-check lint dist clean install spec-sync screenshots
+.PHONY: all build test coverage vet fmt fmt-check lint dist dist-checksums clean install spec-sync screenshots
 
 all: fmt vet test build
 
@@ -55,6 +55,12 @@ dist:
 	done
 	@cp LICENSE NOTICE THIRD_PARTY_NOTICES.md dist/
 	@ls -lh dist/
+
+## Keep the manifest in one target so release, CI, and native acceptance cannot
+## silently publish different candidate sets.
+dist-checksums:
+	@cd dist && sha256sum fitr-* LICENSE NOTICE THIRD_PARTY_NOTICES.md > SHA256SUMS
+	@test "$$(wc -l < dist/SHA256SUMS | tr -d ' ')" -eq 9
 
 install: build
 	CGO_ENABLED=$(CGO) go install $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" ./cmd/fitr

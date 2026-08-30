@@ -111,11 +111,7 @@ jobs:
             test "$size" -le "$max_bytes"
           done
       - name: checksums
-        shell: bash
-        run: |
-          cd dist
-          sha256sum fitr-* LICENSE NOTICE THIRD_PARTY_NOTICES.md > SHA256SUMS
-          test "$(wc -l < SHA256SUMS | tr -d ' ')" -eq 9
+        run: make dist-checksums
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: binaries
