@@ -447,6 +447,28 @@ func TestTopSnapshotUsesCentralSemanticNextAction(t *testing.T) {
 	}
 }
 
+func TestTopRunPreservesObservedZeroAndResidentContext(t *testing.T) {
+	result := mockResult("zero-ttft", 10, .1, 100, 1, 0, 0, 1, 1)
+	result.Memory.ResidentGB = 6
+	sealCurrentResult(t, result)
+	run := presentTopRun(result)
+	if !run.TTFTPresent || run.TTFTMean != 0 {
+		t.Fatalf("observed zero TTFT was erased: %+v", run)
+	}
+	if !run.MemoryPresent || run.ResidentContext != memoryProbeCtx {
+		t.Fatalf("resident context was not projected: %+v", run)
+	}
+	encoded, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"ttft_present", "memory_present", "resident_context"} {
+		if strings.Contains(string(encoded), field) {
+			t.Fatalf("compatibility JSON gained internal field %q: %s", field, encoded)
+		}
+	}
+}
+
 func TestTopSnapshotKeepsContaminatedRunInHistoryButOutOfBoard(t *testing.T) {
 	clean := mockResult("clean", 10, .1, 100, 1, 1, 1, 1, 1)
 	contaminated := mockResult("contaminated", 100, .1, 100, 1, 1, 1, 1, 1)
@@ -502,6 +524,39 @@ func TestTopBoardUsesOnlyReconciledCurrentRecords(t *testing.T) {
 	if forgedHistory == nil || !strings.Contains(forgedHistory.UseFor, "INCONCLUSIVE") {
 		t.Fatalf("injected history was not disclosed as display-only: %+v", snapshot.History)
 	}
+	if forgedHistory.DecodeMean != 999 || forgedHistory.PrefillMean != 999 || len(forgedHistory.DecodeSeries) != 3 {
+		t.Fatalf("display-only history lost its descriptive observations: %+v", forgedHistory)
+	}
+}
+
+func TestTopHistoryRetainsMetricsForAnOlderDisplayOnlyRun(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	older := mockResult("same-model", 10, .1, 100, 1, 1, 1, 1, 1)
+	newer := mockResult("same-model", 20, .2, 200, 2, 1, 1, 1, 1)
+	if _, err := save(older); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := save(newer); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, _, err := loadTopSnapshot(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archived *top.Run
+	for i := range snapshot.History {
+		if snapshot.History[i].ID == older.StableRunID() {
+			archived = &snapshot.History[i]
+			break
+		}
+	}
+	if archived == nil || archived.DecodeMean != 10 || archived.PrefillMean != 100 ||
+		len(archived.DecodeSeries) != 3 || !strings.Contains(archived.UseFor, "INCONCLUSIVE") {
+		t.Fatalf("older display-only history lost observations or exclusion: %+v", archived)
+	}
+	assertOnlyTopBoardModel(t, snapshot, "same-model")
 }
 
 func TestTopExternalCandidateCannotEnterBoard(t *testing.T) {
@@ -529,6 +584,10 @@ func TestTopExternalCandidateCannotEnterBoard(t *testing.T) {
 	if len(snapshot.History) < 2 || snapshot.History[0].Model != "external" ||
 		!strings.Contains(snapshot.History[0].UseFor, "INCONCLUSIVE") {
 		t.Fatalf("external candidate was not display-only: %+v", snapshot.History)
+	}
+	if snapshot.History[0].DecodeMean != 999 || snapshot.History[0].PrefillMean != 999 ||
+		len(snapshot.History[0].DecodeSeries) != 3 || snapshot.History[0].NextCommand != "" {
+		t.Fatalf("external display-only result lost observations or gained an action: %+v", snapshot.History[0])
 	}
 }
 

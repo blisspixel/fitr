@@ -134,7 +134,8 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 		Loaded: isLoaded,
 	}
 	ev := matchEvidence(tag, evidence, q)
-	weightsExceed := memoryBudgetTrusted(q.HaveSrc) && q.HaveGB > 0 && tag.Size > 0 &&
+	sharedCapacity := automaticSharedMemoryCapacity(inventoryMemoryInput(q))
+	weightsExceed := memoryBudgetTrusted(q.HaveSrc) && !sharedCapacity && q.HaveGB > 0 && tag.Size > 0 &&
 		float64(tag.Size) > q.HaveGB*GiB
 
 	serving, servingKnown := servingOf(tag.Name, q.Serving)
@@ -203,14 +204,11 @@ func attachFit(row *InventoryRow, tag InstalledModel, ev *InventoryEvidence, q I
 	if tag.ResidentB <= 0 && (weights <= 0 || (!arch.KVReady() && !arch.Hybrid)) {
 		return
 	}
-	in := Input{
-		WeightsB: weights, HaveGB: q.HaveGB, HaveSrc: q.HaveSrc,
-		Ctx: ctx, Arch: arch,
-		NVIDIAUnifiedMemory: device.IsNVIDIAUnifiedMemoryGPU(q.Current.GPU) ||
-			q.HaveSrc == device.NVIDIAUnifiedMemorySource ||
-			q.HaveSrc == device.NVIDIAUnifiedProbeSource,
-		ResidentB: tag.ResidentB,
-	}
+	in := inventoryMemoryInput(q)
+	in.WeightsB = weights
+	in.Ctx = ctx
+	in.Arch = arch
+	in.ResidentB = tag.ResidentB
 	if tag.ResidentB > 0 {
 		in.ResidentSrc = "runtime PS"
 		if row.ServingKnown {
@@ -230,6 +228,14 @@ func attachFit(row *InventoryRow, tag InstalledModel, ev *InventoryEvidence, q I
 	}
 	if next := AdviseNext(row.Model, row.Fit, r.FlagValue); next != "" {
 		row.Next = next
+	}
+}
+
+func inventoryMemoryInput(q InventoryQuery) Input {
+	return Input{
+		HaveGB:              q.HaveGB,
+		HaveSrc:             q.HaveSrc,
+		NVIDIAUnifiedMemory: device.IsNVIDIAUnifiedMemoryGPU(q.Current.GPU),
 	}
 }
 

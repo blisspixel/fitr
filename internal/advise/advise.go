@@ -449,8 +449,8 @@ func evaluateCore(in Input) Report {
 	if in.FitB > 0 {
 		return evaluateFit(in, r)
 	}
-	if automaticNVIDIAUnifiedCapacity(in) {
-		return evaluateAutomaticNVIDIAUnifiedCapacity(in, haveB, r)
+	if automaticSharedMemoryCapacity(in) {
+		return evaluateAutomaticSharedMemoryCapacity(in, haveB, r)
 	}
 	if in.Arch.Hybrid {
 		r.Tier = Skip
@@ -488,9 +488,9 @@ func newCoreReport(in Input) Report {
 	if in.WeightsB > 0 {
 		r.WeightsGB = round1(float64(in.WeightsB) / GiB)
 	}
-	if automaticNVIDIAUnifiedCapacity(in) && in.FreeGB <= 0 {
+	if automaticSharedMemoryCapacity(in) && in.FreeGB <= 0 {
 		r.Gaps = append(r.Gaps,
-			"shared pool includes Linux and other processes; whole-pool available memory was not measured")
+			"shared pool includes the operating system and other processes; whole-pool available memory was not measured")
 	}
 	return r
 }
@@ -512,8 +512,8 @@ func evaluateResident(in Input, haveB float64, r *Report) bool {
 		}
 		return true
 	}
-	if sharedNVIDIAUnifiedMemory(in) {
-		return evaluateSharedNVIDIAResident(in, r)
+	if sharedMemoryPool(in) {
+		return evaluateSharedMemoryResident(in, r)
 	}
 	if requested := requestedResidentContext(in); requested > 0 {
 		if in.ResidentCtx != requested {
@@ -551,7 +551,7 @@ func evaluateResident(in Input, haveB float64, r *Report) bool {
 	return false
 }
 
-func evaluateSharedNVIDIAResident(in Input, r *Report) bool {
+func evaluateSharedMemoryResident(in Input, r *Report) bool {
 	if !residentMatchesRequestedContext(in) {
 		r.Gaps = append(r.Gaps,
 			"resident allocation was not observed at the requested context, so it does not prove that point")
@@ -561,7 +561,7 @@ func evaluateSharedNVIDIAResident(in Input, r *Report) bool {
 	r.NeedGB = r.ObservedGB
 	r.Ctx = in.ResidentCtx
 	capacity := fmt.Sprintf("the %s GB declared planning budget", trim1(r.HaveGB))
-	if automaticNVIDIAUnifiedCapacity(in) {
+	if automaticSharedMemoryCapacity(in) {
 		capacity = fmt.Sprintf("the %s GB addressable shared pool", trim1(r.HaveGB))
 	}
 	r.Why = fmt.Sprintf("resident %s GB within %s at the requested %d context (measured)",
@@ -594,26 +594,35 @@ func residentSource(in Input) string {
 	return "observed resident"
 }
 
-func sharedNVIDIAUnifiedMemory(in Input) bool {
-	return in.NVIDIAUnifiedMemory || in.HaveSrc == device.NVIDIAUnifiedMemorySource ||
-		in.HaveSrc == device.NVIDIAUnifiedProbeSource
+func sharedMemoryPool(in Input) bool {
+	return in.NVIDIAUnifiedMemory || wholeSystemUnifiedMemorySource(in.HaveSrc)
 }
 
-func automaticNVIDIAUnifiedCapacity(in Input) bool {
-	return sharedNVIDIAUnifiedMemory(in) && !strings.HasPrefix(in.HaveSrc, "--vram-gb")
+func wholeSystemUnifiedMemorySource(src string) bool {
+	switch strings.TrimSpace(src) {
+	case device.NVIDIAUnifiedMemorySource, device.NVIDIAUnifiedProbeSource,
+		device.AppleLegacyRAMSource:
+		return true
+	default:
+		return false
+	}
 }
 
-func evaluateAutomaticNVIDIAUnifiedCapacity(in Input, haveB float64, r Report) Report {
+func automaticSharedMemoryCapacity(in Input) bool {
+	return sharedMemoryPool(in) && !strings.HasPrefix(strings.TrimSpace(in.HaveSrc), "--vram-gb")
+}
+
+func evaluateAutomaticSharedMemoryCapacity(in Input, haveB float64, r Report) Report {
 	r.Gaps = append(r.Gaps,
-		"automatic shared-memory capacity is not a safe planning budget after Linux, other processes, and runtime reserve")
+		"automatic shared-memory capacity is not a safe planning budget after the operating system, other processes, and runtime reserve")
 	if in.Arch.Hybrid {
-		return evaluateAutomaticNVIDIAUnifiedHybrid(in, haveB, r)
+		return evaluateAutomaticSharedMemoryHybrid(in, haveB, r)
 	}
 	lower := evaluateWeightsAndKV(in, haveB, r)
-	return constrainAutomaticNVIDIAUnifiedClaim(lower)
+	return constrainAutomaticSharedMemoryClaim(lower)
 }
 
-func evaluateAutomaticNVIDIAUnifiedHybrid(in Input, haveB float64, r Report) Report {
+func evaluateAutomaticSharedMemoryHybrid(in Input, haveB float64, r Report) Report {
 	if in.WeightsB > 0 {
 		r.WeightsGB = round1(float64(in.WeightsB) / GiB)
 	}
@@ -633,7 +642,7 @@ func evaluateAutomaticNVIDIAUnifiedHybrid(in Input, haveB float64, r Report) Rep
 	return r
 }
 
-func constrainAutomaticNVIDIAUnifiedClaim(r Report) Report {
+func constrainAutomaticSharedMemoryClaim(r Report) Report {
 	switch r.Tier {
 	case Compatible:
 		r.Tier = Skip
@@ -679,10 +688,10 @@ func evaluateFit(in Input, r Report) Report {
 	if in.FitCannot {
 		r.Gaps = append(r.Gaps, "the fitter's final status did not satisfy its device-memory target")
 	}
-	if automaticNVIDIAUnifiedCapacity(in) {
+	if automaticSharedMemoryCapacity(in) {
 		r.Gaps = append(r.Gaps,
 			"automatic shared-memory capacity is not a safe whole-pool budget")
-	} else if sharedNVIDIAUnifiedMemory(in) {
+	} else if sharedMemoryPool(in) {
 		r.Gaps = append(r.Gaps,
 			"host and device allocations share one physical pool and were not reconciled")
 	}

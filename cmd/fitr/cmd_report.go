@@ -291,6 +291,7 @@ type boardExclusions struct {
 	contaminated int
 	unverified   int
 	context      int
+	performance  int
 	unscored     int
 }
 
@@ -327,6 +328,10 @@ func claimableBoardRows(rows []*Result, excluded *boardExclusions) []*Result {
 		}
 		if result.EvidenceIntegrityIssue() != "" {
 			excluded.unverified++
+			continue
+		}
+		if !hasSupportedBoardDecode(result) {
+			excluded.performance++
 			continue
 		}
 		clean = append(clean, result)
@@ -399,6 +404,10 @@ func writeBoardExclusions(excluded boardExclusions) {
 		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without verified effective context from board ranking and claims\n",
 			excluded.context)
 	}
+	if excluded.performance > 0 {
+		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without supported decode evidence from board ranking and claims\n",
+			excluded.performance)
+	}
 	if excluded.unscored > 0 {
 		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: %d board row(s) have no reproducible qualification because their scoring profile is unavailable\n",
 			excluded.unscored)
@@ -406,17 +415,19 @@ func writeBoardExclusions(excluded boardExclusions) {
 }
 
 func emptyBoardResult(excluded boardExclusions) int {
-	if excluded.contaminated == 0 && excluded.unverified == 0 && excluded.context == 0 {
+	if excluded.contaminated == 0 && excluded.unverified == 0 && excluded.context == 0 && excluded.performance == 0 {
 		errPrint("no results for this machine", "", "run fitr run <model>")
 		return exitError
 	}
 	detail := "all matching results lacked claimable evidence"
-	if excluded.contaminated > 0 && excluded.unverified == 0 && excluded.context == 0 {
+	if excluded.contaminated > 0 && excluded.unverified == 0 && excluded.context == 0 && excluded.performance == 0 {
 		detail = "all matching results were contaminated"
-	} else if excluded.unverified > 0 && excluded.contaminated == 0 && excluded.context == 0 {
+	} else if excluded.unverified > 0 && excluded.contaminated == 0 && excluded.context == 0 && excluded.performance == 0 {
 		detail = "all matching results lacked a valid evidence contract"
-	} else if excluded.context > 0 && excluded.contaminated == 0 && excluded.unverified == 0 {
+	} else if excluded.context > 0 && excluded.contaminated == 0 && excluded.unverified == 0 && excluded.performance == 0 {
 		detail = "all matching results lacked verified effective context"
+	} else if excluded.performance > 0 && excluded.contaminated == 0 && excluded.unverified == 0 && excluded.context == 0 {
+		detail = "all matching results lacked supported decode evidence"
 	}
 	errPrint("no conclusive results for this machine", detail,
 		"re-run with the current fitr version after unloading all models")

@@ -82,14 +82,14 @@ func conventionalFit(in Input, t *FitTable) *FitTable {
 	}
 	weightsB := float64(in.WeightsB)
 	haveB := in.HaveGB * GiB
-	if automaticNVIDIAUnifiedCapacity(in) {
+	if automaticSharedMemoryCapacity(in) {
 		t.HaveSemantics = "addressable_capacity"
 	}
 	for _, ctx := range fitCtxPoints(in.Arch.MaxCtx, in.Ctx) {
 		t.Points = append(t.Points, makeFitPoint(in, ctx, weightsB, perTok, haveB))
 	}
 	markSuggested(t)
-	if automaticNVIDIAUnifiedCapacity(in) {
+	if automaticSharedMemoryCapacity(in) {
 		t.Note = "automatic shared-memory capacity is not a safe budget; ? is unproven"
 	} else if !anyOtherKnown(t.Points) {
 		t.Note = "weights + KV only; other allocation has no matched total evidence"
@@ -117,7 +117,7 @@ func makeFitPoint(in Input, ctx int, weightsB, perTok, haveB float64) FitPoint {
 	}
 	p.NeedGB = round1(needB / GiB)
 	marginGB := round1((haveB - needB) / GiB)
-	if automaticNVIDIAUnifiedCapacity(in) {
+	if automaticSharedMemoryCapacity(in) {
 		p.CapacityDeltaGB = &marginGB
 	} else {
 		p.HeadroomGB = marginGB
@@ -129,7 +129,7 @@ func makeFitPoint(in Input, ctx int, weightsB, perTok, haveB float64) FitPoint {
 
 func hybridFit(in Input, t *FitTable) *FitTable {
 	haveB := in.HaveGB * GiB
-	if automaticNVIDIAUnifiedCapacity(in) {
+	if automaticSharedMemoryCapacity(in) {
 		t.HaveSemantics = "addressable_capacity"
 	}
 	add := func(ctx int, allocB int64, note string) {
@@ -146,7 +146,7 @@ func hybridFit(in Input, t *FitTable) *FitTable {
 			Note:               note,
 		}
 		marginGB := round1((haveB - need) / GiB)
-		if automaticNVIDIAUnifiedCapacity(in) {
+		if automaticSharedMemoryCapacity(in) {
 			p.CapacityDeltaGB = &marginGB
 		} else {
 			p.HeadroomGB = marginGB
@@ -167,7 +167,7 @@ func hybridFit(in Input, t *FitTable) *FitTable {
 		}
 		return t
 	}
-	if automaticNVIDIAUnifiedCapacity(in) {
+	if automaticSharedMemoryCapacity(in) {
 		t.Note = "automatic shared-memory capacity is not a safe budget; only observed points fit"
 	}
 	markSuggested(t)
@@ -176,7 +176,7 @@ func hybridFit(in Input, t *FitTable) *FitTable {
 
 func fitPointTier(in Input, evidence string, needB, haveB float64) string {
 	observed := evidence == allocationObservedTotal || evidence == allocationObservedTotalRemainder
-	if automaticNVIDIAUnifiedCapacity(in) {
+	if automaticSharedMemoryCapacity(in) {
 		if !observed || needB > haveB {
 			return Skip
 		}

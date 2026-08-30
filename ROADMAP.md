@@ -431,7 +431,9 @@ receipt its schema cannot carry.
 
 Exit criterion: the public install path is verifiable without persistent host
 mutation, main is visibly ahead of the shipped release, and one central
-analysis contract slice renders identically across its supported clients.
+analysis contract owns the supported facts and actions across CLI, TUI, Board,
+and HTML. Each client may render a deliberate subset, but no client recomputes
+an evidence claim.
 
 ### 0.10 - explain and choose
 
@@ -440,10 +442,10 @@ fit, and how does it perform once it does? This release makes that separation
 structural and adds cautious explanation without turning vendor specifications
 or arithmetic proxies into measured facts.
 
-- [ ] Define one renderer-neutral analysis contract consumed by CLI, TUI, HTML,
-      and later clients. It owns performance, capacity, model shape, placement,
-      diagnoses, evidence gaps, and next actions. Clients render it and never
-      recompute a verdict or bottleneck.
+- [ ] Extend `fitr.analysis.run.v1` across CLI, TUI, HTML, and later clients.
+      Add typed capacity policy, model shape, placement, cautious diagnoses,
+      and broader client coverage without letting a renderer recompute a
+      verdict or bottleneck.
 - [ ] Version typed memory evidence and an explicit capacity policy. Keep
       physical or addressable total, OS availability, runtime allocation,
       accelerator allocation, process residency, and allocator projection as

@@ -588,6 +588,39 @@ func TestJoinNVIDIAUnifiedIdentityDoesNotTurnProbeIntoFitBudget(t *testing.T) {
 	}
 }
 
+func TestJoinWholeSystemUnifiedCapacityNeverRejectsFromProjection(t *testing.T) {
+	for _, gpu := range []string{"AMD Radeon 780M", "Intel UHD Graphics 770"} {
+		t.Run(gpu, func(t *testing.T) {
+			table := Join(InventoryQuery{
+				Tags: []InstalledModel{{
+					Name: "large-model", Size: 9 * GiB, Arch: llama8B(),
+				}},
+				Current: device.Fingerprint{GPU: gpu},
+				HaveGB:  8, HaveSrc: device.AppleLegacyRAMSource,
+			})
+			row := table.Rows[0]
+			if row.State != StateUnproven || row.Fit != Skip || strings.Contains(row.Windows, " ok") {
+				t.Fatalf("automatic whole-system inventory row = %+v", row)
+			}
+			if row.Next != "fitr advise large-model" {
+				t.Fatalf("automatic whole-system next = %q", row.Next)
+			}
+		})
+	}
+}
+
+func TestJoinExplicitBudgetRemainsAuthoritativeOnUnifiedGPU(t *testing.T) {
+	table := Join(InventoryQuery{
+		Tags:    []InstalledModel{{Name: "model", Size: 5 * GiB, Arch: llama8B()}},
+		Current: device.Fingerprint{GPU: "AMD Radeon 780M"},
+		HaveGB:  8, HaveSrc: "--vram-gb 8",
+	})
+	row := table.Rows[0]
+	if row.State != StateUnproven || row.Fit != Compatible || !strings.Contains(row.Windows, " ok") {
+		t.Fatalf("declared unified-memory inventory budget = %+v", row)
+	}
+}
+
 func TestJoinCapsAtOneHundred(t *testing.T) {
 	tags := make([]InstalledModel, 120)
 	for i := range tags {

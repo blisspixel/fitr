@@ -285,6 +285,9 @@ func TestPresentationTypesHaveExplicitSnakeCaseJSONTags(t *testing.T) {
 		for i := range typ.NumField() {
 			field := typ.Field(i)
 			name := strings.Split(field.Tag.Get("json"), ",")[0]
+			if name == "-" && field.Tag.Get("presentation") == "local" {
+				continue
+			}
 			if name == "" || name == "-" || name != strings.ToLower(name) || strings.ContainsAny(name, " -") {
 				t.Errorf("%s.%s has invalid json tag %q", typ.Name(), field.Name, name)
 			}

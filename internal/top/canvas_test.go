@@ -241,6 +241,7 @@ func TestRenderCoversEveryFullSizeSurface(t *testing.T) {
 	snapshot.History[0].PrefillMean = 120
 	snapshot.History[0].TTFTMean = 0.5
 	snapshot.History[0].MemoryGB = 6
+	markFullMetricsPresent(&snapshot.History[0])
 	snapshot.History[0].Warnings = []string{"thin evidence"}
 	snapshot.History[0].NextCommand = "fitr apply alpha:8b"
 	snapshot.History[0].Verdicts = []Verdict{
@@ -288,6 +289,31 @@ func TestRenderCoversEveryFullSizeSurface(t *testing.T) {
 	state.Help, state.Width, state.Height = true, 100, 30
 	if plain := Render(state, DefaultGlyphs(true)).Plain(); !strings.Contains(plain, "Ctrl+L") {
 		t.Fatalf("help render missing keys:\n%s", plain)
+	}
+}
+
+func markFullMetricsPresent(run *Run) {
+	run.DecodePresent, run.PrefillPresent = true, true
+	run.TTFTPresent, run.MemoryPresent = true, true
+	run.ResidentContext = 32768
+}
+
+func TestResultRendersObservedZeroTTFTAndActualResidentContext(t *testing.T) {
+	snapshot := testSnapshot()
+	snapshot.History[0].TTFTMean = 0
+	snapshot.History[0].TTFTPresent = true
+	snapshot.History[0].MemoryGB = 6
+	snapshot.History[0].MemoryPresent = true
+	snapshot.History[0].ResidentContext = 8192
+	state := NewState(snapshot)
+	state.View, state.Width, state.Height = ViewResult, 100, 30
+	state.Selected[ViewResult] = snapshot.History[0].ID
+	plain := Render(state, DefaultGlyphs(false)).Plain()
+	if !strings.Contains(plain, "TTFT") || !strings.Contains(plain, "0.00 s") {
+		t.Fatalf("observed zero TTFT was hidden:\n%s", plain)
+	}
+	if !strings.Contains(plain, "8192-token load probe") || strings.Contains(plain, "32K load probe") {
+		t.Fatalf("resident context was mislabeled:\n%s", plain)
 	}
 }
 

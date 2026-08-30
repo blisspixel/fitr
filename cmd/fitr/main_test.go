@@ -44,11 +44,35 @@ func TestAnalysisActionCommandSubstitutesAndQuotesOnlyTheModel(t *testing.T) {
 	action := analysis.Action{Argv: []string{
 		"fitr", "run", analysis.CurrentModelPlaceholder, "-k", "3",
 	}}
-	if got := analysisActionCommand(action, "local model"); got != `fitr run "local model" -k 3` {
+	if got := analysisActionCommand(action, "local model"); got != `fitr run 'local model' -k 3` {
 		t.Fatalf("command = %q", got)
 	}
 	if action.Argv[2] != analysis.CurrentModelPlaceholder {
 		t.Fatal("rendering mutated the semantic action template")
+	}
+}
+
+func TestAnalysisActionCommandQuotesHostileModelLabels(t *testing.T) {
+	action := analysis.Action{Argv: []string{"fitr", "run", analysis.CurrentModelPlaceholder}}
+	for _, model := range []string{
+		`$(Get-Content private).gguf`,
+		`model; Remove-Item private`,
+		`C:\private\model&whoami.gguf`,
+	} {
+		want := "fitr run '" + model + "'"
+		if got := analysisActionCommand(action, model); got != want {
+			t.Errorf("command for %q = %q, want %q", model, got, want)
+		}
+	}
+}
+
+func TestShellCommandArgEscapesEmbeddedQuotesForTargetShell(t *testing.T) {
+	const arg = "model'$(command).gguf"
+	if got := shellCommandArg(arg, "windows"); got != `'model''$(command).gguf'` {
+		t.Fatalf("PowerShell argument = %q", got)
+	}
+	if got := shellCommandArg(arg, "linux"); got != `'model'"'"'$(command).gguf'` {
+		t.Fatalf("POSIX argument = %q", got)
 	}
 }
 

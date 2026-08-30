@@ -131,6 +131,7 @@ const (
 	GapResidentContextAdjusted   GapCode = "capacity.resident_context_adjusted"
 	GapCapacityPolicyUnsealed    GapCode = "capacity.policy_unsealed"
 	GapModelIdentityUnbound      GapCode = "artifact.identity_unbound"
+	GapStorageUnreconciled       GapCode = "artifact.storage_unreconciled"
 )
 
 type EvidenceGap struct {

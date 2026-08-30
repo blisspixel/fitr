@@ -759,6 +759,9 @@ func collectTopBoardGroups(boardRecords []*Result) (map[string][]top.Run, map[st
 		if len(result.Contamination) > 0 || result.EvidenceIntegrityIssue() != "" {
 			continue
 		}
+		if !hasSupportedBoardDecode(result) {
+			continue
+		}
 		groupKey, err := result.ComparableDeviceKey()
 		if err != nil {
 			continue
@@ -837,8 +840,11 @@ func presentTopRun(result *Result) top.Run {
 		Context: meta.NumCtx, Repeats: result.Repeats,
 		DecodeMean: meta.DecodeMean, DecodeSD: meta.DecodeSD,
 		PrefillMean: meta.PrefillMean, TTFTMean: meta.TTFTMean,
-		MemoryGB: meta.ResidentGB, DecodeSeries: slices.Clone(meta.DecodeSeries),
-		Serves: topServes(scorecard), Warnings: topWarnings(result), Verdicts: topVerdicts(scorecard),
+		MemoryGB: meta.ResidentGB, ResidentContext: meta.ResidentContext,
+		DecodePresent: meta.DecodeN > 0, PrefillPresent: meta.PrefillN > 0,
+		TTFTPresent: meta.TTFTN > 0, MemoryPresent: meta.ResidentGB > 0,
+		DecodeSeries: slices.Clone(meta.DecodeSeries),
+		Serves:       topServes(scorecard), Warnings: topWarnings(result), Verdicts: topVerdicts(scorecard),
 		NextCommand: nextCommand,
 	}
 }

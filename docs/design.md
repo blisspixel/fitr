@@ -161,7 +161,8 @@ record, completion receipt, profile, summaries, and scorecard validate,
 `fitr.analysis.run.v1` projects requested and effective context, decode,
 prefill, TTFT, exact-context resident bytes, typed evidence gaps, direct
 receipt-state diagnoses, and a semantic next action. CLI, TUI, Board, and HTML
-consume that projection; the compatibility JSON shapes remain unchanged.
+consume supported subsets of that projection rather than deriving their own
+claims; the compatibility JSON shapes remain unchanged.
 
 The analysis is rebuilt from the record and is never written into schema 6 as
 new evidence. Its estimates use pointers so an observed zero is not confused

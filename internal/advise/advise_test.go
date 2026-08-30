@@ -663,6 +663,46 @@ func TestNVIDIAUnifiedBudgetAcceptsExactResidentReceipt(t *testing.T) {
 	}
 }
 
+func TestWholeSystemUnifiedBudgetFailsClosedAndAcceptsExactReceipt(t *testing.T) {
+	for _, gpu := range []string{"AMD Radeon 780M", "Intel UHD Graphics 770"} {
+		t.Run(gpu+" projection", func(t *testing.T) {
+			r := Evaluate(Input{
+				Model: gpu, WeightsB: 5 * GiB,
+				HaveGB: 32, HaveSrc: device.AppleLegacyRAMSource,
+				Ctx: 8192, Arch: llama8B(), Backend: "ollama",
+			})
+			if r.Tier != Skip || !strings.Contains(r.Why, "safe available shared memory was not measured") {
+				t.Fatalf("automatic whole-system capacity = %+v, want fail-closed skip", r)
+			}
+			if r.FlagValue != 0 || r.FitsGB != 0 || r.KVRemedy != "" {
+				t.Fatalf("automatic whole-system capacity emitted a fit claim: %+v", r)
+			}
+		})
+
+		t.Run(gpu+" exact receipt", func(t *testing.T) {
+			r := Evaluate(Input{
+				Model: gpu, WeightsB: 5 * GiB,
+				HaveGB: 32, HaveSrc: device.AppleLegacyRAMSource,
+				Ctx: 8192, Arch: llama8B(), Backend: "ollama",
+				ResidentB: 7 * GiB, ResidentCtx: 8192, ResidentSrc: "runtime status after load",
+			})
+			if r.Tier != Compatible || r.NeedGB != 7 || r.Source != "runtime status after load" {
+				t.Fatalf("exact resident receipt = %+v, want measured compatible", r)
+			}
+		})
+	}
+}
+
+func TestExplicitBudgetOverridesAutomaticWholeSystemCapacity(t *testing.T) {
+	r := Evaluate(Input{
+		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb 8",
+		Ctx: 8192, Arch: llama8B(), Backend: "ollama",
+	})
+	if r.Tier != Compatible || !strings.Contains(r.Why, "8.0 GB available") {
+		t.Fatalf("declared planning budget = %+v, want compatible projection", r)
+	}
+}
+
 func TestSharedNVIDIAUserBudgetSeparatesProjectionKinds(t *testing.T) {
 	ordinary := Evaluate(Input{
 		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
@@ -682,12 +722,26 @@ func TestSharedNVIDIAUserBudgetSeparatesProjectionKinds(t *testing.T) {
 }
 
 func TestNVIDIAUnifiedIdentityStaysAutomaticWithDedicatedProbeValue(t *testing.T) {
-	r := Evaluate(Input{
-		WeightsB: 5 * GiB, HaveGB: 121.7, HaveSrc: "nvidia-smi",
-		NVIDIAUnifiedMemory: true, Ctx: 8192, Arch: llama8B(),
-	})
-	if r.Tier != Skip || !strings.Contains(r.Why, "safe available shared memory was not measured") {
-		t.Fatalf("shared identity with nonzero probe = %+v, want automatic-capacity skip", r)
+	for _, tc := range []struct {
+		name    string
+		unified bool
+		want    string
+	}{
+		{name: "GB10 shared pool", unified: true, want: Skip},
+		{name: "discrete NVIDIA VRAM", unified: false, want: Compatible},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Evaluate(Input{
+				WeightsB: 5 * GiB, HaveGB: 121.7, HaveSrc: "nvidia-smi",
+				NVIDIAUnifiedMemory: tc.unified, Ctx: 8192, Arch: llama8B(),
+			})
+			if r.Tier != tc.want {
+				t.Fatalf("tier = %s (%s), want %s", r.Tier, r.Why, tc.want)
+			}
+			if tc.unified && !strings.Contains(r.Why, "safe available shared memory was not measured") {
+				t.Fatalf("shared identity with nonzero probe = %+v, want automatic-capacity skip", r)
+			}
+		})
 	}
 }
 

@@ -47,34 +47,39 @@ type Verdict struct {
 // ID must be stable across reloads. The full saved artifact stays outside this
 // package and can be loaded only when a detail view needs it.
 type Run struct {
-	ID           string        `json:"id"`
-	Model        string        `json:"model"`
-	Family       string        `json:"family"`
-	ParamSize    string        `json:"param_size"`
-	Quant        string        `json:"quant"`
-	DeviceID     string        `json:"device_id"`
-	HardwareID   string        `json:"hardware_id"`
-	Device       string        `json:"device"`
-	Driver       string        `json:"driver"`
-	Runtime      string        `json:"runtime"`
-	Config       string        `json:"config"`
-	Profile      string        `json:"profile"`
-	Level        string        `json:"level"`
-	UseFor       string        `json:"use_for"`
-	StartedAt    time.Time     `json:"started_at"`
-	Duration     time.Duration `json:"duration"`
-	Context      int           `json:"context"`
-	Repeats      int           `json:"repeats"`
-	DecodeMean   float64       `json:"decode_mean"`
-	DecodeSD     float64       `json:"decode_sd"`
-	PrefillMean  float64       `json:"prefill_mean"`
-	TTFTMean     float64       `json:"ttft_mean"`
-	MemoryGB     float64       `json:"memory_gb"`
-	DecodeSeries []float64     `json:"decode_series"`
-	Serves       []string      `json:"serves"`
-	Warnings     []string      `json:"warnings"`
-	Verdicts     []Verdict     `json:"verdicts"`
-	NextCommand  string        `json:"next_command"`
+	ID              string        `json:"id"`
+	Model           string        `json:"model"`
+	Family          string        `json:"family"`
+	ParamSize       string        `json:"param_size"`
+	Quant           string        `json:"quant"`
+	DeviceID        string        `json:"device_id"`
+	HardwareID      string        `json:"hardware_id"`
+	Device          string        `json:"device"`
+	Driver          string        `json:"driver"`
+	Runtime         string        `json:"runtime"`
+	Config          string        `json:"config"`
+	Profile         string        `json:"profile"`
+	Level           string        `json:"level"`
+	UseFor          string        `json:"use_for"`
+	StartedAt       time.Time     `json:"started_at"`
+	Duration        time.Duration `json:"duration"`
+	Context         int           `json:"context"`
+	Repeats         int           `json:"repeats"`
+	DecodeMean      float64       `json:"decode_mean"`
+	DecodeSD        float64       `json:"decode_sd"`
+	PrefillMean     float64       `json:"prefill_mean"`
+	TTFTMean        float64       `json:"ttft_mean"`
+	MemoryGB        float64       `json:"memory_gb"`
+	DecodePresent   bool          `json:"-" presentation:"local"`
+	PrefillPresent  bool          `json:"-" presentation:"local"`
+	TTFTPresent     bool          `json:"-" presentation:"local"`
+	MemoryPresent   bool          `json:"-" presentation:"local"`
+	ResidentContext int           `json:"-" presentation:"local"`
+	DecodeSeries    []float64     `json:"decode_series"`
+	Serves          []string      `json:"serves"`
+	Warnings        []string      `json:"warnings"`
+	Verdicts        []Verdict     `json:"verdicts"`
+	NextCommand     string        `json:"next_command"`
 }
 
 // Comparison is an exact-value preview between two saved runs. It never

@@ -101,10 +101,12 @@ and fitr does not relabel it as free memory. If a future driver reports a
 nonzero capacity through `nvidia-smi`, fitr preserves the value but labels it
 as unified capacity rather than dedicated VRAM.
 
-This is what has been exercised on real hardware so far: Windows with an
-NVIDIA card. Everything else is written from the platform's documented
-interfaces and covered by tests that do not need the hardware. Treat the
-unexercised rows as untested rather than as working.
+The GPU-memory probes have been exercised on a Windows host with a discrete
+NVIDIA card. Clean Linux and macOS runners exercise installation and the full
+decision loop against a pinned native runtime, but their hosted hardware does
+not validate the physical GPU-memory probes. The remaining probe paths follow
+their platform interfaces and have automated tests; treat them as unverified
+on physical hardware until a native acceptance row records otherwise.
 
 Hardware choice is not a single speed ranking. Capacity, prompt processing,
 generation, first-response latency, model behavior, placement, and intended
@@ -123,7 +125,8 @@ operator supplies a safe budget or a runtime receipt proves one loaded point.
 |---|---|---|
 | NVIDIA discrete | `nvidia-smi` total, and free where a contention caveat applies | measured |
 | NVIDIA GB10 / Thor on Linux | `/proc/meminfo` `MemTotal` | measured addressable pool, not safe free budget |
-| AMD on Linux | `drm sysfs` | measured |
+| AMD or Intel dedicated memory on Linux | `drm sysfs` | measured |
+| AMD or Intel integrated whole-system fallback | system RAM | measured addressable pool, not safe free budget |
 | Apple Silicon, limit set | `iogpu.wired_limit_mb` | measured |
 | Apple Silicon, default | 75% of `hw.memsize` | **assumed** |
 | Override | `--vram-gb N` | you said so |

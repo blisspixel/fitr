@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/device"
@@ -27,22 +28,46 @@ func FromRecord(result *record.Record) (Report, error) {
 	if err := result.ValidateEvidenceContract(); err != nil {
 		return Report{}, fmt.Errorf("analyze result: validate evidence: %w", err)
 	}
+	displayOnly := displayOnlyNone
 	identityIssue := result.Manifest.Model.RankingIssue()
-	if issue := result.EvidenceIntegrityIssue(); issue != "" && issue != identityIssue {
-		return Report{}, fmt.Errorf("analyze result: evidence integrity: %s", issue)
+	if issue := result.EvidenceIntegrityIssue(); issue != "" {
+		if issue == identityIssue {
+			displayOnly = displayOnlyIdentity
+		} else {
+			// The evidence contract already passed above. The only remaining
+			// integrity state is Store's local current/history reconciliation.
+			// It removes claimability, not the sealed observations themselves.
+			displayOnly = displayOnlyStorage
+		}
 	}
-	return fromValidatedRecordWithIdentity(result, identityIssue), nil
+	return fromValidatedRecordWithDisplayOnly(result, displayOnly), nil
 }
+
+type displayOnlyReason uint8
+
+const (
+	displayOnlyNone displayOnlyReason = iota
+	displayOnlyIdentity
+	displayOnlyStorage
+)
 
 // fromValidatedRecord is kept separate so extraction tests can exercise every
 // evidence combination without reproducing record's signing implementation.
 // FromRecord is the only production entry point and always validates first.
 func fromValidatedRecord(result *record.Record) Report {
-	return fromValidatedRecordWithIdentity(result, "")
+	return fromValidatedRecordWithDisplayOnly(result, displayOnlyNone)
 }
 
 func fromValidatedRecordWithIdentity(result *record.Record, identityIssue string) Report {
-	identityUnbound := identityIssue != ""
+	reason := displayOnlyNone
+	if identityIssue != "" {
+		reason = displayOnlyIdentity
+	}
+	return fromValidatedRecordWithDisplayOnly(result, reason)
+}
+
+func fromValidatedRecordWithDisplayOnly(result *record.Record, displayOnly displayOnlyReason) Report {
+	unclaimable := displayOnly != displayOnlyNone
 	report := Report{
 		Schema: ReportSchema,
 		Policy: PolicySchema,
@@ -52,12 +77,12 @@ func fromValidatedRecordWithIdentity(result *record.Record, identityIssue string
 			EvidenceSHA256: result.Completion.EvidenceSHA256, Validated: true,
 		},
 		Context:     contextFrom(result),
-		Performance: performanceFrom(result, identityUnbound),
-		Capacity:    capacityFrom(result, identityUnbound),
+		Performance: performanceFrom(result, unclaimable),
+		Capacity:    capacityFrom(result, unclaimable),
 	}
-	report.Gaps = gapsFrom(result, report, identityUnbound)
+	report.Gaps = gapsFrom(result, report, displayOnly)
 	report.Diagnoses = diagnosesFrom(result)
-	report.NextActions = nextActionsFrom(result, identityUnbound)
+	report.NextActions = nextActionsFrom(result, unclaimable)
 	return report
 }
 
@@ -223,13 +248,17 @@ func cacheEligibility(results []eval.SpeedResult, receipt cacheReceipt) cacheSta
 	}
 }
 
-func gapsFrom(result *record.Record, report Report, identityUnbound bool) []EvidenceGap {
+func gapsFrom(result *record.Record, report Report, displayOnly displayOnlyReason) []EvidenceGap {
 	gaps := []EvidenceGap{gap(GapCapacityPolicyUnsealed, "capacity",
 		"no sealed usable-capacity policy exists, so resident bytes cannot establish headroom or fit",
 		ClaimCapacityHeadroom, ClaimFit)}
-	if identityUnbound {
+	switch displayOnly {
+	case displayOnlyIdentity:
 		gaps = append(gaps, gap(GapModelIdentityUnbound, "artifact",
 			"the observed artifact was not bound to the serving runtime, so measurements remain descriptive only"))
+	case displayOnlyStorage:
+		gaps = append(gaps, gap(GapStorageUnreconciled, "artifact",
+			"the saved copy is not reconciled with canonical current history, so measurements remain descriptive only"))
 	}
 	gaps = appendUnavailablePerformanceGaps(gaps, report.Performance)
 	gaps = appendCacheGaps(gaps, result.Speed)
@@ -338,8 +367,8 @@ func diagnosesFrom(result *record.Record) []Diagnosis {
 	return diagnoses
 }
 
-func nextActionsFrom(result *record.Record, identityUnbound bool) []Action {
-	if identityUnbound && len(result.Contamination) == 0 {
+func nextActionsFrom(result *record.Record, displayOnly bool) []Action {
+	if displayOnly {
 		return nil
 	}
 	action := Action{Code: ActionOpenBoard, Argv: []string{"fitr", "board"},
@@ -347,22 +376,41 @@ func nextActionsFrom(result *record.Record, identityUnbound bool) []Action {
 	switch {
 	case len(result.Contamination) > 0:
 		action = Action{Code: ActionRerunUncontaminated,
-			Argv:   []string{"fitr", "run", CurrentModelPlaceholder},
+			Argv:   runActionArgv(result),
 			Reason: "replace timing evidence contaminated by another resident model"}
 	case toolsBlocked(result.Scorecard):
 		action = Action{Code: ActionDiagnoseTools,
-			Argv:   []string{"fitr", "diag", CurrentModelPlaceholder},
+			Argv:   diagnosticActionArgv(result),
 			Reason: "separate runtime tool plumbing from model behavior"}
 	case result.Repeats > 0 && result.Repeats < 3:
 		action = Action{Code: ActionIncreaseRepeats,
-			Argv:   []string{"fitr", "run", CurrentModelPlaceholder, "-k", "3"},
+			Argv:   append(runActionArgv(result), "-k", "3"),
 			Reason: "collect enough repeats for a stable comparison"}
 	case result.Level == "quick" || result.Level == "checks" || result.Level == "checks-only":
 		action = Action{Code: ActionCompleteBattery,
-			Argv:   []string{"fitr", "run", CurrentModelPlaceholder},
+			Argv:   runActionArgv(result),
 			Reason: "measure the standard behavior and performance battery"}
 	}
 	return []Action{action}
+}
+
+func runActionArgv(result *record.Record) []string {
+	manifest := result.Manifest
+	return []string{
+		"fitr", "run", CurrentModelPlaceholder,
+		"--ctx", strconv.Itoa(manifest.NumCtx),
+		"--backend", manifest.Model.Backend,
+		"--profile", manifest.Profile,
+	}
+}
+
+func diagnosticActionArgv(result *record.Record) []string {
+	manifest := result.Manifest
+	return []string{
+		"fitr", "diag", CurrentModelPlaceholder,
+		"--ctx", strconv.Itoa(manifest.NumCtx),
+		"--backend", manifest.Model.Backend,
+	}
 }
 
 func toolsBlocked(card score.Scorecard) bool {

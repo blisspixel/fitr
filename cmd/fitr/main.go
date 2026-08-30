@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -663,12 +664,51 @@ func analysisActionCommand(action analysis.Action, model string) string {
 		if arg == analysis.CurrentModelPlaceholder {
 			arg = model
 		}
-		if strings.ContainsAny(arg, " \t\"'\\") {
-			arg = strconv.Quote(arg)
-		}
-		args = append(args, arg)
+		args = append(args, shellCommandArg(arg, runtime.GOOS))
 	}
 	return strings.Join(args, " ")
+}
+
+// shellCommandArg renders one inert argv element for the shell convention of
+// the built target. Single-quoted strings are literal in PowerShell and POSIX
+// shells; only the way an embedded quote is represented differs. Keeping the
+// safe set deliberately narrow prevents a model filename from turning a
+// displayed next action into command substitution or another shell operator.
+func shellCommandArg(arg, goos string) string {
+	if safeUnquotedCommandArg(arg) {
+		return arg
+	}
+	if goos == "windows" {
+		return "'" + strings.ReplaceAll(arg, "'", "''") + "'"
+	}
+	return "'" + strings.ReplaceAll(arg, "'", `'"'"'`) + "'"
+}
+
+func safeUnquotedCommandArg(arg string) bool {
+	if arg == "" {
+		return false
+	}
+	for _, r := range arg {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
+			strings.ContainsRune("-._/:=+", r) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func hasSupportedBoardDecode(result *Result) bool {
+	if result == nil {
+		return false
+	}
+	report, err := analysis.FromRecord(result)
+	if err != nil {
+		return false
+	}
+	observation := report.Performance.DecodeTPS
+	return observation.Estimate != nil && observation.Status == analysis.StatusAvailable &&
+		slices.Contains(observation.Supports, analysis.ClaimObservedDecode)
 }
 
 // writeHTMLArtifact is a no-op unless the caller asked. dest "auto" writes

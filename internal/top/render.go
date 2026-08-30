@@ -301,20 +301,28 @@ func renderResultIdentity(w *lineWriter, run Run, glyphs Glyphs) {
 
 func renderResultPerformance(w *lineWriter, run Run, glyphs Glyphs) {
 	w.line(Span{Text: "performance", Role: RoleHeader})
-	if run.DecodeMean > 0 {
+	if run.DecodePresent {
 		w.line(Span{Text: "decode     ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f ± %.2f tok/s  k=%d", run.DecodeMean, run.DecodeSD, run.Repeats), Role: RoleDefault},
 			Span{Text: "  " + sparkline(run.DecodeSeries, 12, glyphs), Role: RoleAccent})
 	}
-	if run.PrefillMean > 0 {
+	if run.PrefillPresent {
 		w.line(metricSpans("prefill", run.PrefillMean, "tok/s", nil, glyphs)...)
 	}
-	if run.TTFTMean > 0 {
+	if run.TTFTPresent {
 		w.line(metricSpans("TTFT", run.TTFTMean, "s", nil, glyphs)...)
 	}
-	if run.MemoryGB > 0 {
+	if run.MemoryPresent {
 		w.line(Span{Text: "capacity", Role: RoleHeader})
-		w.line(Span{Text: "resident   ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GB after requested 32K load probe", run.MemoryGB), Role: RoleDefault})
+		w.line(Span{Text: "resident   ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GB after requested %s load probe", run.MemoryGB,
+			residentContextLabel(run.ResidentContext)), Role: RoleDefault})
 	}
+}
+
+func residentContextLabel(ctx int) string {
+	if ctx <= 0 || ctx == 32768 {
+		return "32K"
+	}
+	return fmt.Sprintf("%d-token", ctx)
 }
 
 func renderResultWarnings(w *lineWriter, run Run) bool {

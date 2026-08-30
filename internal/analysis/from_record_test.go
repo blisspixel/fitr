@@ -59,6 +59,70 @@ func TestFromRecordAcceptsACompletedSchemaSixReceipt(t *testing.T) {
 	}
 }
 
+func TestFromRecordKeepsUnreconciledStorageEvidenceDescriptive(t *testing.T) {
+	requested := 32768
+	result := completedTestRecordConfigured(t, "", func(result *record.Record) {
+		result.TaskPlan.Memory = true
+		result.Memory = measuredMemory(requested, &requested)
+	})
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalPath := filepath.Join(t.TempDir(), "external.json")
+	if err := os.WriteFile(externalPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := record.NewStore(t.TempDir()).Read(externalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := FromRecord(loaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, observation := range []PerformanceObservation{
+		report.Performance.DecodeTPS, report.Performance.PrefillTPS, report.Performance.TTFTSeconds,
+	} {
+		if observation.Estimate == nil || observation.Status != StatusDescriptiveOnly || len(observation.Supports) != 0 {
+			t.Fatalf("display-only performance retained claimability: %+v", observation)
+		}
+	}
+	resident := report.Capacity.Resident
+	if resident == nil || resident.Estimate == nil || resident.Status != StatusDescriptiveOnly || len(resident.Supports) != 0 {
+		t.Fatalf("display-only resident evidence = %+v", resident)
+	}
+	if !hasGap(report.Gaps, GapStorageUnreconciled) || len(report.NextActions) != 0 {
+		t.Fatalf("display-only report gaps/actions = %+v / %+v", report.Gaps, report.NextActions)
+	}
+}
+
+func TestFromRecordStillRejectsTamperedCompletedEvidence(t *testing.T) {
+	result := completedTestRecord(t)
+	result.DecodeSum.Mean = 999
+	report, err := FromRecord(result)
+	if err == nil || !reflect.DeepEqual(report, Report{}) {
+		t.Fatalf("tampered evidence returned report=%+v err=%v", report, err)
+	}
+}
+
+func TestFromRecordActionCarriesSealedExperimentConfiguration(t *testing.T) {
+	result := completedTestRecordConfigured(t, "", func(result *record.Record) {
+		result.Level = "quick"
+	})
+	report, err := FromRecord(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.NextActions) != 1 || report.NextActions[0].Code != ActionCompleteBattery {
+		t.Fatalf("next actions = %+v", report.NextActions)
+	}
+	action := report.NextActions[0]
+	assertArgValue(t, action, "--ctx", "8192")
+	assertArgValue(t, action, "--backend", "ollama")
+	assertArgValue(t, action, "--profile", "default")
+}
+
 func TestPerformanceObservationsPreservePointFactsAndCacheEligibility(t *testing.T) {
 	result := handRecord(validUncachedSamples(3))
 	result.Speed[1].ClientDerived = true
@@ -289,6 +353,7 @@ func TestNextActionPriorityAndTemplates(t *testing.T) {
 				t.Fatalf("actions = %+v, want %s", actions, test.want)
 			}
 			assertSafeArgvTemplate(t, actions[0])
+			assertActionPreservesSealedConfiguration(t, result, actions[0])
 		})
 	}
 }
@@ -341,7 +406,15 @@ func completedTestRecord(t *testing.T) *record.Record {
 
 func completedTestRecordWithLocalArtifact(t *testing.T, localArtifact string) *record.Record {
 	t.Helper()
+	return completedTestRecordConfigured(t, localArtifact, nil)
+}
+
+func completedTestRecordConfigured(t *testing.T, localArtifact string, configure func(*record.Record)) *record.Record {
+	t.Helper()
 	result := handRecord(validUncachedSamples(3))
+	if configure != nil {
+		configure(result)
+	}
 	result.Manifest, result.Completion = nil, nil
 	profile := device.Profile{Name: "default", Description: "test", Gates: map[string]device.Gate{}}
 	result.Profile = profile.Name
@@ -397,9 +470,10 @@ func handRecord(samples []eval.SpeedResult) *record.Record {
 	}
 	result := &record.Record{
 		SchemaVersion: record.EvidenceSchemaVersion,
-		Manifest:      &record.RunManifest{Schema: record.RunManifestSchema},
-		Completion:    &record.CompletionReceipt{Schema: record.CompletionReceiptSchema},
-		Model:         "model", StartedAt: "2026-08-30T12:00:00Z", Level: "full",
+		Manifest: &record.RunManifest{Schema: record.RunManifestSchema,
+			Model: record.ModelIdentity{Backend: "ollama"}, Profile: "default", NumCtx: effective},
+		Completion: &record.CompletionReceipt{Schema: record.CompletionReceiptSchema},
+		Model:      "model", StartedAt: "2026-08-30T12:00:00Z", Level: "full",
 		ExecutionPolicy: record.ExecutionDisabled, SeedSet: "analysis-test", Repeats: len(samples), NumCtx: effective,
 		Device: fingerprint, DeviceV2: &v2, Profile: "default",
 		TaskPlan: record.TaskPlan{SpeedSamples: len(samples)}, Speed: samples,
@@ -513,6 +587,34 @@ func assertSafeArgvTemplate(t *testing.T, action Action) {
 			t.Fatalf("action contains forbidden shell or saved-state operation: %+v", action)
 		}
 	}
+}
+
+func assertActionPreservesSealedConfiguration(t *testing.T, result *record.Record, action Action) {
+	t.Helper()
+	if action.Code == ActionOpenBoard {
+		return
+	}
+	if !slices.Contains(action.Argv, "--ctx") || !slices.Contains(action.Argv, "--backend") {
+		t.Fatalf("action omitted sealed context or backend: %+v", action)
+	}
+	assertArgValue(t, action, "--ctx", "8192")
+	assertArgValue(t, action, "--backend", result.Manifest.Model.Backend)
+	if action.Code != ActionDiagnoseTools {
+		assertArgValue(t, action, "--profile", result.Manifest.Profile)
+	}
+}
+
+func assertArgValue(t *testing.T, action Action, flag, want string) {
+	t.Helper()
+	for i, arg := range action.Argv {
+		if arg == flag && i+1 < len(action.Argv) {
+			if action.Argv[i+1] != want {
+				t.Fatalf("%s value = %q, want %q in %+v", flag, action.Argv[i+1], want, action)
+			}
+			return
+		}
+	}
+	t.Fatalf("action omitted %s: %+v", flag, action)
 }
 
 func assertDetached(t *testing.T, result *record.Record, report Report) {

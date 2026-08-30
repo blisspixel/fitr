@@ -246,17 +246,18 @@ func shotInventory(context.Context) (string, error) {
 		GPUBackend: "rocm", MemoryGB: 32, MemorySource: "unified memory (system RAM)",
 		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
 		Profile: "lappy", Uncalibrated: false,
+		Warnings: []string{"32.0 GB is addressable shared capacity, not a safe model budget; pass --vram-gb N"},
 		Rows: []render.InventoryRow{
 			{Model: "qwen3:30b-q4", State: "measured", Fit: "low_memory", SizeB: 18 << 30, Loaded: true,
 				Ctx: "16k/8k", Next: "fitr apply qwen3:30b-q4",
 				Note:    "measured ctx=16384; serving ctx=8192",
 				Windows: "2k ok | 4k ok | 8k ok | *16k ok | >32k no"},
-			{Model: "gemma4:12b", State: "unproven", Fit: "compatible", SizeB: 8 << 30,
-				Next: "fitr run gemma4:12b", Windows: "2k ok | 4k ok | *8k ok | 16k ok | 32k no"},
+			{Model: "gemma4:12b", State: "unproven", SizeB: 8 << 30,
+				Next: "fitr advise gemma4:12b", Note: "shared-memory fit needs a safe operator budget or an exact runtime receipt"},
 			{Model: "qwen3:32b", State: "stale", SizeB: 20 << 30, Next: "fitr run qwen3:32b",
 				Note: "device or runtime changed since the last measurement"},
-			{Model: "llama3.1:70b", State: "incompatible", Fit: "incompatible", SizeB: 40 << 30, Next: "try a smaller quant",
-				Note: "weights 40.0 GB exceed 32.0 GB (unified memory (system RAM))"},
+			{Model: "llama3.1:70b", State: "unproven", SizeB: 40 << 30, Next: "fitr advise llama3.1:70b",
+				Note: "addressable system RAM is not a safe budget; mmap and runtime allocation are unmeasured"},
 		},
 	}, "rich")
 	return "", nil

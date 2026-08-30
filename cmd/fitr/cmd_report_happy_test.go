@@ -134,3 +134,41 @@ func TestBoardJSONProjectsOnlyClaimableRunsAndSupportsFullEvidence(t *testing.T)
 		t.Fatalf("full board identity = %+v", full)
 	}
 }
+
+func TestBoardsExcludeSealedChecksOnlyResultWithoutDecodeEvidence(t *testing.T) {
+	t.Setenv("FITR_RESULTS", t.TempDir())
+	measured := mockResult("measured", 20, .2, 200, 2, 0, 0, 1, 1)
+	checksOnly := mockResult("checks-only", 99, .1, 999, 1, 0, 0, 1, 1)
+	checksOnly.Level = "checks"
+	checksOnly.Speed = nil
+	checksOnly.Memory = eval.MemoryResult{}
+	sealCurrentResult(t, checksOnly)
+	if issue := checksOnly.EvidenceIntegrityIssue(); issue != "" {
+		t.Fatalf("checks-only fixture is not valid current evidence: %s", issue)
+	}
+	saveCurrentResults(t, measured, checksOnly)
+
+	var stdout string
+	stderr, code := captureTopStderr(t, func() int {
+		var inner int
+		stdout, inner = captureTopStdout(t, func() int {
+			return cmdBoard(context.Background(), []string{"--display=json"})
+		})
+		return inner
+	})
+	if code != exitOK {
+		t.Fatalf("board exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "checks-only") || !strings.Contains(stdout, `"results":1`) {
+		t.Fatalf("CLI board admitted a result without decode evidence: %s", stdout)
+	}
+	if !strings.Contains(stderr, "without supported decode evidence") {
+		t.Fatalf("CLI board did not disclose the exclusion: %q", stderr)
+	}
+
+	snapshot := buildTopSnapshot([]*Result{checksOnly, measured})
+	if len(snapshot.History) != 2 || len(snapshot.Board) != 1 || len(snapshot.Board[0].Runs) != 1 ||
+		snapshot.Board[0].Runs[0].Model != measured.Model {
+		t.Fatalf("TUI board admitted a result without decode evidence: %+v", snapshot)
+	}
+}
