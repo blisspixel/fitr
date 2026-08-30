@@ -18,6 +18,28 @@ Last updated: 2026-08-30.
 | Installer smoke | Windows, macOS, and Linux runners install locally served candidate artifacts, bind the native asset to its exact checksum entry, and validate its version command. |
 | Release quality | Formatting, vet, unit tests, race detection, cross-compilation, reproducible Linux build comparison, static ELF verification, size limits, vulnerability scanning, fuzz smoke tests, and installer syntax checks must all pass. |
 
+### 0.9.10 release receipt
+
+Release 0.9.10 is bound to commit
+`4c69505d4aad7a29bfbebb55cdd1d732e03248e8`. The exact commit passed
+[aggregate CI run 33335116411](https://github.com/blisspixel/fitr/actions/runs/33335116411)
+and
+[native acceptance run 33335118599](https://github.com/blisspixel/fitr/actions/runs/33335118599)
+before the tag was published. The
+[release workflow run 33335321170](https://github.com/blisspixel/fitr/actions/runs/33335321170)
+then published the public
+[v0.9.10 release](https://github.com/blisspixel/fitr/releases/tag/v0.9.10).
+
+All ten public assets were downloaded independently after publication. The
+manifest contained exactly nine file entries, each downloaded asset matched
+its SHA-256 entry, and the public Windows amd64 binary reported
+`fitr 0.9.10`. The tagged PowerShell installer was then run against GitHub
+with `FITR_VERSION=v0.9.10`, an isolated `FITR_BIN`, and `FITR_NO_PATH=1`.
+It verified the public binary checksum, installed to the requested directory,
+left the persistent user `PATH` byte-for-byte unchanged, made the isolated
+directory first on the current process `PATH`, and installed a binary that
+reported `fitr 0.9.10`.
+
 ### Reproducible native candidate acceptance
 
 `.github/workflows/native-acceptance.yml` is a manual release gate, not a

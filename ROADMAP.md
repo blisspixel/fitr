@@ -43,8 +43,8 @@ methods live in [statistics](docs/statistics.md).
 |---|---|---|
 | Shipped | 0.9.8 | Output that fits the terminal, and verdicts the renderer can lay out |
 | Shipped | 0.9.9 | Evidence correctness, tool-channel behavior, internal decomposition, and the native matrix |
-| Now | 0.9.10 | Release and installer polish, then the first renderer-neutral explanation slice |
-| Then | 0.10 | Explain and choose: central analysis, capacity versus performance, calibration, context and quant experiments |
+| Shipped | 0.9.10 | Release and installer polish, then the first renderer-neutral explanation slice |
+| Now | 0.10 | Explain and choose: central analysis, capacity versus performance, calibration, context and quant experiments |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -412,7 +412,7 @@ every rankable backend row rests on a native run. A protocol that cannot bind
 artifact identity remains explicitly unrankable instead of blocking on a
 receipt its schema cannot carry.
 
-### 0.9.10 - release and installer polish
+### 0.9.10 - release and installer polish [shipped]
 
 - [x] Publish 0.9.9 only after aggregate CI and native Linux/macOS acceptance
       pass on the exact tagged main commit, then independently download and
@@ -892,6 +892,8 @@ These features must preserve the evidence contract.
 | 0.9.6 | Duplicate-key JSON rejection, fail-closed model inventory, bounded discovery and control calls, and portable task-file boundaries |
 | 0.9.7 | Second-machine correctness: the fit verdict restored on Ollama, device identity sealed and gated, untrusted GGUF and task-file input hardened and fuzzed, the KV dtype remedy, whole-loop live coverage, and a static analysis gate |
 | 0.9.8 | Output that fits: every surface composed to a resolved width, verdicts given a structure the renderer can lay out, sparklines refused where the data cannot support them, and the transport retry that stopped discarding completed runs |
+| 0.9.9 | Evidence correctness, native tool-channel behavior, package decomposition, the Linux and macOS native acceptance matrix, and exact-commit release gates |
+| 0.9.10 | Non-persistent PowerShell installs, HTML performance and capacity parity, central validated analysis, fail-closed unified-memory advice, display-only history preservation, and hardened Board actions |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).
