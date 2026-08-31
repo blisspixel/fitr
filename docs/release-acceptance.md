@@ -63,6 +63,28 @@ that hidden no-profile process. The candidate remained staged and the target
 remained unchanged. This public-path finding is fixed in 0.9.12 with a
 module-independent SHA-256 implementation and a subprocess replacement test.
 
+### 0.9.12 release receipt
+
+Release 0.9.12 is bound to commit
+`ed7add5e0da44d99973f136c63cecc420fd640a5`. The exact commit passed
+[aggregate CI run 33342996701](https://github.com/blisspixel/fitr/actions/runs/33342996701)
+and
+[native acceptance run 33343012240](https://github.com/blisspixel/fitr/actions/runs/33343012240)
+before
+[release workflow run 33343160364](https://github.com/blisspixel/fitr/actions/runs/33343160364)
+published the public
+[v0.9.12 release](https://github.com/blisspixel/fitr/releases/tag/v0.9.12).
+
+The public PowerShell installer installed the Windows amd64 asset into a fresh
+isolated directory with `FITR_NO_PATH=1`. The installed binary reported
+`fitr 0.9.12` and matched the release manifest at SHA-256
+`25dc60d226ee392b6531125441b0bb83dcf2261f1ae72dae260d3ef23ede41c0`.
+`update --check` identified 0.9.12 as current. `update --reinstall` downloaded
+and verified that same public asset, staged it beside the running executable,
+and launched the hidden helper. After the updating process exited, the helper
+removed the staged file and replaced the target. The replaced binary again
+reported `fitr 0.9.12` and matched the same published SHA-256.
+
 ### Reproducible native candidate acceptance
 
 `.github/workflows/native-acceptance.yml` is a manual release gate, not a
