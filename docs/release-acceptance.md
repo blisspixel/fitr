@@ -4,7 +4,7 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-08-30.
+Last updated: 2026-09-01.
 
 ## Automated gates
 
@@ -84,6 +84,31 @@ and verified that same public asset, staged it beside the running executable,
 and launched the hidden helper. After the updating process exited, the helper
 removed the staged file and replaced the target. The replaced binary again
 reported `fitr 0.9.12` and matched the same published SHA-256.
+
+### 0.10.0 release receipt
+
+Release 0.10.0 is bound to commit
+`7bcf2a6991608e40111e0b4eae3604a9492f7f6f`. The exact commit passed
+[aggregate CI run 33570791085](https://github.com/blisspixel/fitr/actions/runs/33570791085)
+and
+[native acceptance run 33570801126](https://github.com/blisspixel/fitr/actions/runs/33570801126)
+before
+[release workflow run 33571114233](https://github.com/blisspixel/fitr/actions/runs/33571114233)
+published the public
+[v0.10.0 release](https://github.com/blisspixel/fitr/releases/tag/v0.10.0).
+
+The release workflow re-ran the full test, coverage, race, vulnerability,
+fuzz, lint, file-length, reproducibility, static-binary, size, CLI, checksum,
+and three-platform installer gates. It then downloaded all ten release assets,
+verified the nine-entry manifest, and published only after every asset matched.
+
+After publication, GitHub's latest stable release metadata reported 0.10.0 as
+non-draft and non-prerelease with exactly ten assets. The public manifest was
+downloaded independently. The public Windows amd64 binary was also downloaded
+independently, matched SHA-256
+`4031c03e0d899146c17314ed219bfc89fe50c8cb88e6fd6e360b77d20a6b4304`,
+reported `fitr 0.10.0`, and identified 0.10.0 as current through
+`update --check`.
 
 ### Reproducible native candidate acceptance
 
