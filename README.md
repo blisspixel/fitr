@@ -3,220 +3,193 @@
 [![CI](https://github.com/blisspixel/fitr/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/fitr/actions/workflows/ci.yml)
 [![Native acceptance](https://github.com/blisspixel/fitr/actions/workflows/native-acceptance.yml/badge.svg)](https://github.com/blisspixel/fitr/actions/workflows/native-acceptance.yml)
 
-**The fitr thesis is to determine what local AI actually works for your
-workload on this machine, what evidence proves it, and which configuration
-gives the best validated outcome.** FIT, behavior, and burst performance ship
-today; validated-work, tradeoff, explanation, and coverage contracts are the
-pre-1.0 direction.
+**fitr determines what local AI actually works for your workload on this
+machine, shows the evidence, and helps choose a configuration without reducing
+everything to one benchmark score.**
 
-You have an accelerator with a finite memory budget. That may be dedicated
-VRAM, or one unified pool shared with the operating system and every other
-process. New open models come out every week, and it is never obvious which
-ones will fit, how much context you can give them, or whether any of them beat
-what you are already running. Published benchmarks do not answer that: they
-were run on someone else's hardware, often at a quant nobody mentions.
+Model names and public leaderboards do not answer the local questions. Will
+this artifact fit at the context you need? Is the runtime really using the
+accelerator? Are tool calls reaching the tool channel? Is the faster quant
+still correct? Does a candidate complete a bounded workflow when another
+system independently verifies the result?
 
-So you either spend an evening testing by hand every time something drops, or
-you keep running whatever you set up months ago and hope it is still a good
-choice.
+fitr measures those questions against the model bytes, runtime, context,
+placement, and device that produced the evidence. Missing evidence stays
+missing. An unmeasured model stays a candidate, not a recommendation.
 
-fitr does that testing for you. Point it at Ollama, llama-server, or a supported
-OpenAI-compatible endpoint and it lists the models already served. When the
-runtime exposes the required artifact and allocation evidence, fitr works out
-which ones fit within the measured or configured memory budget and at what
-context length. It measures how each actually performs here and tells you the
-exact setting to change when one does not fit.
-
-> `llmfit` estimates what fits, and benchmarks how fast. Leaderboards rank what
-> is smart on someone else's machine. Neither checks whether the model is
-> *behaving*. **`fitr` tells you what is silently broken on yours** - the Q4
-> that still writes clean prose but emits malformed tool calls, the parser that
-> swallows them, the loop your GPU triggers and nobody else's does.
-
-<img src="docs/assets/inventory.svg?v=0.9.12" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
-
-The run capture is a deterministic reconstruction based on selected
-observations from a native RTX 4090 validation on 2026-08-30, not a sanitized
-copy of the sealed record. The inventory, advice, and TUI captures are
-deterministic fixtures using that same device profile. Host identity and local
-paths are omitted throughout.
+<img src="docs/assets/inventory.svg?v=0.10.0" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
 
 ## Install
 
-The full loop needs a supported runtime that is running with at least one
-installed model. Backend identity requirements and limits are documented in
-[backends](docs/backends.md).
+The full loop needs a running supported backend with at least one model. See
+[backend requirements and identity limits](docs/backends.md).
 
-macOS / Linux:
+macOS and Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/blisspixel/fitr/main/install.sh | sh
 ```
 
-Windows (PowerShell):
+Windows PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
 ```
 
-One command, then it runs. No Python, no venv, and no CUDA wrangling. Keep the
-single binary current with `fitr update --check` and `fitr update`. fitr sends no telemetry. Installed-model evaluation talks only
-to the endpoint you selected; network access otherwise occurs only for an
-explicit install, update, pull, or remote endpoint. Installers and the updater
-verify the download against its published checksum.
-Pinning, relocating and building from source are in
-[install](docs/usage.md#install).
-Candidate releases are also installed through that checksum-verifying path and
-run against a pinned native llama-server on clean Linux and macOS runners. The
-reviewable receipts are tracked in [release acceptance](docs/release-acceptance.md).
+fitr is one static binary. It needs no Python environment and sends no
+telemetry. Installers and `fitr update` verify the selected release asset
+against its published SHA-256 checksum. Pinning a version, relocating the
+binary, updating, and building from source are covered in the
+[install guide](docs/usage.md#install).
 
-`fitr update` resolves the latest stable release from the official GitHub
-repository, selects the exact asset for the running OS and architecture,
-matches it to the release's `SHA256SUMS` entry, and executes the staged binary
-to confirm its version before replacement. It never runs a remote install
-script. On Windows, replacement is attempted just after the current process
-exits; run `fitr version` to verify completion.
-
-## The loop
+## Start with the local decision loop
 
 ```bash
-fitr                          # what is installed, what is measured, what next
-fitr qwen3:30b                # does it fit, and which flag if not
-fitr run qwen3:30b --ctx 16384   # measure it here
-fitr apply qwen3:30b          # print how to persist that context
-fitr board                    # compare only runs this device can honestly compare
+fitr                                # inventory, evidence state, one next action
+fitr qwen3:30b                      # fit advice for one model
+fitr run qwen3:30b --ctx 16384      # behavior, performance, and capacity here
+fitr apply qwen3:30b                # print, but do not execute, persistence steps
+fitr board                          # compare compatible measured evidence
+fitr decide qwen3:30b --spec local-coding.json
 ```
 
-Every row ends in the one thing to do next, so there is never a question of
-what to run.
+Every inventory row ends with one useful next command. A decision spec then
+applies your workload requirements to sealed evidence without changing the
+original measurement. Requirements may cover behavior, capability support,
+effective context, a specific latency state, and exact-context resident
+memory. The answer is eligible, ineligible, or unresolved, with exit code 4
+reserved for required evidence that has not yet been established.
 
-The product is organized around evidence, not a composite score:
+Read [usage](docs/usage.md) for all commands and flags, or
+[decision specifications](docs/decisions.md) for the strict schema and
+requirement semantics.
 
-- **FIT:** can the artifact, context, and placement live within this machine's
-  measured or configured memory budget?
-- **BEHAVIOR:** does it produce correct structured output, follow instructions,
-  call tools through the real tool channel, and avoid degeneration?
-- **PERFORMANCE:** how long do load, prompt processing, first response, and
-  generation take in this configuration?
-- **EXPLAIN:** which observed constraint is most likely to matter, with the
-  evidence and uncertainty behind that diagnosis?
-- **VALIDATED WORK:** does raw speed survive contact with correctness, retries,
-  and independent verification?
-- **TRADEOFFS:** which context, quant, or model configuration is dominated, and
-  which alternatives remain genuine choices?
-- **COVERAGE:** which declared workloads have earned local trust, and which
-  still require evidence or a fallback?
+## What ships today
 
-FIT, behavior, and burst performance are measured today. The derived analysis
-also keeps supported latency states separate and reports exact-context runtime
-allocation attribution when the runtime supplies that receipt. Root-cause
-diagnosis, validated work, tradeoff experiments, and workload coverage remain
-the pre-1.0 direction, with their evidence contracts specified before their
-CLI shape is frozen. See the [roadmap](ROADMAP.md) for the boundary between
-shipped behavior and planned experiments.
+| Capability | What it establishes | Details |
+|---|---|---|
+| Inventory and fit advice | Installed artifacts, evidence freshness, projected context fit, and an exact remedy when supported evidence says a configuration does not fit | [Usage](docs/usage.md), [choosing hardware](docs/choosing-hardware.md) |
+| Local measurement | Structured output, instruction following, refusal, tool-channel behavior, degeneration, load state, TTFT, prefill, decode, context, placement, and allocation when the backend exposes them | [Design](docs/design.md), [tasks](docs/tasks.md) |
+| Workload decisions | Constraint-based eligibility under a versioned declaration, with no universal weighted score | [Decisions](docs/decisions.md) |
+| Context experiments | A predeclared exploratory context plan with shared task seeds, point-specific allocation, required-equal factors, and replayable bundles | [Context experiment](docs/usage.md#context-experiment) |
+| Configuration tradeoffs | Conservative frontiers across sealed candidates, optional same-base conversion lineage, and no point-estimate winner when intervals overlap | [Quant experiment](docs/usage.md#quant-configuration-experiment), [calibration](docs/calibration.md) |
+| Fresh confirmation | A sealed candidate set, a fresh shared task seed, full paired runs, and confirmation only when requirements resolve and the objective separates | [Confirmation](docs/usage.md#fresh-configuration-confirmation) |
+| Validated work | One fixed policy-repair workflow with capability-scoped tools, harness-owned time and state, an independent deterministic verifier, signed trial receipts, and explicit terminal outcomes | [Validated work](docs/usage.md#validated-work-experiment), [workload evidence](docs/workload-evidence.md) |
 
-**Does it fit, and what do I change if not.** Artifact bytes, derived KV cache,
-and allocation projections at each context length. A safe configured budget
-adds headroom and fit verdicts; addressable shared capacity alone stays
-unproven. Every value carries its evidence label, and every negative verdict
-ends with a flag plus resulting number.
+The broader 1.0 thesis has seven evidence layers:
 
-<img src="docs/assets/advise.svg?v=0.9.12" alt="fitr advise for qwen3-coder 30B on an RTX 4090" width="820">
+```text
+FIT          Can this exact configuration run within the relevant capacity?
+BEHAVIOR     Does it perform the required primitives correctly?
+PERFORMANCE  How long do distinct load and inference phases take?
+EXPLAIN      What does the evidence support, contradict, or leave unresolved?
+VALIDATED WORK
+             Does speed survive retries and independent verification?
+TRADEOFFS    Which configurations are dominated, and which remain choices?
+COVERAGE     Which declared workloads have earned local trust or need fallback?
+```
 
-**What it actually does here.** Load, first-response, prompt-processing, and
-generation timings are observed from the selected runtime. Request TTFT is
-promoted to loaded TTFT only when the gated request has its own residency
-receipt. Runtime-unloaded TTFT, verified loaded cache-hit TTFT, and
-runtime-reported load time remain separate observations. Runtime-unloaded does not mean machine
-cold because the operating system may still cache model pages. Exact-context
-resident allocation and runtime-classified accelerator bytes are shown when
-the runtime supplies them. The non-accelerator value is only the arithmetic
-remainder, not proof of host spill, layer placement, or exclusive physical
-memory pools.
+FIT, behavior, burst performance, direct receipt diagnoses, typed context and
+configuration experiments, fresh confirmation, and one bounded validated-work
+contract are implemented. Broader causal explanation, operational experiments,
+and declared workload coverage remain pre-1.0 work. The
+[roadmap](ROADMAP.md) distinguishes shipped slices from planned contracts.
 
-Structured output, instruction following, and tool use are graded
-mechanically against computed or declarative answers. Refusal uses a disclosed
-deterministic classifier. Another model's opinion never supplies a core
-verdict. One derived analysis contract owns these observations, typed evidence
-gaps, direct receipt-state diagnoses, and semantic next actions after the
-sealed result validates. Each renderer consumes the subset it supports; no
-renderer recomputes an evidence claim. The contract reports what was observed;
-it does not yet guess a hardware bottleneck.
+<img src="docs/assets/run.svg?v=0.10.0" alt="fitr reconstructed full-run demo based on selected RTX 4090 validation observations" width="820">
 
-Tool calls are measured **in the tool channel**, not as text. The most common
-local tool failure is not bad JSON: it is a perfectly well-formed call that
-arrives in the message body instead of the tool channel, because a chat
-template or a tool-call parser did not fire. An agent harness reads that as
-silence. fitr names it, and separates it from a model that genuinely cannot
-call tools.
+The screenshot is a deterministic reconstruction based on selected native RTX
+4090 observations. It is not a copy of a private sealed result. Host identity
+and local paths are omitted. All README screenshots regenerate through the
+real renderers with `make screenshots`.
 
-<img src="docs/assets/run.svg?v=0.9.12" alt="fitr reconstructed full-run demo based on selected RTX 4090 validation observations" width="820">
+## Why the evidence is useful
 
-## What it refuses to do
+- **Fit is not performance.** Artifact size, KV projection, addressable
+  capacity, current availability, observed allocation, and sustained residency
+  are different claims.
+- **Speed is not correctness.** A fast model can emit malformed structure,
+  call a tool in message content, repeat a call after the tool disappears, or
+  degenerate into a loop.
+- **Capability is not competence.** A runtime declaration can route a test. It
+  cannot become a behavioral PASS.
+- **Exploration is not confirmation.** The observations that selected an
+  attractive context or quant cannot certify that choice. Confirmation uses a
+  fresh sealed plan and fresh evidence.
+- **The worker is not the verifier.** Validated work requires harness-owned
+  state and independent proof of the final outcome.
+- **Uncertainty is an answer.** Missing receipts, overlapping intervals, and
+  blocked observations remain visible instead of becoming estimates.
 
-This is the part that makes the rest worth trusting.
+One renderer-neutral analysis path rebuilds presentation claims from validated
+records. CLI, TUI, JSON, and HTML consume those facts; a renderer does not get
+to invent a verdict.
 
-- **It will not rank across machines.** Results carry the device, runtime,
-  quant and context that produced them, and `board` compares only within a
-  matching fingerprint.
-- **It will not invent a number.** A missing input is SKIP, not an estimate.
-  INCONCLUSIVE is a real answer.
-- **It will not call an unmeasured model good.** Unmeasured is a candidate,
-  never a recommendation.
-- **It will not reuse evidence across changed weights.** Reuse requires a
-  runtime-bound artifact digest. If a pull replaces the bytes behind a mutable
-  tag, inventory marks the prior run stale and asks for a new measurement. A
-  runtime that supplies only an observed local-file hash leaves the result
-  display-only.
-- **It will not add single-model estimates and call the sum co-residency.**
-  Ordinary measurements keep one model resident. A multi-model capacity claim
-  needs its own observed runtime contract.
-- **It will not touch your server.** `apply` prints a recipe; it never restarts
-  or mutates a running runtime.
-- **It will not run generated code by default**, and it says so rather than
-  scoring coding as if it had.
+## What fitr refuses to claim
 
-## Local, and yours
+- It does not rank evidence across incompatible machines or configurations.
+- It does not call an unmeasured model good or turn missing input into a
+  number.
+- It does not reuse a result after the runtime-bound artifact identity changes.
+- It does not add isolated model measurements and call the sum co-residency.
+- It does not infer a hardware root cause from a timing ratio.
+- It does not certify an exploration winner on the data that selected it.
+- It does not mutate or restart your serving runtime. `fitr apply` prints a
+  recipe.
+- It does not run generated code by default or silently score unavailable
+  execution evidence.
 
-Evidence stays on your machine. No fitr account, sign-in, telemetry, or
-automatic upload is involved. Evaluation of an installed model can run with
-the network unplugged when its selected runtime is local. Sharing a result is
-an explicit command. The exported artifact leaves out raw model output,
-hostnames, local paths, the raw fingerprint key, and arbitrary runtime
-configuration; it carries an opaque device ID and an allowlisted comparison
-configuration instead.
+These boundaries are part of the product. The detailed evidence model and
+known limits are in [design](docs/design.md).
 
-fitr imposes no editorial or content-policy preference on which models you
-should run. It measures whatever your runtime serves and reports which declared
-needs each configuration supports. How often a model refuses is a first-class
-need in the battery (`no filtering / low refusal`) rather than an awkward
-footnote, because whether a model will actually answer you is a property of
-that model on your hardware, and worth knowing before you commit to it.
+## Optional remote validation
 
-Apache 2.0, and the evidence stays where it was produced.
+OpenRouter and other OpenAI-compatible providers are optional. They can help
+develop adversarial cases, calibrate heuristic graders, compare task-pack
+behavior, or provide an explicitly labeled model-judged observation. They are
+never required for installation, local measurement, decisions, exports, or
+CI, and they cannot establish local fit, placement, residency, or performance.
+
+The existing OpenAI-compatible backend can be used explicitly for protocol
+diagnostics. Credentials come from environment variables and are not written
+to a fitr result. Exact commands, current limits, and the future
+experiment-scoped provider receipt are documented in
+[optional external validation](docs/external-validation.md).
+
+## Local, private, and inspectable
+
+Installed-model evaluation talks only to the selected endpoint. With a local
+backend and installed artifact, the measurement path can run offline. Network
+access otherwise occurs only for an explicit install, update, pull, or remote
+endpoint.
+
+Results remain on your machine unless you explicitly export them. The HTML
+export omits raw model output, hostnames, local paths, the raw device
+fingerprint key, and arbitrary runtime configuration. Private workload bundles
+retain hashes and deterministic verifier output rather than raw prompts,
+replies, or tool contents. The resulting integrity receipt is intentionally
+not described as full replayability.
 
 ## Documentation
 
-**Start here.** [design](docs/design.md) for what a result means and why, then
-[usage](docs/usage.md) for every command, flag and output mode.
-
-**Going deeper.** [choosing hardware](docs/choosing-hardware.md) (capacity,
-performance, workload fit, and honest buying evidence), [workload evidence](docs/workload-evidence.md)
-(bounded workflows, independent proof, and validated work),
-[statistics](docs/statistics.md) (methods and rejected alternatives),
-[tasks](docs/tasks.md) (the battery, and adding your own without forking),
-[backends](docs/backends.md) (Ollama, llama-server, OpenAI-compatible),
-[doctor](docs/doctor.md) (can this box be measured fairly at all),
-[calibration](docs/calibration.md) (paired-quant protocol), and [TUI](docs/tui.md)
-(the opt-in monitor and its privacy contract).
-
-**Project.** [roadmap](ROADMAP.md), [release
-acceptance](docs/release-acceptance.md), [retonr](docs/retonr.md) (optional
-sister project; fitr works without it).
-
-Screenshots regenerate from deterministic fixtures through the real printers
-via `make screenshots`. They reflect current `main` and may be ahead of the
-latest stable release.
+- [Usage](docs/usage.md): installation, commands, flags, output modes, storage,
+  and exit codes.
+- [Design](docs/design.md): the evidence model, scoring principles, trust
+  boundaries, and known limits.
+- [Decision specifications](docs/decisions.md): workload requirements,
+  eligibility, uncertainty, objectives, and evidence levels.
+- [Workload evidence](docs/workload-evidence.md): bounded workflows,
+  independent verification, timing, coverage, authority, and retention.
+- [Choosing hardware](docs/choosing-hardware.md): capacity, performance,
+  workload fit, and honest hardware evidence.
+- [Tasks](docs/tasks.md), [statistics](docs/statistics.md), and
+  [calibration](docs/calibration.md): battery construction and inference.
+- [Backends](docs/backends.md), [doctor](docs/doctor.md), and
+  [TUI](docs/tui.md): runtime contracts, measurement readiness, and the
+  optional terminal monitor.
+- [Optional external validation](docs/external-validation.md): the narrow,
+  opt-in OpenRouter role and its evidence boundary.
+- [Roadmap](ROADMAP.md) and [release acceptance](docs/release-acceptance.md):
+  what comes next and the receipts required to publish.
 
 ## License
 

@@ -30,6 +30,8 @@ const (
 	UnitTokensPerSecond Unit = "tokens_per_second"
 	UnitSeconds         Unit = "seconds"
 	UnitBytes           Unit = "bytes"
+	UnitTokens          Unit = "tokens"
+	UnitFraction        Unit = "fraction"
 )
 
 type Acquisition string
@@ -273,17 +275,37 @@ func ObservationQualifier(status ObservationStatus, acquisition Acquisition) str
 type DiagnosisCode string
 
 const (
-	DiagnosisContextAdjusted  DiagnosisCode = "context.adjusted"
-	DiagnosisContaminated     DiagnosisCode = "run.resident_contamination"
-	DiagnosisPartialPlacement DiagnosisCode = "placement.partial_accelerator_allocation"
+	DiagnosisContextAdjusted   DiagnosisCode = "context.adjusted"
+	DiagnosisContaminated      DiagnosisCode = "run.resident_contamination"
+	DiagnosisPartialPlacement  DiagnosisCode = "placement.partial_accelerator_allocation"
+	DiagnosisTTFTNotResident   DiagnosisCode = "performance.ttft_not_resident"
+	DiagnosisPrefillCacheHit   DiagnosisCode = "performance.prefill_cache_hit"
+	DiagnosisTTFTCacheHit      DiagnosisCode = "performance.ttft_cache_hit"
+	DiagnosisFirstDecodeSlow   DiagnosisCode = "performance.first_decode_sample_slow"
+	DiagnosisToolCallInContent DiagnosisCode = "behavior.tool_call_in_content"
 )
 
-// Diagnosis is limited to a direct statement carried by a sealed receipt.
-// It deliberately has no numeric confidence and cannot name a hardware cause.
+type DiagnosisSupport string
+
+const (
+	DiagnosisDirect                DiagnosisSupport = "direct"
+	DiagnosisInterventionSupported DiagnosisSupport = "intervention_supported"
+	DiagnosisSuggestive            DiagnosisSupport = "suggestive"
+	DiagnosisContradicted          DiagnosisSupport = "contradicted"
+	DiagnosisBlocked               DiagnosisSupport = "blocked"
+)
+
+// Diagnosis currently contains only direct receipt-backed patterns. The
+// support vocabulary is explicit now so later hypotheses cannot masquerade as
+// direct facts or acquire an arbitrary numeric confidence score.
 type Diagnosis struct {
-	Code      DiagnosisCode `json:"code"`
-	Statement string        `json:"statement"`
-	Evidence  []string      `json:"evidence"`
+	Code           DiagnosisCode    `json:"code"`
+	Support        DiagnosisSupport `json:"support"`
+	Statement      string           `json:"statement"`
+	Evidence       []string         `json:"evidence"`
+	Contradictions []string         `json:"contradictions,omitempty"`
+	Missing        []string         `json:"missing,omitempty"`
+	NextExperiment *Action          `json:"next_experiment,omitempty"`
 }
 
 func DiagnosisLabel(code DiagnosisCode) string {
@@ -294,6 +316,16 @@ func DiagnosisLabel(code DiagnosisCode) string {
 		return "run contamination"
 	case DiagnosisPartialPlacement:
 		return "allocation attribution"
+	case DiagnosisTTFTNotResident:
+		return "TTFT residency"
+	case DiagnosisPrefillCacheHit:
+		return "prefill cache state"
+	case DiagnosisTTFTCacheHit:
+		return "TTFT cache state"
+	case DiagnosisFirstDecodeSlow:
+		return "decode stability"
+	case DiagnosisToolCallInContent:
+		return "tool channel"
 	default:
 		return string(code)
 	}
@@ -302,11 +334,13 @@ func DiagnosisLabel(code DiagnosisCode) string {
 type ActionCode string
 
 const (
-	ActionRerunUncontaminated ActionCode = "rerun_without_contamination"
-	ActionDiagnoseTools       ActionCode = "diagnose_tool_plumbing"
-	ActionIncreaseRepeats     ActionCode = "increase_repeats"
-	ActionCompleteBattery     ActionCode = "complete_standard_battery"
-	ActionOpenBoard           ActionCode = "open_comparison_board"
+	ActionRerunUncontaminated  ActionCode = "rerun_without_contamination"
+	ActionDiagnoseTools        ActionCode = "diagnose_tool_plumbing"
+	ActionIncreaseRepeats      ActionCode = "increase_repeats"
+	ActionRepeatMeasurement    ActionCode = "repeat_measurement"
+	ActionRunContextExperiment ActionCode = "run_context_experiment"
+	ActionCompleteBattery      ActionCode = "complete_standard_battery"
+	ActionOpenBoard            ActionCode = "open_comparison_board"
 )
 
 const CurrentModelPlaceholder = "<current-model>"

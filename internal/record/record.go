@@ -32,6 +32,7 @@ type Record struct {
 	Level           string             `json:"level"`
 	ExecutionPolicy string             `json:"execution_policy,omitempty"`
 	TaskPlan        TaskPlan           `json:"task_plan,omitempty"`
+	Experiment      *ExperimentBinding `json:"experiment,omitempty"`
 	// SeedSet names the instance set the generated checks were drawn from.
 	// Unique per run by default; pinned seed sets enable paired comparison.
 	SeedSet     string                `json:"seedset,omitempty"`

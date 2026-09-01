@@ -191,6 +191,11 @@ of installed RAM as an unconditional model budget.
 | `fitr doctor <model> [-n N]` | can this box be measured fairly at all? (~1 min) |
 | `fitr diag <model>` | 5-rung tool-use plumbing diagnostic |
 | `fitr compare <a> <b>` | difference/ratio intervals; paired flips (accuracy can hide them) |
+| `fitr decide [model\|result.json] --spec decision.json` | evaluate sealed evidence against explicit workload requirements; unresolved required evidence exits 4 |
+| `fitr experiment context <model> --ctx 4096,8192,... [-k N]` | run a predeclared exploratory context plan with point-specific allocation and required-equal factor checks |
+| `fitr experiment quant <result.json>... --spec decision.json [--lineage conversion.json]` | build a decision-relative conservative configuration frontier; optional lineage verifies a shared base revision |
+| `fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N]` | seal the selected candidate set, collect fresh paired full-run evidence, and confirm only a separated decision objective |
+| `fitr experiment workload <model> [-n 3] [--ctx N]` | run the fixed bounded policy-repair workflow with independent deterministic verification and signed per-trial receipts |
 | `fitr device [--display MODE]` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
 | `fitr calibrate <a> <b> [--out PATH] [--lineage PATH]` | paired item discrimination; optional same-base lineage receipt |
 | `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads without claiming verified campaign readiness |
@@ -304,6 +309,7 @@ fitr advise qwen3:30b --display json  # one fitr.advise.v1 document
 fitr view                    # newest saved result, with repeat-shape graphs on a rich terminal
 fitr view m --display json   # privacy-safe presentation scorecard JSON
 fitr view m --display json --full  # complete sealed local record; may contain sensitive data
+fitr decide m --spec local-coding.json  # requirement-relative eligibility and next evidence action
 fitr run m -q                # results only     -v  detail, no progress
 NO_COLOR=1 fitr board        # honored (empty string means unset)
 FITR_ASCII=1 fitr board      # force ASCII glyphs
@@ -350,6 +356,7 @@ terminal.
 | 1 | error |
 | 2 | usage |
 | 3 | ran fine, a need FAILED (`advise`: low memory or incompatible) |
+| 4 | a `decide` requirement is unresolved or blocked |
 | 130 | interrupted |
 
 For `advise`, SKIP exits 0 because no measured need failed. Automation that
@@ -482,6 +489,252 @@ work, but current aggregate records cannot honestly produce time to valid
 result or accepted outcomes per hour. Those require sealed per-trial timing,
 attempt, verifier, retry, and escalation receipts. See
 [Workload evidence and bounded workflows](workload-evidence.md).
+
+## Decide
+
+`fitr decide [model|result.json] --spec decision.json` applies a strict,
+versioned workload declaration to one validated sealed result. The original
+profile-bound scorecard remains unchanged. This means the same measurement can
+be evaluated against a new reliability or latency requirement without
+pretending a new benchmark occurred.
+
+```json
+{
+  "schema": "fitr.decision.spec.v1",
+  "name": "local coding",
+  "evidence_level": "decide",
+  "requirements": [
+    {
+      "id": "structured",
+      "behavior": {"need": "structured_output", "minimum_rate": 0.90}
+    },
+    {
+      "id": "context",
+      "context": {"minimum_effective_tokens": 16384}
+    },
+    {
+      "id": "memory",
+      "capacity": {
+        "maximum_resident_gb": 22,
+        "requested_context": 16384
+      }
+    },
+    {
+      "id": "responsiveness",
+      "performance": {
+        "metric": "loaded_ttft_seconds",
+        "at_most": 1.0
+      }
+    }
+  ]
+}
+```
+
+Unknown fields, duplicate requirement IDs, mixed requirement kinds, invalid
+bounds, and trailing JSON are rejected. Behavior rate requirements use the
+same family-clustered interval as the scorer. Repeats of one scenario family
+cannot impersonate independent evidence, and unavailable planned observations
+cannot establish a requirement. `loaded_ttft_seconds` requires its exact
+residency-supported claim; a request-TTFT number is not relabeled.
+Profile-bound speed and footprint screening rows are not accepted as behavior
+requirements. Express those needs as typed performance and capacity limits.
+
+The decision states are:
+
+- `eligible`: every required claim is established, exit 0.
+- `ineligible`: at least one required claim is disproven, exit 3.
+- `unresolved`: no requirement is disproven, but at least one is unresolved or
+  blocked, exit 4.
+
+An `objective` is comparative. Supplying one while evaluating a single result
+keeps selection unresolved until a comparable eligible candidate set and
+comparison policy exist. `evidence_level: confirm` also stays unresolved for
+an ordinary run because discovery evidence cannot certify the candidate it
+selected. The confirmation experiment will supply fresh lineage.
+
+The full schema and evidence semantics are in
+[Decision specifications](decisions.md).
+
+## Context experiment
+
+```bash
+fitr experiment context qwen3:30b --ctx 4096,8192,16384 -k 3
+```
+
+The live command creates `fitr.experiment.context.plan.v1` before contacting
+the runtime. Every point is a normal signed result whose manifest carries an
+explicit `fitr.experiment.binding.v1` receipt with the plan digest, stage,
+point index, and point count. The plan also creates one fresh shared task seed
+set and binds every point to the same quick measurement level, so task drift
+cannot invalidate or bias the context treatment. The point measures:
+
+- requested and runtime-verified effective context
+- decode, prefill, request TTFT, and their support state
+- runtime allocation at that point's requested context
+- exact-context placement attribution when the runtime supplies it
+- evidence gaps such as unknown residency or cache state
+
+Plans are bounded to 2 through 16 distinct points, at most 16,777,216 tokens
+per point, and 1 through 20 performance samples per point. The same bounds are
+enforced when a stored plan is replayed, not only by CLI flag parsing.
+
+Requested context is the treatment. Artifact identity, backend and runtime,
+device configuration, and the context measurement protocol are
+required-equal factors. Observed placement is an outcome, so it is not
+incorrectly required to remain equal when more context changes placement.
+If a required factor changes, all points remain visible but the comparison is
+unresolved.
+
+Point execution follows the declared order. If one point fails operationally,
+fitr stops, reports how many later points were not run, and keeps completed
+point records. It does not insert failed values for unattempted contexts. A
+fully completed plan writes a private local bundle under
+`$FITR_RESULTS/.experiments` or `~/.fitr/results/.experiments`. The bundle
+contains the plan, derived report, and signed point records. Reopening it
+validates every source and re-derives the report:
+
+```bash
+fitr experiment context path/to/context-bundle.json
+```
+
+Two or more sealed result paths can also be analyzed retrospectively:
+
+```bash
+fitr experiment context result-4k.json result-8k.json --display json
+```
+
+That report is labeled `predeclared: false`. Result-file analysis never
+contacts a runtime. Both forms are exploration, not confirmation. They map
+capacity and performance but do not select or certify a winner on the same
+observations.
+
+## Quant configuration experiment
+
+```bash
+fitr experiment quant q8-result.json q5-result.json q4-result.json \
+  --spec local-coding.json \
+  --lineage conversion.json
+```
+
+The command evaluates every sealed candidate against the same decision spec.
+Eligibility is constraint satisfaction. The objective is considered only
+among eligible candidates, so a fast configuration that misses a required
+behavior or capacity gate cannot win by speed. Unresolved eligibility and a
+missing bounded objective metric keep the whole declared candidate set
+unresolved. If exactly one fully resolved candidate is eligible, constraints
+select it without inventing a metric comparison against failed candidates.
+
+Backend/runtime, device configuration, verified context, task plan, seed set,
+grading policy, and profile policy are required-equal factors. Artifact is the
+treatment. A candidate appears on the conservative frontier unless another
+eligible candidate is established as no worse on decode, request TTFT, and
+resident bytes, and strictly better on at least one. Missing observations and
+overlapping 95% intervals prevent a dominance claim rather than being replaced
+with point-estimate rankings.
+
+`--lineage` accepts a strict `fitr.lineage.conversion.v1` manifest. When it
+names every runtime-bound artifact under one base revision, the report marks
+same-base lineage verified. Without that receipt, the measurements can still
+support a configuration choice, but they cannot attribute differences to
+quantization. Even with lineage, the report uses the exact claim
+`configuration_comparison`: a conversion manifest does not prove that chat
+templates, tool parsers, or every other artifact-adjacent setting were equal.
+
+An objective winner is labeled `exploratory`. The same observations that
+selected it cannot certify it. If timing has only one sample or candidate
+intervals overlap, the objective remains unresolved and the next action asks
+for more comparable evidence. Use the separate confirmation stage once an
+exploratory candidate set is worth testing.
+
+## Fresh configuration confirmation
+
+```bash
+fitr experiment confirm qwen3:30b-q5 qwen3:30b-q4 \
+  --spec local-coding-confirm.json --ctx 16384 -k 3
+```
+
+The decision spec must use `evidence_level: confirm` and declare one narrow
+objective. Before inference, fitr resolves each candidate to a runtime-backed
+artifact identity, observes the device configuration, creates a fresh shared
+task seed, and seals all of those inputs into
+`fitr.experiment.confirmation.plan.v1`. Two to four distinct candidates are
+supported. At least three repeats are required.
+
+Each candidate receives the full measurement battery under the same context,
+task seed, runtime, device, grading policy, profile policy, and repeat count.
+Its ordinary sealed run also contains a `confirm` experiment binding with the
+plan digest and exact candidate position. A saved result without that binding
+cannot be relabeled as fresh evidence after it looks favorable.
+
+Confirmation applies the same conservative frontier rules as exploration. It
+prints `CONFIRMED` only when one candidate clears every requirement and its
+fresh 95% objective interval is better than every other eligible candidate.
+Overlapping bounds remain ambiguous. Missing observations remain unresolved.
+If no candidate is eligible because requirements are disproven, the command
+exits 3. Unresolved confirmation exits 4.
+
+The private confirmation bundle contains the plan, decision spec, complete
+sealed point records, and derived report. Reopening it validates all source
+receipts and rebuilds the report:
+
+```bash
+fitr experiment confirm path/to/confirmation-bundle.json
+```
+
+The confirmation proves a choice among the exact measured configurations. It
+does not prove that quantization alone caused the difference unless a separate
+same-base causal protocol establishes every relevant conversion factor.
+
+## Validated work experiment
+
+```bash
+fitr experiment workload qwen3:30b -n 3 --ctx 8192
+```
+
+This first vertical workflow measures whether a configuration can repair a
+small policy document under a declared authority boundary. The harness owns a
+virtual filesystem and exposes only `list_files`, `read_file`, `write_file`,
+and `run_checks`. Only `policy.json` is writable. There is no arbitrary shell,
+process, network, clock, receipt, or verifier access.
+
+The command creates `fitr.workload.plan.v1` before contacting the model. The
+plan binds the runtime-backed artifact identity, device fingerprint, requested
+context, trial count, turn and time budgets, retention policy, fixed workflow
+version, and an ephemeral completion public key. Each trial records monotonic
+model, tool, worker, verifier, and terminal events. A deterministic verifier
+runs after the worker stops and independently reconstructs the final state.
+The trial digest and signature cover the complete event sequence, counters,
+outcome, and verifier receipt.
+
+The aggregate never hides unsuccessful exposure:
+
+```text
+planned                 5
+accepted                3
+rejected                1
+timed out               1
+infrastructure fault    0
+```
+
+Median accepted time is withheld below three accepted trials. Accepted work
+rate divides accepted outcomes by elapsed time across every terminal outcome,
+not only successes. Coverage is `ESTABLISHED` only when at least three planned
+trials all receive independent acceptance.
+
+Raw prompts, model replies, tool arguments, and tool results exist only during
+execution. The saved private bundle retains their hashes, the deterministic
+verifier output, and the signed harness events. This supports integrity and
+aggregate analysis, but not full raw replay. Reopen a bundle to validate it and
+rebuild the report:
+
+```bash
+fitr experiment workload path/to/workload-bundle.json
+```
+
+A rejection exits 3. A timeout or infrastructure fault without a rejection
+exits 4. Interrupted live execution exits 130 and does not emit a partial
+claim. This fixed workflow is a safe design probe, not authority to run
+arbitrary generated code or user-supplied workflow definitions.
 
 ## Apply
 

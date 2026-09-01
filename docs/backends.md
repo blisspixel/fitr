@@ -20,6 +20,13 @@ only on loopback. Credential-bearing redirects must preserve the exact origin
 and transport safety. Auto-discovered endpoints are always probed without
 credentials. Keep tokens out of endpoint URLs and command arguments.
 
+OpenRouter can be reached explicitly with `FITR_OPENAI_URL` set to
+`https://openrouter.ai/api` and the dedicated fitr key variable. This is useful
+for opt-in protocol diagnostics and future external validation, but it does not
+create local model evidence. Routed services normally do not expose the exact
+served weight digest required by a decision-bearing `fitr run`, so artifact
+identity fails closed. See [optional external validation](external-validation.md).
+
 Auto-detect identifies the *runtime* by response shape, not by port:
 `/api/tags` is Ollama, `/props` with a build or model path is llama-server,
 `/v1/models` is OpenAI-compatible. llama-server also speaks `/v1/models`,

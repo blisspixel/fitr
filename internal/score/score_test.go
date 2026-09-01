@@ -104,6 +104,59 @@ func TestVisionAbsenceIsNotAFailure(t *testing.T) {
 	}
 }
 
+func TestDeclaredVisionIsCapabilityNotBehavioralPass(t *testing.T) {
+	m := good()
+	m.Capabilities = append(m.Capabilities, "vision")
+	sc := Score(m, lappy(t))
+	vision := sc.Needs["vision"]
+	if vision.State != NA || vision.Measure != "declared" {
+		t.Fatalf("vision = %+v, want declared capability with no behavioral verdict", vision)
+	}
+	if slices.Contains(sc.Serves, "vision") {
+		t.Fatalf("runtime declaration became a served behavioral need: %+v", sc)
+	}
+	capability, ok := sc.Capabilities["vision"]
+	if !ok || capability.Support != CapabilityDeclared {
+		t.Fatalf("vision capability evidence = %+v", sc.Capabilities)
+	}
+}
+
+func TestHealthyToolPlumbingVerifiesProtocolNotBehavior(t *testing.T) {
+	m := good()
+	m.PlumbingRan, m.PlumbingHealthy = true, true
+	sc := Score(m, lappy(t))
+	capability := sc.Capabilities["tools"]
+	if capability.Support != CapabilityProtocolVerified {
+		t.Fatalf("tools capability = %+v, want protocol verification", capability)
+	}
+	if sc.Needs["tool_calling"].State == Pass {
+		t.Fatalf("healthy plumbing became tool behavior: %+v", sc.Needs["tool_calling"])
+	}
+}
+
+func TestHealthyToolPlumbingDoesNotRequireRuntimeDeclaration(t *testing.T) {
+	m := good()
+	m.Capabilities = nil
+	m.PlumbingRan, m.PlumbingHealthy = true, true
+	sc := Score(m, lappy(t))
+	capability, ok := sc.Capabilities["tools"]
+	if !ok || capability.Support != CapabilityProtocolVerified || capability.Source == "runtime" {
+		t.Fatalf("observed tool protocol was lost without runtime metadata = %+v", sc.Capabilities)
+	}
+}
+
+func TestLegacyV5PreservesDeclaredVisionPass(t *testing.T) {
+	m := good()
+	m.Capabilities = append(m.Capabilities, "vision")
+	sc := ScoreLegacyV5(m, lappy(t))
+	if sc.Needs["vision"].State != Pass || !slices.Contains(sc.Serves, "vision") {
+		t.Fatalf("legacy v5 vision semantics changed: %+v", sc)
+	}
+	if sc.Capabilities != nil {
+		t.Fatalf("legacy scorecard gained a current capability map: %+v", sc.Capabilities)
+	}
+}
+
 func TestUnmeasuredNeedIsSkip(t *testing.T) {
 	sc := Score(good(), lappy(t))
 	if sc.Needs["uncensored"].State != Skip {
@@ -140,6 +193,13 @@ func TestNeverSaysNotRecommended(t *testing.T) {
 	sc := Score(m, lappy(t))
 	if strings.Contains(strings.ToLower(sc.UseFor), "not recommended") {
 		t.Fatalf("must never print a bare dismissal, got %q", sc.UseFor)
+	}
+}
+
+func TestCurrentUseForKeepsResidentMemoryClaimAtMeasuredContext(t *testing.T) {
+	sc := Score(good(), lappy(t))
+	if strings.Contains(sc.UseFor, "small footprint") || !strings.Contains(sc.UseFor, "resident-memory gate at 32K") {
+		t.Fatalf("current use claim broadened exact-context memory evidence: %q", sc.UseFor)
 	}
 }
 
@@ -557,7 +617,7 @@ func TestContaminationExcludesMeasuredScoreClaims(t *testing.T) {
 	m.Contamination = []string{"other:7b", "other:7b"}
 
 	sc := Score(m, lappy(t))
-	for _, need := range []string{"fast_and_decent", "coding", "structured_output", "vision", "output_health"} {
+	for _, need := range []string{"fast_and_decent", "coding", "structured_output", "output_health"} {
 		verdict := sc.Needs[need]
 		if verdict.State != Inconclusive {
 			t.Fatalf("%s = %s, want INCONCLUSIVE: %s", need, verdict.State, verdict.Why)
@@ -573,6 +633,12 @@ func TestContaminationExcludesMeasuredScoreClaims(t *testing.T) {
 			!strings.Contains(verdict.Why, "not fixed by more trials") {
 			t.Fatalf("%s does not distinguish a void run from a thin one: %q", need, verdict.Why)
 		}
+	}
+	if vision := sc.Needs["vision"]; vision.State != NA {
+		t.Fatalf("declared vision is not a measured claim for contamination to exclude: %+v", vision)
+	}
+	if sc.Capabilities["vision"].Support != CapabilityDeclared {
+		t.Fatalf("contamination hid the sealed runtime capability declaration: %+v", sc.Capabilities)
 	}
 	if sc.Needs["uncensored"].State != Skip {
 		t.Fatalf("an unmeasured need remains SKIP, got %s", sc.Needs["uncensored"].State)

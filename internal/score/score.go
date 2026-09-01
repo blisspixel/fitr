@@ -1,4 +1,5 @@
-// Package score turns raw measurements into a device-specific verdict.
+// Package score turns raw measurements into screening verdicts under an
+// explicit grading policy and threshold set.
 //
 // Three ideas:
 //
@@ -7,7 +8,9 @@
 //     separate, legitimate needs, and a model can serve one brilliantly and
 //     another not at all. A single score cannot say that.
 //
-//  2. GATES ARE DEVICE-SPECIFIC and live in profiles, not code.
+//  2. GATES ARE DECLARED POLICY. The legacy profile format currently carries
+//     those thresholds; callers must not mistake them for properties of the
+//     device or model.
 //
 //  3. DEGENERACY IS MEASURED. A local model once produced a 104 KB report that
 //     passed every structural check while 25% of its paragraphs were exact
@@ -30,7 +33,7 @@ import (
 )
 
 // State is a verdict. SKIP means "not measured" and must NEVER read as failure;
-// NA means the model never claimed the capability, which is not a deficiency.
+// NA means no behavioral verdict applies, which is not a deficiency.
 // INCONCLUSIVE means a measurement exists but an integrity problem excludes it
 // from PASS and FAIL claims.
 type State string
@@ -65,6 +68,22 @@ type Verdict struct {
 	Detail []string `json:"detail,omitempty"`
 	// Note is prose: caveats, exclusions, and the readings to head off.
 	Note string `json:"note,omitempty"`
+}
+
+// CapabilitySupport keeps endpoint capability evidence separate from a
+// behavioral verdict. A runtime declaration is useful routing information, but
+// it does not establish that a model can perform the corresponding work.
+type CapabilitySupport string
+
+const (
+	CapabilityDeclared         CapabilitySupport = "declared"
+	CapabilityProtocolVerified CapabilitySupport = "protocol_verified"
+)
+
+type CapabilityEvidence struct {
+	Support CapabilitySupport `json:"support"`
+	Source  string            `json:"source"`
+	Note    string            `json:"note,omitempty"`
 }
 
 func newVerdict(s State, measure, gate string, detail []string, note string) Verdict {
@@ -151,16 +170,16 @@ const LabelWidth = 26
 const MeasureWidth = 26
 
 var NeedLabel = map[string]string{
-	"fast_and_decent":       "fast + pretty good (chat)",
-	"coding":                "great coding / reasoning",
+	"fast_and_decent":       "interactive response",
+	"coding":                "executable coding",
 	"structured_output":     "valid structured output",
 	"instruction_precision": "follows exact instructions",
-	"uncensored":            "no filtering / low refusal",
+	"uncensored":            "refusal prompt behavior",
 	"tool_calling":          "calls tools correctly",
-	"unattended_agentic":    "works unattended (agent)",
+	"unattended_agentic":    "bounded agent fixture",
 	"tool_restraint":        "leaves unused tools alone",
-	"low_footprint":         "keeps a small footprint",
-	"vision":                "reads images",
+	"low_footprint":         "resident memory at 32K",
+	"vision":                "vision capability",
 	"output_health":         "no degenerate output",
 	"user_tasks":            "your tasks (~/.fitr/tasks)",
 }
@@ -341,6 +360,29 @@ type Pool struct {
 
 func (p Pool) rate() float64 { return float64(p.Passes) / float64(p.N) }
 
+// Rate is the observed scorable pass fraction. The boolean is false when no
+// observation entered the denominator.
+func (p Pool) Rate() (float64, bool) {
+	if p.N <= 0 {
+		return 0, false
+	}
+	return p.rate(), true
+}
+
+// Interval returns the same family-clustered interval used by the scorer.
+// Decision evaluation uses this method so a changed requirement cannot
+// accidentally reinterpret within-family repeats as independent trials.
+func (p Pool) Interval() stats.Interval {
+	return stats.ClusteredWilson(p.clusters())
+}
+
+// IndependentFamilies returns the number of planned scenario families. It is
+// deliberately not the number of trials: repeating one family strengthens
+// within-family evidence without establishing a broader workload construct.
+func (p Pool) IndependentFamilies() int {
+	return countPlannedFamilies(p.Families)
+}
+
 func (p *Pool) Add(family string, pass bool) {
 	if p == nil {
 		return
@@ -509,41 +551,74 @@ type Measured struct {
 }
 
 type Scorecard struct {
-	Model    string             `json:"model"`
-	Profile  string             `json:"profile"`
-	Needs    map[string]Verdict `json:"needs"`
-	Serves   []string           `json:"serves"`
-	UseFor   string             `json:"use_it_for"`
-	Passes   int                `json:"passes"`
-	Fails    int                `json:"fails"`
-	Unproven int                `json:"unproven"`
+	Model        string                        `json:"model"`
+	Profile      string                        `json:"profile"`
+	Capabilities map[string]CapabilityEvidence `json:"capabilities,omitempty"`
+	Needs        map[string]Verdict            `json:"needs"`
+	Serves       []string                      `json:"serves"`
+	UseFor       string                        `json:"use_it_for"`
+	Passes       int                           `json:"passes"`
+	Fails        int                           `json:"fails"`
+	Unproven     int                           `json:"unproven"`
 }
 
 func Score(m Measured, p device.Profile) Scorecard {
-	return score(m, p, false, true)
+	return score(m, p, scoreSemantics{
+		requireTTFTResidency: true,
+		recordCapabilities:   true,
+		exactNeedClaims:      true,
+	})
+}
+
+// ScoreLegacyV5 reconstructs records written before declared capabilities and
+// behavioral PASS were separated. It must remain byte-for-byte compatible
+// with persisted scoring-policy v5 scorecards.
+func ScoreLegacyV5(m Measured, p device.Profile) Scorecard {
+	return score(m, p, scoreSemantics{
+		requireTTFTResidency:      true,
+		declaredVisionPass:        true,
+		unsupportedTruncationRate: true,
+	})
 }
 
 // ScoreLegacyV4 reconstructs scorecards written before the gated TTFT request
 // carried its own runtime residency receipt.
 func ScoreLegacyV4(m Measured, p device.Profile) Scorecard {
-	return score(m, p, false, false)
+	return score(m, p, scoreSemantics{
+		declaredVisionPass:        true,
+		unsupportedTruncationRate: true,
+	})
 }
 
 // ScoreLegacyV3 reconstructs sealed schema-6 scorecards written before
 // auxiliary latency states moved out of behavior prose and into central
 // analysis. It exists only for evidence compatibility.
 func ScoreLegacyV3(m Measured, p device.Profile) Scorecard {
-	return score(m, p, true, false)
+	return score(m, p, scoreSemantics{
+		includeAuxiliaryTTFT:      true,
+		declaredVisionPass:        true,
+		unsupportedTruncationRate: true,
+	})
 }
 
-func score(m Measured, p device.Profile, includeAuxiliaryTTFT, requireTTFTResidency bool) Scorecard {
+type scoreSemantics struct {
+	includeAuxiliaryTTFT      bool
+	requireTTFTResidency      bool
+	declaredVisionPass        bool
+	unsupportedTruncationRate bool
+	recordCapabilities        bool
+	exactNeedClaims           bool
+}
+
+func score(m Measured, p device.Profile, semantics scoreSemantics) Scorecard {
 	n := map[string]Verdict{}
-	n["fast_and_decent"] = scoreFastAndDecent(m, p, includeAuxiliaryTTFT, requireTTFTResidency)
+	n["fast_and_decent"] = scoreFastAndDecent(m, p,
+		semantics.includeAuxiliaryTTFT, semantics.requireTTFTResidency)
 
 	n["coding"] = scoreCoding(m)
 
-	// --- structured output. Quantization degrades JSON validity long before
-	// prose; this is the earliest damage signal and it gets its own need.
+	// --- structured output. It is a high-value damage probe because it can
+	// fail while ordinary prose remains superficially plausible.
 	n["structured_output"] = poolVerdict(m.Structured, p, "structured_output", "valid")
 
 	// --- instruction precision: verifiable constraints, graded by code.
@@ -582,11 +657,14 @@ func score(m Measured, p device.Profile, includeAuxiliaryTTFT, requireTTFTReside
 
 	// --- vision. Not claiming vision is NOT a deficiency; it is a different
 	// kind of model.
-	n["vision"] = scoreVision(m)
+	n["vision"] = scoreVision(m, semantics.declaredVisionPass)
 
-	n["output_health"] = outputHealth(m, p)
+	n["output_health"] = outputHealth(m, p, semantics.unsupportedTruncationRate)
 	sc := summarizeNeeds(m, p, n)
-	sc.UseFor = useFor(m, n, sc.Serves)
+	if semantics.recordCapabilities {
+		sc.Capabilities = capabilityEvidence(m)
+	}
+	sc.UseFor = useFor(m, n, sc.Serves, semantics.exactNeedClaims)
 	return ExcludeContamination(sc, m.Contamination)
 }
 
@@ -876,13 +954,43 @@ func scoreFootprint(m Measured, p device.Profile) Verdict {
 		fmt.Sprintf("need <=%.0f", lim), nil, "")
 }
 
-func scoreVision(m Measured) Verdict {
+func scoreVision(m Measured, declaredIsPass bool) Verdict {
 	if hasCap(m.Capabilities, "vision") {
-		return newVerdict(Pass, "declared", "", nil,
-			fmt.Sprintf("capabilities=%v", m.Capabilities))
+		if declaredIsPass {
+			return newVerdict(Pass, "declared", "", nil,
+				fmt.Sprintf("capabilities=%v", m.Capabilities))
+		}
+		return newVerdict(NA, "declared", "", nil,
+			"runtime declares vision support; image competence was not tested")
 	}
 	return newVerdict(NA, "text-only", "", nil,
 		"not a deficiency, just not what this model is for")
+}
+
+func capabilityEvidence(m Measured) map[string]CapabilityEvidence {
+	out := make(map[string]CapabilityEvidence, len(m.Capabilities)+1)
+	for _, name := range m.Capabilities {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		evidence := CapabilityEvidence{
+			Support: CapabilityDeclared,
+			Source:  "runtime",
+			Note:    "runtime declaration; behavioral competence is not implied",
+		}
+		out[name] = evidence
+	}
+	if m.PlumbingRan && m.PlumbingHealthy {
+		out["tools"] = CapabilityEvidence{
+			Support: CapabilityProtocolVerified, Source: "fitr tool-channel diagnostic",
+			Note: "fitr completed the runtime tool-channel plumbing diagnostic; task behavior is graded separately",
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func summarizeNeeds(m Measured, p device.Profile, needs map[string]Verdict) Scorecard {
@@ -1069,7 +1177,7 @@ func gateInsideInterval(lo, hi, gate float64) bool {
 	return lo <= gate && gate <= hi
 }
 
-func outputHealth(m Measured, p device.Profile) Verdict {
+func outputHealth(m Measured, p device.Profile, unsupportedTruncationRate bool) Verdict {
 	if _, ok := p.Gates["quality"]; !ok {
 		return skipped("no quality gate in profile")
 	}
@@ -1103,8 +1211,11 @@ func outputHealth(m Measured, p device.Profile) Verdict {
 	// in the same denominator would let a fully breached card report "-1/5".
 	held := len(measured) - len(breached)
 	if allow, ok := p.Bool("quality", "allow_truncation"); m.Rep.Truncated && (!ok || !allow) {
-		breached = append(breached,
-			"output TRUNCATED (hit token cap; ~92% of truncations are loops)")
+		detail := "output TRUNCATED (hit token cap before completion)"
+		if unsupportedTruncationRate {
+			detail = "output TRUNCATED (hit token cap; ~92% of truncations are loops)"
+		}
+		breached = append(breached, detail)
 	}
 	measure := fmt.Sprintf("%d/%d checks", held, len(measured))
 	if len(breached) > 0 {
@@ -1115,8 +1226,8 @@ func outputHealth(m Measured, p device.Profile) Verdict {
 
 // useFor never prints a bare dismissal. If nothing passed it says how much went
 // unmeasured, because that is the honest statement.
-func useFor(m Measured, n map[string]Verdict, serves []string) string {
-	if hasCap(m.Capabilities, "embedding") {
+func useFor(m Measured, n map[string]Verdict, serves []string, exactClaims bool) string {
+	if !exactClaims && hasCap(m.Capabilities, "embedding") {
 		return "embeddings / local search"
 	}
 	if n["output_health"].State == Fail {
@@ -1126,44 +1237,65 @@ func useFor(m Measured, n map[string]Verdict, serves []string) string {
 	for _, s := range serves {
 		has[s] = true
 	}
-	var bits []string
-	switch {
-	case has["coding"] && has["unattended_agentic"]:
-		bits = append(bits, "daily driver (coding + agents)")
-	case has["coding"]:
-		bits = append(bits, "coding")
-	case has["unattended_agentic"]:
-		bits = append(bits, "unattended agent")
-	}
-	if has["structured_output"] {
-		bits = append(bits, "JSON/structured pipelines")
-	}
-	if has["uncensored"] {
-		bits = append(bits, "no-filter writing/chat")
-	}
+	bits := primaryUseClaims(has, exactClaims)
+	bits = appendUseClaim(bits, has["structured_output"], exactClaims,
+		"verified structured-output tasks", "JSON/structured pipelines")
+	bits = appendUseClaim(bits, has["uncensored"], exactClaims,
+		"named refusal prompts answered", "no-filter writing/chat")
 	if has["fast_and_decent"] && len(bits) == 0 {
-		bits = append(bits, "quick chat")
+		bits = append(bits, useClaim(exactClaims, "interactive response target", "quick chat"))
 	}
-	if has["vision"] {
+	if !exactClaims && has["vision"] {
 		bits = append(bits, "vision one-shot")
 	}
 	if len(bits) == 0 {
-		unproven := 0
-		for _, verdict := range n {
-			if s := verdict.State; s == Skip || s == NA || s == Blocked || s == Inconclusive {
-				unproven++
-			}
-		}
-		if unproven > 0 {
-			return fmt.Sprintf("no need passed yet, but %d were unmeasured/blocked "+
-				"- this is not a verdict; coding stays unproven until an isolated worker exists", unproven)
-		}
-		return "none of the measured needs on this device"
+		return noPassedUseClaim(n)
 	}
 	if has["low_footprint"] {
-		bits = append(bits, "(small footprint)")
+		bits = append(bits, useClaim(exactClaims, "(resident-memory gate at 32K)", "(small footprint)"))
 	}
 	return strings.Join(bits, ", ")
+}
+
+func primaryUseClaims(has map[string]bool, exact bool) []string {
+	switch {
+	case has["coding"] && has["unattended_agentic"]:
+		return []string{useClaim(exact, "executable coding + bounded agent fixture", "daily driver (coding + agents)")}
+	case has["coding"]:
+		return []string{useClaim(exact, "executable coding tasks", "coding")}
+	case has["unattended_agentic"]:
+		return []string{useClaim(exact, "bounded agent fixture", "unattended agent")}
+	default:
+		return nil
+	}
+}
+
+func appendUseClaim(bits []string, enabled, exact bool, exactText, legacyText string) []string {
+	if enabled {
+		return append(bits, useClaim(exact, exactText, legacyText))
+	}
+	return bits
+}
+
+func useClaim(exact bool, exactText, legacyText string) string {
+	if exact {
+		return exactText
+	}
+	return legacyText
+}
+
+func noPassedUseClaim(needs map[string]Verdict) string {
+	unproven := 0
+	for _, verdict := range needs {
+		if s := verdict.State; s == Skip || s == NA || s == Blocked || s == Inconclusive {
+			unproven++
+		}
+	}
+	if unproven > 0 {
+		return fmt.Sprintf("no need passed yet, but %d were unmeasured/blocked "+
+			"- this is not a verdict; coding stays unproven until an isolated worker exists", unproven)
+	}
+	return "none of the measured needs on this device"
 }
 
 func state(ok bool) State {

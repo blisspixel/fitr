@@ -22,11 +22,11 @@
     },
     "uncensored": {
       "refused_max": 0,
-      "why": "3 mundane prompts aligned models often refuse"
+      "why": "finite screening pack of three named ordinary prompts; a pass means no refusal was observed in that pack, not that the model has a universal low-refusal rate"
     },
     "structured_output": {
       "pass_rate_min": 0.75,
-      "why": "quantization degrades JSON validity before prose; below ~3/4 valid a pipeline spends more time retrying than working"
+      "why": "structured output is a high-value damage probe because it can fail while ordinary prose remains superficially plausible; below ~3/4 valid a pipeline spends more time retrying than working"
     },
     "instruction_precision": {
       "pass_rate_min": 0.7,
@@ -34,11 +34,11 @@
     },
     "tool_calling": {
       "pass_rate_min": 0.7,
-      "why": "a gate has to be reachable by the battery that feeds it. Three families at -k 3 is nine trials, and nine perfect trials pin the rate no tighter than [0.70, 1.00] -- so 0.70 is the strictest bar this sample can clear, and a stricter one would leave the need permanently undecided rather than strict. This separates a model whose tool calls land from one whose do not; it cannot separate 90% from 95%, and does not pretend to. Raise -k to raise the bar"
+      "why": "screening threshold for three clustered tool families. Nine perfect trials may remain inconclusive after family clustering; a production reliability requirement must select its own evidence plan, and more repeats of the same families do not automatically provide independent evidence"
     },
     "tool_restraint": {
       "pass_rate_min": 0.7,
-      "why": "same arithmetic: three irrelevance specs at -k 3 is nine trials. Firing a tool on a question no tool can answer burns a turn and drags an agent loop off course, so the bar should be as high as the evidence supports and no higher"
+      "why": "screening threshold for three clustered irrelevance families. Firing a tool on a question no tool can answer burns a turn, but a production restraint requirement must select an evidence plan with enough independent scenarios"
     },
     "unattended_agentic": {
       "prefill_tps_min": 100.0,
@@ -57,7 +57,7 @@
       "gzip_compression_ratio_max": 4.0,
       "repetition_score_max": 0.35,
       "allow_truncation": false,
-      "why": "Multiple independent signals -- a single metric misses cases. A looping table scored dup_paragraph_ratio 0.0 while dup_line_ratio was 0.91 and gzip CR 9.2. Gopher corpus thresholds (dup_line 0.30, top_4gram 0.16) are reused; gzip CR anchors: human prose ~2.28, model output 2.36-2.72, so >4.0 is plainly degenerate. Truncation matters because ~92% of truncations are repetition loops."
+      "why": "Multiple independent signals -- a single metric misses cases. A looping table scored dup_paragraph_ratio 0.0 while dup_line_ratio was 0.91 and gzip CR 9.2. Gopher corpus thresholds (dup_line 0.30, top_4gram 0.16) are reused; gzip CR anchors: human prose ~2.28, model output 2.36-2.72, so >4.0 is plainly degenerate. Truncation is separate because it prevents completion and can accompany repetition."
     }
   },
   "hints": {

@@ -756,18 +756,22 @@ func prepareValidationMeasurements(r *Result) {
 }
 
 func prepareMockMemory(r *Result) {
+	requestedContext := r.Memory.RequestedCtx
+	if requestedContext <= 0 {
+		requestedContext = memoryProbeCtx
+	}
 	if r.Memory.ResidentGB > 0 {
 		r.Memory.Outcome = eval.OutcomePass
 		r.Memory.UnavailableReason = ""
-		r.Memory.RequestedCtx = memoryProbeCtx
-		effectiveMemoryCtx := memoryProbeCtx
+		r.Memory.RequestedCtx = requestedContext
+		effectiveMemoryCtx := requestedContext
 		r.Memory.EffectiveCtx = &effectiveMemoryCtx
 		r.Memory.ResidentBytes = int64(r.Memory.ResidentGB * advise.GiB)
 		r.Memory.AcceleratorBytes = r.Memory.ResidentBytes * int64(r.Memory.PctOnGPU) / 100
 		r.Memory.PctOnGPU = int(100 * float64(r.Memory.AcceleratorBytes) / float64(r.Memory.ResidentBytes))
 	} else {
 		r.Memory.Outcome = eval.OutcomeSkipped
-		r.Memory.RequestedCtx = memoryProbeCtx
+		r.Memory.RequestedCtx = requestedContext
 		r.Memory.UnavailableReason = "demo runtime did not report a resident allocation"
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -60,6 +61,51 @@ func TestRunManifestSealsResolvedIdentityAndRejectsMutation(t *testing.T) {
 	r.Repeats++
 	if err := r.ValidateManifest(); err == nil || !strings.Contains(err.Error(), "repeats") {
 		t.Fatalf("mutated record validation = %v", err)
+	}
+}
+
+func TestRunManifestSealsExplicitExperimentBinding(t *testing.T) {
+	r := manifestRecord("model", "2026-08-21T12:00:00Z")
+	r.Experiment = &ExperimentBinding{
+		Schema: ExperimentBindingSchema, Kind: "context", Stage: "explore",
+		PlanSHA256: testArtifactDigest, PointIndex: 1, PointCount: 3,
+	}
+	if err := r.AttachManifest(digestIdentity(t, "model", "model")); err != nil {
+		t.Fatal(err)
+	}
+	if r.Manifest.Experiment == r.Experiment || !reflect.DeepEqual(r.Manifest.Experiment, r.Experiment) {
+		t.Fatalf("experiment binding was not independently sealed: record=%+v manifest=%+v",
+			r.Experiment, r.Manifest.Experiment)
+	}
+	r.Experiment.PointIndex = 2
+	if err := r.ValidateManifest(); err == nil || !strings.Contains(err.Error(), "experiment binding") {
+		t.Fatalf("mutated experiment binding error = %v", err)
+	}
+}
+
+func TestExperimentBindingValidation(t *testing.T) {
+	valid := ExperimentBinding{
+		Schema: ExperimentBindingSchema, Kind: "context", Stage: "explore",
+		PlanSHA256: testArtifactDigest, PointIndex: 2, PointCount: 3,
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*ExperimentBinding){
+		"schema": func(value *ExperimentBinding) { value.Schema = "wrong" },
+		"kind":   func(value *ExperimentBinding) { value.Kind = "" },
+		"stage":  func(value *ExperimentBinding) { value.Stage = "reuse" },
+		"digest": func(value *ExperimentBinding) { value.PlanSHA256 = "missing" },
+		"count":  func(value *ExperimentBinding) { value.PointCount = 1 },
+		"index":  func(value *ExperimentBinding) { value.PointIndex = 4 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := valid
+			mutate(&candidate)
+			if err := candidate.Validate(); err == nil {
+				t.Fatal("invalid experiment binding was accepted")
+			}
+		})
 	}
 }
 

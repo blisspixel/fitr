@@ -165,6 +165,10 @@ func (r *Record) validateScorecard(profile device.Profile) error {
 	if err != nil {
 		return fmt.Errorf("hash current scoring policy: %w", err)
 	}
+	legacyV5Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV5())
+	if err != nil {
+		return fmt.Errorf("hash legacy v5 scoring policy: %w", err)
+	}
 	legacyHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV3())
 	if err != nil {
 		return fmt.Errorf("hash legacy scoring policy: %w", err)
@@ -177,6 +181,8 @@ func (r *Record) validateScorecard(profile device.Profile) error {
 	switch r.Manifest.Provenance.ScoringPolicySHA256 {
 	case currentHash:
 		expected = score.Score(r.Measured(), profile)
+	case legacyV5Hash:
+		expected = score.ScoreLegacyV5(r.Measured(), profile)
 	case legacyHash:
 		expected = score.ScoreLegacyV3(r.Measured(), profile)
 	case legacyV4Hash:

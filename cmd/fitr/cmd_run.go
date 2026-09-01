@@ -480,6 +480,7 @@ func (run *runExecution) initializeResult() error {
 		Level:         run.opts.level, Repeats: run.opts.reps, NumCtx: reqCtx,
 		Device: fp, DeviceKey: fp.Key(), Profile: run.profile.Name, ModelMeta: run.resolved.Info,
 		ExecutionPolicy: record.ExecutionDisabled,
+		Experiment:      cloneRunExperimentBinding(run.opts.experiment),
 		TaskPlan: runTaskPlan(run.opts.level, run.opts.reps, run.opts.checksReps,
 			len(run.spec.Checks), len(run.spec.Refusal.Prompts)),
 	}
@@ -495,6 +496,14 @@ func (run *runExecution) initializeResult() error {
 	}
 	run.initializeSeedSet()
 	return run.sealTaskPlans()
+}
+
+func cloneRunExperimentBinding(binding *record.ExperimentBinding) *record.ExperimentBinding {
+	if binding == nil {
+		return nil
+	}
+	clone := *binding
+	return &clone
 }
 
 func (run *runExecution) initializeSeedSet() {
@@ -731,8 +740,12 @@ func (run *runExecution) measureStandardPhases(work string) error {
 	}); err != nil {
 		return err
 	}
-	if err := run.standardStep("memory", "resident @32K", func() error {
-		return measureMemory(run.ctx, run.backend, run.model, run.result, run.display)
+	memoryCtx := run.opts.memoryCtx
+	if memoryCtx <= 0 {
+		memoryCtx = memoryProbeCtx
+	}
+	if err := run.standardStep("memory", "resident @"+formatTokenContext(memoryCtx), func() error {
+		return measureMemory(run.ctx, run.backend, run.model, memoryCtx, run.result, run.display)
 	}); err != nil {
 		return err
 	}
@@ -1008,9 +1021,9 @@ func measureSpeed(ctx context.Context, c llm.Backend, model string, spec *eval.S
 }
 
 // measureMemory records the resident footprint at a fixed 32K window.
-func measureMemory(ctx context.Context, c llm.Backend, model string,
+func measureMemory(ctx context.Context, c llm.Backend, model string, memoryCtx int,
 	res *Result, disp render.Display) error {
-	m, err := eval.RunMemory(ctx, c, model, memoryProbeCtx)
+	m, err := eval.RunMemory(ctx, c, model, memoryCtx)
 	res.Memory = m
 	if live, ok := disp.(liveTelemetry); ok && m.ResidentGB > 0 {
 		live.LiveMemory(m.ResidentGB)

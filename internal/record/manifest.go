@@ -38,6 +38,7 @@ const (
 	BackendProtocolOllama            = "fitr.backend.ollama.v1"
 	BackendProtocolLlamaServerNative = "fitr.backend.llama-server-native.v1"
 	BackendProtocolOpenAICompatible  = "fitr.backend.openai-compatible.v1"
+	ExperimentBindingSchema          = "fitr.experiment.binding.v1"
 )
 
 var (
@@ -61,6 +62,44 @@ type ModelIdentity struct {
 	ContentAddressed bool   `json:"content_addressed"`
 	Binding          string `json:"binding"`
 	SizeBytes        int64  `json:"size_bytes,omitempty"`
+}
+
+// ExperimentBinding commits an ordinary sealed run to a predeclared
+// experiment plan and exact point position. It is optional so standalone runs
+// keep their existing contract.
+type ExperimentBinding struct {
+	Schema     string `json:"schema"`
+	Kind       string `json:"kind"`
+	Stage      string `json:"stage"`
+	PlanSHA256 string `json:"plan_sha256"`
+	PointIndex int    `json:"point_index"`
+	PointCount int    `json:"point_count"`
+}
+
+func (binding ExperimentBinding) Validate() error {
+	switch {
+	case binding.Schema != ExperimentBindingSchema:
+		return fmt.Errorf("unsupported experiment binding schema %q", binding.Schema)
+	case strings.TrimSpace(binding.Kind) == "":
+		return errors.New("experiment binding kind is required")
+	case binding.Stage != "explore" && binding.Stage != "confirm":
+		return fmt.Errorf("unsupported experiment stage %q", binding.Stage)
+	case !sha256Digest.MatchString(binding.PlanSHA256):
+		return errors.New("experiment binding plan digest is invalid")
+	case binding.PointCount < 2:
+		return errors.New("experiment binding requires at least two points")
+	case binding.PointIndex < 1 || binding.PointIndex > binding.PointCount:
+		return errors.New("experiment binding point index is outside the plan")
+	}
+	return nil
+}
+
+func cloneExperimentBinding(binding *ExperimentBinding) *ExperimentBinding {
+	if binding == nil {
+		return nil
+	}
+	clone := *binding
+	return &clone
 }
 
 // TaskPlan is the immutable denominator plan selected before measurement.
@@ -304,7 +343,7 @@ type ScoringPolicy struct {
 
 func CurrentScoringPolicy() ScoringPolicy {
 	return ScoringPolicy{
-		Schema:          "fitr.scoring.policy.v5",
+		Schema:          "fitr.scoring.policy.v6",
 		RateInterval:    "clustered_wilson_95_fixed",
 		BoundaryVerdict: "inconclusive", ScorableOutcomes: "pass_fail_only",
 		UnisolatedExecution: "excluded", Contamination: "exclude_measured_claims",
@@ -312,14 +351,20 @@ func CurrentScoringPolicy() ScoringPolicy {
 	}
 }
 
-func legacyScoringPolicyV3() ScoringPolicy {
+func legacyScoringPolicyV5() ScoringPolicy {
 	policy := CurrentScoringPolicy()
+	policy.Schema = "fitr.scoring.policy.v5"
+	return policy
+}
+
+func legacyScoringPolicyV3() ScoringPolicy {
+	policy := legacyScoringPolicyV5()
 	policy.Schema = "fitr.scoring.policy.v3"
 	return policy
 }
 
 func legacyScoringPolicyV4() ScoringPolicy {
-	policy := CurrentScoringPolicy()
+	policy := legacyScoringPolicyV5()
 	policy.Schema = "fitr.scoring.policy.v4"
 	return policy
 }
@@ -585,6 +630,7 @@ type RunManifest struct {
 	ExecutionPolicy         string                `json:"execution_policy"`
 	Executor                *eval.ExecutorReceipt `json:"executor,omitempty"`
 	TaskPlan                TaskPlan              `json:"task_plan"`
+	Experiment              *ExperimentBinding    `json:"experiment,omitempty"`
 	SeedSet                 string                `json:"seedset"`
 	Repeats                 int                   `json:"repeats"`
 	NumCtx                  int                   `json:"num_ctx"`
@@ -649,8 +695,8 @@ func (r *Record) attachManifest(identity ModelIdentity, executor *eval.ExecutorR
 		Schema: schema, RunID: r.RunID, StartedAt: r.StartedAt,
 		Model: identity, DeviceKey: r.DeviceKey, Profile: r.Profile,
 		Level: r.Level, ExecutionPolicy: r.ExecutionPolicy, TaskPlan: r.TaskPlan,
-		Executor: executor,
-		SeedSet:  r.SeedSet, Repeats: r.Repeats,
+		Experiment: cloneExperimentBinding(r.Experiment), Executor: executor,
+		SeedSet: r.SeedSet, Repeats: r.Repeats,
 		NumCtx: r.ContextSize(), Provenance: receipt,
 	}
 	if schema == RunManifestSchema && r.DeviceV2 != nil {
@@ -812,6 +858,11 @@ func (m RunManifest) validateOptionalReceipts() error {
 			return fmt.Errorf("run manifest executor: %w", err)
 		}
 	}
+	if m.Experiment != nil {
+		if err := m.Experiment.Validate(); err != nil {
+			return fmt.Errorf("run manifest experiment: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -929,6 +980,8 @@ func (r *Record) validateManifestRecordFields() error {
 		return errors.New("record execution policy differs from its manifest")
 	case !reflect.DeepEqual(r.TaskPlan, m.TaskPlan):
 		return errors.New("record task plan differs from its manifest")
+	case !reflect.DeepEqual(r.Experiment, m.Experiment):
+		return errors.New("record experiment binding differs from its manifest")
 	case r.SeedSet != m.SeedSet:
 		return errors.New("record seed set differs from its manifest")
 	case r.Repeats != m.Repeats:

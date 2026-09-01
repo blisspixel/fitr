@@ -1,4 +1,5 @@
-// Command fitr answers: is this local model any good ON THIS DEVICE?
+// Command fitr determines which local AI configuration works for a declared
+// workload on this machine and shows the evidence behind that decision.
 //
 // Conventions borrowed from tools that got them right:
 //   - progress to stderr, results to stdout, so output is pipeable (promptfoo)
@@ -49,11 +50,12 @@ var version = buildinfo.Version()
 
 // Exit codes: small, documented, domain-specific. Not sysexits -- nobody uses it.
 const (
-	exitOK        = 0 // ran, and every measured need passed
-	exitError     = 1 // something broke
-	exitUsage     = 2 // bad invocation
-	exitGates     = 3 // ran fine, but a need FAILED (useful as a CI gate)
-	exitInterrupt = 130
+	exitOK         = 0 // ran, and every measured need passed
+	exitError      = 1 // something broke
+	exitUsage      = 2 // bad invocation
+	exitGates      = 3 // ran fine, but a need FAILED (useful as a CI gate)
+	exitUnresolved = 4 // required decision evidence is unresolved or blocked
+	exitInterrupt  = 130
 )
 
 func errPrint(msg, note, hint string) {
@@ -68,7 +70,7 @@ func errPrint(msg, note, hint string) {
 
 func terminalText(value string) string { return render.SingleLine(value) }
 
-const usageText = ` - is this local model any good ON THIS DEVICE?
+const usageText = ` - evidence for what local AI works on this machine
 
 usage:
   fitr [--display MODE]             installed models, evidence, next command
@@ -87,11 +89,19 @@ usage:
   fitr diag <model>
   fitr doctor <model> [-n N]
   fitr device
-	fitr update [--check] [--reinstall]
+  fitr update [--check] [--reinstall]
   fitr profiles [new [name]]
   fitr calibrate <model-a> <model-b> [--out PATH] [--lineage PATH]
   fitr calibrate merge <pair.json>... [--out PATH]
   fitr compare <model-a> <model-b>
+  fitr decide [model|result.json] --spec decision.json [--display MODE]
+  fitr experiment context <model> --ctx 4096,8192,... [-k N]
+  fitr experiment context <result.json> <result.json>... [--display MODE]
+  fitr experiment quant <result.json> <result.json>... --spec decision.json [--lineage conversion.json]
+  fitr experiment confirm <model-a> <model-b> --spec decision.json [--ctx N] [-k N]
+  fitr experiment confirm <confirmation-bundle.json> [--display MODE]
+  fitr experiment workload <model> [-n N] [--ctx N] [--backend B]
+  fitr experiment workload <workload-bundle.json> [--display MODE]
 
 flags:
   --display  auto|rich|plain|json|none   output mode (default auto)
@@ -103,7 +113,7 @@ flags:
   -q         quiet (repeat for silent)      -v  verbose
 
 exit codes:
-  0 ok   1 error   2 usage   3 a need FAILED   130 interrupted
+  0 eligible/ok   1 error   2 usage   3 disproven   4 unresolved   130 interrupted
 
 environment:
   FITR_OPENAI_URL       OpenAI-compatible endpoint
@@ -123,7 +133,7 @@ examples:
   fitr advise ./model.gguf --vram-gb 8 --fit
   fitr run qwen3:30b --ctx 4096
   fitr apply qwen3:30b
-	fitr update --check
+  fitr update --check
   fitr tune
   fitr tune qwen3:30b qwen3:30b-q8
   fitr export qwen3:30b --out scorecard.html
@@ -132,6 +142,9 @@ examples:
   fitr run qwen3:8b-q8_0 --checks-only --seedset qwen3-8b -k 5
   fitr run qwen3:8b-q4_K_M --checks-only --seedset qwen3-8b -k 5
   fitr calibrate qwen3:8b-q8_0 qwen3:8b-q4_K_M --out pair.json --lineage conversion.json
+  fitr experiment quant q8-result.json q4-result.json --spec coding.json --lineage conversion.json
+  fitr experiment confirm qwen3:8b-q8_0 qwen3:8b-q4_K_M --spec coding-confirm.json
+  fitr experiment workload qwen3-coder:30b -n 3
 `
 
 func usage() { fmt.Fprint(os.Stderr, "fitr "+version+usageText) }
@@ -200,6 +213,10 @@ func commandHandler(name string) commandFunc {
 		return cmdCalibrate
 	case "compare":
 		return cmdCompare
+	case "decide":
+		return cmdDecide
+	case "experiment":
+		return cmdExperiment
 	case "screenshots": // dev-only: regenerate docs/assets from mock data
 		return cmdScreenshots
 	}
@@ -233,7 +250,7 @@ func permute(args []string) []string {
 func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
-	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view":
+	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec":
 		return true
 	}
 	return false
@@ -443,7 +460,8 @@ type Result = record.Record
 type runOpts struct {
 	level, profile, seedSet string
 	reps, checksReps        int
-	numCtx                  int
+	numCtx, memoryCtx       int
+	experiment              *record.ExperimentBinding
 	allowUnsafeExec         bool
 }
 

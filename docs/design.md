@@ -4,11 +4,14 @@ A new model lands every few days. The datacenter number is not your number.
 The post skipped the quant. The leaderboard ran on someone else's GPU. fitr
 is being built to determine what local AI actually works for a declared
 workload on this machine, what evidence proves it, and which configuration
-gives the best validated outcome. FIT, behavior, and burst performance ship
-today. Explanation, validated work, tradeoffs, and workload coverage are the
-pre-1.0 direction.
+gives the best validated outcome. FIT, behavior, burst performance, typed
+tradeoff experiments, fresh configuration confirmation, and the first bounded
+validated-work contract ship today. Broader explanation and workload coverage
+are the pre-1.0 direction.
 
-The default path is five commands (`fitr` → `advise` → `run` → `apply` → `board`).
+The default measurement path is five commands (`fitr` → `advise` → `run` →
+`apply` → `board`). A declared-workload path adds `fitr decide --spec` after a
+sealed result exists.
 Bare `fitr` is the installed inventory: measured, unproven, incompatible, or
 stale, each with one next command. Architecture, when known, adds a compact
 context-fit graph. A measured non-default ctx asks `apply` until the server
@@ -19,9 +22,11 @@ The interior is strict so that surface can be trusted. You should not need
 the vocabulary below to get through Thursday night. You should be able to
 see it when you look.
 
-The current product loop establishes three layers: FIT, BEHAVIOR, and burst
-PERFORMANCE. The pre-1.0 work adds EXPLAIN, VALIDATED WORK, TRADEOFFS, and
-COVERAGE. Those are separate evidence views, not ingredients in one score. A
+The current product loop establishes FIT, BEHAVIOR, burst PERFORMANCE, typed
+TRADEOFF experiments, direct EXPLAIN diagnoses, and one fixed VALIDATED WORK
+contract. Fresh confirmation is separate from exploration. The pre-1.0 work
+generalizes confirmation across more experiment families and builds COVERAGE. These are
+separate evidence views, not ingredients in one score. A
 configuration can be fast and unreliable, slow and dependable, or proven for
 extraction while still unproven for a repository workflow.
 
@@ -48,24 +53,25 @@ and fail another, and one number cannot say that.
 
 | Need | Why separate |
 |---|---|
-| **fast + pretty good** | responsiveness; decode plus uncached, already-loaded TTFT when gated-request residency and cache state are proven |
-| **great coding / reasoning** | computed-answer checks today; executable assertions stay INCONCLUSIVE until isolated |
-| **valid structured output** | quantization breaks JSON before prose - the earliest damage signal |
+| **interactive response** | responsiveness only; decode plus uncached, already-loaded TTFT when gated-request residency and cache state are proven |
+| **executable coding** | executable assertions when isolated; computed reasoning checks remain separate observations and never substitute for coding evidence |
+| **valid structured output** | a high-value damage probe because it can fail while ordinary prose remains superficially plausible |
 | **follows exact instructions** | verifiable constraints, graded by code |
-| **no filtering / low refusal** | a first-class need, not a footnote |
+| **refusal prompt behavior** | no refusal observed in a finite named screening pack; not a universal refusal-rate claim |
 | **calls tools correctly** | measured in the tool channel, not as text. Asking for "the JSON arguments" and handing over a tool it must call are different skills, and the second exercises the chat template and the runtime's tool-call parser too |
-| **works unattended (agent)** | a bounded multi-turn tool loop whose behavior, context, and performance are reported separately |
+| **bounded agent fixture** | a bounded multi-turn tool loop whose behavior, context, and performance are reported separately |
 | **leaves unused tools alone** | restraint at rest (no calls on an unrelated question) and under change (a tool vanishes mid-loop) |
-| **keeps a small footprint** | resident bytes after a requested 32K load probe, only when the runtime confirms that effective context |
-| **reads images** | a capability, not a grade |
+| **resident memory at 32K** | resident bytes after a requested 32K load probe, only when the runtime confirms that effective context |
+| **vision capability** | a runtime declaration, not a behavioral grade; real vision tasks remain planned |
 | **no degenerate output** | five independent loop/repetition signals; length correlates negatively with quality |
 | **your tasks** | `~/.fitr/tasks/*.json` - the built-ins are defaults, your work is the point |
 
 Verdicts are **PASS / FAIL / INCONCLUSIVE / SKIP / n/a / BLKD**. `SKIP` means
 not measured. `INCONCLUSIVE` means an observation exists but its integrity or
 uncertainty cannot support either binary claim.
-`n/a` means the model never claimed it - a text-only model is not *bad at
-vision*. `BLKD` means we could not fairly test it.
+`n/a` means no behavioral verdict applies. A declared vision capability remains
+a declaration until a real image task verifies it, and a text-only model is not
+*bad at vision*. `BLKD` means we could not fairly test it.
 
 ## 3. A single run is not a measurement
 
@@ -85,7 +91,8 @@ sequential protocol are documented in [statistics.md](statistics.md).
 
 ## 4. A model that passes every test can still be broken here
 
-Quantization can degrade structured output before prose, and looping can be
+Structured output is a high-value damage probe because it can fail while
+ordinary prose remains superficially plausible. Looping can also be
 **hardware-specific**: llama.cpp has reported issues tying garbled
 output to dual-GPU CUDA but not single, batch 512 but not 1024, Vulkan on
 particular gfx IDs, quantized KV cache, and long agentic sessions.
@@ -186,12 +193,14 @@ bytes and derives only the non-accelerator remainder. On unified-memory systems
 that arithmetic does not identify exclusive pools, spill, layer placement, or
 host traffic.
 
-New results use `fitr.scoring.policy.v5`. Policy v4 keeps auxiliary latency
+New results use `fitr.scoring.policy.v6`. Policy v4 keeps auxiliary latency
 states out of behavior-verdict prose; v5 additionally requires the gated
 request's own residency receipt before a loaded-TTFT gate can clear. Sealed
-schema-6 results written with policies v3 and v4 are reconstructed with their
-original scorers and remain valid. The policy hashes are different, so Board
-does not compare across those presentation-contract changes.
+schema-6 results written with policies v3 through v5 are reconstructed with
+their original scorers and remain valid. Policy v6 separates declared
+capability availability from behavioral PASS and replaces broad need labels
+with the exact evidence each row establishes. The policy hashes are different,
+so Board does not compare across those presentation-contract changes.
 
 - **Small, heterogeneous battery.** The default battery has 22 generated task
   specs across 16 families and five measured needs. Each need has its own
@@ -230,12 +239,24 @@ does not compare across those presentation-contract changes.
   requested 32K. Older receipts without that fact remain visible but cannot
   support the claim.
 - **No root-cause oracle.** Current output reports observations and
-  contamination. Evidence-backed limiter diagnoses, context sweeps, quant
-  frontiers, soak runs, and serving tests are pre-1.0 experiments.
-- **No validated-work receipt yet.** Current records preserve aggregate
-  behavioral outcomes and timing observations, but not the sealed per-trial
-  attempts, acceptance times, verifier receipts, retries, and escalation
-  events required for time-to-valid-result or validated work rate.
+  contamination. A typed exploratory context experiment now binds a
+  predeclared plan, measurement level, and fresh shared task seed into every
+  point manifest and enforces claim-specific required-equal factors. A typed
+  quant-configuration experiment applies one decision spec, checks comparison
+  factors, and uses confidence-bounded dominance without certifying its
+  exploration winner. A separate
+  configuration-confirmation plan seals exact runtime artifacts, device,
+  context, protocol, decision spec, and a fresh shared task seed before the
+  full paired runs. Evidence-backed limiter diagnoses, context-specific
+  confirmation, soak runs, and serving tests remain pre-1.0 experiments.
+- **Validated work starts with one fixed contract.** The policy-repair
+  experiment predeclares a runtime-bound plan, uses a harness-owned virtual
+  filesystem and capability-scoped tools, records monotonic per-trial events,
+  runs a deterministic verifier after worker completion, and signs every
+  terminal receipt. It reports all accepted, rejected, timed-out, and
+  infrastructure outcomes. It does not yet establish general user workflows,
+  retries, approvals, escalation, checkpoint recovery, or arbitrary executable
+  work.
 - **Sharing is opt-in.** `fitr export` / `--html` write a self-contained
   page with an opaque device ID and allowlisted comparison configuration. It
   omits hostnames, local paths, raw model output, the raw fingerprint key, and

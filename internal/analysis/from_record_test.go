@@ -553,6 +553,34 @@ func TestOnlyDirectReceiptDiagnosesAreProduced(t *testing.T) {
 	}
 }
 
+func TestDirectDiagnosesPreserveReceiptStateAndNextExperiment(t *testing.T) {
+	samples := validUncachedSamples(3)
+	samples[0].DecodeTPS = 5
+	samples[0].CachedPromptTok = 20
+	samples[0].PromptTok = 180
+	samples[1].GatedResident = false
+	samples[2].GatedCachedTok = 10
+	samples[2].GatedPromptTok = 90
+	result := handRecord(samples)
+	result.Checks = []eval.CheckOutcome{{
+		Need: "tool_calling", Detail: "prose_channel: emitted a tool call as text, not through the tool channel",
+	}}
+	report := fromValidatedRecord(result)
+	want := []DiagnosisCode{
+		DiagnosisToolCallInContent, DiagnosisFirstDecodeSlow, DiagnosisPrefillCacheHit,
+		DiagnosisTTFTCacheHit, DiagnosisTTFTNotResident,
+	}
+	if got := diagnosisCodes(report.Diagnoses); !reflect.DeepEqual(got, want) {
+		t.Fatalf("diagnoses = %v, want %v", got, want)
+	}
+	for _, diagnosis := range report.Diagnoses {
+		if diagnosis.Support != DiagnosisDirect || len(diagnosis.Evidence) == 0 || diagnosis.NextExperiment == nil {
+			t.Fatalf("direct diagnosis contract = %+v", diagnosis)
+		}
+		assertSafeArgvTemplate(t, *diagnosis.NextExperiment)
+	}
+}
+
 func TestNextActionPriorityAndTemplates(t *testing.T) {
 	tests := []struct {
 		name      string

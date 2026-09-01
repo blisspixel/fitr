@@ -104,9 +104,10 @@ jobs:
       - name: binary size gate
         shell: bash
         run: |
-          # The 0.9.10 centralized evidence analyzer moved windows/amd64 to
-          # 12,034,560 bytes. Keep a narrow ceiling that still catches drift.
-          max_bytes=12200000
+          # Decision, tradeoff, confirmation, and validated work moved the
+          # windows/amd64 binary to 12,606,976 bytes. Keep about 1.21% headroom, the
+          # same narrow margin used by the prior evidence-analyzer ceiling.
+          max_bytes=12760000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"
             printf '%-32s %10d bytes\n' "$binary" "$size"
@@ -318,6 +319,12 @@ jobs:
         run: go test ./internal/eval -run='^$' -fuzz=FuzzUserCheck -fuzztime=20000x -parallel=4
       - name: conversion lineage fuzz smoke
         run: go test ./internal/calibration -run='^$' -fuzz=FuzzConversionManifest -fuzztime=20000x -parallel=4
+      - name: validated-work bundle fuzz smoke
+        run: go test ./internal/workload -run='^$' -fuzz=FuzzDecodeBundle -fuzztime=20000x -parallel=4
+      - name: confirmation bundle fuzz smoke
+        run: go test ./internal/experiment -run='^$' -fuzz=FuzzDecodeConfirmationBundle -fuzztime=20000x -parallel=4
+      - name: context bundle fuzz smoke
+        run: go test ./internal/experiment -run='^$' -fuzz=FuzzDecodeContextBundle -fuzztime=20000x -parallel=4
 
       - name: static analysis
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0

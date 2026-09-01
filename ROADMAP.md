@@ -46,7 +46,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.9.10 | Release and installer polish, then the first renderer-neutral explanation slice |
 | Shipped | 0.9.11 | Distinct latency states and exact-context runtime allocation attribution |
 | Shipped | 0.9.12 | Public Windows self-update completion and an end-to-end replacement gate |
-| Now | 0.10 | Explain and choose: central analysis, capacity versus performance, calibration, context and quant experiments |
+| Current | 0.10.0 | Decision specifications, typed context and configuration experiments, fresh confirmation, and the first bounded validated-work contract |
+| Now | 0.10.x | Complete explain and choose: typed capacity policy, calibrated projections, direct and intervention-supported explanation, and decision-relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -55,6 +56,26 @@ methods live in [statistics](docs/statistics.md).
 Progress is counted in releases, not dates. Each pre-1.0 release below states
 its own exit criterion. 1.0 ships when those criteria are met and not before:
 the point of the version is that it is trustworthy, not that it is reached.
+
+## Immediate build order
+
+0.10.0 establishes the decision substrate and three demanding vertical probes:
+context treatment, configuration choice with fresh confirmation, and bounded
+validated work. The next work should deepen that center rather than add
+parallel evidence paths.
+
+| Order | Build next | Why it comes next |
+|---:|---|---|
+| 1 | Versioned capacity policy and pre-observation prediction receipts | FIT still needs a structural distinction between addressable capacity, current availability, operator reserve, projected allocation, and observed allocation. Calibration cannot safely influence advice until the original prediction is sealed. |
+| 2 | One central analysis and decision path across CLI, TUI, HTML, and JSON | The new experiments are useful only if every surface explains the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
+| 3 | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
+| 4 | Generalized validated-work receipts and explicit evidence classes | The fixed bounded workflow has pressured the schema with real events. It should now graduate into reusable trial, verifier, retry, escalation, timing, authority, and retention contracts before more workflows are added. |
+| 5 | Model-set, soak, and serving experiments | Co-residency and operational reliability are essential, but they depend on the capacity and validated-outcome contracts above. They remain distinct experiments and never contaminate an ordinary scored run. |
+
+Optional OpenRouter validation can develop adversarial cases and grader
+calibration alongside this sequence. It remains experiment-scoped, explicitly
+invoked, spending-capped, and outside the local FIT and PERFORMANCE trust
+boundary. Normal use, offline tests, CI, and releases never depend on it.
 
 ## What the second machine changed
 
@@ -517,6 +538,23 @@ reports:
       Add typed capacity policy, model shape, placement, cautious diagnoses,
       and broader client coverage without letting a renderer recompute a
       verdict or bottleneck.
+- [x] Separate the legacy profile's meanings behind typed policy boundaries.
+      The compatibility adapter projects device selection and hints, screening
+      grades, resident-memory policy, and presentation independently.
+      Measurement protocol comes from the sealed manifest. It never invents a
+      workload decision from device matching or a screening threshold.
+- [x] Add `fitr.decision.spec.v1`, `fitr.configuration.v1`, and
+      `fitr.decision.evaluation.v1`. `fitr decide` re-evaluates validated sealed
+      evidence under explicit behavior, capability, context, latency, and
+      exact-context memory requirements without rewriting the source
+      scorecard. It distinguishes eligible, disproven, unresolved, and blocked
+      states, uses exit 4 for unresolved required evidence, and selects one
+      deterministic next evidence action.
+- [x] Separate runtime capability availability from behavioral verdicts.
+      A runtime declaration is useful routing evidence but cannot enter the
+      served-needs list or become a behavioral PASS. Protocol verification is
+      a stronger capability state and still remains distinct from task
+      competence.
 - [x] Preserve supported latency states as separate central observations.
       Request TTFT, receipt-proven loaded TTFT, runtime-unloaded TTFT, verified
       loaded cache-hit TTFT, and runtime-reported load time now retain their
@@ -543,11 +581,16 @@ reports:
       only when artifact metadata supports those facts. Do not infer either
       from a model name. Expose a compact architecture and KV-strategy label
       in inventory only when the installed artifact supplies that metadata.
-- [ ] Add conservative diagnoses with enumerated evidence and confidence.
-      Labels such as `consistent with memory-traffic pressure` are allowed;
-      an unmeasured claim such as `memory-bandwidth bound` is not. Every
-      diagnosis names contradictory or missing evidence and a useful next
-      experiment.
+- [x] Establish the diagnosis evidence contract and direct receipt patterns.
+      Every diagnosis now carries an explicit support class, evidence
+      references, optional contradictions and missing evidence, and a semantic
+      next experiment. Direct diagnoses cover context adjustment, resident
+      contamination, partial placement, cache contamination, nonresident TTFT,
+      first-sample decode instability, and tool calls emitted in content.
+- [ ] Add intervention-supported and suggestive limiter diagnoses. Labels such
+      as `consistent with memory-traffic pressure` are allowed; an unmeasured
+      claim such as `memory-bandwidth bound` is not. Each hypothesis must name
+      contradictory or missing evidence and a discriminating experiment.
 - [ ] Make help selection-aware for TTFT, prefill, decode, resident memory,
       placement, model shape, and verdict uncertainty. Explain what each fact
       answers and what comparisons remain valid.
@@ -559,9 +602,15 @@ reports:
       beside observed runtime allocation, accumulate residuals by architecture
       and context, and publish uncertainty. A correction never enters a fit
       verdict until its calibration and versioned provenance support that use.
-- [ ] Prototype a context sweep as its own experiment schema. Each point binds
+- [x] Prototype a context sweep as its own experiment schema. Each point binds
       requested/effective context, allocation, TTFT cache state, placement, and
-      comparable performance. One failed point does not fabricate later ones.
+      comparable performance. A predeclared point plan is bound into every
+      sealed run manifest with its exact sequence, quick measurement level,
+      and one fresh shared task seed. One failed point stops the plan and
+      explicitly leaves later points not run. Completed plans write a local
+      replay bundle containing the individually signed point records; reopening
+      the bundle re-derives and verifies the stored report. The experiment
+      remains exploratory and cannot certify its observed winner.
 - [ ] Give saved runs stable CLI selectors and version comparison JSON before
       adding context filters. A future `compare --ctx N` may select only
       receipts whose requested and verified effective contexts both equal N;
@@ -579,9 +628,24 @@ reports:
 - [ ] Clarify Inventory's `CTX` as measured evidence, not artifact maximum.
       Either rename the column to `EVID CTX` or add a separately sourced
       metadata-maximum field without fetching every artifact on the hot path.
-- [ ] Prototype a quant and configuration frontier. Report dominance only when
-      one measured option is no worse on all declared dimensions and strictly
-      better on at least one. Otherwise show the tradeoff, not a winner.
+- [x] Prototype a quant and configuration frontier. Every sealed candidate is
+      evaluated under one decision spec. Required-equal runtime, device,
+      context, task-plan, seed-set, grading, and profile factors are checked.
+      Dominance requires separated bounds showing one eligible configuration
+      no worse on decode, request TTFT, and resident bytes, and strictly better
+      on at least one. Optional conversion lineage binds all artifacts to one
+      base revision without turning a configuration comparison into a causal
+      quant-only claim. Any objective winner remains exploratory.
+- [x] Add the explicit exploration-to-confirmation transition. The live
+      confirmation command resolves and seals two to four runtime-backed
+      candidates, device identity, context, full-run protocol, confirm-level
+      decision spec, and a fresh shared task seed before inference. Every point
+      carries the plan digest and candidate position. Ordinary results cannot
+      be relabeled as confirmation. A winner is confirmed only after every
+      candidate's eligibility resolves and either it is the sole eligible
+      choice or its fresh 95% objective interval separates from every eligible
+      alternative; the replay bundle rebuilds that conclusion from the sealed
+      point records.
 - [ ] Extend llama.cpp configuration evidence to resolved offload,
       fitter-adjusted context, tensor or layer placement, CPU-MoE placement,
       tensor split, and mmap/mlock policy when the runtime exposes them. Advice
@@ -606,6 +670,19 @@ can be measured when its authority, state, definition of done, and independent
 verifier are explicit. fitr evaluates that system; it does not become its work
 queue, scheduler, or organizational memory.
 
+- [x] Ship one complete safe vertical workflow before generalizing the schema.
+      `fitr experiment workload` seals a runtime-bound policy-repair plan,
+      grants only four capability-scoped virtual-filesystem tools, permits
+      writes only to `policy.json`, records monotonic model, tool, worker,
+      verifier, and terminal events, and runs a deterministic verifier after
+      the worker stops. Every trial is signed with the plan's ephemeral key.
+      Accepted, rejected, timed-out, and infrastructure outcomes remain
+      distinct; the median is withheld below three acceptances; accepted-work
+      rate includes the elapsed time of every terminal outcome. Saved evidence
+      retains hashes and verifier output rather than raw model or tool content.
+      Arbitrary workflows and generated-code execution remain out of scope for
+      this slice.
+
 - [ ] Add sealed per-trial receipts for scenario release, worker start/end,
       model and tool intervals, verifier queue/start/end, verifier outcome,
       independent acceptance, approval and escalation events, retries, and
@@ -616,6 +693,15 @@ queue, scheduler, or organizational memory.
       independent verifier, harness state machine, heuristic, model judged,
       self-reported, and none. Core workflow PASS and FAIL require an allowed
       independent class; self-report never upgrades itself into proof.
+- [x] Define the optional external-validation boundary. OpenRouter and other
+      providers may support task development, grader calibration, adversarial
+      proposals, and explicitly labeled model-judged observations. They never
+      enter local fit or performance, never replace deterministic proof, never
+      run automatically, and remain optional for users and CI.
+- [ ] Add an experiment-scoped external-validation provider receipt with
+      provider/model identity, task and rubric digests, prompt/response hashes,
+      retention policy, timing, usage, cost, abstention, and terminal status.
+      Start with OpenRouter behind explicit invocation and a spending cap.
 - [ ] Version a bounded workflow contract with intent, initial state, supplied
       context, allowed tools, forbidden actions, definition of done, verifier,
       budgets, approval authority, denial/timeout/revocation behavior,

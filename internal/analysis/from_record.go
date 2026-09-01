@@ -488,32 +488,104 @@ func gap(code GapCode, section, message string, claims ...SupportClaim) Evidence
 func diagnosesFrom(result *record.Record, unclaimable bool) []Diagnosis {
 	var diagnoses []Diagnosis
 	if len(result.Contamination) > 0 {
-		diagnoses = append(diagnoses, Diagnosis{
+		diagnoses = append(diagnoses, directDiagnosis(Diagnosis{
 			Code:      DiagnosisContaminated,
 			Statement: "another resident model contaminated the measured run",
 			Evidence:  []string{"sealed_completion.contamination"},
-		})
+		}, Action{Code: ActionRerunUncontaminated, Argv: runActionArgv(result),
+			Reason: "repeat the run after removing unrelated resident models"}))
 	}
 	if result.DeviceV2 != nil && result.DeviceV2.Context.State() == device.ContextAdjusted {
-		diagnoses = append(diagnoses, Diagnosis{
+		diagnoses = append(diagnoses, directDiagnosis(Diagnosis{
 			Code:      DiagnosisContextAdjusted,
 			Statement: "the runtime reported an effective context different from the request",
 			Evidence:  []string{"device_fingerprint_v2.context"},
-		})
+		}, Action{Code: ActionRunContextExperiment, Argv: []string{"fitr", "experiment", "context", CurrentModelPlaceholder,
+			"--ctx", contextExperimentPair(result)}, Reason: "measure the requested and adjusted contexts as separate points"}))
 	}
+	diagnoses = append(diagnoses, performanceDiagnoses(result)...)
+	diagnoses = append(diagnoses, behaviorDiagnoses(result)...)
 	if !unclaimable && result.TaskPlan.Memory && result.Memory.RequestedCtx > 0 {
 		if allocation, ok := result.Memory.VerifiedAllocationAt(result.Memory.RequestedCtx); ok &&
 			allocation.AcceleratorBytes > 0 && allocation.AcceleratorBytes < allocation.ResidentBytes {
-			diagnoses = append(diagnoses, Diagnosis{
+			diagnoses = append(diagnoses, directDiagnosis(Diagnosis{
 				Code:      DiagnosisPartialPlacement,
 				Statement: "the runtime reported a partial accelerator share at the exact-context allocation point",
 				Evidence: []string{"memory.resident_bytes", "memory.accelerator_bytes",
 					"memory.requested_ctx", "memory.effective_ctx"},
-			})
+			}, Action{Code: ActionOpenBoard, Argv: []string{"fitr", "board"},
+				Reason: "compare only with compatible exact-context allocation receipts"}))
 		}
 	}
 	sort.Slice(diagnoses, func(i, j int) bool { return diagnoses[i].Code < diagnoses[j].Code })
 	return diagnoses
+}
+
+func performanceDiagnoses(result *record.Record) []Diagnosis {
+	var diagnoses []Diagnosis
+	if ttftResidencyEligibility(result.Speed) == residencyNotResident {
+		diagnoses = append(diagnoses, directDiagnosis(Diagnosis{
+			Code: DiagnosisTTFTNotResident, Statement: "the model was not resident before at least one timed request",
+			Evidence: []string{"speed_repeats.gated_residency_known", "speed_repeats.gated_resident"},
+		}, repeatMeasurementAction(result, "repeat after establishing a loaded runtime state")))
+	}
+	if status := cacheEligibility(result.Speed, prefillCacheReceipt); status == cacheHit || status == cacheUnknownAndHit {
+		diagnoses = append(diagnoses, directDiagnosis(Diagnosis{
+			Code: DiagnosisPrefillCacheHit, Statement: "cached prompt tokens contaminated at least one prefill observation",
+			Evidence: []string{"speed_repeats.prompt_tokens", "speed_repeats.cached_prompt_tokens"},
+		}, repeatMeasurementAction(result, "repeat the nonce-bound prefill probe without cached prompt tokens")))
+	}
+	if status := cacheEligibility(result.Speed, ttftCacheReceipt); status == cacheHit || status == cacheUnknownAndHit {
+		diagnoses = append(diagnoses, directDiagnosis(Diagnosis{
+			Code: DiagnosisTTFTCacheHit, Statement: "cached prompt tokens contaminated at least one gated TTFT observation",
+			Evidence: []string{"speed_repeats.gated_prompt_tokens", "speed_repeats.gated_cached_tokens"},
+		}, repeatMeasurementAction(result, "repeat the gated request without cached prompt tokens")))
+	}
+	decode, _, _ := speedValues(result.Speed)
+	if slow, _ := stats.FirstRunSlow(decode); slow {
+		action := repeatMeasurementAction(result, "repeat enough times to separate a first-run effect from unstable throughput")
+		action.Argv = append(action.Argv, "-k", "5")
+		diagnoses = append(diagnoses, directDiagnosis(Diagnosis{
+			Code: DiagnosisFirstDecodeSlow, Statement: "the first decode sample was materially slower than the remaining samples",
+			Evidence: []string{"speed_repeats.decode_tps"},
+		}, action))
+	}
+	return diagnoses
+}
+
+func behaviorDiagnoses(result *record.Record) []Diagnosis {
+	for index, check := range result.Checks {
+		if strings.Contains(strings.ToLower(check.Detail), "tool call as text") ||
+			strings.Contains(strings.ToLower(check.Detail), "not through the tool channel") {
+			return []Diagnosis{directDiagnosis(Diagnosis{
+				Code:      DiagnosisToolCallInContent,
+				Statement: "a tool-shaped call appeared in assistant content instead of the tool channel",
+				Evidence:  []string{"checks[" + strconv.Itoa(index) + "].detail"},
+			}, Action{Code: ActionDiagnoseTools, Argv: diagnosticActionArgv(result),
+				Reason: "separate chat-template or parser plumbing from model behavior"})}
+		}
+	}
+	return nil
+}
+
+func directDiagnosis(diagnosis Diagnosis, action Action) Diagnosis {
+	diagnosis.Support = DiagnosisDirect
+	actionCopy := action
+	diagnosis.NextExperiment = &actionCopy
+	return diagnosis
+}
+
+func repeatMeasurementAction(result *record.Record, reason string) Action {
+	return Action{Code: ActionRepeatMeasurement, Argv: runActionArgv(result), Reason: reason}
+}
+
+func contextExperimentPair(result *record.Record) string {
+	requested := result.ContextSize()
+	effective := requested
+	if result.DeviceV2 != nil && result.DeviceV2.Context.EffectiveTokens != nil {
+		effective = *result.DeviceV2.Context.EffectiveTokens
+	}
+	return strconv.Itoa(requested) + "," + strconv.Itoa(effective)
 }
 
 func nextActionsFrom(result *record.Record, displayOnly bool) []Action {

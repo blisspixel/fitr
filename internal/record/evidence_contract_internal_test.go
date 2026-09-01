@@ -276,12 +276,26 @@ func TestScorecardValidationPreservesSealedV3AuxiliaryLatencyProse(t *testing.T)
 	if why := r.Scorecard.Needs["fast_and_decent"].Why; strings.Contains(why, "residency receipt") {
 		t.Fatalf("v4 scorecard gained v5 residency prose: %q", why)
 	}
+	legacyV5Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV5())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Manifest.Provenance.ScoringPolicySHA256 = legacyV5Hash
+	r.Scorecard = score.ScoreLegacyV5(r.Measured(), profile)
+	if err := r.validateScorecard(profile); err != nil {
+		t.Fatalf("sealed v5 scorecard no longer validates: %v", err)
+	}
 	currentHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", CurrentScoringPolicy())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if currentHash == legacyHash || currentHash == legacyV4Hash || legacyHash == legacyV4Hash {
-		t.Fatal("scoring policies v3, v4, and v5 must have distinct receipts")
+	hashes := []string{legacyHash, legacyV4Hash, legacyV5Hash, currentHash}
+	for i, left := range hashes {
+		for _, right := range hashes[i+1:] {
+			if left == right {
+				t.Fatal("scoring policies v3 through v6 must have distinct receipts")
+			}
+		}
 	}
 }
 

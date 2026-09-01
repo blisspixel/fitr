@@ -26,6 +26,11 @@ func TestPublicCommandsRejectUnexpectedArguments(t *testing.T) {
 		{"profiles", func() int { return cmdProfiles(ctx, []string{"new", "box", "extra"}) }},
 		{"calibrate", func() int { return cmdCalibrate(ctx, []string{"model-a", "model-b", "extra"}) }},
 		{"compare", func() int { return cmdCompare(ctx, []string{"model-a", "model-b", "extra"}) }},
+		{"decide", func() int { return cmdDecide(ctx, []string{"model-a", "extra", "--spec", "decision.json"}) }},
+		{"experiment", func() int { return cmdExperiment(ctx, []string{"unknown"}) }},
+		{"experiment confirm", func() int {
+			return cmdExperiment(ctx, []string{"confirm", "a", "b", "c", "d", "e", "--spec", "decision.json"})
+		}},
 		{"screenshots", func() int { return cmdScreenshots(ctx, []string{"one", "extra"}) }},
 	}
 	for _, tc := range cases {
@@ -72,6 +77,12 @@ func TestPublicCommandHelpIsSuccessful(t *testing.T) {
 		{"calibrate", func() int { return cmdCalibrate(ctx, []string{"--help"}) }},
 		{"calibrate merge", func() int { return cmdCalibrate(ctx, []string{"merge", "--help"}) }},
 		{"compare", func() int { return cmdCompare(ctx, []string{"--help"}) }},
+		{"decide", func() int { return cmdDecide(ctx, []string{"--help"}) }},
+		{"experiment", func() int { return cmdExperiment(ctx, []string{"--help"}) }},
+		{"experiment context", func() int { return cmdExperiment(ctx, []string{"context", "--help"}) }},
+		{"experiment quant", func() int { return cmdExperiment(ctx, []string{"quant", "--help"}) }},
+		{"experiment confirm", func() int { return cmdExperiment(ctx, []string{"confirm", "--help"}) }},
+		{"experiment workload", func() int { return cmdExperiment(ctx, []string{"workload", "--help"}) }},
 		{"screenshots", func() int { return cmdScreenshots(ctx, []string{"--help"}) }},
 	}
 	for _, tc := range cases {
@@ -109,6 +120,9 @@ func TestPublicCommandsRejectInvalidNumericInputsBeforeRuntimeDiscovery(t *testi
 		{"diag context", func() int { return cmdDiag(ctx, []string{"model-a", "--ctx=-1"}) }, "context size"},
 		{"doctor context", func() int { return cmdDoctor(ctx, []string{"model-a", "--ctx=-1"}) }, "context size"},
 		{"doctor repeats", func() int { return cmdDoctor(ctx, []string{"model-a", "-n=1"}) }, "repeat count"},
+		{"confirmation context", func() int {
+			return cmdExperiment(ctx, []string{"confirm", "model-a", "model-b", "--spec", "decision.json", "--ctx=-1"})
+		}, "measurement plan"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

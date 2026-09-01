@@ -118,8 +118,9 @@ type Metrics struct {
 	// a zero with CacheKnown=false is "not measured", not "cache miss".
 	CachedTokens int  `json:"cached_tokens,omitempty"`
 	CacheKnown   bool `json:"cache_known,omitempty"`
-	// Truncated means the model hit the token cap. Worth scoring as a failure:
-	// roughly 92% of truncations are repetition loops wearing a cap.
+	// Truncated means the model hit the token cap. It is separate from the
+	// repetition metrics because it prevents completion and can accompany a
+	// loop without proving that repetition caused the cap.
 	Truncated bool `json:"truncated"`
 	// ClientDerived is true when tok/s and TTFT were computed from wall-clock
 	// on this side of the socket. The OpenAI-compatible surface has no server
