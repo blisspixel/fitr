@@ -252,14 +252,14 @@ func parseCgroupMemoryCandidates(data string) []cgroupMemoryFiles {
 			continue
 		}
 		if parts[0] == "0" && parts[1] == "" {
-			base := filepath.Join("/sys", "fs", "cgroup", relative)
+			base := filepath.Join(string(filepath.Separator), "sys", "fs", "cgroup", relative)
 			candidates = append(candidates, cgroupMemoryFiles{
 				limit: filepath.Join(base, "memory.max"), current: filepath.Join(base, "memory.current"),
 				source: "cgroup v2 memory.max/current",
 			})
 		}
 		if slicesContain(strings.Split(parts[1], ","), "memory") {
-			base := filepath.Join("/sys", "fs", "cgroup", "memory", relative)
+			base := filepath.Join(string(filepath.Separator), "sys", "fs", "cgroup", "memory", relative)
 			candidates = append(candidates, cgroupMemoryFiles{
 				limit: filepath.Join(base, "memory.limit_in_bytes"), current: filepath.Join(base, "memory.usage_in_bytes"),
 				source: "cgroup v1 memory limit/usage",
