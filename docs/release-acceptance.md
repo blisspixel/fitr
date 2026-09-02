@@ -134,6 +134,32 @@ after publication. The executable matched SHA-256
 reported `fitr 0.10.1`, and identified 0.10.1 as current through
 `update --check`.
 
+### 0.10.2 release receipt
+
+Release 0.10.2 is bound to commit
+`beba22cb50ccb4db0ce578e5a3e248430b2e8b91`. The exact commit passed
+[aggregate CI run 33583896986](https://github.com/blisspixel/fitr/actions/runs/33583896986)
+and
+[native acceptance run 33583901290](https://github.com/blisspixel/fitr/actions/runs/33583901290)
+before
+[release workflow run 33584236132](https://github.com/blisspixel/fitr/actions/runs/33584236132)
+published the public
+[v0.10.2 release](https://github.com/blisspixel/fitr/releases/tag/v0.10.2).
+
+The release workflow re-ran the full test, coverage, race, vulnerability,
+fuzz, lint, file-length, reproducibility, static-binary, size, CLI, checksum,
+and three-platform installer gates. It downloaded and verified the published
+asset set before exposing the release. GitHub then reported the stable release
+as non-draft and non-prerelease with exactly ten public assets.
+
+The public manifest and Windows amd64 binary were downloaded independently
+after publication. The executable matched SHA-256
+`3f3ec62e60fdd6e01e926523a50e57eb2cf1739fa4d7d5934fa7b8f78ff56cea`,
+reported `fitr 0.10.2`, and identified 0.10.2 as current through
+`update --check`. The checksum-verifying public installer then replaced the
+existing Windows PATH installation; the installed executable matched the same
+public checksum and version.
+
 ### Reproducible native candidate acceptance
 
 `.github/workflows/native-acceptance.yml` is a manual release gate, not a
