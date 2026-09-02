@@ -148,6 +148,22 @@ func (a Arch) kvBytesPerToken(elem float64) float64 {
 	return per
 }
 
+// ProjectKVBytes returns the exact conventional KV-cache projection for one
+// declared context and element size. Hybrid recurrent state is deliberately
+// unavailable because conventional attention arithmetic is not its complete
+// allocation model.
+func ProjectKVBytes(arch Arch, contextTokens int, elementBytes float64) (int64, bool) {
+	if arch.Hybrid || contextTokens <= 0 {
+		return 0, false
+	}
+	perToken := arch.kvBytesPerToken(elementBytes)
+	projected := perToken * float64(contextTokens)
+	if projected <= 0 || math.IsNaN(projected) || math.IsInf(projected, 0) || projected > math.MaxInt64 {
+		return 0, false
+	}
+	return int64(math.Ceil(projected)), true
+}
+
 // ActiveParams is the decode-time parameter count. MoE loads every expert
 // (weights) but decode only touches expert_used of them. ok is false when
 // the split cannot be computed, so callers do not print total as if it were

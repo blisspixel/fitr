@@ -67,6 +67,71 @@ func TestResultMarksDescriptiveOnlyEvidenceAndItsSource(t *testing.T) {
 	}
 }
 
+func TestResultRendersCapacityPolicyProjectionAndObservedBudgetResult(t *testing.T) {
+	addressable, available := int64(24<<30), int64(23<<30)
+	reserve, budget, components := int64(3<<30), int64(20<<30), int64(18<<30)
+	resident, headroom := int64(19<<30), int64(1<<30)
+	report := &analysis.Report{Capacity: analysis.Capacity{
+		Policy: &analysis.CapacityPolicyObservation{
+			ResourceDomain: "accelerator_memory", AddressableBytes: &addressable,
+			AddressableSource: "nvidia-smi", CurrentAvailableBytes: &available,
+			CurrentAvailableSource: "nvidia-smi memory.free", CurrentAvailableAt: "2026-09-01T12:00:00Z",
+			OperatorReserveBytes: &reserve,
+			UsableBudgetBytes:    &budget, Formula: "current_available-operator_reserve",
+			SwapPolicy: "excluded", Status: analysis.StatusAvailable,
+		},
+		Prediction: &analysis.CapacityPredictionObservation{
+			RequestedContext: 32768, KnownComponentBytes: &components,
+			ArtifactBytes: int64TestPointer(17 << 30), KVBytes: int64TestPointer(1 << 30), KVDataType: "q8_0",
+			Excluded: []string{"in-flight peaks", "runtime buffers"}, Status: analysis.StatusAvailable,
+		},
+		Resident: &analysis.ResidentObservation{
+			Estimate: &resident, RequestedContext: 32768, Status: analysis.StatusAvailable,
+			Acquisition: analysis.AcquisitionRuntimeAllocation,
+		},
+		Budget: &analysis.CapacityBudgetObservation{
+			State: analysis.CapacityBudgetFit, BudgetBytes: budget, ObservedBytes: &resident,
+			HeadroomBytes: &headroom, Status: analysis.StatusAvailable, Acquisition: analysis.AcquisitionMixed,
+		},
+	}}
+	var output strings.Builder
+	display := plainDisplay(&output)
+	display.Result(score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}}, Meta{Analysis: report})
+	text := output.String()
+	for _, want := range []string{
+		"resource domain", "accelerator memory", "addressable", "available now",
+		"availability observed 2026-09-01T12:00:00Z", "operator reserve", "safe budget", "swap excluded", "pre-load components",
+		"component projection only", "excludes in-flight peaks; runtime buffers",
+		"resident", "safe-budget result", "FIT", "headroom +1.00 GiB",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("capacity result missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestJSONResultIncludesRendererNeutralAnalysis(t *testing.T) {
+	budget := int64(20 << 30)
+	report := &analysis.Report{
+		Schema: analysis.ReportSchema,
+		Capacity: analysis.Capacity{Policy: &analysis.CapacityPolicyObservation{
+			ResourceDomain: "unified_memory", UsableBudgetBytes: &budget,
+			Formula: "operator_budget", SwapPolicy: "excluded", Status: analysis.StatusAvailable,
+		}},
+	}
+	var output strings.Builder
+	display := &jsonDisplay{out: &output}
+	display.Result(score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}}, Meta{Analysis: report})
+	text := output.String()
+	for _, want := range []string{`"analysis"`, `"capacity"`, `"usable_budget_bytes":21474836480`, `"unified_memory"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("JSON result missing %q: %s", want, text)
+		}
+	}
+}
+
+func int64TestPointer(value int64) *int64 { return &value }
+
 func TestNoColorEmptyStringMeansUnset(t *testing.T) {
 	// no-color.org: present AND NOT EMPTY disables colour. NO_COLOR="" must NOT
 	// disable it -- the classic off-by-one in this spec.

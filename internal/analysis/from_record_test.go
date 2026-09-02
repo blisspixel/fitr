@@ -9,7 +9,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	capacityevidence "github.com/blisspixel/fitr/internal/capacity"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/record"
@@ -18,6 +20,111 @@ import (
 )
 
 const testDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+func TestCapacityPlanProducesObservedSafeBudgetDecision(t *testing.T) {
+	for name, residentBytes := range map[string]int64{"fit": 20 << 30, "exceeded": 24 << 30} {
+		t.Run(name, func(t *testing.T) {
+			effective := 32768
+			result := completedTestRecordConfigured(t, "", func(result *record.Record) {
+				result.TaskPlan.Memory = true
+				result.Memory = measuredMemory(effective, &effective)
+				result.Memory.ResidentBytes = residentBytes
+				result.Memory.ResidentGB = math.Round(float64(residentBytes)/(1024*1024*1024)*100) / 100
+				result.Memory.AcceleratorBytes = residentBytes
+				result.Memory.PctOnGPU = 100
+				result.CapacityPlan = analysisCapacityPlan(t, int64(22<<30), true)
+			})
+			report, err := FromRecord(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.Capacity.Policy == nil || report.Capacity.Policy.UsableBudgetBytes == nil ||
+				report.Capacity.Prediction == nil || report.Capacity.Budget == nil {
+				t.Fatalf("capacity analysis incomplete: %+v", report.Capacity)
+			}
+			if hasGap(report.Gaps, GapCapacityPolicyUnsealed) || hasGap(report.Gaps, GapCapacityBudgetUnavailable) {
+				t.Fatalf("sealed safe budget still reported missing: %+v", report.Gaps)
+			}
+			budget := report.Capacity.Budget
+			if name == "fit" {
+				if budget.State != CapacityBudgetFit || !slices.Contains(budget.Supports, ClaimSafeBudgetFit) ||
+					budget.HeadroomBytes == nil || *budget.HeadroomBytes != 2<<30 {
+					t.Fatalf("fit budget = %+v", budget)
+				}
+			} else if budget.State != CapacityBudgetExceeded ||
+				!slices.Contains(budget.Supports, ClaimSafeBudgetExceeded) ||
+				budget.HeadroomBytes == nil || *budget.HeadroomBytes != -2<<30 {
+				t.Fatalf("exceeded budget = %+v", budget)
+			}
+		})
+	}
+}
+
+func TestCapacityFactsWithoutOperatorChoiceStayUnresolved(t *testing.T) {
+	effective := 32768
+	result := completedTestRecordConfigured(t, "", func(result *record.Record) {
+		result.TaskPlan.Memory = true
+		result.Memory = measuredMemory(effective, &effective)
+		result.CapacityPlan = analysisCapacityPlan(t, 0, false)
+	})
+	report, err := FromRecord(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Capacity.Policy == nil || report.Capacity.Policy.CurrentAvailableBytes == nil ||
+		report.Capacity.Policy.UsableBudgetBytes != nil || report.Capacity.Budget != nil {
+		t.Fatalf("availability became a safe budget: %+v", report.Capacity)
+	}
+	if !hasGap(report.Gaps, GapCapacityBudgetUnavailable) || hasGap(report.Gaps, GapCapacityPolicyUnsealed) {
+		t.Fatalf("capacity gap classification = %+v", report.Gaps)
+	}
+}
+
+func TestUnavailableCapacityPredictionHasNoProjectionClaim(t *testing.T) {
+	plan := analysisCapacityPlan(t, 0, false)
+	plan.Prediction.ArtifactBytes = nil
+	plan.Prediction.KVBytes = nil
+	plan.Prediction.KnownComponentBytes = nil
+	plan.Prediction.State = capacityevidence.PredictionUnavailable
+	plan.Prediction.Missing = []string{"artifact bytes", "conventional KV projection"}
+	report := capacityPlanFrom(&record.Record{CapacityPlan: plan})
+	if report.Prediction == nil || report.Prediction.Status != StatusUnavailable ||
+		len(report.Prediction.Supports) != 0 {
+		t.Fatalf("unavailable prediction acquired support: %+v", report.Prediction)
+	}
+}
+
+func analysisCapacityPlan(t *testing.T, budget int64, explicit bool) *capacityevidence.Plan {
+	t.Helper()
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	available := capacityevidence.MemoryObservation{
+		Kind:           capacityevidence.ObservationCurrentAvailable,
+		ResourceDomain: capacityevidence.DomainAccelerator,
+		Bytes:          23 << 30, Source: "nvidia-smi memory.free", ObservedAt: now.Format(time.RFC3339Nano),
+	}
+	input := capacityevidence.PolicyInput{
+		ResourceDomain: capacityevidence.DomainAccelerator, CurrentAvailable: &available,
+	}
+	if explicit {
+		input.OperatorBudgetBytes = &budget
+	}
+	policy, err := capacityevidence.BuildPolicy(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, kv := int64(17<<30), int64(1<<30)
+	prediction, err := capacityevidence.BuildPrediction(policy, capacityevidence.PredictionInput{
+		CreatedAt: now.Add(time.Second), ArtifactSHA256: testDigest,
+		ResourceDomain: capacityevidence.DomainAccelerator, RequestedContext: 32768,
+		Architecture: "qwen3", KVDataType: "q8_0", KVElementBytes: 1,
+		PlacementAssumption: "runtime default; unverified", ArtifactBytes: &artifact, KVBytes: &kv,
+		Excluded: []string{"runtime buffers", "in-flight peaks"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &capacityevidence.Plan{Schema: capacityevidence.PlanSchema, Policy: policy, Prediction: prediction}
+}
 
 func TestFromRecordRejectsAnythingButValidatedSchemaSix(t *testing.T) {
 	tests := []struct {

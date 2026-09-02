@@ -162,10 +162,10 @@ func ProbeTooling(context.Context) string { return "" }
 // free: the GPU budget is a share of one pool that the OS is also using, and
 // "free system RAM" is a different question wearing the same words. Reporting
 // it would invent a number.
-func availableVRAMFallback(context.Context) (float64, bool) {
+func availableVRAMFallback(context.Context) (float64, string, bool) {
 	totals, err := filepath.Glob("/sys/class/drm/card*/device/mem_info_vram_total")
 	if err != nil {
-		return 0, false
+		return 0, "", false
 	}
 	var best float64
 	var found bool
@@ -179,7 +179,116 @@ func availableVRAMFallback(context.Context) (float64, bool) {
 			best, found = gb, true
 		}
 	}
-	return best, found
+	if !found {
+		return 0, "", false
+	}
+	return best, "drm sysfs total-used", true
+}
+
+func systemMemoryAvailable(context.Context) (int64, string, bool) {
+	if runtime.GOOS != "linux" {
+		return 0, "", false
+	}
+	b, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0, "", false
+	}
+	bytes, ok := parseMemAvailable(b)
+	return bytes, "/proc/meminfo MemAvailable", ok
+}
+
+func parseMemAvailable(data []byte) (int64, bool) {
+	match := regexp.MustCompile(`(?m)^MemAvailable:\s+(\d+)\s+kB\s*$`).FindSubmatch(data)
+	if len(match) != 2 {
+		return 0, false
+	}
+	kib, err := strconv.ParseInt(string(match[1]), 10, 64)
+	if err != nil || kib <= 0 || kib > (1<<63-1)/1024 {
+		return 0, false
+	}
+	return kib * 1024, true
+}
+
+func containerMemoryLimit() (ContainerMemory, bool) {
+	if runtime.GOOS != "linux" {
+		return ContainerMemory{}, false
+	}
+	for _, candidate := range cgroupMemoryCandidates() {
+		limit, limitOK := readCgroupNumber(candidate.limit)
+		current, currentOK := readCgroupNumber(candidate.current)
+		if !limitOK || !currentOK || current < 0 || current >= limit || limit >= 1<<62 {
+			continue
+		}
+		return ContainerMemory{LimitBytes: limit, CurrentBytes: current, Source: candidate.source}, true
+	}
+	return ContainerMemory{}, false
+}
+
+type cgroupMemoryFiles struct {
+	limit, current, source string
+}
+
+func cgroupMemoryCandidates() []cgroupMemoryFiles {
+	fallbacks := []cgroupMemoryFiles{
+		{limit: "/sys/fs/cgroup/memory.max", current: "/sys/fs/cgroup/memory.current", source: "cgroup v2 memory.max/current"},
+		{limit: "/sys/fs/cgroup/memory/memory.limit_in_bytes", current: "/sys/fs/cgroup/memory/memory.usage_in_bytes", source: "cgroup v1 memory limit/usage"},
+	}
+	b, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return fallbacks
+	}
+	return append(parseCgroupMemoryCandidates(string(b)), fallbacks...)
+}
+
+func parseCgroupMemoryCandidates(data string) []cgroupMemoryFiles {
+	var candidates []cgroupMemoryFiles
+	for _, line := range strings.Split(data, "\n") {
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		relative := strings.TrimPrefix(filepath.Clean("/"+parts[2]), "/")
+		if relative == "" || relative == "." || strings.HasPrefix(relative, "..") {
+			continue
+		}
+		if parts[0] == "0" && parts[1] == "" {
+			base := filepath.Join("/sys/fs/cgroup", relative)
+			candidates = append(candidates, cgroupMemoryFiles{
+				limit: filepath.Join(base, "memory.max"), current: filepath.Join(base, "memory.current"),
+				source: "cgroup v2 memory.max/current",
+			})
+		}
+		if slicesContain(strings.Split(parts[1], ","), "memory") {
+			base := filepath.Join("/sys/fs/cgroup/memory", relative)
+			candidates = append(candidates, cgroupMemoryFiles{
+				limit: filepath.Join(base, "memory.limit_in_bytes"), current: filepath.Join(base, "memory.usage_in_bytes"),
+				source: "cgroup v1 memory limit/usage",
+			})
+		}
+	}
+	return candidates
+}
+
+func readCgroupNumber(path string) (int64, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	text := strings.TrimSpace(string(b))
+	if text == "max" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(text, 10, 64)
+	return n, err == nil && n >= 0
+}
+
+func slicesContain(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func readSysfsUint(path string) int64 {

@@ -168,10 +168,11 @@ record, completion receipt, profile, summaries, and scorecard validate,
 `fitr.analysis.run.v1` projects requested and effective context, decode,
 prefill, request TTFT, receipt-proven loaded TTFT, supported runtime-unloaded and cache-hit TTFT states,
 runtime load time, exact-context resident and accelerator allocation bytes,
-typed evidence gaps, direct receipt-state diagnoses, and a semantic next
-action. CLI, TUI, Board, and HTML consume supported subsets of that projection
-rather than deriving their own claims; the compatibility JSON shapes remain
-unchanged.
+the sealed capacity policy and pre-observation component projection, observed
+safe-budget fit or excess, signed headroom, typed evidence gaps, direct
+receipt-state diagnoses, and a semantic next action. CLI, TUI, JSON, and HTML
+consume supported subsets of that projection rather than deriving their own
+claims; compatibility fields remain additive.
 
 The analysis is rebuilt from the record and is never written into schema 6 as
 new evidence. Its estimates use pointers so an observed zero is not confused
@@ -179,9 +180,20 @@ with absence. Units, acquisition source, claim support, and
 `available`/`descriptive_only`/`unavailable` status are explicit. Cache hits,
 unknown cache state, resident-model contamination, or an artifact not bound to
 the serving runtime remove the affected support claim without deleting the
-observation. Schema 6 has no sealed usable-capacity policy, so the report
-always blocks headroom and fit claims even when resident bytes and a device
-memory value both exist.
+observation. New schema-6 records may carry an optional
+`fitr.capacity.plan.v1` that is duplicated in the sealed manifest and validated
+on reopen. The plan is created before allocation and binds
+`fitr.capacity.policy.v1` to `fitr.capacity.prediction.v1` by digest. Existing
+schema-6 records without that optional plan remain valid and retain an explicit
+capacity-policy gap.
+
+Addressable memory, current availability, container headroom, operator budget
+or reserve, component projection, and observed resident allocation keep
+separate semantics and resource domains. Availability alone never becomes a
+safe budget. Artifact plus conventional KV arithmetic discloses excluded
+runtime allocation and cannot establish fit or failure. A safe-budget verdict
+and headroom require both a sealed usable budget and an exact-context observed
+resident allocation. Swap is excluded in policy v1.
 
 Latency states never borrow evidence from one another. Loaded TTFT requires a
 gated-request residency receipt. Runtime-unloaded TTFT and runtime load require
@@ -214,6 +226,8 @@ so Board does not compare across those presentation-contract changes.
 - **Shared memory.** On an iGPU or unified-memory accelerator, model memory,
   Linux, services, and CPU-side runtime allocation compete for one pool. An
   addressable `MemTotal` reading is capacity, not a safe current model budget.
+  A run can seal a safe budget only from an explicit operator limit or an
+  explicit reserve applied to timestamped current availability.
 - **The refusal battery is 3 sealed prompts.** The current receipt binds their
   exact canonical prompt-ID set, but it still detects only "will refuse ordinary work",
   not the full alignment surface.

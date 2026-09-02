@@ -78,6 +78,41 @@ func TestHTMLSeparatesPerformanceAndVerifiedCapacity(t *testing.T) {
 	}
 }
 
+func TestHTMLRendersCapacityPlanWithoutPretendingProjectionIsFit(t *testing.T) {
+	artifact := sampleArtifact()
+	available, reserve, budget, components := int64(80<<30), int64(8<<30), int64(72<<30), int64(42<<30)
+	artifact.Meta.Analysis = &analysis.Report{Capacity: analysis.Capacity{
+		Policy: &analysis.CapacityPolicyObservation{
+			ResourceDomain: "unified_memory", CurrentAvailableBytes: &available,
+			CurrentAvailableSource: "/proc/meminfo MemAvailable",
+			CurrentAvailableAt:     "2026-09-01T12:00:00Z", OperatorReserveBytes: &reserve,
+			UsableBudgetBytes: &budget, Formula: "current_available-operator_reserve",
+			SwapPolicy: "excluded", Status: analysis.StatusAvailable,
+		},
+		Prediction: &analysis.CapacityPredictionObservation{
+			RequestedContext: 32768, KnownComponentBytes: &components,
+			Excluded: []string{"runtime buffers", "in-flight peaks"}, Status: analysis.StatusAvailable,
+		},
+	}}
+	var output bytes.Buffer
+	if err := WriteHTML(&output, artifact); err != nil {
+		t.Fatal(err)
+	}
+	text := output.String()
+	for _, want := range []string{
+		"<h2>Capacity</h2>", "unified memory", "available now", "/proc/meminfo MemAvailable",
+		"operator reserve", "safe budget", "swap excluded", "pre-load components",
+		"component projection only", "excludes runtime buffers; in-flight peaks",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("capacity HTML missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "safe-budget result</th><td>FIT") {
+		t.Fatal("component projection became an observed fit result")
+	}
+}
+
 func TestHTMLMarksDescriptiveOnlyEvidenceAndSource(t *testing.T) {
 	artifact := sampleArtifact()
 	decode, ttft := artifact.Meta.DecodeMean, artifact.Meta.TTFTMean

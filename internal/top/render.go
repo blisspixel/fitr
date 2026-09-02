@@ -403,22 +403,78 @@ func renderResultPerformance(w *lineWriter, run Run, glyphs Glyphs, compact bool
 }
 
 func renderResultCapacity(w *lineWriter, run Run, compact bool) {
-	if !run.MemoryPresent {
+	if !run.MemoryPresent && (run.Analysis == nil ||
+		run.Analysis.Capacity.Policy == nil && run.Analysis.Capacity.Prediction == nil) {
 		return
 	}
 	w.line(Span{Text: "capacity", Role: RoleHeader})
+	var capacityReport analysis.Capacity
+	if run.Analysis != nil {
+		capacityReport = run.Analysis.Capacity
+	}
+	renderResultCapacityPolicy(w, capacityReport.Policy, compact)
+	renderResultCapacityPrediction(w, capacityReport.Prediction, compact)
+	if !run.MemoryPresent {
+		return
+	}
 	residentLabel, residentQualifier := "resident   ", ""
-	if run.Analysis != nil && run.Analysis.Capacity.Resident != nil &&
-		run.Analysis.Capacity.Resident.Status == analysis.StatusDescriptiveOnly {
+	if capacityReport.Resident != nil && capacityReport.Resident.Status == analysis.StatusDescriptiveOnly {
 		residentLabel = "resident [descriptive] "
-		residentQualifier = " via " + analysis.AcquisitionLabel(run.Analysis.Capacity.Resident.Acquisition)
+		residentQualifier = " via " + analysis.AcquisitionLabel(capacityReport.Resident.Acquisition)
 	}
 	w.line(Span{Text: residentLabel, Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GB after requested %s load probe", run.MemoryGB,
 		residentContextLabel(run.ResidentContext)), Role: RoleDefault}, Span{Text: residentQualifier, Role: RoleMuted})
-	if compact || run.Analysis == nil || run.Analysis.Capacity.Placement == nil {
+	renderResultCapacityBudget(w, capacityReport.Budget)
+	if compact || capacityReport.Placement == nil {
 		return
 	}
-	placement := run.Analysis.Capacity.Placement
+	renderResultCapacityPlacement(w, capacityReport.Placement)
+}
+
+func renderResultCapacityPolicy(w *lineWriter, policy *analysis.CapacityPolicyObservation, compact bool) {
+	if policy == nil {
+		return
+	}
+	if policy.UsableBudgetBytes != nil {
+		w.line(Span{Text: "safe budget ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GiB  %s",
+			float64(*policy.UsableBudgetBytes)/(1024*1024*1024), policy.Formula), Role: RoleDefault})
+	} else {
+		w.line(Span{Text: "safe budget ", Role: RoleMuted},
+			Span{Text: "unresolved; no operator budget or reserve", Role: RoleWarning})
+	}
+	if compact || policy.CurrentAvailableBytes == nil {
+		return
+	}
+	w.line(Span{Text: "available   ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GiB  %s",
+		float64(*policy.CurrentAvailableBytes)/(1024*1024*1024), policy.CurrentAvailableSource), Role: RoleDefault})
+	if policy.CurrentAvailableAt != "" {
+		w.line(Span{Text: "observed    " + policy.CurrentAvailableAt, Role: RoleMuted})
+	}
+}
+
+func renderResultCapacityPrediction(w *lineWriter, prediction *analysis.CapacityPredictionObservation, compact bool) {
+	if compact || prediction == nil || prediction.KnownComponentBytes == nil {
+		return
+	}
+	w.line(Span{Text: "pre-load   ", Role: RoleMuted}, Span{Text: fmt.Sprintf("%.2f GiB components at %s; not a fit claim",
+		float64(*prediction.KnownComponentBytes)/(1024*1024*1024),
+		residentContextLabel(prediction.RequestedContext)), Role: RoleDefault})
+}
+
+func renderResultCapacityBudget(w *lineWriter, budget *analysis.CapacityBudgetObservation) {
+	if budget == nil || budget.State == analysis.CapacityBudgetUnresolved {
+		return
+	}
+	label, role := "FIT", RolePass
+	if budget.State == analysis.CapacityBudgetExceeded {
+		label, role = "EXCEEDED", RoleFail
+	}
+	headroom := float64(*budget.HeadroomBytes) / (1024 * 1024 * 1024)
+	w.line(Span{Text: "budget     ", Role: RoleMuted},
+		Span{Text: fmt.Sprintf("%s  headroom %+.2f GiB", label, headroom), Role: role})
+}
+
+func renderResultCapacityPlacement(w *lineWriter, placement *analysis.PlacementObservation) {
 	const gib = 1024 * 1024 * 1024
 	w.line(Span{Text: "runtime accel", Role: RoleMuted}, Span{Text: fmt.Sprintf("  %.2f GB (%.1f%% of runtime allocation)",
 		float64(placement.AcceleratorBytes)/gib, placement.AcceleratorPercent), Role: RoleDefault})

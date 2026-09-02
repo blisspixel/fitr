@@ -16,10 +16,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/blisspixel/fitr/internal/advise"
 	"github.com/blisspixel/fitr/internal/atomicfile"
 	"github.com/blisspixel/fitr/internal/buildinfo"
+	"github.com/blisspixel/fitr/internal/capacity"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/ollama"
@@ -254,7 +256,7 @@ func shotRun(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	pre := "$ fitr run qwen3-coder:30b --full -k 3\n\n"
+	pre := "$ fitr run qwen3-coder:30b --full -k 3 --capacity-budget-gb 22\n\n"
 	disp := render.New("rich")
 	disp.Result(artifact.Scorecard, resultMeta(&res, artifact.Profile))
 	return pre, nil
@@ -532,7 +534,7 @@ func prepareMockEvidence(r *Result) error {
 	if err := prepareMockDeviceReceipt(r); err != nil {
 		return err
 	}
-	return completeMockEvidence(r)
+	return completeMockEvidence(r, false)
 }
 
 func prepareValidationEvidence(r *Result) error {
@@ -552,7 +554,7 @@ func prepareValidationEvidence(r *Result) error {
 	if err := prepareMockDeviceReceipt(r); err != nil {
 		return err
 	}
-	return completeMockEvidence(r)
+	return completeMockEvidence(r, true)
 }
 
 func prepareMockDefaults(r *Result) {
@@ -830,7 +832,7 @@ func prepareMockDeviceReceipt(r *Result) error {
 	return nil
 }
 
-func completeMockEvidence(r *Result) error {
+func completeMockEvidence(r *Result, includeCapacityPlan bool) error {
 	sum := sha256.Sum256([]byte("fitr mock artifact\x00" + r.Model))
 	runtimeVersion := r.Device.Runtime
 	if runtimeVersion == "" {
@@ -840,6 +842,11 @@ func completeMockEvidence(r *Result) error {
 		"sha256:"+hex.EncodeToString(sum[:]), "", 0)
 	if err != nil {
 		return err
+	}
+	if includeCapacityPlan {
+		if err := attachValidationCapacityPlan(r, identity); err != nil {
+			return err
+		}
 	}
 	spec, err := eval.LoadSpec()
 	if err != nil {
@@ -871,6 +878,48 @@ func completeMockEvidence(r *Result) error {
 	}
 	r.Scorecard = score.Score(measure(r), profile)
 	return r.CompleteEvidence(profile)
+}
+
+func attachValidationCapacityPlan(r *Result, identity record.ModelIdentity) error {
+	observedAt := time.Date(2026, 8, 30, 22, 24, 1, 0, time.UTC)
+	addressable := capacity.MemoryObservation{
+		Kind: capacity.ObservationAddressable, ResourceDomain: capacity.DomainAccelerator,
+		Bytes: 24 << 30, Source: "nvidia-smi memory.total", ObservedAt: observedAt.Format(time.RFC3339Nano),
+	}
+	available := capacity.MemoryObservation{
+		Kind: capacity.ObservationCurrentAvailable, ResourceDomain: capacity.DomainAccelerator,
+		Bytes: 21 << 30, Source: "nvidia-smi memory.free", ObservedAt: observedAt.Format(time.RFC3339Nano),
+	}
+	budget := int64(22 << 30)
+	policy, err := capacity.BuildPolicy(capacity.PolicyInput{
+		ResourceDomain: capacity.DomainAccelerator, Addressable: &addressable,
+		CurrentAvailable: &available, OperatorBudgetBytes: &budget,
+	})
+	if err != nil {
+		return err
+	}
+	artifact := r.ModelMeta.Size
+	kv, ok := advise.ProjectKVBytes(advise.Arch{
+		Blocks: 48, KVHeads: 4, KeyLength: 128, ValLength: 128,
+	}, r.Memory.RequestedCtx, 2)
+	if !ok {
+		return errors.New("validation fixture KV projection is unavailable")
+	}
+	prediction, err := capacity.BuildPrediction(policy, capacity.PredictionInput{
+		CreatedAt: observedAt, ArtifactSHA256: identity.Value,
+		ResourceDomain: capacity.DomainAccelerator, RequestedContext: r.Memory.RequestedCtx,
+		Architecture: "qwen3moe", KVDataType: "f16 assumed", KVElementBytes: 2,
+		PlacementAssumption: "runtime default; unverified before allocation",
+		ArtifactBytes:       &artifact, KVBytes: &kv,
+		Excluded: []string{"in-flight compute and activation peaks", "runtime buffers, mappings, and allocator overhead"},
+	})
+	if err != nil {
+		return err
+	}
+	r.CapacityPlan = &capacity.Plan{
+		Schema: capacity.PlanSchema, Policy: policy, Prediction: prediction,
+	}
+	return r.CapacityPlan.Validate()
 }
 
 func mockBinaryOutcome(pass bool) eval.Outcome {

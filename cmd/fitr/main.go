@@ -250,7 +250,8 @@ func permute(args []string) []string {
 func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
-	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec":
+	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec",
+		"capacity-budget-gb", "capacity-reserve-gb":
 		return true
 	}
 	return false
@@ -462,6 +463,8 @@ type runOpts struct {
 	reps, checksReps        int
 	numCtx, memoryCtx       int
 	experiment              *record.ExperimentBinding
+	capacityBudgetGB        *float64
+	capacityReserveGB       *float64
 	allowUnsafeExec         bool
 }
 

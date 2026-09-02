@@ -448,6 +448,13 @@ func IsNVIDIAUnifiedMemoryGPU(name string) bool {
 	return nvidiaUnifiedMemoryGPU(name)
 }
 
+// IsUnifiedMemoryGPU reports whether device detection identifies a shared
+// CPU/accelerator memory pool. The result selects a resource domain; it never
+// turns installed memory into a usable inference budget.
+func IsUnifiedMemoryGPU(name string) bool {
+	return unifiedMemoryGPU(name) || nvidiaUnifiedMemoryGPU(name)
+}
+
 func unifiedMemoryGPU(name string) bool {
 	u := strings.ToLower(name)
 	if u == "" {
@@ -887,6 +894,13 @@ const (
 )
 
 func AvailableVRAM(ctx context.Context) (float64, bool) {
+	gb, _, ok := AvailableVRAMWithSource(ctx)
+	return gb, ok
+}
+
+// AvailableVRAMWithSource returns a transient free-memory observation and its
+// acquisition source. It is deliberately excluded from device identity.
+func AvailableVRAMWithSource(ctx context.Context) (float64, string, bool) {
 	if _, err := exec.LookPath("nvidia-smi"); err != nil {
 		// Not every GPU ships an nvidia-smi. Free memory is the number that
 		// decides whether a model loads right now, and answering it only for
@@ -900,8 +914,29 @@ func AvailableVRAM(ctx context.Context) (float64, bool) {
 	cmd.WaitDelay = 250 * time.Millisecond
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, false
+		return 0, "", false
 	}
 	gb := ParseNvidiaSMIMemory(string(out))
-	return gb, gb > 0
+	return gb, "nvidia-smi memory.free", gb > 0
+}
+
+// ContainerMemory is a transient cgroup capacity receipt. Headroom is a
+// resource limit minus current use, not an operating-system availability
+// reading, so callers retain both and take the smaller value when appropriate.
+type ContainerMemory struct {
+	LimitBytes   int64
+	CurrentBytes int64
+	Source       string
+}
+
+// SystemMemoryAvailable returns the operating system's current host-memory
+// availability when the platform has a defensible reading.
+func SystemMemoryAvailable(ctx context.Context) (int64, string, bool) {
+	return systemMemoryAvailable(ctx)
+}
+
+// ContainerMemoryLimit returns an active cgroup limit and current use. A host
+// without an effective container limit returns ok=false.
+func ContainerMemoryLimit() (ContainerMemory, bool) {
+	return containerMemoryLimit()
 }

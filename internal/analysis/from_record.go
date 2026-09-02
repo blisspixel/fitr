@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	capacityevidence "github.com/blisspixel/fitr/internal/capacity"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/record"
@@ -226,13 +227,14 @@ func timingAcquisition(results []eval.SpeedResult) Acquisition {
 }
 
 func capacityFrom(result *record.Record, identityUnbound bool) Capacity {
+	capacity := capacityPlanFrom(result)
 	memory := result.Memory
 	if !result.TaskPlan.Memory || memory.RequestedCtx <= 0 {
-		return Capacity{}
+		return capacity
 	}
 	allocation, verified := memory.VerifiedAllocationAt(memory.RequestedCtx)
 	if !verified {
-		return Capacity{}
+		return capacity
 	}
 	status := StatusAvailable
 	supports := []SupportClaim{ClaimExactContextResidentBytes}
@@ -240,12 +242,128 @@ func capacityFrom(result *record.Record, identityUnbound bool) Capacity {
 		status = StatusDescriptiveOnly
 		supports = nil
 	}
-	return Capacity{Resident: &ResidentObservation{
+	capacity.Resident = &ResidentObservation{
 		Estimate: int64Pointer(allocation.ResidentBytes), Unit: UnitBytes,
 		Status: status, Acquisition: AcquisitionRuntimeAllocation,
 		RequestedContext: memory.RequestedCtx, EffectiveContext: cloneInt(memory.EffectiveCtx),
 		Supports: supports,
-	}, Placement: placementFrom(allocation, status, identityUnbound || len(result.Contamination) > 0)}
+	}
+	capacity.Placement = placementFrom(allocation, status, identityUnbound || len(result.Contamination) > 0)
+	capacity.Budget = capacityBudgetFrom(result.CapacityPlan, allocation.ResidentBytes, status)
+	return capacity
+}
+
+func capacityPlanFrom(result *record.Record) Capacity {
+	if result == nil || result.CapacityPlan == nil {
+		return Capacity{}
+	}
+	plan := result.CapacityPlan
+	policy := plan.Policy
+	prediction := plan.Prediction
+	policyStatus := StatusDescriptiveOnly
+	policySupports := []SupportClaim{ClaimSealedCapacityPolicy}
+	if policy.UsableBudgetBytes != nil {
+		policyStatus = StatusAvailable
+	}
+	predictionStatus := StatusUnavailable
+	var predictionSupports []SupportClaim
+	if prediction.State == capacityevidence.PredictionComponentProjection {
+		predictionStatus = StatusAvailable
+		predictionSupports = []SupportClaim{ClaimProjectedCapacityComponents}
+	}
+	return Capacity{
+		Policy: &CapacityPolicyObservation{
+			ResourceDomain:         string(policy.ResourceDomain),
+			AddressableBytes:       observationBytes(policy.Addressable),
+			AddressableSource:      observationSource(policy.Addressable),
+			CurrentAvailableBytes:  observationBytes(policy.CurrentAvailable),
+			CurrentAvailableSource: observationSource(policy.CurrentAvailable),
+			CurrentAvailableAt:     observationTime(policy.CurrentAvailable),
+			ContainerHeadroomBytes: containerHeadroom(policy.Container),
+			ContainerSource:        containerSource(policy.Container),
+			OperatorReserveBytes:   cloneInt64(policy.OperatorReserveBytes),
+			UsableBudgetBytes:      cloneInt64(policy.UsableBudgetBytes),
+			Formula:                string(policy.Formula), SwapPolicy: string(policy.Swap),
+			Status: policyStatus, Supports: policySupports,
+		},
+		Prediction: &CapacityPredictionObservation{
+			CreatedAt: prediction.CreatedAt, RequestedContext: prediction.RequestedContext,
+			Architecture: prediction.Architecture, KVDataType: prediction.KVDataType,
+			ArtifactBytes: cloneInt64(prediction.ArtifactBytes), KVBytes: cloneInt64(prediction.KVBytes),
+			KnownComponentBytes: cloneInt64(prediction.KnownComponentBytes),
+			PlacementAssumption: prediction.PlacementAssumption,
+			Missing:             append([]string(nil), prediction.Missing...),
+			Excluded:            append([]string(nil), prediction.Excluded...),
+			Status:              predictionStatus, Supports: predictionSupports,
+		},
+		Budget: capacityBudgetFrom(plan, 0, StatusUnavailable),
+	}
+}
+
+func capacityBudgetFrom(plan *capacityevidence.Plan, residentBytes int64,
+	residentStatus ObservationStatus) *CapacityBudgetObservation {
+	if plan == nil || plan.Policy.UsableBudgetBytes == nil {
+		return nil
+	}
+	budget := *plan.Policy.UsableBudgetBytes
+	observation := &CapacityBudgetObservation{
+		State: CapacityBudgetUnresolved, BudgetBytes: budget,
+		Status: StatusUnavailable, Acquisition: AcquisitionMixed,
+	}
+	if residentBytes <= 0 {
+		return observation
+	}
+	observation.ObservedBytes = int64Pointer(residentBytes)
+	headroom := budget - residentBytes
+	observation.HeadroomBytes = &headroom
+	observation.Status = residentStatus
+	if residentBytes <= budget {
+		observation.State = CapacityBudgetFit
+		if residentStatus == StatusAvailable {
+			observation.Supports = []SupportClaim{ClaimSafeBudgetFit, ClaimCapacityHeadroom, ClaimFit}
+		}
+		return observation
+	}
+	observation.State = CapacityBudgetExceeded
+	if residentStatus == StatusAvailable {
+		observation.Supports = []SupportClaim{ClaimSafeBudgetExceeded, ClaimCapacityHeadroom}
+	}
+	return observation
+}
+
+func observationBytes(observation *capacityevidence.MemoryObservation) *int64 {
+	if observation == nil {
+		return nil
+	}
+	return int64Pointer(observation.Bytes)
+}
+
+func observationSource(observation *capacityevidence.MemoryObservation) string {
+	if observation == nil {
+		return ""
+	}
+	return observation.Source
+}
+
+func observationTime(observation *capacityevidence.MemoryObservation) string {
+	if observation == nil {
+		return ""
+	}
+	return observation.ObservedAt
+}
+
+func containerHeadroom(observation *capacityevidence.ContainerReceipt) *int64 {
+	if observation == nil {
+		return nil
+	}
+	return int64Pointer(observation.HeadroomBytes)
+}
+
+func containerSource(observation *capacityevidence.ContainerReceipt) string {
+	if observation == nil {
+		return ""
+	}
+	return observation.Source
 }
 
 func placementFrom(allocation eval.VerifiedAllocation, status ObservationStatus,
@@ -339,9 +457,16 @@ func cacheEligibility(results []eval.SpeedResult, receipt cacheReceipt) cacheSta
 }
 
 func gapsFrom(result *record.Record, report Report, displayOnly displayOnlyReason) []EvidenceGap {
-	gaps := []EvidenceGap{gap(GapCapacityPolicyUnsealed, "capacity",
-		"no sealed usable-capacity policy exists, so resident bytes cannot establish headroom or fit",
-		ClaimCapacityHeadroom, ClaimFit)}
+	var gaps []EvidenceGap
+	if result.CapacityPlan == nil {
+		gaps = append(gaps, gap(GapCapacityPolicyUnsealed, "capacity",
+			"no pre-observation capacity plan was sealed, so resident bytes cannot establish headroom or fit",
+			ClaimSealedCapacityPolicy, ClaimCapacityHeadroom, ClaimFit))
+	} else if result.CapacityPlan.Policy.UsableBudgetBytes == nil {
+		gaps = append(gaps, gap(GapCapacityBudgetUnavailable, "capacity",
+			"the sealed plan preserves capacity and availability facts but no operator budget or reserve defines usable capacity",
+			ClaimSafeBudgetFit, ClaimCapacityHeadroom, ClaimFit))
+	}
 	switch displayOnly {
 	case displayOnlyIdentity:
 		gaps = append(gaps, gap(GapModelIdentityUnbound, "artifact",
@@ -648,6 +773,14 @@ func int64Pointer(value int64) *int64       { return &value }
 func intPointer(value int) *int             { return &value }
 
 func cloneInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneInt64(value *int64) *int64 {
 	if value == nil {
 		return nil
 	}

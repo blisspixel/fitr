@@ -518,6 +518,46 @@ func TestResultMarksDescriptiveOnlyEvidenceBeforeItsValueCanBeMistakenForAClaim(
 	}
 }
 
+func TestResultShowsCapacityPolicyBesideObservedBudgetOutcome(t *testing.T) {
+	snapshot := testSnapshot()
+	run := &snapshot.History[0]
+	markFullMetricsPresent(run)
+	run.MemoryGB, run.ResidentContext = 19, 32768
+	available, budget, components := int64(23<<30), int64(20<<30), int64(18<<30)
+	resident, headroom := int64(19<<30), int64(1<<30)
+	run.Analysis = &analysis.Report{Capacity: analysis.Capacity{
+		Policy: &analysis.CapacityPolicyObservation{
+			ResourceDomain: "accelerator_memory", CurrentAvailableBytes: &available,
+			CurrentAvailableSource: "nvidia-smi memory.free", CurrentAvailableAt: "2026-09-01T12:00:00Z",
+			UsableBudgetBytes: &budget,
+			Formula:           "operator_budget", SwapPolicy: "excluded", Status: analysis.StatusAvailable,
+		},
+		Prediction: &analysis.CapacityPredictionObservation{
+			RequestedContext: 32768, KnownComponentBytes: &components, Status: analysis.StatusAvailable,
+		},
+		Resident: &analysis.ResidentObservation{
+			Estimate: &resident, RequestedContext: 32768, Status: analysis.StatusAvailable,
+		},
+		Budget: &analysis.CapacityBudgetObservation{
+			State: analysis.CapacityBudgetFit, BudgetBytes: budget, ObservedBytes: &resident,
+			HeadroomBytes: &headroom, Status: analysis.StatusAvailable,
+		},
+	}}
+	state := NewState(snapshot)
+	state.View, state.Width, state.Height = ViewResult, 100, 40
+	state.Selected[ViewResult] = run.ID
+	plain := Render(state, DefaultGlyphs(false)).Plain()
+	for _, want := range []string{
+		"capacity", "safe budget", "20.00 GiB", "available", "nvidia-smi memory.free",
+		"observed", "2026-09-01T12:00:00Z",
+		"pre-load", "not a fit claim", "resident", "budget", "FIT", "headroom +1.00 GiB",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("capacity result lost %q:\n%s", want, plain)
+		}
+	}
+}
+
 func TestRenderCompatibleComparisonAndFooterModes(t *testing.T) {
 	state := NewState(testSnapshot())
 	state.View, state.Width, state.Height = ViewHistory, 100, 24

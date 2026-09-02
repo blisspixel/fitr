@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +106,8 @@ type runFlags struct {
 	seedSet                 *string
 	pull, html              *bool
 	numCtx                  *int
+	capacityBudgetGB        *float64
+	capacityReserveGB       *float64
 	allowUnsafeExec         *bool
 	verbose                 *bool
 	quiet                   countFlag
@@ -131,6 +134,10 @@ func newRunFlagSet(supplied render.Display) (*flag.FlagSet, *runFlags) {
 		"(Ollama; supports hf.co/... and pasted Hugging Face URLs)")
 	flags.html = fs.Bool("html", false, "write a self-contained HTML artifact next to the JSON")
 	flags.numCtx = fs.Int("ctx", 0, "request context (default 8192). Apply an advise num_ctx remedy here.")
+	flags.capacityBudgetGB = fs.Float64("capacity-budget-gb", -1,
+		"seal an operator-supplied safe memory budget; never inferred from nominal capacity")
+	flags.capacityReserveGB = fs.Float64("capacity-reserve-gb", -1,
+		"subtract an explicit reserve from current available memory and seal the exact formula")
 	flags.allowUnsafeExec = fs.Bool("allow-unsafe-exec", false,
 		"run unisolated built-in executable diagnostics; observations remain INCONCLUSIVE")
 	fs.Var(&flags.quiet, "q", "quiet level")
@@ -154,6 +161,9 @@ func validateRunFlags(fs *flag.FlagSet, flags *runFlags, reportError func(string
 	if *flags.numCtx < 0 {
 		reportError("invalid context size", "--ctx cannot be negative", "omit --ctx for the default, or pass a positive token count")
 		return exitUsage, false
+	}
+	if code, ok := validateCapacityFlags(flags, reportError); !ok {
+		return code, false
 	}
 	if selectedRunLevels(*flags.quick, *flags.full, *flags.checksOnly) > 1 {
 		reportError("choose one run level", "--quick, --full, and --checks-only are mutually exclusive", "")
@@ -183,8 +193,42 @@ func buildRunCommand(model string, flags *runFlags, level string, reps int) runC
 			level: level, profile: *flags.profileName, seedSet: *flags.seedSet,
 			reps: reps, checksReps: generatedCheckRepeats(level, *flags.repeats, reps),
 			numCtx: *flags.numCtx, allowUnsafeExec: *flags.allowUnsafeExec,
+			capacityBudgetGB:  optionalPositiveFloat(*flags.capacityBudgetGB),
+			capacityReserveGB: optionalNonnegativeFloat(*flags.capacityReserveGB),
 		},
 	}
+}
+
+func validateCapacityFlags(flags *runFlags, reportError func(string, string, string)) (int, bool) {
+	budget, reserve := *flags.capacityBudgetGB, *flags.capacityReserveGB
+	if math.IsNaN(budget) || math.IsInf(budget, 0) || budget == 0 || (budget < 0 && budget != -1) {
+		reportError("invalid capacity budget", "--capacity-budget-gb must be positive", "omit it when no safe budget is declared")
+		return exitUsage, false
+	}
+	if math.IsNaN(reserve) || math.IsInf(reserve, 0) || (reserve < 0 && reserve != -1) {
+		reportError("invalid capacity reserve", "--capacity-reserve-gb must be zero or positive", "omit it when no reserve policy is declared")
+		return exitUsage, false
+	}
+	if budget >= 0 && reserve >= 0 {
+		reportError("choose one capacity policy", "--capacity-budget-gb and --capacity-reserve-gb are mutually exclusive",
+			"supply a final safe budget, or derive one from current availability and a reserve")
+		return exitUsage, false
+	}
+	return exitOK, true
+}
+
+func optionalPositiveFloat(value float64) *float64 {
+	if value <= 0 {
+		return nil
+	}
+	return &value
+}
+
+func optionalNonnegativeFloat(value float64) *float64 {
+	if value < 0 {
+		return nil
+	}
+	return &value
 }
 
 func selectedRunLevels(quick, full, checks bool) int {
@@ -560,6 +604,9 @@ func (run *runExecution) stopAll() error {
 func (run *runExecution) verifyContextAndSeal() error {
 	if err := run.stopAll(); err != nil {
 		return fmt.Errorf("establish clean runtime state: %w", err)
+	}
+	if err := run.prepareCapacityPlan(); err != nil {
+		return fmt.Errorf("seal capacity plan: %w", err)
 	}
 	receipt, err := run.observeContext()
 	if err != nil {

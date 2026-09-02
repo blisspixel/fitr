@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blisspixel/fitr/internal/capacity"
 	"github.com/blisspixel/fitr/internal/eval"
 )
 
@@ -631,6 +632,7 @@ type RunManifest struct {
 	Executor                *eval.ExecutorReceipt `json:"executor,omitempty"`
 	TaskPlan                TaskPlan              `json:"task_plan"`
 	Experiment              *ExperimentBinding    `json:"experiment,omitempty"`
+	CapacityPlan            *capacity.Plan        `json:"capacity_plan,omitempty"`
 	SeedSet                 string                `json:"seedset"`
 	Repeats                 int                   `json:"repeats"`
 	NumCtx                  int                   `json:"num_ctx"`
@@ -696,7 +698,8 @@ func (r *Record) attachManifest(identity ModelIdentity, executor *eval.ExecutorR
 		Model: identity, DeviceKey: r.DeviceKey, Profile: r.Profile,
 		Level: r.Level, ExecutionPolicy: r.ExecutionPolicy, TaskPlan: r.TaskPlan,
 		Experiment: cloneExperimentBinding(r.Experiment), Executor: executor,
-		SeedSet: r.SeedSet, Repeats: r.Repeats,
+		CapacityPlan: capacity.ClonePlan(r.CapacityPlan),
+		SeedSet:      r.SeedSet, Repeats: r.Repeats,
 		NumCtx: r.ContextSize(), Provenance: receipt,
 	}
 	if schema == RunManifestSchema && r.DeviceV2 != nil {
@@ -863,6 +866,14 @@ func (m RunManifest) validateOptionalReceipts() error {
 			return fmt.Errorf("run manifest experiment: %w", err)
 		}
 	}
+	if m.CapacityPlan != nil {
+		if err := m.CapacityPlan.Validate(); err != nil {
+			return fmt.Errorf("run manifest capacity plan: %w", err)
+		}
+		if !m.TaskPlan.Memory {
+			return errors.New("run manifest has a capacity plan without a memory probe")
+		}
+	}
 	return nil
 }
 
@@ -982,6 +993,8 @@ func (r *Record) validateManifestRecordFields() error {
 		return errors.New("record task plan differs from its manifest")
 	case !reflect.DeepEqual(r.Experiment, m.Experiment):
 		return errors.New("record experiment binding differs from its manifest")
+	case !reflect.DeepEqual(r.CapacityPlan, m.CapacityPlan):
+		return errors.New("record capacity plan differs from its manifest")
 	case r.SeedSet != m.SeedSet:
 		return errors.New("record seed set differs from its manifest")
 	case r.Repeats != m.Repeats:

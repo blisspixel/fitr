@@ -154,7 +154,7 @@ operator supplies a safe budget or a runtime receipt proves one loaded point.
 | Platform | Source | Kind |
 |---|---|---|
 | NVIDIA discrete | `nvidia-smi` total, and free where a contention caveat applies | measured |
-| NVIDIA GB10 / Thor on Linux | `/proc/meminfo` `MemTotal` | measured addressable pool, not safe free budget |
+| NVIDIA GB10 / Thor on Linux | `/proc/meminfo` `MemTotal` and timestamped `MemAvailable` | measured addressable pool plus transient availability, not an implicit safe budget |
 | AMD or Intel dedicated memory on Linux | `drm sysfs` | measured |
 | AMD or Intel integrated whole-system fallback | system RAM | measured addressable pool, not safe free budget |
 | Apple Silicon, limit set | `iogpu.wired_limit_mb` | measured |
@@ -176,7 +176,7 @@ of installed RAM as an unconditional model budget.
 | Command | Does |
 |---|---|
 | `fitr` | installed inventory: measured / unproven / incompatible / stale, fit windows, and the one thing to do next on each row |
-| `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N]` | measure a model; checks-only runs the generated battery for calibration |
+| `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N] [--capacity-budget-gb N\|--capacity-reserve-gb N]` | measure a model; optionally seal an explicit safe-capacity policy before loading; checks-only runs the generated battery for calibration |
 | `fitr [model]` / `fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]` | no model: inventory. With a model: does it fit, and if not, which flag to try |
 | `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
@@ -240,6 +240,15 @@ Ctrl-C is safe (exit 130).
   configurations with the same `--ctx`, then compare them. The current CLI
   selects the newest exact named result; use History to select a specific
   saved pair.
+- `--capacity-budget-gb N` (run) seals the operator's final safe memory
+  budget before the allocation probe. It does not derive that budget from a
+  device name, nominal capacity, or current free memory.
+- `--capacity-reserve-gb N` (run) seals current availability, its source and
+  observation time, then subtracts the exact operator reserve. If a process
+  container has less headroom, the formula uses the smaller base. Zero is a
+  valid explicit reserve. This flag is mutually exclusive with
+  `--capacity-budget-gb`. Swap is excluded. Platforms without a defensible
+  current-availability reading require the explicit budget form.
 - `--load` (advise) loads an Ollama model and reads `/api/ps` so fit includes
   the live resident allocation, including runtime-managed memory beyond
   modeled weights and KV. It requires an explicit `--ctx`; compatibility is
@@ -429,6 +438,34 @@ good loaded responsiveness while paying a large runtime-unloaded startup cost.
 - **Weights** and **KV** are derived from artifact metadata. The remainder of
   observed resident allocation is labeled as other resident memory, not as a
   directly measured compute-buffer component.
+
+### Capacity policy for a run
+
+When the memory probe is planned, a new run creates a versioned capacity plan
+before the runtime allocation is observed. The plan keeps these facts apart:
+
+| Fact | Meaning |
+|---|---|
+| Addressable | Memory the selected resource domain can address |
+| Available now | A timestamped transient operating-system or device reading |
+| Container headroom | The remaining process-memory allowance when measurable |
+| Operator budget | A final safe limit supplied with `--capacity-budget-gb` |
+| Operator reserve | Bytes subtracted from current availability with `--capacity-reserve-gb` |
+| Component projection | Artifact bytes plus conventional KV arithmetic before load |
+| Observed resident | Runtime allocation at the verified memory-probe context |
+
+The exact formula is either `operator_budget`,
+`current_available-operator_reserve`, or
+`min(current_available,container_headroom)-operator_reserve`. Availability
+without an operator choice remains an unresolved budget. Artifact plus KV is
+marked as a component projection because runtime buffers, mappings, allocator
+overhead, in-flight peaks, and placement are not yet observed. It cannot prove
+fit or failure.
+
+`FIT` or `EXCEEDED` appears only when an exact-context resident allocation can
+be compared with the sealed usable budget. Headroom is the signed difference
+between those two values. Older records remain readable, but they retain an
+explicit capacity-policy gap rather than receiving a budget retroactively.
 
 The footprint check requests a 32K load probe. It is scored only when the
 runtime receipt confirms that the effective context is exactly 32K. If the

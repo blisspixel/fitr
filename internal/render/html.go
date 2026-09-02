@@ -161,6 +161,7 @@ type htmlData struct {
 	RuntimeLoad         string
 	LoadedCacheHitTTFT  string
 	Resident            string
+	CapacityFacts       []htmlKV
 	Accelerator         string
 	NonAccelerator      string
 	PlacementNote       string
@@ -271,12 +272,15 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 </table>
 {{end}}
 
-{{if .Resident}}
+{{if or .Resident .CapacityFacts}}
 <h2>Capacity</h2>
 <table>
+{{range .CapacityFacts}}<tr><th class="k">{{.K}}</th><td>{{.V}}</td></tr>{{end}}
+{{if .Resident}}
 <tr><th class="k">resident</th><td>{{.Resident}}</td></tr>
 {{if .Accelerator}}<tr><th class="k">runtime-attributed accelerator</th><td>{{.Accelerator}}</td></tr>{{end}}
 {{if .NonAccelerator}}<tr><th class="k">non-accelerator</th><td>{{.NonAccelerator}}</td></tr>{{end}}
+{{end}}
 </table>
 {{if .PlacementNote}}<p class="sub">{{.PlacementNote}}</p>{{end}}
 {{end}}
@@ -345,6 +349,7 @@ func htmlDataFrom(a Artifact) htmlData {
 					analysis.AcquisitionLabel(placement.Acquisition) + ". " + d.PlacementNote
 			}
 		}
+		d.CapacityFacts = htmlCapacityFacts(a.Meta.Analysis.Capacity)
 	}
 	d.Decode, d.Prefill, d.TTFT = htmlPerformance(a.Meta, g)
 	d.Resident = htmlCapacity(a.Meta)
@@ -358,6 +363,57 @@ func htmlDataFrom(a Artifact) htmlData {
 		}
 	}
 	return d
+}
+
+func htmlCapacityFacts(capacity analysis.Capacity) []htmlKV {
+	var facts []htmlKV
+	if policy := capacity.Policy; policy != nil {
+		facts = append(facts, htmlKV{K: "resource domain", V: strings.ReplaceAll(policy.ResourceDomain, "_", " ")})
+		facts = appendHTMLBytes(facts, "addressable", policy.AddressableBytes, policy.AddressableSource)
+		availableSource := policy.CurrentAvailableSource
+		if policy.CurrentAvailableAt != "" {
+			availableSource += "; observed " + policy.CurrentAvailableAt
+		}
+		facts = appendHTMLBytes(facts, "available now", policy.CurrentAvailableBytes, availableSource)
+		facts = appendHTMLBytes(facts, "container headroom", policy.ContainerHeadroomBytes, policy.ContainerSource)
+		facts = appendHTMLBytes(facts, "operator reserve", policy.OperatorReserveBytes, "")
+		if policy.UsableBudgetBytes != nil {
+			facts = appendHTMLBytes(facts, "safe budget", policy.UsableBudgetBytes,
+				policy.Formula+"; swap "+policy.SwapPolicy)
+		} else {
+			facts = append(facts, htmlKV{K: "safe budget", V: "unresolved; no operator budget or reserve; swap " + policy.SwapPolicy})
+		}
+	}
+	if prediction := capacity.Prediction; prediction != nil && prediction.KnownComponentBytes != nil {
+		value := fmt.Sprintf("%.2f GiB at requested %s; component projection only",
+			float64(*prediction.KnownComponentBytes)/(1024*1024*1024),
+			residentContextLabel(prediction.RequestedContext))
+		if len(prediction.Excluded) > 0 {
+			value += "; excludes " + strings.Join(prediction.Excluded, "; ")
+		}
+		facts = append(facts, htmlKV{K: "pre-load components", V: value})
+	}
+	if budget := capacity.Budget; budget != nil && budget.State != analysis.CapacityBudgetUnresolved &&
+		budget.HeadroomBytes != nil {
+		label := "FIT"
+		if budget.State == analysis.CapacityBudgetExceeded {
+			label = "EXCEEDED"
+		}
+		facts = append(facts, htmlKV{K: "safe-budget result", V: fmt.Sprintf("%s; headroom %+.2f GiB",
+			label, float64(*budget.HeadroomBytes)/(1024*1024*1024))})
+	}
+	return facts
+}
+
+func appendHTMLBytes(facts []htmlKV, label string, value *int64, source string) []htmlKV {
+	if value == nil {
+		return facts
+	}
+	text := fmt.Sprintf("%.2f GiB", float64(*value)/(1024*1024*1024))
+	if strings.TrimSpace(source) != "" {
+		text += " (" + source + ")"
+	}
+	return append(facts, htmlKV{K: label, V: text})
 }
 
 func htmlAnalysisObservation(observation analysis.PerformanceObservation, g glyphs) string {

@@ -69,6 +69,10 @@ const (
 	ClaimExactContextAcceleratorBytes SupportClaim = "exact_context_accelerator_bytes"
 	ClaimExactContextPlacement        SupportClaim = "exact_context_allocation_placement"
 	ClaimStablePerformance            SupportClaim = "stable_performance"
+	ClaimSealedCapacityPolicy         SupportClaim = "sealed_capacity_policy"
+	ClaimProjectedCapacityComponents  SupportClaim = "projected_capacity_components"
+	ClaimSafeBudgetFit                SupportClaim = "safe_budget_fit"
+	ClaimSafeBudgetExceeded           SupportClaim = "safe_budget_exceeded"
 	ClaimCapacityHeadroom             SupportClaim = "capacity_headroom"
 	ClaimFit                          SupportClaim = "fit"
 )
@@ -150,8 +154,61 @@ type PlacementObservation struct {
 }
 
 type Capacity struct {
-	Resident  *ResidentObservation  `json:"resident,omitempty"`
-	Placement *PlacementObservation `json:"placement,omitempty"`
+	Resident   *ResidentObservation           `json:"resident,omitempty"`
+	Placement  *PlacementObservation          `json:"placement,omitempty"`
+	Policy     *CapacityPolicyObservation     `json:"policy,omitempty"`
+	Prediction *CapacityPredictionObservation `json:"prediction,omitempty"`
+	Budget     *CapacityBudgetObservation     `json:"budget,omitempty"`
+}
+
+type CapacityPolicyObservation struct {
+	ResourceDomain         string            `json:"resource_domain"`
+	AddressableBytes       *int64            `json:"addressable_bytes,omitempty"`
+	AddressableSource      string            `json:"addressable_source,omitempty"`
+	CurrentAvailableBytes  *int64            `json:"current_available_bytes,omitempty"`
+	CurrentAvailableSource string            `json:"current_available_source,omitempty"`
+	CurrentAvailableAt     string            `json:"current_available_at,omitempty"`
+	ContainerHeadroomBytes *int64            `json:"container_headroom_bytes,omitempty"`
+	ContainerSource        string            `json:"container_source,omitempty"`
+	OperatorReserveBytes   *int64            `json:"operator_reserve_bytes,omitempty"`
+	UsableBudgetBytes      *int64            `json:"usable_budget_bytes,omitempty"`
+	Formula                string            `json:"formula,omitempty"`
+	SwapPolicy             string            `json:"swap_policy"`
+	Status                 ObservationStatus `json:"status"`
+	Supports               []SupportClaim    `json:"supports,omitempty"`
+}
+
+type CapacityPredictionObservation struct {
+	CreatedAt           string            `json:"created_at"`
+	RequestedContext    int               `json:"requested_context"`
+	Architecture        string            `json:"architecture,omitempty"`
+	KVDataType          string            `json:"kv_data_type,omitempty"`
+	ArtifactBytes       *int64            `json:"artifact_bytes,omitempty"`
+	KVBytes             *int64            `json:"kv_bytes,omitempty"`
+	KnownComponentBytes *int64            `json:"known_component_bytes,omitempty"`
+	PlacementAssumption string            `json:"placement_assumption"`
+	Missing             []string          `json:"missing,omitempty"`
+	Excluded            []string          `json:"excluded"`
+	Status              ObservationStatus `json:"status"`
+	Supports            []SupportClaim    `json:"supports,omitempty"`
+}
+
+type CapacityBudgetState string
+
+const (
+	CapacityBudgetFit        CapacityBudgetState = "observed_fit"
+	CapacityBudgetExceeded   CapacityBudgetState = "observed_exceeded"
+	CapacityBudgetUnresolved CapacityBudgetState = "unresolved"
+)
+
+type CapacityBudgetObservation struct {
+	State         CapacityBudgetState `json:"state"`
+	BudgetBytes   int64               `json:"budget_bytes"`
+	ObservedBytes *int64              `json:"observed_bytes,omitempty"`
+	HeadroomBytes *int64              `json:"headroom_bytes,omitempty"`
+	Status        ObservationStatus   `json:"status"`
+	Acquisition   Acquisition         `json:"acquisition"`
+	Supports      []SupportClaim      `json:"supports,omitempty"`
 }
 
 type GapCode string
@@ -176,6 +233,7 @@ const (
 	GapResidentContextAdjusted        GapCode = "capacity.resident_context_adjusted"
 	GapPlacementUnavailable           GapCode = "capacity.placement_unavailable"
 	GapCapacityPolicyUnsealed         GapCode = "capacity.policy_unsealed"
+	GapCapacityBudgetUnavailable      GapCode = "capacity.safe_budget_unavailable"
 	GapModelIdentityUnbound           GapCode = "artifact.identity_unbound"
 	GapStorageUnreconciled            GapCode = "artifact.storage_unreconciled"
 )
@@ -217,6 +275,8 @@ func GapLabel(code GapCode) string {
 		return "allocation attribution"
 	case GapCapacityPolicyUnsealed:
 		return "usable capacity"
+	case GapCapacityBudgetUnavailable:
+		return "safe capacity budget"
 	case GapModelIdentityUnbound:
 		return "artifact identity"
 	case GapStorageUnreconciled:

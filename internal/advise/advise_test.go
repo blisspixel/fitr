@@ -2,6 +2,7 @@ package advise
 
 import (
 	"bytes"
+	"math"
 	"strings"
 	"testing"
 
@@ -342,6 +343,41 @@ func TestArchFromKVsQwen3MoE(t *testing.T) {
 func TestArchFromKVsEmptyIsNotReady(t *testing.T) {
 	if ArchFromKVs(nil).KVReady() || ArchFromKVs(map[string]any{}).KVReady() {
 		t.Fatal("empty metadata must not look KV-ready")
+	}
+}
+
+func TestProjectKVBytesUsesDeclaredArchitectureAndContext(t *testing.T) {
+	arch := Arch{Blocks: 2, KVHeads: 4, KeyLength: 8, ValLength: 8}
+	got, ok := ProjectKVBytes(arch, 1024, 2)
+	if !ok {
+		t.Fatal("ProjectKVBytes unexpectedly unavailable")
+	}
+	const want = int64(2 * (4*8 + 4*8) * 2 * 1024)
+	if got != want {
+		t.Fatalf("ProjectKVBytes = %d, want %d", got, want)
+	}
+}
+
+func TestProjectKVBytesRefusesIncompleteOrUnsupportedInputs(t *testing.T) {
+	ready := Arch{Blocks: 2, KVHeads: 4, KeyLength: 8, ValLength: 8}
+	tests := []struct {
+		name string
+		arch Arch
+		ctx  int
+		elem float64
+	}{
+		{name: "hybrid", arch: Arch{Hybrid: true, Blocks: 2, KVHeads: 4, KeyLength: 8}, ctx: 1024, elem: 2},
+		{name: "missing metadata", arch: Arch{}, ctx: 1024, elem: 2},
+		{name: "zero context", arch: ready, ctx: 0, elem: 2},
+		{name: "unknown element size", arch: ready, ctx: 1024, elem: 0},
+		{name: "overflow", arch: Arch{Blocks: math.MaxInt, KVHeads: math.MaxInt, KeyLength: math.MaxInt}, ctx: math.MaxInt, elem: math.MaxFloat64},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, ok := ProjectKVBytes(tc.arch, tc.ctx, tc.elem); ok || got != 0 {
+				t.Fatalf("ProjectKVBytes = %d, %v; want unavailable", got, ok)
+			}
+		})
 	}
 }
 

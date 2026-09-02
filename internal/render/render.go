@@ -735,17 +735,31 @@ func (d *textDisplay) descriptiveReceipt(w io.Writer, observation analysis.Perfo
 }
 
 func (d *textDisplay) resultCapacity(w io.Writer, m Meta, width int) {
+	var capacityReport *analysis.Capacity
+	if m.Analysis != nil {
+		capacityReport = &m.Analysis.Capacity
+	}
+	if m.ResidentGB <= 0 && (capacityReport == nil ||
+		capacityReport.Policy == nil && capacityReport.Prediction == nil) {
+		return
+	}
+	fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "capacity"))
+	if capacityReport != nil && capacityReport.Policy != nil {
+		d.resultCapacityPolicy(w, capacityReport.Policy, width)
+	}
+	if capacityReport != nil && capacityReport.Prediction != nil {
+		d.resultCapacityPrediction(w, capacityReport.Prediction, width)
+	}
 	if m.ResidentGB > 0 {
-		fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "capacity"))
 		fmt.Fprintf(w, "  %-8s %.2f GB after requested %s load probe\n", "resident", m.ResidentGB,
 			residentContextLabel(m.ResidentContext))
-		if m.Analysis != nil && m.Analysis.Capacity.Resident != nil &&
-			m.Analysis.Capacity.Resident.Status == analysis.StatusDescriptiveOnly {
+		if capacityReport != nil && capacityReport.Resident != nil &&
+			capacityReport.Resident.Status == analysis.StatusDescriptiveOnly {
 			d.footer(w, "descriptive only; source "+analysis.AcquisitionLabel(
-				m.Analysis.Capacity.Resident.Acquisition), width, 2, 4, d.pal.Muted)
+				capacityReport.Resident.Acquisition), width, 2, 4, d.pal.Muted)
 		}
-		if m.Analysis != nil && m.Analysis.Capacity.Placement != nil {
-			placement := m.Analysis.Capacity.Placement
+		if capacityReport != nil && capacityReport.Placement != nil {
+			placement := capacityReport.Placement
 			const gib = 1024 * 1024 * 1024
 			fmt.Fprintf(w, "  %-18s %.2f GB (%.1f%% of runtime allocation)\n", "runtime accelerator",
 				float64(placement.AcceleratorBytes)/gib, placement.AcceleratorPercent)
@@ -754,6 +768,82 @@ func (d *textDisplay) resultCapacity(w io.Writer, m Meta, width int) {
 			d.footer(w, placement.Boundary, width, 2, 4, d.pal.Muted)
 		}
 	}
+	if capacityReport != nil && capacityReport.Budget != nil {
+		d.resultCapacityBudget(w, capacityReport.Budget, width)
+	}
+}
+
+func (d *textDisplay) resultCapacityPolicy(w io.Writer, policy *analysis.CapacityPolicyObservation,
+	width int) {
+	fmt.Fprintf(w, "  %-18s %s\n", "resource domain", strings.ReplaceAll(policy.ResourceDomain, "_", " "))
+	capacityBytesRow(w, "addressable", policy.AddressableBytes, policy.AddressableSource)
+	capacityBytesRow(w, "available now", policy.CurrentAvailableBytes, policy.CurrentAvailableSource)
+	if policy.CurrentAvailableBytes != nil && policy.CurrentAvailableAt != "" {
+		d.footer(w, "availability observed "+policy.CurrentAvailableAt, width, 2, 4, d.pal.Muted)
+	}
+	capacityBytesRow(w, "container headroom", policy.ContainerHeadroomBytes, policy.ContainerSource)
+	capacityBytesRow(w, "operator reserve", policy.OperatorReserveBytes, "")
+	if policy.UsableBudgetBytes != nil {
+		capacityBytesRow(w, "safe budget", policy.UsableBudgetBytes, policy.Formula)
+	} else {
+		fmt.Fprintln(w, "  safe budget        unresolved (no operator budget or reserve)")
+	}
+	d.footer(w, "swap "+policy.SwapPolicy+"; availability is a transient receipt, not device identity",
+		width, 2, 4, d.pal.Muted)
+}
+
+func (d *textDisplay) resultCapacityPrediction(w io.Writer,
+	prediction *analysis.CapacityPredictionObservation, width int) {
+	if prediction.KnownComponentBytes != nil {
+		fmt.Fprintf(w, "  %-18s %.2f GiB at requested %s\n", "pre-load components",
+			float64(*prediction.KnownComponentBytes)/(1024*1024*1024),
+			residentContextLabel(prediction.RequestedContext))
+	}
+	parts := make([]string, 0, 2)
+	if prediction.ArtifactBytes != nil {
+		parts = append(parts, fmt.Sprintf("artifact %.2f GiB", float64(*prediction.ArtifactBytes)/(1024*1024*1024)))
+	}
+	if prediction.KVBytes != nil {
+		parts = append(parts, fmt.Sprintf("KV %.2f GiB (%s)",
+			float64(*prediction.KVBytes)/(1024*1024*1024), prediction.KVDataType))
+	}
+	if len(parts) > 0 {
+		d.footer(w, strings.Join(parts, " + ")+"; component projection only", width, 2, 4, d.pal.Muted)
+	}
+	if len(prediction.Excluded) > 0 {
+		d.footer(w, "excludes "+strings.Join(prediction.Excluded, "; "), width, 2, 4, d.pal.Muted)
+	}
+}
+
+func (d *textDisplay) resultCapacityBudget(w io.Writer, budget *analysis.CapacityBudgetObservation,
+	width int) {
+	if budget.State == analysis.CapacityBudgetUnresolved || budget.ObservedBytes == nil {
+		d.footer(w, "safe-budget fit is unresolved until an exact-context allocation is observed",
+			width, 2, 4, d.pal.Muted)
+		return
+	}
+	label := "FIT"
+	style := d.pal.Pass
+	if budget.State == analysis.CapacityBudgetExceeded {
+		label, style = "EXCEEDED", d.pal.Fail
+	}
+	headroom := float64(*budget.HeadroomBytes) / (1024 * 1024 * 1024)
+	fmt.Fprintf(w, "  %-18s %s  headroom %+.2f GiB\n", "safe-budget result", d.pal.wrap(style, label), headroom)
+	if budget.Status == analysis.StatusDescriptiveOnly {
+		d.footer(w, "descriptive only because the allocation cannot support a decision claim",
+			width, 2, 4, d.pal.Muted)
+	}
+}
+
+func capacityBytesRow(w io.Writer, label string, value *int64, source string) {
+	if value == nil {
+		return
+	}
+	suffix := ""
+	if source != "" {
+		suffix = " (" + source + ")"
+	}
+	fmt.Fprintf(w, "  %-18s %.2f GiB%s\n", label, float64(*value)/(1024*1024*1024), suffix)
 }
 
 func (d *textDisplay) resultAnalysis(w io.Writer, m Meta, width int) {
@@ -937,6 +1027,9 @@ func (d *jsonDisplay) Result(sc score.Scorecard, m Meta) {
 	}
 	if m.EffectiveCtx > 0 {
 		payload["effective_ctx"] = m.EffectiveCtx
+	}
+	if m.Analysis != nil {
+		payload["analysis"] = m.Analysis
 	}
 	d.emit(payload)
 }

@@ -66,11 +66,13 @@ different evidence strength:
 |---|---|---|
 | Artifact bytes | File or runtime-listed artifact size | observed |
 | KV cache | Architecture, context, and KV dtype arithmetic | derived |
+| Addressable memory | Memory exposed for the selected resource domain | observed |
+| Current availability | Timestamped operating-system or device reading | observed now |
+| Safe budget | Explicit operator budget, or current availability minus an explicit reserve | derived from sealed policy |
 | Runtime allocation | Runtime receipt at a named context and configuration | observed |
 | Allocator projection | Versioned fitter output for its declared resource domain | projected |
 | Other resident | Runtime allocation minus artifact bytes minus modeled KV | derived remainder |
-| Capacity margin | Configured device budget minus the modeled or observed need | derived or projected |
-| Free memory | A transient live device reading | observed now, not a stored constant |
+| Safe headroom | Sealed usable budget minus exact-context observed resident allocation | derived |
 
 `other resident` is not an independently measured buffer breakdown. It can
 include runtime overhead, mappings, allocator effects, and compute buffers.
@@ -95,19 +97,34 @@ reading. The addressable pool still contains Linux, services, page cache, and
 every CPU and accelerator allocation. It is not a live free-memory receipt or
 an unconditional fit budget.
 
-Today an operator can pass a deliberately conservative planning budget with
-`--vram-gb`. That value is labeled as supplied rather than measured. An
-explicit reserve policy needs its own versioned contract: capacity source,
-reserve bytes, swap policy, container limit, observation time, and the exact
-formula producing usable bytes. fitr will not silently choose a fixed reserve
-or turn nominal sticker capacity into addressable memory.
+For advice, an operator can pass a deliberately conservative planning budget
+with `--vram-gb`. That value is labeled as supplied rather than measured. For
+a scored run, `--capacity-budget-gb` seals a final safe limit before the model
+loads. Alternatively, `--capacity-reserve-gb` seals a timestamped current
+availability reading and subtracts the declared reserve. On a constrained
+process, the smaller of current availability and container headroom becomes
+the base. Swap is explicitly excluded.
 
-The next capacity work starts with a transient current-availability receipt,
-then a safe-budget policy. On Linux unified-memory hosts,
-`/proc/meminfo` `MemAvailable` is the first candidate source, but it must retain
-its observation time and resource domain and must not be stored as a permanent
-machine property. A configured reserve, container limit, or explicit
-`--vram-gb` may produce a smaller usable budget.
+The policy schemas are `fitr.capacity.policy.v1` and
+`fitr.capacity.plan.v1`. They retain the resource domain, source, observation
+time, operator choice, container receipt when available, and exact formula.
+On Linux unified-memory hosts, current availability comes from
+`/proc/meminfo` `MemAvailable`; on Windows host or unified-memory paths it
+comes from `Win32_OperatingSystem.FreePhysicalMemory`. Dedicated accelerator
+availability uses the vendor reading when one exists. Platforms without a
+defensible current-availability source can use an explicit budget, but cannot
+derive one from a reserve.
+
+No flag silently turns addressable or nominal capacity into a safe budget.
+Current availability without an explicit operator budget or reserve remains a
+useful observation and an unresolved policy.
+
+Before allocation, the same plan seals artifact bytes and conventional KV
+arithmetic as a `component_projection`. Runtime buffers, mappings, allocator
+overhead, in-flight peaks, and runtime placement remain explicitly excluded.
+The projection is not called a lower bound and cannot establish fit or
+failure. Only an exact-context observed resident allocation compared with the
+sealed usable budget can produce `FIT`, `EXCEEDED`, and signed headroom.
 
 The second step learns `OTHER` only from matched observations. A resident
 remainder is exact-context runtime allocation minus bound artifact bytes and

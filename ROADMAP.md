@@ -47,8 +47,9 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.9.11 | Distinct latency states and exact-context runtime allocation attribution |
 | Shipped | 0.9.12 | Public Windows self-update completion and an end-to-end replacement gate |
 | Shipped | 0.10.0 | Decision specifications, typed context and configuration experiments, fresh confirmation, and the first bounded validated-work contract |
-| Current | 0.10.1 | Lowercase product language, a wide master-detail Board, exact uncertainty tokens, and README product photography from the real renderer |
-| Now | 0.10.x | Complete explain and choose: typed capacity policy, calibrated projections, direct and intervention-supported explanation, and decision-relative views |
+| Shipped | 0.10.1 | Lowercase product language, a wide master-detail Board, exact uncertainty tokens, and README product photography from the real renderer |
+| Current | 0.10.2 | Typed capacity policy, pre-observation component projections, safe-budget fit and headroom, and cross-surface capacity explanations |
+| Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported explanation, and decision-relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -62,16 +63,16 @@ the point of the version is that it is trustworthy, not that it is reached.
 
 0.10.0 establishes the decision substrate and three demanding vertical probes:
 context treatment, configuration choice with fresh confirmation, and bounded
-validated work. The next work should deepen that center rather than add
-parallel evidence paths.
+validated work. The work below deepens that center rather than adding parallel
+evidence paths.
 
-| Order | Build next | Why it comes next |
-|---:|---|---|
-| 1 | Versioned capacity policy and pre-observation prediction receipts | FIT still needs a structural distinction between addressable capacity, current availability, operator reserve, projected allocation, and observed allocation. Calibration cannot safely influence advice until the original prediction is sealed. |
-| 2 | One central analysis and decision path across CLI, TUI, HTML, and JSON | The new experiments are useful only if every surface explains the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
-| 3 | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
-| 4 | Generalized validated-work receipts and explicit evidence classes | The fixed bounded workflow has pressured the schema with real events. It should now graduate into reusable trial, verifier, retry, escalation, timing, authority, and retention contracts before more workflows are added. |
-| 5 | Model-set, soak, and serving experiments | Co-residency and operational reliability are essential, but they depend on the capacity and validated-outcome contracts above. They remain distinct experiments and never contaminate an ordinary scored run. |
+| Order | State | Build next | Why it comes next |
+|---:|---|---|---|
+| 1 | complete | Versioned capacity policy and pre-observation prediction receipts | FIT now distinguishes addressable capacity, current availability, operator reserve, component projection, observed allocation, and safe headroom. The original policy and projection are sealed before allocation. |
+| 2 | active | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
+| 3 | next | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
+| 4 | queued | Generalized validated-work receipts and explicit evidence classes | The fixed bounded workflow has pressured the schema with real events. It should now graduate into reusable trial, verifier, retry, escalation, timing, authority, and retention contracts before more workflows are added. |
+| 5 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability are essential, but they depend on the capacity and validated-outcome contracts above. They remain distinct experiments and never contaminate an ordinary scored run. |
 
 Optional OpenRouter validation can develop adversarial cases and grader
 calibration alongside this sequence. It remains experiment-scoped, explicitly
@@ -521,16 +522,16 @@ or arithmetic proxies into measured facts.
 The next capacity sequence is explicit, based on the 2026-08-30 GB10 field
 reports:
 
-1. Seal current shared-memory availability as a transient operating-system
+1. [x] Seal current shared-memory availability as a transient operating-system
    receipt with source and observation time. Test `/proc/meminfo`
    `MemAvailable`, container limits, swap policy, and an explicit operator
    reserve before allowing it to become a safe budget. Addressable total stays
    a different fact and `--vram-gb` continues to win when supplied.
-2. Learn exact-context `OTHER` from matched runtime allocation receipts.
+2. [ ] Learn exact-context `OTHER` from matched runtime allocation receipts.
    Resident remainder and sampled in-flight peak are separate observations;
    neither is guessed from a percentage. This is especially important for
    vision towers, graphs, mappings, and compute buffers.
-3. Build a model-set projection from those receipts, then require a
+3. [ ] Build a model-set projection from those receipts, then require a
    simultaneous runtime observation before claiming co-residency. Single-model
    fit never proves that a resident model, vision model, embedder, reranker,
    and audio model can share one pool.
@@ -573,7 +574,7 @@ reports:
       context.
       The output does not rename that remainder as spill, infer layer
       placement, or claim exclusive pools on unified-memory systems.
-- [ ] Version typed memory evidence and an explicit capacity policy. Keep
+- [x] Version typed memory evidence and an explicit capacity policy. Keep
       physical or addressable total, OS availability, runtime allocation,
       accelerator allocation, process residency, and allocator projection as
       different semantics and resource domains. Seal operator reserve, swap
@@ -1081,6 +1082,9 @@ These features must preserve the evidence contract.
 | 0.9.10 | Non-persistent PowerShell installs, HTML performance and capacity parity, central validated analysis, fail-closed unified-memory advice, display-only history preservation, and hardened Board actions |
 | 0.9.11 | Distinct latency states, exact-context runtime allocation attribution, scoring-policy compatibility, secure self-update, native RTX 4090 validation, and terminal evidence polish |
 | 0.9.12 | Module-independent Windows update handoff, encoded hidden helper execution, and end-to-end deferred replacement coverage |
+| 0.10.0 | Decision specifications, typed context and configuration experiments, fresh confirmation, and the first bounded validated-work contract |
+| 0.10.1 | Lowercase product language, wide master-detail Board, exact uncertainty tokens, and deterministic README product photography |
+| 0.10.2 | Typed capacity policy, timestamped availability, pre-observation component projections, observed safe-budget fit and headroom, and renderer-neutral capacity explanations |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

@@ -17,7 +17,7 @@ fitr measures those questions against the model bytes, runtime, context,
 placement, and device that produced the evidence. Missing evidence stays
 missing. An unmeasured model stays a candidate, not a recommendation.
 
-<img src="docs/assets/top.svg?v=0.10.1" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
+<img src="docs/assets/top.svg?v=0.10.2" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
 The wide Board keeps the comparable configurations, selected evidence, exact
 measurements, unresolved requirements, and one next action on one screen. The
@@ -51,7 +51,8 @@ binary, updating, and building from source are covered in the
 ```bash
 fitr                                # inventory, evidence state, one next action
 fitr qwen3:30b                      # fit advice for one model
-fitr run qwen3:30b --ctx 16384      # behavior, performance, and capacity here
+fitr run qwen3:30b --ctx 16384 --capacity-budget-gb 22
+                                      # behavior, performance, and safe-budget fit
 fitr apply qwen3:30b                # print, but do not execute, persistence steps
 fitr board                          # compare compatible measured evidence
 fitr decide qwen3:30b --spec local-coding.json
@@ -68,7 +69,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.10.1" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
+<img src="docs/assets/inventory.svg?v=0.10.2" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
 
 ## What ships today
 
@@ -76,6 +77,7 @@ requirement semantics.
 |---|---|---|
 | Inventory and fit advice | Installed artifacts, evidence freshness, projected context fit, and an exact remedy when supported evidence says a configuration does not fit | [Usage](docs/usage.md), [choosing hardware](docs/choosing-hardware.md) |
 | Local measurement | Structured output, instruction following, refusal, tool-channel behavior, degeneration, load state, TTFT, prefill, decode, context, placement, and allocation when the backend exposes them | [Design](docs/design.md), [tasks](docs/tasks.md) |
+| Capacity policy | A pre-load sealed resource domain, timestamped availability, explicit operator budget or reserve, exact usable-budget formula, component projection, and observed safe headroom | [Choosing hardware](docs/choosing-hardware.md#capacity), [usage](docs/usage.md#capacity-policy-for-a-run) |
 | Workload decisions | Constraint-based eligibility under a versioned declaration, with no universal weighted score | [Decisions](docs/decisions.md) |
 | Context experiments | A predeclared exploratory context plan with shared task seeds, point-specific allocation, required-equal factors, and replayable bundles | [Context experiment](docs/usage.md#context-experiment) |
 | Configuration tradeoffs | Conservative frontiers across sealed candidates, optional same-base conversion lineage, and no point-estimate winner when intervals overlap | [Quant experiment](docs/usage.md#quant-configuration-experiment), [calibration](docs/calibration.md) |
@@ -95,10 +97,11 @@ TRADEOFFS    Which configurations are dominated, and which remain choices?
 COVERAGE     Which declared workloads have earned local trust or need fallback?
 ```
 
-FIT, behavior, burst performance, direct receipt diagnoses, typed context and
-configuration experiments, fresh confirmation, and one bounded validated-work
-contract are implemented. Broader causal explanation, operational experiments,
-and declared workload coverage remain pre-1.0 work. The
+FIT, behavior, burst performance, typed capacity policy, direct receipt
+diagnoses, typed context and configuration experiments, fresh confirmation,
+and one bounded validated-work contract are implemented. Broader causal
+explanation, operational experiments, and declared workload coverage remain
+pre-1.0 work. The
 [roadmap](ROADMAP.md) distinguishes shipped slices from planned contracts.
 
 README screenshots are deterministic fixtures rendered through the real

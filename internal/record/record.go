@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/blisspixel/fitr/internal/capacity"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/ollama"
@@ -33,6 +34,7 @@ type Record struct {
 	ExecutionPolicy string             `json:"execution_policy,omitempty"`
 	TaskPlan        TaskPlan           `json:"task_plan,omitempty"`
 	Experiment      *ExperimentBinding `json:"experiment,omitempty"`
+	CapacityPlan    *capacity.Plan     `json:"capacity_plan,omitempty"`
 	// SeedSet names the instance set the generated checks were drawn from.
 	// Unique per run by default; pinned seed sets enable paired comparison.
 	SeedSet     string                `json:"seedset,omitempty"`
@@ -193,6 +195,17 @@ func (r *Record) validateCurrentEvidenceHeader() error {
 	}
 	if !r.TaskPlan.Memory && r.Memory != (eval.MemoryResult{}) {
 		return errors.New("unplanned memory probe contains evidence")
+	}
+	if !r.TaskPlan.Memory && r.CapacityPlan != nil {
+		return errors.New("unplanned memory probe contains a capacity plan")
+	}
+	if r.CapacityPlan != nil {
+		if err := r.CapacityPlan.Validate(); err != nil {
+			return fmt.Errorf("capacity plan: %w", err)
+		}
+		if r.CapacityPlan.Prediction.RequestedContext != r.Memory.RequestedCtx {
+			return errors.New("capacity prediction context differs from the memory probe")
+		}
 	}
 	if err := r.Memory.ValidateReceipt(); err != nil {
 		return fmt.Errorf("memory receipt: %w", err)

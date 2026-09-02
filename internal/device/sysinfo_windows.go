@@ -184,4 +184,18 @@ func nvidiaSMIName(ctx context.Context) string {
 // is COM and per-adapter, and the registry figure is a static capacity rather
 // than live state. Returning "unknown" is the honest result: the caller prints
 // no free-memory caveat rather than a fabricated one.
-func availableVRAMFallback(context.Context) (float64, bool) { return 0, false }
+func availableVRAMFallback(context.Context) (float64, string, bool) { return 0, "", false }
+
+func systemMemoryAvailable(ctx context.Context) (int64, string, bool) {
+	// FreePhysicalMemory is reported in KiB. It is named exactly rather than
+	// relabeled as MemAvailable because Windows and Linux expose different
+	// operating-system semantics.
+	raw := ps(ctx, `(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory`)
+	kib, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || kib <= 0 || kib > (1<<63-1)/1024 {
+		return 0, "", false
+	}
+	return kib * 1024, "Win32_OperatingSystem FreePhysicalMemory", true
+}
+
+func containerMemoryLimit() (ContainerMemory, bool) { return ContainerMemory{}, false }
