@@ -65,7 +65,7 @@ terminal provider status
 
 The evidence class remains `model_judged` or `external_reference`. The worker
 does not grade itself, but a second model is still a heuristic observer rather
-than ground truth. FITR should report agreement, disagreement, abstention, and
+than ground truth. fitr should report agreement, disagreement, abstention, and
 known calibration error separately from deterministic correctness.
 
 ## Development and CI

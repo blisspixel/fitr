@@ -21,7 +21,7 @@ func TestBoardPlainIsGraphicalPipeSafeAndHonest(t *testing.T) {
 	// The plain stream has no Unicode, so there is no sparkline to show. The
 	// series is not flat, so it must not claim to be: absence, not a false
 	// stability claim.
-	for _, want := range []string{"FITR BOARD", "[########]", "[####....]", "not a rankable result"} {
+	for _, want := range []string{"fitr board", "[########]", "[####....]", "not a rankable result"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("plain board missing %q:\n%s", want, got)
 		}

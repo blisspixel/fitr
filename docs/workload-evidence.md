@@ -125,7 +125,7 @@ invalid at budget   1
 Reporting latency only among successes without the complete outcome counts is
 selection bias. A p95 from a handful of cases is not useful evidence.
 
-FITR decision latency is a different metric: how long the instrument needed
+fitr decision latency is a different metric: how long the instrument needed
 to produce sealed evidence. The current `wall_s` is only battery-core wall
 time and must not be relabeled as either end-to-end run latency or workload
 time to valid result.

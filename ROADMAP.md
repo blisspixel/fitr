@@ -46,7 +46,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.9.10 | Release and installer polish, then the first renderer-neutral explanation slice |
 | Shipped | 0.9.11 | Distinct latency states and exact-context runtime allocation attribution |
 | Shipped | 0.9.12 | Public Windows self-update completion and an end-to-end replacement gate |
-| Current | 0.10.0 | Decision specifications, typed context and configuration experiments, fresh confirmation, and the first bounded validated-work contract |
+| Shipped | 0.10.0 | Decision specifications, typed context and configuration experiments, fresh confirmation, and the first bounded validated-work contract |
+| Current | 0.10.1 | Lowercase product language, a wide master-detail Board, exact uncertainty tokens, and README product photography from the real renderer |
 | Now | 0.10.x | Complete explain and choose: typed capacity policy, calibrated projections, direct and intervention-supported explanation, and decision-relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
@@ -550,6 +551,12 @@ reports:
       scorecard. It distinguishes eligible, disproven, unresolved, and blocked
       states, uses exit 4 for unresolved required evidence, and selects one
       deterministic next evidence action.
+- [x] Establish the terminal design language around lowercase `fitr`, dense
+      facts, sparse chrome, exact state vocabulary, and a 120-column
+      master-detail Board. The selected receipt keeps its requirements,
+      measurements, and next command beside the comparable configurations;
+      narrower terminals retain the one-column evidence path. README product
+      photography comes from the real renderer rather than a styled mockup.
 - [x] Separate runtime capability availability from behavioral verdicts.
       A runtime declaration is useful routing evidence but cannot enter the
       served-needs list or become a behavioral PASS. Protocol verification is

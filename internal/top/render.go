@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -113,14 +114,15 @@ func renderTinyResult(canvas *Canvas, state State) {
 
 func renderHeader(canvas *Canvas, state State, glyphs Glyphs) {
 	if canvas.Height < 2 {
-		canvas.SetLine(0, Span{Text: "fitr top", Role: RoleHeader})
+		canvas.SetLine(0, Span{Text: "fitr", Role: RoleHeader})
 		return
 	}
-	spans := []Span{{Text: " fitr top ", Role: RoleHeader}}
+	spans := []Span{{Text: " fitr ", Role: RoleHeader}}
 	for view := ViewLive; view < viewCount; view++ {
-		label := fmt.Sprintf(" %d:%s ", int(view)+1, view.String())
+		label := fmt.Sprintf(" %d %s ", int(view)+1, view.String())
 		role := RoleMuted
 		if state.View == view {
+			label = fmt.Sprintf(" [%d %s] ", int(view)+1, view.String())
 			role = RoleSelected
 		}
 		spans = append(spans, Span{Text: label, Role: role})
@@ -529,11 +531,15 @@ func renderResultVerdicts(w *lineWriter, run Run, width int) {
 }
 
 func renderBoard(canvas *Canvas, state State, glyphs Glyphs) {
-	w := contentWriter(canvas)
 	groups := VisibleBoard(state)
+	w := contentWriter(canvas)
 	if len(groups) == 0 {
 		w.line(Span{Text: "BOARD", Role: RoleHeader})
 		w.line(Span{Text: emptyFilterMessage(state), Role: RoleMuted})
+		return
+	}
+	if canvas.Width >= 120 && canvas.Height >= 22 {
+		renderWideBoard(canvas, state, glyphs, groups)
 		return
 	}
 	if !w.line(Span{Text: fmt.Sprintf("BOARD  %d comparable group(s)  sort %s%s", len(groups), state.BoardSort, filterSuffix(state.Filter)), Role: RoleHeader}) {
@@ -551,6 +557,286 @@ func renderBoard(canvas *Canvas, state State, glyphs Glyphs) {
 			return
 		}
 	}
+}
+
+// renderWideBoard gives ordinary desktop terminals a stable master-detail
+// surface. The left pane remains the comparable list; the right pane explains
+// the selected receipt. Narrow terminals retain the single-column renderer
+// above instead of squeezing a dashboard into unreadable columns.
+func renderWideBoard(canvas *Canvas, state State, glyphs Glyphs, groups []BoardGroup) {
+	w := contentWriter(canvas)
+	run, selected := selectedBoardRun(groups, state.Selected[ViewBoard])
+	configurations := 0
+	for _, group := range groups {
+		configurations += len(group.Runs)
+	}
+	w.line(
+		Span{Text: fmt.Sprintf("board  %d %s", configurations, countLabel(configurations, "configuration", "configurations")), Role: RoleHeader},
+		Span{Text: fmt.Sprintf("  %d comparable %s  sort ", len(groups), countLabel(len(groups), "group", "groups")), Role: RoleMuted},
+		Span{Text: state.BoardSort.String() + " " + boardSortArrow(state.BoardSort), Role: RoleAccent},
+		Span{Text: filterSuffix(state.Filter), Role: RoleMuted},
+	)
+	if selected {
+		w.line(wideBoardMetricSpans(run, glyphs)...)
+	} else {
+		w.line(Span{Text: "No configuration selected.", Role: RoleMuted})
+	}
+	w.line(Span{Text: strings.Repeat(glyphs.Horizontal, canvas.Width), Role: RoleMuted})
+
+	leftWidth := max(min(canvas.Width*58/100, 72), 56)
+	left := wideBoardList(groups, state, leftWidth, glyphs)
+	right := wideBoardDetail(run, selected, canvas.Width-leftWidth-3, glyphs)
+	renderBoardPanes(canvas, w.y, w.end, leftWidth, left, right, glyphs)
+}
+
+func selectedBoardRun(groups []BoardGroup, selectedID string) (Run, bool) {
+	for _, group := range groups {
+		for _, run := range group.Runs {
+			if run.ID == selectedID {
+				return run, true
+			}
+		}
+	}
+	for _, group := range groups {
+		if len(group.Runs) > 0 {
+			return group.Runs[0], true
+		}
+	}
+	return Run{}, false
+}
+
+func wideBoardMetricSpans(run Run, glyphs Glyphs) []Span {
+	spans := []Span{{Text: "selected  ", Role: RoleMuted}, {Text: run.Model, Role: RoleAccent}}
+	if run.DecodePresent {
+		spans = append(spans, Span{Text: fmt.Sprintf("  decode %.2f tok/s", run.DecodeMean), Role: RoleDefault})
+	}
+	if run.TTFTPresent && run.TTFTMean > 0 {
+		spans = append(spans, Span{Text: fmt.Sprintf("  TTFT %.2f s", run.TTFTMean), Role: RoleDefault})
+	}
+	if run.MemoryPresent {
+		spans = append(spans, Span{Text: fmt.Sprintf("  resident %.2f GB", run.MemoryGB), Role: RoleDefault})
+	}
+	if run.Context > 0 {
+		spans = append(spans, Span{Text: glyphs.Dot + "ctx " + shortContext(run.Context), Role: RoleMuted})
+	}
+	passes := 0
+	for _, verdict := range run.Verdicts {
+		if strings.EqualFold(strings.TrimSpace(verdict.State), "PASS") {
+			passes++
+		}
+	}
+	if passes > 0 {
+		spans = append(spans, Span{Text: fmt.Sprintf("  %d pass", passes), Role: RolePass})
+	}
+	return spans
+}
+
+func wideBoardList(groups []BoardGroup, state State, width int, glyphs Glyphs) [][]Span {
+	lines := [][]Span{{
+		{Text: "configurations", Role: RoleHeader},
+		{Text: "  comparable evidence only", Role: RoleMuted},
+	}, {
+		{Text: "  MODEL / BUILD", Role: RoleMuted},
+		{Text: "                         RELATIVE   TOK/S", Role: RoleMuted},
+	}}
+	offset := state.Offset[ViewBoard]
+	rowIndex := 0
+	for _, group := range groups {
+		groupWritten := false
+		ceiling := maxRunDecode(group.Runs)
+		for _, run := range group.Runs {
+			if rowIndex < offset {
+				rowIndex++
+				continue
+			}
+			if !groupWritten {
+				lines = append(lines, []Span{{Text: clipCells(group.Title, width, glyphs.Ellipsis), Role: RoleHeader}})
+				if group.Note != "" {
+					role := RoleMuted
+					if !group.Comparable {
+						role = RoleWarning
+					}
+					lines = append(lines, []Span{{Text: "  " + clipCells(group.Note, max(width-2, 1), glyphs.Ellipsis), Role: role}})
+				}
+				groupWritten = true
+			}
+			selected := run.ID == state.Selected[ViewBoard]
+			row := boardRowSpans(run, selected, ceiling, width, glyphs)
+			if len(run.Serves) > 0 {
+				role := RolePass
+				if selected {
+					role = RoleSelected
+				}
+				row = append(row, Span{Text: fmt.Sprintf("  %d %s", len(run.Serves),
+					countLabel(len(run.Serves), "need", "needs")), Role: role})
+			}
+			lines = append(lines, row)
+			rowIndex++
+		}
+	}
+	return lines
+}
+
+func wideBoardDetail(run Run, selected bool, width int, glyphs Glyphs) [][]Span {
+	lines := [][]Span{{{Text: "selected evidence", Role: RoleHeader}}}
+	if !selected {
+		return append(lines, []Span{{Text: "No saved evidence selected.", Role: RoleMuted}})
+	}
+	lines = append(lines,
+		[]Span{{Text: clipCells(run.Model, width, glyphs.Ellipsis), Role: RoleAccent}},
+		[]Span{{Text: clipCells(strings.TrimSpace(run.ParamSize+" "+run.Quant+glyphs.Dot+"ctx "+shortContext(run.Context)), width, glyphs.Ellipsis), Role: RoleMuted}},
+	)
+	if len(run.Serves) > 0 {
+		lines = append(lines, []Span{{Text: "established  ", Role: RoleMuted}, {
+			Text: clipCells(strings.Join(run.Serves, ", "), max(width-13, 1), glyphs.Ellipsis), Role: RolePass,
+		}})
+	}
+	lines = append(lines, []Span{{Text: "requirements", Role: RoleHeader}})
+	for _, verdict := range orderedBoardVerdicts(run.Verdicts) {
+		label := verdict.Label
+		if label == "" {
+			label = verdict.Need
+		}
+		lines = append(lines, []Span{
+			{Text: fmt.Sprintf("[%-4s] ", shortVerdictState(verdict.State)), Role: verdictRole(verdict.State)},
+			{Text: clipCells(label, max(width-7, 1), glyphs.Ellipsis), Role: RoleDefault},
+		})
+		if len(lines) >= 10 {
+			break
+		}
+	}
+	lines = append(lines, []Span{{Text: "measurements", Role: RoleHeader}})
+	if run.DecodePresent {
+		lines = append(lines, []Span{{Text: "decode     ", Role: RoleMuted}, {Text: fmt.Sprintf("%.2f tok/s", run.DecodeMean), Role: RoleDefault}})
+	}
+	if run.TTFTPresent && run.TTFTMean > 0 {
+		lines = append(lines, []Span{{Text: "TTFT       ", Role: RoleMuted}, {Text: fmt.Sprintf("%.2f s", run.TTFTMean), Role: RoleDefault}})
+	}
+	if run.MemoryPresent {
+		lines = append(lines, []Span{{Text: "resident   ", Role: RoleMuted}, {Text: fmt.Sprintf("%.2f GB", run.MemoryGB), Role: RoleDefault}})
+	}
+	if run.NextCommand != "" {
+		lines = append(lines,
+			[]Span{{Text: "next", Role: RoleHeader}},
+			[]Span{{Text: clipCells(run.NextCommand, width, glyphs.Ellipsis), Role: RoleAccent}},
+		)
+	}
+	return lines
+}
+
+func orderedBoardVerdicts(verdicts []Verdict) []Verdict {
+	ordered := slices.Clone(verdicts)
+	slices.SortStableFunc(ordered, func(a, b Verdict) int {
+		return verdictPriority(a.State) - verdictPriority(b.State)
+	})
+	return ordered
+}
+
+func verdictPriority(state string) int {
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case "FAIL":
+		return 0
+	case "BLKD":
+		return 1
+	case "INCONCLUSIVE":
+		return 2
+	default:
+		return 3
+	}
+}
+
+func shortVerdictState(state string) string {
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case "INCONCLUSIVE":
+		return "INCL"
+	case "ESTABLISHED":
+		return "PASS"
+	case "DISPROVEN":
+		return "FAIL"
+	default:
+		return strings.ToUpper(strings.TrimSpace(state))
+	}
+}
+
+func countLabel(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
+}
+
+func boardSortArrow(sort Sort) string {
+	if sort == SortModel || sort == SortMemory {
+		return "↑"
+	}
+	return "↓"
+}
+
+func shortContext(context int) string {
+	if context <= 0 {
+		return "unknown"
+	}
+	if context%1024 == 0 {
+		return fmt.Sprintf("%dK", context/1024)
+	}
+	return strconv.Itoa(context)
+}
+
+func renderBoardPanes(canvas *Canvas, start, end, leftWidth int, left, right [][]Span, glyphs Glyphs) {
+	rows := max(len(left), len(right))
+	for index := 0; index < rows && start+index < end; index++ {
+		leftLine := paneLine(left, index)
+		rightLine := paneLine(right, index)
+		leftLine = fitPaneLine(leftLine, leftWidth)
+		paddingRole := RoleDefault
+		for _, span := range leftLine {
+			if span.Role == RoleSelected {
+				paddingRole = RoleSelected
+				break
+			}
+		}
+		used := spansWidth(leftLine)
+		if used < leftWidth {
+			leftLine = append(leftLine, Span{Text: strings.Repeat(" ", leftWidth-used), Role: paddingRole})
+		}
+		line := slices.Clone(leftLine)
+		line = append(line, Span{Text: " " + glyphs.Vertical + " ", Role: RoleMuted})
+		line = append(line, fitPaneLine(rightLine, max(canvas.Width-leftWidth-3, 1))...)
+		canvas.SetLine(start+index, line...)
+	}
+}
+
+func paneLine(lines [][]Span, index int) []Span {
+	if index < 0 || index >= len(lines) {
+		return nil
+	}
+	return slices.Clone(lines[index])
+}
+
+func fitPaneLine(spans []Span, width int) []Span {
+	remaining := max(width, 0)
+	result := make([]Span, 0, len(spans))
+	for _, span := range spans {
+		if remaining == 0 {
+			break
+		}
+		text := singleLine(span.Text)
+		text = clipCells(text, remaining, "...")
+		if text == "" {
+			continue
+		}
+		result = append(result, Span{Text: text, Role: span.Role})
+		remaining -= displayWidth(text)
+	}
+	return result
+}
+
+func spansWidth(spans []Span) int {
+	width := 0
+	for _, span := range spans {
+		width += displayWidth(span.Text)
+	}
+	return width
 }
 
 func renderBoardGroup(w *lineWriter, group BoardGroup, selectedID string, offset int,
@@ -902,7 +1188,7 @@ func verdictRole(state string) Role {
 		return RolePass
 	case "FAIL":
 		return RoleFail
-	case "BLKD", "WARN", "INCONCLUSIVE":
+	case "BLKD", "WARN":
 		return RoleWarning
 	default:
 		return RoleMuted

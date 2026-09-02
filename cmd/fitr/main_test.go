@@ -978,13 +978,16 @@ func TestScreenshotsWriteDemoSVGs(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := string(b)
-		if !strings.Contains(got, "<svg") || !strings.Contains(got, "$ fitr") {
+		if !strings.Contains(got, "<svg") || (name != "top.svg" && !strings.Contains(got, "$ fitr")) {
 			t.Fatalf("%s is not a terminal screenshot:\n%.200s", name, got)
+		}
+		if name == "top.svg" && strings.Contains(got, "$ fitr top") {
+			t.Fatalf("top screenshot should show the full-screen surface, not a shell prompt:\n%.400s", got)
 		}
 		if name == "board.svg" && !strings.Contains(got, "#d2a8ff") {
 			t.Fatalf("board screenshot lost its rich terminal color:\n%.400s", got)
 		}
-		if name == "top.svg" && !strings.Contains(got, "#79c0ff") {
+		if name == "top.svg" && !strings.Contains(got, "#56d4dd") {
 			t.Fatalf("top screenshot lost its rich terminal color:\n%.400s", got)
 		}
 	}
@@ -1008,9 +1011,9 @@ func TestCaptureStdoutDrainsWhileTheProducerWrites(t *testing.T) {
 	}
 }
 
-// Every surface composes to the same width, and the demo assets are the proof
-// a reader sees first. They are also the only place all eight surfaces render
-// together, so this is where a regression in any one of them shows up.
+// Every one-shot surface composes to the same width. The interactive top demo
+// deliberately uses a wider desktop canvas so the README can show its real
+// master-detail layout instead of a stretched single-column capture.
 //
 // It used to be worth checking and nobody was: the scorecard reached 224
 // columns, the inventory 117, doctor 286, and the board drew a 104-column rule
@@ -1037,9 +1040,13 @@ func TestEveryDemoSurfaceComposesToTheWidth(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		limit := render.DefaultWidth
+		if e.Name() == "top.svg" {
+			limit = 120
+		}
 		for _, line := range svgTextLines(string(b)) {
-			if n := len([]rune(line)); n > render.DefaultWidth {
-				t.Errorf("%s: %d cols against %d: %q", e.Name(), n, render.DefaultWidth, line)
+			if n := len([]rune(line)); n > limit {
+				t.Errorf("%s: %d cols against %d: %q", e.Name(), n, limit, line)
 			}
 		}
 	}

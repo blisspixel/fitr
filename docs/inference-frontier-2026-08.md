@@ -3,7 +3,7 @@
 Working research ledger assembled from llama.cpp, vLLM, SGLang, Ollama, and
 MLX repositories, model cards, papers, and vendor documentation on
 2026-08-18. Its source ledger is incomplete, so precise claims below are
-research leads, not FITR evidence or buying guidance. A claim can enter the
+research leads, not fitr evidence or buying guidance. A claim can enter the
 product only after its primary source, version, protocol, and receipt are
 linked.
 
@@ -95,11 +95,11 @@ reproducible tool calls.
 Adopt vLLM vocabulary -- **TTFT / TPOT / ITL / E2EL / goodput**, P50 not mean --
 so numbers are comparable across tools.
 
-## A hardware research lead, not FITR evidence
+## A hardware research lead, not fitr evidence
 
 The figures below came from an external comparison and currently lack linked
 primary receipts, runtime versions, prompts, quant metadata, and run
-conditions. They motivate a measurement question, but they must not feed FITR
+conditions. They motivate a measurement question, but they must not feed fitr
 buying guidance or a product verdict until the source and protocol are cited
 and reproducible. The durable conclusion is narrower: prefill, decode, memory
 capacity, context, and placement must be measured and presented separately.
@@ -118,14 +118,14 @@ very different prefill, but the table does not yet prove why. A single speed
 number is still inadequate for agentic or long-prompt work.
 
 The same external report claims **23-28% decode degradation from empty to 76k
-context**. Treat that as a hypothesis until its receipts are linked. FITR's
+context**. Treat that as a hypothesis until its receipts are linked. fitr's
 product rule does not depend on the percentage: a speed result is meaningful
 only with its effective context attached.
 
 ## Why llama-server was the next backend, not vLLM
 
 Same audience as Ollama, with a broader inference and measurement surface for
-FITR's purposes. It does not replace Ollama's model library, lifecycle, or
+fitr's purposes. It does not replace Ollama's model library, lifecycle, or
 Modelfile features. For inference diagnostics it provides:
 
 - `timings.cache_n` -- prefix-cache hit rate, so loaded/uncached and prefix-cache-hit TTFT can be separated

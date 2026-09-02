@@ -95,11 +95,21 @@ func shotTop(context.Context) (string, error) {
 	a.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
 	a.Memory.ResidentGB = 20.34
 	a.Scorecard.Serves = []string{"fast_and_decent", "coding", "structured_output"}
+	a.Withdrawal = &eval.ToolLoopResult{
+		Outcome: eval.OutcomeFail, Verified: true, Ended: "stopped_without_done",
+		Calls: 2, DeadCalls: 1, Sequence: "KRW",
+	}
+	for index := range a.Speed {
+		a.Speed[index].TTFT = 3.0 + float64(index)*0.1
+	}
 	b := mockResult("llama3.1:8b", 14.61, .52, 148.20, 4.70, 4, 6, 12, 22)
 	b.ModelMeta.Details.ParameterSize = "8.0B"
 	b.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
 	b.Memory.ResidentGB = 5.10
 	b.Scorecard.Serves = []string{"fast_and_decent", "low_footprint"}
+	for index := range b.Speed {
+		b.Speed[index].TTFT = 4.6 + float64(index)*0.1
+	}
 	a.DeviceKey = "demo-device|ctx=8192"
 	b.DeviceKey = a.DeviceKey
 	a.Device.GPU, b.Device.GPU = "Demo GPU 24 GB", "Demo GPU 24 GB"
@@ -111,11 +121,19 @@ func shotTop(context.Context) (string, error) {
 		return "", err
 	}
 	snapshot := buildTopSnapshot([]*Result{a, b})
+	for groupIndex := range snapshot.Board {
+		for runIndex := range snapshot.Board[groupIndex].Runs {
+			if snapshot.Board[groupIndex].Runs[runIndex].Model == a.Model {
+				snapshot.Board[groupIndex].Runs[runIndex].NextCommand = "fitr diag " + a.Model
+			}
+		}
+	}
 	state := top.NewState(snapshot)
-	// The demo canvas matches the width every other surface composes to, so
-	// the docs show one terminal rather than eight different ones.
-	state.View, state.Width, state.Height = top.ViewBoard, render.DefaultWidth, 18
-	return "$ fitr top\n\n" + topCanvasANSI(top.Render(state, top.DefaultGlyphs(false))), nil
+	// The README shows the wide master-detail board because it is the clearest
+	// expression of the interactive product. Narrow terminals still use the
+	// responsive single-column board.
+	state.View, state.Width, state.Height = top.ViewBoard, 120, 23
+	return topCanvasANSI(top.Render(state, top.DefaultGlyphs(false))), nil
 }
 
 func topCanvasANSI(canvas top.Canvas) string {
@@ -127,9 +145,9 @@ func topCanvasANSI(canvas top.Canvas) string {
 			case top.RoleMuted:
 				style = "\x1b[90m"
 			case top.RoleHeader:
-				style = "\x1b[1;34m"
+				style = "\x1b[1;36m"
 			case top.RoleAccent:
-				style = "\x1b[35m"
+				style = "\x1b[1;36m"
 			case top.RolePass:
 				style = "\x1b[32m"
 			case top.RoleFail:
@@ -137,7 +155,7 @@ func topCanvasANSI(canvas top.Canvas) string {
 			case top.RoleWarning:
 				style = "\x1b[33m"
 			case top.RoleSelected:
-				style = "\x1b[7m"
+				style = "\x1b[1;36m"
 			}
 			out.WriteString(style)
 			out.WriteString(span.Text)
@@ -889,6 +907,7 @@ func ansiColors() map[string]string {
 		"35":   "#d2a8ff",
 		"90":   "#8b949e",
 		"1;34": "#79c0ff",
+		"1;36": "#56d4dd",
 	}
 }
 

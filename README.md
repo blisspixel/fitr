@@ -17,7 +17,11 @@ fitr measures those questions against the model bytes, runtime, context,
 placement, and device that produced the evidence. Missing evidence stays
 missing. An unmeasured model stays a candidate, not a recommendation.
 
-<img src="docs/assets/inventory.svg?v=0.10.0" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
+<img src="docs/assets/top.svg?v=0.10.1" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
+
+The wide Board keeps the comparable configurations, selected evidence, exact
+measurements, unresolved requirements, and one next action on one screen. The
+same facts remain available as compact terminal output, JSON, and HTML.
 
 ## Install
 
@@ -64,6 +68,8 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
+<img src="docs/assets/inventory.svg?v=0.10.1" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
+
 ## What ships today
 
 | Capability | What it establishes | Details |
@@ -95,12 +101,10 @@ contract are implemented. Broader causal explanation, operational experiments,
 and declared workload coverage remain pre-1.0 work. The
 [roadmap](ROADMAP.md) distinguishes shipped slices from planned contracts.
 
-<img src="docs/assets/run.svg?v=0.10.0" alt="fitr reconstructed full-run demo based on selected RTX 4090 validation observations" width="820">
-
-The screenshot is a deterministic reconstruction based on selected native RTX
-4090 observations. It is not a copy of a private sealed result. Host identity
-and local paths are omitted. All README screenshots regenerate through the
-real renderers with `make screenshots`.
+README screenshots are deterministic fixtures rendered through the real
+presentation paths with `make screenshots`. Host identity and local paths are
+omitted. Full receipts and the other command surfaces live in the linked docs,
+where they can be explained without turning the front page into a transcript.
 
 ## Why the evidence is useful
 

@@ -962,11 +962,11 @@ func (noneDisplay) Close()                       {}
 // and an exception reads as something going wrong, which is the opposite of
 // what an undecided row means.
 //
-// "????" is the display form: four characters, fits the column, and cannot be
-// misread as a verdict word the way a truncated "INCON" could.
+// "INCL" is the display form: four characters, fits the column, and remains a
+// recognizable abbreviation of the full state shown in detail and JSON.
 func stateTag(s score.State) string {
 	if s == score.Inconclusive {
-		return "????"
+		return "INCL"
 	}
 	return string(s)
 }

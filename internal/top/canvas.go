@@ -54,8 +54,8 @@ type Theme struct {
 func DefaultTheme(noColor bool) Theme {
 	var theme Theme
 	theme.Styles[RoleMuted] = Style{Foreground: ColorGray, Dim: true}
-	theme.Styles[RoleHeader] = Style{Foreground: ColorBlue, Bold: true}
-	theme.Styles[RoleAccent] = Style{Foreground: ColorMagenta, Bold: true}
+	theme.Styles[RoleHeader] = Style{Foreground: ColorCyan, Bold: true}
+	theme.Styles[RoleAccent] = Style{Foreground: ColorCyan, Bold: true}
 	theme.Styles[RolePass] = Style{Foreground: ColorGreen}
 	theme.Styles[RoleFail] = Style{Foreground: ColorRed, Bold: true}
 	theme.Styles[RoleWarning] = Style{Foreground: ColorYellow, Bold: true}

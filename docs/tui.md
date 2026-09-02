@@ -91,6 +91,13 @@ Device/config blocks are stacked with explicit boundaries. Sorting and
 relative bars are always local to one block. There is no global ranking,
 cross-fingerprint aggregate, or visual scale across blocks.
 
+At 120 columns and above, Board becomes a master-detail surface. Comparable
+configurations stay in the left pane while the selected configuration's need
+verdicts, measurements, and next command remain visible in the right pane.
+The selected row uses a full-row terminal selection style, and the active sort
+is named with a direction marker. At narrower widths, Board returns to one
+column without changing the evidence or inventing a shorter verdict language.
+
 Supported sort fields are model, start time, decode, prefill, resident memory,
 and repeats. Stable tie breakers keep equal rows from jumping during refresh.
 
@@ -138,7 +145,7 @@ Layout uses terminal-cell width, not byte or rune count.
 
 | Terminal size | Behavior |
 |---|---|
-| Width 120 or greater | Full width-qualified tables, values, and supported graphs |
+| Width 120 or greater | Board uses the master-detail layout; other views show full width-qualified values and supported graphs |
 | Width 80 to 119 | One primary column; Result uses a compact full-battery summary below 32 rows |
 | Width 56 to 79 | Priority-trimmed rows with exact primary values and explicit truncation |
 | Width below 56 or height below 14 | Tiny safe view with identity, state, `?`, and `q` |
@@ -154,11 +161,31 @@ Result labels every displayed performance observation with `n`; a single
 runtime-unloaded sample is not visually equivalent to a repeated estimate.
 The footer and `?` help are view-specific and never advertise a no-op key.
 
-A selected-detail pane is planned, not claimed as shipped. At 120 columns and
-above it will sit beside Board, History, and Inventory; at 80 to 119 it will
-stack below; narrower terminals will open detail as its own surface. Until
-that contract ships, the current single-column layouts remain the documented
-behavior.
+Board's selected-detail pane is shipped at 120 columns and above. History and
+Inventory remain single-column collections until their detail panes can carry
+the same selection, clipping, and evidence-integrity guarantees. Narrow Board
+views open the complete selected Result with `Enter` rather than compressing
+its evidence into an unreadable side pane.
+
+## Visual language
+
+The product name is always written `fitr`, including the terminal header and
+sentence starts. Uppercase is reserved for machine-like state tokens such as
+`PASS`, `FAIL`, and `INCONCLUSIVE`, evidence-layer names, schema constants, and
+environment variables.
+
+The interface uses dense facts and sparse chrome. Pane titles are lowercase;
+table columns and verdict tokens remain uppercase. Exact values accompany
+every relative bar. Cyan identifies structure, focus, active sorting, and
+actions. Green means established, red means disproven, yellow means blocked or
+warning, and inconclusive evidence remains neutral and dim. Selection also
+has a text marker and full-row terminal treatment, so color never carries the
+state by itself.
+
+The compact scorecard tag `[INCL]` is only a width-safe rendering of the stored
+`INCONCLUSIVE` verdict. Detail, JSON, and evidence records retain the complete
+word. Inventory states, claim states, verdicts, and experiment stages are not
+interchanged merely because two of them sound similar.
 
 `NO_COLOR` removes color while retaining text and selection shape. Any
 non-empty `FITR_ASCII` replaces structural Unicode -- rules, bars, selection

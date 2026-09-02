@@ -71,7 +71,7 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 
 	// The board's columns are fixed, so its rule matches them rather than the
 	// terminal: a rule wider than the content is as wrong as one narrower.
-	title := fmt.Sprintf("FITR BOARD  %d result(s)  %d device/config block(s)", board.Results, len(board.Groups))
+	title := fmt.Sprintf("fitr board  %d result(s)  %d device/config block(s)", board.Results, len(board.Groups))
 	fmt.Fprintln(w, p.wrap(p.Head, title))
 	fmt.Fprintln(w, p.wrap(p.Muted, strings.Repeat("-", boardWidth)))
 	for i, group := range board.Groups {

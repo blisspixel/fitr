@@ -134,6 +134,46 @@ func TestBoardUsesSemanticColorForDataNotOnlyHeaders(t *testing.T) {
 	}
 }
 
+func TestWideBoardStartsAtDocumentedBreakpoint(t *testing.T) {
+	for _, tc := range []struct {
+		width int
+		wide  bool
+	}{{119, false}, {120, true}} {
+		state := NewState(testSnapshot())
+		state.View, state.Width, state.Height = ViewBoard, tc.width, 24
+		plain := Render(state, DefaultGlyphs(false)).Plain()
+		if got := strings.Contains(plain, "selected evidence"); got != tc.wide {
+			t.Fatalf("width %d wide layout=%v, want %v:\n%s", tc.width, got, tc.wide, plain)
+		}
+		if tc.wide && (!strings.Contains(plain, "sort decode ↓") || !strings.Contains(plain, "│")) {
+			t.Fatalf("width %d lost wide navigation or pane boundary:\n%s", tc.width, plain)
+		}
+	}
+}
+
+func TestWideBoardKeepsInconclusiveNeutral(t *testing.T) {
+	snapshot := testSnapshot()
+	snapshot.Board[0].Runs[0].Verdicts = []Verdict{{Need: "structured_output", Label: "structured output", State: "INCONCLUSIVE"}}
+	state := NewState(snapshot)
+	state.View, state.Width, state.Height = ViewBoard, 120, 24
+	state.Selected[ViewBoard] = "a"
+	canvas := Render(state, DefaultGlyphs(false))
+	found := false
+	for _, row := range canvas.Rows {
+		for _, span := range row {
+			if strings.Contains(span.Text, "[INCL]") {
+				found = true
+				if span.Role != RoleMuted {
+					t.Fatalf("INCL role=%v, want neutral muted", span.Role)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("wide board lost the compact inconclusive token:\n%s", canvas.Plain())
+	}
+}
+
 func TestNoColorThemeRetainsNonColorState(t *testing.T) {
 	theme := DefaultTheme(true)
 	for role, style := range theme.Styles {

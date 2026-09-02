@@ -28,6 +28,9 @@ func TestEveryVerdictTagIsTheSameWidth(t *testing.T) {
 	if width != 6 {
 		t.Fatalf("verdict column is %d columns wide, want 6", width)
 	}
+	if got := stateTag(score.Inconclusive); got != "INCL" {
+		t.Fatalf("inconclusive tag = %q, want INCL", got)
+	}
 	// The stored state is unchanged: it is persisted in saved results and in
 	// the JSON contract, so only the display form is short.
 	if score.Inconclusive != "INCONCLUSIVE" {

@@ -203,7 +203,7 @@ comparison across eligible candidates. One result can establish eligibility,
 but it cannot establish a winner. A spec containing `objective` therefore
 remains unresolved until a compatible candidate-set comparison exists.
 Selection also remains unresolved while any candidate named by the experiment
-has unresolved eligibility. FITR cannot discard an unmeasured or inconclusive
+has unresolved eligibility. fitr cannot discard an unmeasured or inconclusive
 candidate merely because two other candidates are ready to compare.
 Likewise, when several candidates are eligible, every one must carry a bounded
 objective metric. If exactly one candidate clears all constraints after every

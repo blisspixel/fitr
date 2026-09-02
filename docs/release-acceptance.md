@@ -131,7 +131,7 @@ and prefill from `timings.cache_n`, and prove the replayed prefix was reused.
 Operational exit 1 from Doctor or Diag fails the job.
 
 The uploaded evidence artifact contains the operating-system and architecture
-record, binary and model hashes, `/props`, launch and request logs, every FITR
+record, binary and model hashes, `/props`, launch and request logs, every fitr
 command transcript, isolated result JSON, and a pass summary. A green job is
 therefore a reviewable receipt for that candidate and runner, not a permanent
 claim about all llama.cpp builds or accelerators.
@@ -272,7 +272,7 @@ positive measured run with the backend selected explicitly, an isolated
 results directory, the backend's identity and context receipts, saved evidence
 reopened by `view`, and server request logs. Honest SKIP fields remain SKIP and
 do not fail the row. The exact launch command, runtime version, model digest,
-device state, FITR command, result path, and cleanup must be recorded.
+device state, fitr command, result path, and cleanup must be recorded.
 
 For llama-server, lifecycle cleanup is external because the backend cannot
 unload a server-owned model. Acceptance must start a dedicated loopback server,
