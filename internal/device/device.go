@@ -700,6 +700,14 @@ func readLog() string {
 	return string(b)
 }
 
+// ServerConfigObserved reports whether the serving runtime's own startup
+// configuration was readable. Detect falls back to this process's environment,
+// which is not the daemon's: a launchd unit, a systemd unit or a container
+// carries an environment this process never sees. Without this distinction an
+// unobserved setting is indistinguishable from one that is genuinely unset,
+// and the caller would state the stronger of the two.
+func ServerConfigObserved() bool { return readLog() != "" }
+
 func mergeServerLogConfig(cfg map[string]string) {
 	text := readLog()
 	if text == "" {

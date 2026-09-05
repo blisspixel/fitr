@@ -102,3 +102,38 @@ func TestProfileBoolAcceptsOnlyBooleanValues(t *testing.T) {
 		t.Fatal("string hint was accepted as a boolean")
 	}
 }
+
+// An empty configuration value means two different things. When the serving
+// runtime's startup log was read, the runtime did not have that variable. When
+// it was not, fitr only ever saw its own environment, and a daemon started by
+// launchd or systemd carries one this process never sees. Reporting the first
+// when only the second is true states the daemon's configuration from evidence
+// about fitr's own.
+func TestServerConfigObservedSeparatesUnsetFromUnobserved(t *testing.T) {
+	root := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("LOCALAPPDATA", root)
+	} else {
+		t.Setenv("HOME", root)
+	}
+	if ServerConfigObserved() {
+		t.Fatal("an absent startup log was reported as observed configuration")
+	}
+	path := serverLogPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("env=[OLLAMA_FLASH_ATTENTION:1]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !ServerConfigObserved() {
+		t.Fatal("a readable startup log was not reported as observed configuration")
+	}
+	// An empty file is not a reading of the daemon's environment either.
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ServerConfigObserved() {
+		t.Fatal("an empty startup log was reported as observed configuration")
+	}
+}
