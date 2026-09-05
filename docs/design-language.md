@@ -36,9 +36,13 @@ updates. Motion never enters JSON, saved receipts or ordinary CLI reports.
 ## Discovery and role-library direction
 
 The current discovery cards show role, candidate, `[UNMEASURED]`, a source
-claim, optional harness and the next planning command. Sources remain private
-unless explicitly requested as JSON. The same proposal objects feed text and
-JSON plans; the renderer does not make a compatibility decision.
+claim, optional harness and the next planning command. A copyable idea ID lets
+the user attach a receipt without searching JSON. Attached metadata uses separate
+repository, commit and receipt fields; it does not replace the original model
+hint. Plans expose dependency, runtime and quality gaps independently. Original
+source URLs remain private unless explicitly requested as JSON. The same
+proposal objects feed text and JSON plans; the renderer does not make a
+compatibility decision.
 
 Role review cards now lead with the role and screening state, followed by
 each candidate's requirements, preference bounds and evidence gaps. Failed

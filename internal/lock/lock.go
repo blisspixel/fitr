@@ -133,7 +133,7 @@ func Acquire(name, what string) (*Lock, error) {
 
 func readHolder(path string) Holder {
 	var h Holder
-	f, err := os.Open(path)
+	f, err := openHolder(path)
 	if err != nil {
 		return h
 	}

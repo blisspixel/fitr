@@ -110,7 +110,12 @@ func shotDiscovery(context.Context) (string, error) {
 	}
 	fmt.Println("$ fitr discover list")
 	fmt.Println()
-	if renderDiscovery([]discovery.Idea{coder, small}, false, "rich") != exitOK {
+	sources := map[string][]discovery.SourceSummary{coder.ID: {{
+		ResolutionSHA256: "sha256:" + strings.Repeat("c", 64), AttachedAt: stamp.Format(time.RFC3339),
+		Relation: "operator_association", MetadataState: "resolved",
+		RepoID: "example/local-coder-GGUF", Commit: strings.Repeat("a", 40),
+	}}}
+	if renderDiscovery([]discovery.Idea{coder, small}, nil, sources, "rich") != exitOK {
 		return "", errors.New("could not render discovery fixture")
 	}
 	return "", nil

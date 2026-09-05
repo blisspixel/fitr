@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.10.7" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.10.7" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.10.7" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.10.7" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.10.8" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.10.8" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.10.8" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.10.8" alt="fitr top (demo data)" width="820">
 
 ### Disk
 
@@ -198,6 +198,9 @@ of installed RAM as an unconditional model budget.
 | `fitr experiment workload <model> [-n 3] [--ctx N]` | run the fixed bounded policy-repair workflow with independent deterministic verification and signed per-trial receipts |
 | `fitr discover add <source> --role <role> [--model <reference>]` | capture a private, unmeasured model or harness idea |
 | `fitr discover list\|plan [--role <role>]` | inspect the private inbox or draft next evidence steps without network access |
+| `fitr discover attach-source <idea-id> <receipt.json>` | copy validated source metadata into a private association; keep the idea unmeasured |
+| `fitr discover plan <idea-id> [--source <resolution-sha256>]` | inspect one source-aware plan; select explicitly when multiple receipts exist |
+| `fitr discover detach-source <idea-id> <resolution-sha256>` | remove only the managed association copy; see [source attachments](source-attachments.md) |
 | `fitr role init <name> --quality <need> --memory-gb <limit> [--ctx N]` | declare mandatory quality and resource floors for a personal role |
 | `fitr role define <role.json>` / `show <name>` | version or export explicit requirements, preferences and freshness limits |
 | `fitr role list` / `review <name>` | inspect role screening, evidence gaps, preference bounds and sensitivity; see [roles](roles.md) |

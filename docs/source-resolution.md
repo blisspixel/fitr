@@ -87,6 +87,7 @@ the actual behavior and quality floors for that exact configuration.
   hostile local process with the same filesystem permissions.
 
 Resolution does not download weights, execute repository code, alter a role,
-grant adoption authority or delete files. Saved discovery ideas remain
-unmeasured. Source extraction, download ownership, complete dependency graphs,
+grant adoption authority or delete files. Attach a receipt to a discovery idea
+with [source attachments](source-attachments.md); the idea remains unmeasured.
+Source extraction, download ownership, complete dependency graphs,
 automatic fit planning and the larger automation loop remain separate work.

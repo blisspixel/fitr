@@ -40,10 +40,12 @@ them. A digest detects accidental edits; it is not external provenance.
 ## The next product milestone
 
 The local role library provides screening, preferences, fresh confirmation
-and explicit selection. In 0.10.7, [source resolution](source-resolution.md)
-pins public metadata for explicitly selected Hugging Face files without
-downloading weights. Source extraction, automatic fit planning and bounded
-automation are the next missing steps in the complete flow:
+and explicit selection. [Source resolution](source-resolution.md) pins public
+metadata for explicitly selected Hugging Face files without downloading weights.
+In 0.10.8, [source attachments](source-attachments.md) retain those receipts with
+ideas and expose dependency, runtime and quality gaps in individual plans.
+Dependency closure, exact runtime binding, source extraction, automatic fit
+planning and bounded automation remain work in the complete flow:
 
 ```text
 idea -> source check -> exact artifact -> fit plan -> bounded experiment

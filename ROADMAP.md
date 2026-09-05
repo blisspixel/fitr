@@ -52,7 +52,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.4 | Private discovery inbox, portable evidence skill, sealed workflow contract, typed proof classes, timing partitions and receipt privacy fixes |
 | Shipped | 0.10.5 | Personal role screening with quality floors and uncertainty-aware preferences, canonical evidence attachments, and read-only cleanup planning |
 | Shipped | 0.10.6 | Fresh role confirmation, explicit selection and validated rollback, runtime and memory preflight, and read-only MCP role tools |
-| Current | 0.10.7 | Bounded immutable HF file metadata resolution, dependency gaps and private receipts without weight downloads |
+| Shipped | 0.10.7 | Bounded immutable HF file metadata resolution, dependency gaps and private receipts without weight downloads |
+| Current | 0.10.8 | Private source attachments, explicit receipt selection and source-aware investigation plans with unmeasured fit and quality |
 | Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported limiter hypotheses, and multi-surface decision relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
@@ -76,7 +77,7 @@ evidence paths.
 | 2 | complete | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | active | Generalized validated-work receipts and explicit evidence classes | 0.10.4 seals the fixed contract and reconstructs timing with typed proof classes. Multi-attempt, approval, escalation and external protocol receipts remain work before arbitrary workflows. |
-| 5 | active | Source ideas into a personal role library | 0.10.7 resolves explicit HF file metadata at a pinned commit. Roles already seal preferences before confirmation and retain explicit selections. Next link source receipts to ideas, resolve dependency closure and build bounded fit/experiment plans. See [roles](docs/roles.md) and [discovery](docs/discovery.md). |
+| 5 | active | Source ideas into a personal role library | 0.10.8 links pinned metadata receipts to ideas and keeps dependency, runtime and quality gaps separate. Roles already seal preferences before confirmation and retain explicit selections. Next establish dependency closure and exact runtime binding before bounded fit/experiment plans. See [source attachments](docs/source-attachments.md), [roles](docs/roles.md) and [discovery](docs/discovery.md). |
 | 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. |
 
 Automatic selection must pass programmatic resource preflight and a separate
@@ -91,6 +92,9 @@ Tracked implementation work: [quality-first role library](https://github.com/bli
 [MCP, A2A and harness adapters](https://github.com/blisspixel/fitr/issues/3).
 [Storage review and safe replacements](https://github.com/blisspixel/fitr/issues/4)
 tracks dependency-aware cleanup beyond the read-only inventory in 0.10.5.
+[Immutable source metadata](https://github.com/blisspixel/fitr/issues/5) and
+[source attachments](https://github.com/blisspixel/fitr/issues/6) track the first
+steps from an idea to an exact artifact investigation.
 
 Optional OpenRouter validation can develop adversarial cases and grader
 calibration alongside this sequence. It remains experiment-scoped, explicitly
@@ -1143,6 +1147,7 @@ These features must preserve the evidence contract.
 | 0.10.5 | Quality-first role screening, fixed preferences and uncertainty, canonical evidence attachments, and read-only cleanup planning |
 | 0.10.6 | Fresh weighted role confirmation, explicit selection and rollback, capacity and context preflight, and read-only MCP evidence tools |
 | 0.10.7 | Immutable public HF file metadata, separate declared hashes, explicit dependency gaps, private no-overwrite receipts and source terminal cards |
+| 0.10.8 | Private source associations, individual source-aware plans, explicit receipt selection and concurrent inbox capture protection |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

@@ -280,7 +280,7 @@ func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
 	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec",
-		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim", "repo", "revision", "file",
+		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim", "repo", "revision", "file", "source",
 		"quality", "minimum-rate", "memory-gb", "max-age-days", "min-age-days":
 		return true
 	}

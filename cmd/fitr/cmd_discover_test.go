@@ -20,8 +20,8 @@ func TestDiscoveryCapturesAnIdeaAndPlansWithoutBackendAccess(t *testing.T) {
 		if code != exitOK || !strings.Contains(strings.ToLower(output), "unmeasured") {
 			t.Fatalf("%v: code %d, output %s", args, code, output)
 		}
-		if args[0] == "plan" && len(args) == 3 && !strings.Contains(output, "fitr advise 'model;q4'") {
-			t.Fatalf("unsafe or missing command: %s", output)
+		if args[0] == "plan" && (strings.Contains(output, "fitr advise") || strings.Contains(output, `"argv"`)) {
+			t.Fatalf("unbound mutable alias became an executable plan: %s", output)
 		}
 		if args[0] == "plan" && len(args) > 3 && !strings.Contains(output, `"proposals"`) {
 			t.Fatalf("JSON lost the plan steps: %s", output)

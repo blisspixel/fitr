@@ -17,7 +17,7 @@ fitr measures those questions against the model bytes, runtime, context,
 placement, and device that produced the evidence. Missing evidence stays
 missing. An unmeasured model stays a candidate, not a recommendation.
 
-<img src="docs/assets/top.svg?v=0.10.7" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
+<img src="docs/assets/top.svg?v=0.10.8" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
 The wide Board keeps the comparable configurations, selected evidence, exact
 measurements, unresolved requirements, and one next action on one screen. The
@@ -69,7 +69,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.10.7" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
+<img src="docs/assets/inventory.svg?v=0.10.8" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
 
 ## Start with something you heard about
 
@@ -90,17 +90,22 @@ resolve public metadata before considering a download:
 ```bash
 fitr source resolve hf --repo owner/model --revision main --file model-Q4_K_M.gguf --out candidate.json
 fitr source show candidate.json
+fitr discover attach-source <idea-id> candidate.json
+fitr discover plan <idea-id>
 ```
 
-<img src="docs/assets/source.svg?v=0.10.7" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
+<img src="docs/assets/source.svg?v=0.10.8" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
 
 The receipt pins a commit, preserves declared file sizes and hashes, and
 surfaces dependency gaps. It downloads no weights and does not qualify the
 model for a role. See [source resolution](docs/source-resolution.md),
+[source attachments and investigation plans](docs/source-attachments.md),
 [discovery and the model library](docs/discovery.md) for the
 flow, and [agent interoperability](docs/agent-interop.md) for the portable
 Agent Plugins package, read-only MCP tools, and the researched A2A, Hermes,
 Pi and OpenClaw integration boundaries.
+
+<img src="docs/assets/discovery.svg?v=0.10.8" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
 
 ## Choose for a role, with quality first
 
@@ -113,7 +118,7 @@ fitr role attach coding /path/to/canonical-result.json
 fitr role review coding
 ```
 
-<img src="docs/assets/roles.svg?v=0.10.7" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
+<img src="docs/assets/roles.svg?v=0.10.8" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
 
 A candidate must clear every floor before preferences matter. Comparisons
 retain uncertainty and check sensitivity to weight changes; missing evidence
@@ -145,6 +150,7 @@ unresolved dependencies remain explicit. See [cleanup planning](docs/cleanup.md)
 | Workload decisions | Constraint-based eligibility under a versioned declaration, with no universal weighted score | [Decisions](docs/decisions.md) |
 | Personal roles | Quality and resource floors, fixed preferences, fresh confirmation, explicit selection, evidence expiry and validated rollback | [Roles](docs/roles.md), [confirmation](docs/role-confirmation.md) |
 | Source resolution | Commit-pinned public file metadata, distinct declared hashes and unresolved dependencies, with no weight downloads | [Source metadata](docs/source-resolution.md) |
+| Discovery investigations | Private source attachments and separately stated metadata, dependency, runtime and quality gaps | [Source attachments](docs/source-attachments.md) |
 | Agent interoperability | Bounded read-only MCP 2026-07-28 stdio role tools and an Agent Plugins 1.0.0 package | [Protocol and client limits](docs/agent-interop.md) |
 | Cleanup planning | Read-only bounded storage inventory and aged partial-download review candidates, with no inferred deletion authority | [Cleanup](docs/cleanup.md) |
 | Context experiments | A predeclared exploratory context plan with shared task seeds, point-specific allocation, required-equal factors, and replayable bundles | [Context experiment](docs/usage.md#context-experiment) |

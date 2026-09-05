@@ -2,119 +2,177 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/blisspixel/fitr/internal/discovery"
 	"github.com/blisspixel/fitr/internal/render"
+	"github.com/blisspixel/fitr/internal/source"
 )
 
-func cmdDiscover(_ context.Context, args []string) int {
+const discoveryHelp = `usage: fitr discover add <source> --role <role> [--model <reference>] [--harness <name>] [--claim <text>]
+       fitr discover list|plan [--role <role>] [--display MODE]
+       fitr discover attach-source <idea-id> <receipt.json> [--display MODE]
+       fitr discover detach-source <idea-id> <resolution-sha256> [--display MODE]
+       fitr discover plan <idea-id> [--source <resolution-sha256>] [--display MODE]`
+
+type discoveryCommand struct {
+	action, mode, role, model, harness, claim, selected string
+	args                                                []string
+}
+
+func cmdDiscover(ctx context.Context, args []string) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(os.Stderr, "usage: fitr discover add <source> --role <role> [--model <reference>] [--harness <name>] [--claim <text>]")
-		fmt.Fprintln(os.Stderr, "       fitr discover list|plan [--role <role>] [--display MODE]")
+		fmt.Fprintln(os.Stderr, discoveryHelp)
 		return exitOK
 	}
-	action := args[0]
-	if action != "add" && action != "list" && action != "plan" {
-		errPrint("unknown discovery action", action, "use fitr discover add, list, or plan")
-		return exitUsage
-	}
-	fs := flag.NewFlagSet("discover "+action, flag.ContinueOnError)
-	role := fs.String("role", "", "intended role, such as coding, daily-driver, or classifier")
-	model := fs.String("model", "", "candidate model reference; still unverified")
-	harness := fs.String("harness", "", "intended harness and version; still unverified")
-	claim := fs.String("claim", "", "source claim to investigate, not measured evidence")
-	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
-	if code, ok := parseCommandFlags(fs, args[1:]); !ok {
+	command, code, ok := parseDiscoveryCommand(args)
+	if !ok {
 		return code
 	}
-	if !render.ValidMode(*mode) {
-		errPrint("invalid display mode", *mode, "use auto, rich, plain, json, or none")
-		return exitUsage
+	if ctx.Err() != nil {
+		return exitInterrupt
 	}
-	directory := filepath.Join(resultsDir(), ".discovery")
-	var ideas []discovery.Idea
-	var err error
-	if action == "add" {
-		if fs.NArg() != 1 {
-			errPrint("discovery add needs exactly one source", "", "fitr discover add <source> --role coding")
-			return exitUsage
-		}
-		var idea discovery.Idea
-		idea, err = discovery.New(fs.Arg(0), *model, *role, *harness, *claim, time.Now())
-		if err != nil {
-			errPrint(err.Error(), "", "provide a source, role, and bounded plain-text fields")
-			return exitUsage
-		}
-		idea, err = discovery.Save(directory, idea)
-		ideas = []discovery.Idea{idea}
-	} else {
-		if fs.NArg() != 0 || *model != "" || *harness != "" || *claim != "" {
-			errPrint("list and plan accept only role and display filters", "", "fitr discover plan --role coding")
-			return exitUsage
-		}
-		ideas, err = discovery.List(directory, *role)
-	}
+	store := discovery.SourceStore{Directory: filepath.Join(resultsDir(), ".discovery")}
+	ideaIDs, err := discoveryAction(store, command)
 	if err != nil {
-		errPrint("could not access discovery inbox: "+err.Error(), "", "check the private results directory")
-		return exitError
+		return discoveryFailure(err)
 	}
-	return renderDiscovery(ideas, action == "plan", *mode)
+	proposals, err := store.Plans(ideaIDs, command.selected)
+	if err != nil {
+		return discoveryFailure(err)
+	}
+	return renderDiscoverySnapshot(proposals, command)
 }
 
-func renderDiscovery(ideas []discovery.Idea, plan bool, mode string) int {
-	if render.Resolve(mode) == "none" {
-		return exitOK
+func renderDiscoverySnapshot(proposals []discovery.SourceProposal, command discoveryCommand) int {
+	ideas := make([]discovery.Idea, 0, len(proposals))
+	summaries := make(map[string][]discovery.SourceSummary, len(proposals))
+	for _, proposal := range proposals {
+		ideas = append(ideas, proposal.Idea)
+		summaries[proposal.Idea.ID] = proposal.Sources
 	}
-	if render.Resolve(mode) == "json" {
-		var proposals []discovery.Proposal
-		if plan {
-			for _, idea := range ideas {
-				proposals = append(proposals, discovery.Plan(idea))
-			}
-		}
-		if err := json.NewEncoder(os.Stdout).Encode(struct {
-			Schema    string               `json:"schema"`
-			Ideas     []discovery.Idea     `json:"ideas"`
-			Note      string               `json:"note"`
-			Proposals []discovery.Proposal `json:"proposals,omitempty"`
-		}{"fitr.discovery.inbox.v1", ideas, "Unmeasured ideas only. No sources fetched, models downloaded, or experiments executed.", proposals}); err != nil {
-			return exitError
-		}
-		return exitOK
+	if command.action != "plan" {
+		proposals = nil
 	}
-	render.WriteDiscovery(os.Stdout, discoveryCards(ideas, plan), mode)
-	return exitOK
+	return renderDiscovery(ideas, proposals, summaries, command.mode)
 }
 
-func discoveryCards(ideas []discovery.Idea, plan bool) []render.DiscoveryCard {
-	cards := make([]render.DiscoveryCard, 0, len(ideas))
+func parseDiscoveryCommand(args []string) (discoveryCommand, int, bool) {
+	command := discoveryCommand{action: args[0]}
+	fs := flag.NewFlagSet("discover "+command.action, flag.ContinueOnError)
+	fs.StringVar(&command.mode, "display", "auto", "auto|rich|plain|json|none")
+	switch command.action {
+	case "add":
+		fs.StringVar(&command.model, "model", "", "candidate model reference; still unverified")
+		fs.StringVar(&command.harness, "harness", "", "intended harness and version; still unverified")
+		fs.StringVar(&command.claim, "claim", "", "source claim to investigate, not measured evidence")
+		fallthrough
+	case "list", "plan":
+		fs.StringVar(&command.role, "role", "", "intended role or role filter")
+		if command.action == "plan" {
+			fs.StringVar(&command.selected, "source", "", "full attached source resolution digest")
+		}
+	case "attach-source", "detach-source":
+	default:
+		errPrint("unknown discovery action", "", "fitr discover --help")
+		return command, exitUsage, false
+	}
+	if code, ok := parseCommandFlags(fs, args[1:]); !ok {
+		return command, code, false
+	}
+	command.args = append([]string(nil), fs.Args()...)
+	if !render.ValidMode(command.mode) || !validDiscoveryArguments(command) {
+		errPrint("invalid discovery arguments or display mode", "", "fitr discover --help")
+		return command, exitUsage, false
+	}
+	if command.action == "add" {
+		if _, err := discovery.New(command.args[0], command.model, command.role, command.harness, command.claim, time.Now()); err != nil {
+			errPrint(err.Error(), "", "provide a source, role, and bounded plain-text fields")
+			return command, exitUsage, false
+		}
+	}
+	return command, exitOK, true
+}
+
+func validDiscoveryArguments(command discoveryCommand) bool {
+	switch command.action {
+	case "add":
+		return len(command.args) == 1 && strings.TrimSpace(command.role) != ""
+	case "list":
+		return len(command.args) == 0
+	case "plan":
+		if len(command.args) == 0 {
+			return command.selected == ""
+		}
+		return len(command.args) == 1 && validDiscoveryID(command.args[0]) && command.role == "" &&
+			(command.selected == "" || validDiscoveryDigest(command.selected))
+	case "attach-source":
+		return len(command.args) == 2 && validDiscoveryID(command.args[0])
+	case "detach-source":
+		return len(command.args) == 2 && validDiscoveryID(command.args[0]) && validDiscoveryDigest(command.args[1])
+	default:
+		return false
+	}
+}
+
+func validDiscoveryID(value string) bool {
+	_, err := hex.DecodeString(value)
+	return len(value) == 64 && strings.ToLower(value) == value && err == nil
+}
+
+func validDiscoveryDigest(value string) bool {
+	value, ok := strings.CutPrefix(value, "sha256:")
+	return ok && validDiscoveryID(value)
+}
+
+func discoveryAction(store discovery.SourceStore, command discoveryCommand) ([]string, error) {
+	if command.action == "add" {
+		idea, err := discovery.New(command.args[0], command.model, command.role, command.harness, command.claim, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		idea, err = discovery.Save(store.Directory, idea)
+		return []string{idea.ID}, err
+	}
+	if len(command.args) == 0 {
+		return discoveryIdeaIDs(store.Directory, command.role)
+	}
+	switch command.action {
+	case "attach-source":
+		receipt, err := source.LoadResolution(command.args[1])
+		if err != nil {
+			return nil, err
+		}
+		if _, err := store.Attach(command.args[0], receipt, time.Now()); err != nil {
+			return nil, err
+		}
+	case "detach-source":
+		if err := store.Detach(command.args[0], command.args[1]); err != nil {
+			return nil, err
+		}
+	}
+	return []string{command.args[0]}, nil
+}
+
+func discoveryIdeaIDs(directory, role string) ([]string, error) {
+	ideas, err := discovery.List(directory, role)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(ideas))
 	for _, idea := range ideas {
-		card := render.DiscoveryCard{Role: idea.Role, Model: idea.Model, Harness: idea.Harness, Claim: idea.Claim,
-			Next: "fitr discover plan --role " + shellCommandArg(idea.Role, runtime.GOOS),
-		}
-		if plan {
-			card.Next = ""
-			for _, step := range discovery.Plan(idea).Steps {
-				detail := render.DiscoveryStep{Label: step.Code, Text: step.Text}
-				if len(step.Argv) > 0 {
-					quoted := make([]string, 0, len(step.Argv))
-					for _, arg := range step.Argv {
-						quoted = append(quoted, shellCommandArg(arg, runtime.GOOS))
-					}
-					detail.Command = strings.Join(quoted, " ")
-				}
-				card.Steps = append(card.Steps, detail)
-			}
-		}
-		cards = append(cards, card)
+		ids = append(ids, idea.ID)
 	}
-	return cards
+	return ids, nil
+}
+
+func discoveryFailure(err error) int {
+	errPrint("could not access discovery inbox: "+err.Error(), "", "inspect the idea and source receipts with fitr discover --help")
+	return exitError
 }

@@ -3,7 +3,7 @@ name: fitr-evidence
 description: Capture candidate models in fitr and interpret local fit, workload, and decision evidence when choosing a configuration for a specific role.
 ---
 
-Requires an installed fitr CLI version 0.10.7 or later and user-selected local evidence.
+Requires an installed fitr CLI version 0.10.8 or later and user-selected local evidence.
 
 Use `fitr --help` for the installed command contract. For a model discovered in
 a post, video, model card, or selected email excerpt, capture its source and
@@ -22,6 +22,14 @@ user's research authority before contacting the source. `fitr source show`
 validates a saved receipt offline. Declared sizes and hashes are not verified
 local bytes; missing shards and candidate projectors do not establish complete
 dependencies. The command downloads no weights and cannot qualify a role.
+
+Attach an explicitly selected receipt with `fitr discover attach-source
+<idea-id> <receipt.json>`. The private copy is an operator association, not proof
+that the original source recommended that exact artifact. Use `discover plan
+<idea-id>` to inspect separate metadata, dependency, runtime and quality gaps.
+Multiple receipts require explicit `--source <resolution-sha256>` selection;
+never blend commits or translate the idea's mutable alias into an exact runtime
+binding. `detach-source` removes only the managed association copy.
 
 Validate a saved workload bundle with `fitr experiment workload <bundle.json>`.
 Use `fitr view <result.json>` for ordinary run evidence and

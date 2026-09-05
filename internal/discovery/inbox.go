@@ -9,16 +9,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
 
-	"github.com/blisspixel/fitr/internal/atomicfile"
 	"github.com/blisspixel/fitr/internal/boundedio"
+	"github.com/blisspixel/fitr/internal/lock"
 	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
@@ -85,10 +87,19 @@ func (idea Idea) digest() string {
 	return hex.EncodeToString(digest[:])
 }
 
-func Save(directory string, idea Idea) (Idea, error) {
+func Save(directory string, idea Idea) (saved Idea, err error) {
 	if err := idea.Validate(); err != nil {
 		return Idea{}, err
 	}
+	directory, err = canonicalInboxDirectory(directory, true)
+	if err != nil {
+		return Idea{}, err
+	}
+	guard, err := acquireInbox(directory)
+	if err != nil {
+		return Idea{}, err
+	}
+	defer func() { err = errors.Join(err, guard.Release()) }()
 	path := filepath.Join(directory, idea.ID+".json")
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
@@ -102,10 +113,7 @@ func Save(directory string, idea Idea) (Idea, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Idea{}, err
 	}
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return Idea{}, err
-	}
-	entries, err := os.ReadDir(directory)
+	entries, err := inboxEntries(directory)
 	if err != nil {
 		return Idea{}, err
 	}
@@ -119,10 +127,26 @@ func Save(directory string, idea Idea) (Idea, error) {
 	if len(data) > maximumIdeaBytes {
 		return Idea{}, errors.New("discovery idea is too large")
 	}
-	return idea, atomicfile.Write(path, append(data, '\n'), 0o600)
+	return idea, publishIdea(path, append(data, '\n'))
 }
 
 func Load(path string) (Idea, error) {
+	absolute, err := inboxAbsolutePath(path)
+	if err != nil {
+		return Idea{}, err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(absolute))
+	if err != nil {
+		return Idea{}, err
+	}
+	path = filepath.Join(parent, filepath.Base(absolute))
+	info, err := os.Lstat(path)
+	if err != nil {
+		return Idea{}, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return Idea{}, errors.New("discovery entry cannot be a symbolic link")
+	}
 	data, err := boundedio.ReadFile(path, maximumIdeaBytes)
 	if err != nil {
 		return Idea{}, err
@@ -143,23 +167,22 @@ func decode(data []byte) (Idea, error) {
 	return idea, idea.Validate()
 }
 
-func List(directory, role string) ([]Idea, error) {
-	info, err := os.Stat(directory)
+func List(directory, role string) (result []Idea, err error) {
+	directory, err = canonicalInboxDirectory(directory, false)
 	if errors.Is(err, os.ErrNotExist) {
 		return []Idea{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !info.IsDir() {
-		return nil, errors.New("discovery inbox must be a directory")
-	}
-	entries, err := os.ReadDir(directory)
+	guard, err := acquireInbox(directory)
 	if err != nil {
 		return nil, err
 	}
-	if len(entries) > maximumIdeas {
-		return nil, errors.New("discovery inbox exceeds its 1000-entry limit")
+	defer func() { err = errors.Join(err, guard.Release()) }()
+	entries, err := inboxEntries(directory)
+	if err != nil {
+		return nil, err
 	}
 	ideas := []Idea{}
 	for _, entry := range entries {
@@ -179,4 +202,112 @@ func List(directory, role string) ([]Idea, error) {
 	}
 	sort.Slice(ideas, func(i, j int) bool { return ideas[i].ID < ideas[j].ID })
 	return ideas, nil
+}
+
+// Resolve a configured directory alias once, then use the physical spelling for
+// both locking and I/O. Raw parent components must be rejected before cleaning:
+// a symlink followed by .. need not refer to its lexically cleaned parent.
+func canonicalInboxDirectory(directory string, create bool) (string, error) {
+	absolute, err := inboxAbsolutePath(directory)
+	if err != nil {
+		return "", err
+	}
+	if create {
+		if err := os.MkdirAll(absolute, 0o700); err != nil {
+			return "", err
+		}
+	}
+	physical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(physical)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", errors.New("discovery inbox must be a directory")
+	}
+	return physical, nil
+}
+
+func inboxAbsolutePath(path string) (string, error) {
+	if strings.TrimSpace(path) == "" || strings.ContainsAny(path, "\x00\r\n") {
+		return "", errors.New("invalid discovery path")
+	}
+	relative := strings.TrimPrefix(path, filepath.VolumeName(path))
+	for _, part := range strings.FieldsFunc(relative, func(char rune) bool { return char == '/' || char == '\\' }) {
+		if part == ".." {
+			return "", errors.New("discovery paths cannot contain parent traversal")
+		}
+	}
+	return filepath.Abs(path)
+}
+
+func acquireInbox(physicalDirectory string) (*lock.Lock, error) {
+	if runtime.GOOS == "windows" {
+		physicalDirectory = strings.ToLower(physicalDirectory)
+	}
+	digest := sha256.Sum256([]byte(physicalDirectory))
+	guard, err := lock.Acquire("discovery-"+hex.EncodeToString(digest[:]), "update discovery inbox")
+	return guard, discoveryLockError(err)
+}
+
+type discoveryBusyError struct{ cause error }
+
+func (err *discoveryBusyError) Error() string {
+	return "discovery storage is busy; retry after the current operation finishes"
+}
+
+func (err *discoveryBusyError) Unwrap() error { return err.cause }
+
+func discoveryLockError(err error) error {
+	var busy *lock.BusyError
+	if errors.As(err, &busy) {
+		return &discoveryBusyError{cause: err}
+	}
+	return err
+}
+
+func inboxEntries(directory string) ([]os.DirEntry, error) {
+	file, err := os.Open(directory)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	entries, err := file.ReadDir(maximumIdeas + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	if len(entries) > maximumIdeas {
+		return nil, errors.New("discovery inbox exceeds its 1000-entry limit")
+	}
+	return entries, nil
+}
+
+// Publish complete private bytes without replacing an existing idea. The inbox
+// lock covers the temporary entry as well, so List cannot observe it or count
+// both links during publication. Filesystems without hard links fail closed.
+func publishIdea(path string, data []byte) error {
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".fitr-inbox-*")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = temporary.Close()
+		_ = os.Remove(temporary.Name())
+	}()
+	if err := temporary.Chmod(0o600); err != nil {
+		return err
+	}
+	if _, err := temporary.Write(data); err != nil {
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Link(temporary.Name(), path)
 }

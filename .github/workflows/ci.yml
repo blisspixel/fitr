@@ -109,9 +109,9 @@ jobs:
       - name: binary size gate
         shell: bash
         run: |
-          # Role confirmation/lifecycle and bounded MCP add about 267 KB to
-          # windows/amd64 (13.25 MB). Keep about 1.2% measured-growth headroom.
-          max_bytes=13420000
+          # Source attachments and concurrency fixes add about 70 KB to
+          # windows/amd64 (13.44 MB). Keep about 1.2% measured-growth headroom.
+          max_bytes=13600000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"
             printf '%-32s %10d bytes\n' "$binary" "$size"
