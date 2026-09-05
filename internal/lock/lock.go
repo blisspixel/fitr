@@ -101,7 +101,13 @@ func Acquire(name, what string) (*Lock, error) {
 			return l, nil
 		}
 		if !os.IsExist(err) {
-			return nil, err
+			if !createContended(err) {
+				return nil, err
+			}
+			// The name belongs to a lock that is being released. Nothing owns
+			// it, but it cannot be created yet, so let this fall through to
+			// the busy answer the caller already knows how to retry.
+			continue
 		}
 
 		st, serr := os.Stat(path)

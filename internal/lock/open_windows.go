@@ -20,3 +20,10 @@ func openHolder(path string) (*os.File, error) {
 	}
 	return os.NewFile(uintptr(handle), path), nil
 }
+
+// createContended reports a create that failed because the lock name is still
+// reserved. Removing a lock while a diagnostic reader holds it open leaves the
+// name delete-pending: it is neither present nor creatable, and an exclusive
+// create against it fails with access-denied until the last handle closes.
+// That is contention with a lock being released, not a permission fault.
+func createContended(err error) bool { return os.IsPermission(err) }
