@@ -244,7 +244,8 @@ func TestHTMLRendersCentralLatencyPlacementAndDiagnosis(t *testing.T) {
 		"runtime-attributed accelerator</th><td>15.00 GB (75.0% of runtime allocation)",
 		"non-accelerator</th><td>5.00 GB (derived remainder)",
 		"not proof of exclusive physical pools, layer placement, or host traffic",
-		"allocation attribution",
+		"<h2>Diagnoses</h2>",
+		"direct · allocation attribution",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("HTML missing %q", want)

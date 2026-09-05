@@ -897,7 +897,7 @@ func renderInventoryStatus(ctx context.Context, b llm.Backend, also []string, mo
 			Model: row.Model, State: row.State, Fit: row.Fit, SizeB: row.SizeB,
 			Loaded: row.Loaded, Next: row.Next, Note: row.Note,
 			Ctx: row.Ctx, Windows: row.Windows, MeasuredCtx: row.MeasuredCtx,
-			ServingCtx: row.ServingCtx, ServingKnown: row.ServingKnown,
+			ServingCtx: row.ServingCtx, ServingKnown: row.ServingKnown, Shape: row.Shape,
 		})
 	}
 	inv.Hidden = table.Hidden

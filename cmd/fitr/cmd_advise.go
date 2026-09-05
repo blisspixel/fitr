@@ -210,6 +210,9 @@ func readShownAdviseSource(ctx context.Context, c llm.Backend, model string, in 
 		return ""
 	}
 	in.Quant = info.Details.QuantizationLevel
+	if info.Digest != "" {
+		in.ArtifactDigest = info.Digest
+	}
 	if info.Size > 0 {
 		in.WeightsB = info.Size
 	}

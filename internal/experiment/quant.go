@@ -226,10 +226,11 @@ func assessQuantLineage(candidates []QuantCandidate, conversion *calibration.Con
 	}
 	known := make(map[string]bool, len(manifest.Artifacts))
 	for _, artifact := range manifest.Artifacts {
-		known[artifact.Digest] = true
+		known[strings.ToLower(strings.TrimSpace(artifact.Digest))] = true
 	}
 	for _, candidate := range candidates {
-		if !known[strings.ToLower(candidate.Subject.ArtifactDigest)] {
+		digest := strings.ToLower(strings.TrimSpace(candidate.Subject.ArtifactDigest))
+		if !known[digest] {
 			lineage.Reason = "conversion manifest does not bind every measured artifact"
 			return lineage
 		}

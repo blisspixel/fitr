@@ -84,7 +84,7 @@ func EvaluateConfirmed(result *record.Record, spec DecisionSpec) (Evaluation, er
 }
 
 func removeConfirmationGaps(gaps []string) []string {
-	filtered := gaps[:0]
+	filtered := make([]string, 0, len(gaps))
 	for _, gap := range gaps {
 		if strings.Contains(gap, "fresh confirmation lineage") ||
 			strings.HasPrefix(gap, "confirmation_lineage:") {

@@ -153,6 +153,7 @@ type htmlData struct {
 	Gaps                []htmlNeed
 	EvidenceGaps        []htmlKV
 	Diagnoses           []htmlKV
+	Artifact            string
 	Decode              string
 	Prefill             string
 	TTFT                string
@@ -206,6 +207,7 @@ var artifactTmpl = template.Must(template.New("artifact").Parse(`<!DOCTYPE html>
 <main>
 <h1>{{.Model}}</h1>
 <p class="sub">{{.SizeLine}} · profile {{.Profile}}{{if .Uncalibrated}} (uncalibrated){{end}}{{if .Wall}} · {{.Wall}}{{end}}</p>
+{{if .Artifact}}<p class="sub">{{.Artifact}}</p>{{end}}
 <p class="use">{{.UseFor}}</p>
 
 <div class="banner"><strong>A number without its device is meaningless.</strong>
@@ -252,7 +254,7 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 {{end}}
 
 {{if .Diagnoses}}
-<h2>Observed conditions</h2>
+<h2>Diagnoses</h2>
 <table>
 {{range .Diagnoses}}
 <tr><th class="k">{{.K}}</th><td>{{.V}}</td></tr>
@@ -329,8 +331,9 @@ func htmlDataFrom(a Artifact) htmlData {
 		for _, gap := range a.Meta.Analysis.Gaps {
 			d.EvidenceGaps = append(d.EvidenceGaps, htmlKV{K: analysis.GapLabel(gap.Code), V: gap.Message})
 		}
+		d.Artifact = htmlArtifactIdentity(a.Meta.Analysis.Artifact)
 		for _, diagnosis := range a.Meta.Analysis.Diagnoses {
-			d.Diagnoses = append(d.Diagnoses, htmlKV{K: analysis.DiagnosisLabel(diagnosis.Code), V: diagnosis.Statement})
+			d.Diagnoses = append(d.Diagnoses, htmlDiagnosis(diagnosis, a.Model))
 		}
 		d.RuntimeUnloadedTTFT = htmlAnalysisObservation(
 			a.Meta.Analysis.Performance.RuntimeUnloadedTTFTSeconds, g)
@@ -346,7 +349,7 @@ func htmlDataFrom(a Artifact) htmlData {
 			d.PlacementNote = placement.Boundary
 			if placement.Status == analysis.StatusDescriptiveOnly {
 				d.PlacementNote = "Descriptive only; source " +
-					analysis.AcquisitionLabel(placement.Acquisition) + ". " + d.PlacementNote
+					analysis.AcquisitionLabel(placement.Acquisition) + ". " + placement.Boundary
 			}
 		}
 		d.CapacityFacts = htmlCapacityFacts(a.Meta.Analysis.Capacity)
@@ -405,12 +408,28 @@ func htmlCapacityFacts(capacity analysis.Capacity) []htmlKV {
 	return facts
 }
 
+func safeShareCapacitySource(source string) string {
+	source = SingleLine(source)
+	if shareURIPattern.MatchString(source) || shareWindowsPathPattern.MatchString(source) ||
+		shareNetworkPathPattern.MatchString(source) ||
+		strings.Contains(source, "/Users/") || strings.Contains(source, "/home/") ||
+		strings.HasPrefix(source, "./") || strings.HasPrefix(source, "../") ||
+		strings.HasPrefix(source, `.\`) || strings.HasPrefix(source, `..\`) {
+		return ""
+	}
+	runes := []rune(source)
+	if len(runes) > 160 {
+		source = string(runes[:160])
+	}
+	return source
+}
+
 func appendHTMLBytes(facts []htmlKV, label string, value *int64, source string) []htmlKV {
 	if value == nil {
 		return facts
 	}
 	text := fmt.Sprintf("%.2f GiB", float64(*value)/(1024*1024*1024))
-	if strings.TrimSpace(source) != "" {
+	if source = safeShareCapacitySource(source); source != "" {
 		text += " (" + source + ")"
 	}
 	return append(facts, htmlKV{K: label, V: text})
@@ -429,6 +448,36 @@ func htmlAnalysisObservation(observation analysis.PerformanceObservation, g glyp
 		value += fmt.Sprintf("; min %.2f, max %.2f", *observation.Min, *observation.Max)
 	}
 	return htmlDescriptive(value, observation)
+}
+
+func htmlArtifactIdentity(artifact analysis.ArtifactIdentity) string {
+	digest := analysis.ShortDigest(artifact.Digest)
+	if digest == "" {
+		return ""
+	}
+	line := "artifact sha256:" + digest
+	if artifact.SizeBytes > 0 {
+		line += fmt.Sprintf(" · %.1f GB file", float64(artifact.SizeBytes)/(1024*1024*1024))
+	}
+	if artifact.Quant != "" {
+		line += " · quant " + artifact.Quant + " is a recipe label, not identity"
+	}
+	return line
+}
+
+func htmlDiagnosis(diagnosis analysis.Diagnosis, model string) htmlKV {
+	presented := analysis.PresentDiagnosis(diagnosis)
+	value := presented.Headline
+	if len(presented.Missing) > 0 {
+		value += "; missing " + strings.Join(presented.Missing, ", ")
+	}
+	if len(presented.Contradictions) > 0 {
+		value += "; contradicted by " + strings.Join(presented.Contradictions, ", ")
+	}
+	if len(presented.NextArgv) > 0 {
+		value += "; next experiment " + analysis.FormatArgv(presented.NextArgv, model)
+	}
+	return htmlKV{K: presented.Support + " · " + presented.Label, V: value}
 }
 
 func htmlDescriptive(value string, observation analysis.PerformanceObservation) string {

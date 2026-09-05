@@ -509,7 +509,7 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	d.resultVerdicts(w, sc, width)
 	d.resultPerformance(w, m, width)
 	d.resultCapacity(w, m, width)
-	d.resultAnalysis(w, m, width)
+	d.resultAnalysis(w, m, sc.Model, width)
 	d.resultEvidenceNotes(w, m, width)
 	fmt.Fprintln(w, rule)
 }
@@ -520,6 +520,9 @@ func (d *textDisplay) resultHeader(w io.Writer, sc score.Scorecard, m Meta, widt
 	if size := strings.TrimSpace(fmt.Sprintf("%s  %s  %s",
 		SingleLine(m.ParamSize), SingleLine(m.Quant), SingleLine(m.Family))); size != "" {
 		fmt.Fprintf(w, "size     %s\n", size)
+	}
+	if m.Analysis != nil {
+		writeArtifactIdentity(w, m.Analysis.Artifact, width)
 	}
 	writeResultContext(w, m)
 	if m.Level != "" {
@@ -846,17 +849,69 @@ func capacityBytesRow(w io.Writer, label string, value *int64, source string) {
 	fmt.Fprintf(w, "  %-18s %.2f GiB%s\n", label, float64(*value)/(1024*1024*1024), suffix)
 }
 
-func (d *textDisplay) resultAnalysis(w io.Writer, m Meta, width int) {
-	if m.Analysis == nil || len(m.Analysis.Diagnoses) == 0 && len(m.Analysis.Gaps) == 0 {
+func writeArtifactIdentity(w io.Writer, artifact analysis.ArtifactIdentity, width int) {
+	digest := analysis.ShortDigest(artifact.Digest)
+	if digest == "" && artifact.SizeBytes <= 0 {
+		return
+	}
+	parts := make([]string, 0, 3)
+	if digest != "" {
+		parts = append(parts, "sha256:"+digest)
+	}
+	if artifact.SizeBytes > 0 {
+		parts = append(parts, fmt.Sprintf("%.1f GB file", float64(artifact.SizeBytes)/(1024*1024*1024)))
+	}
+	if artifact.Quant != "" && digest != "" {
+		parts = append(parts, "quant "+SingleLine(artifact.Quant)+" is a recipe label")
+	}
+	if len(parts) == 0 {
+		return
+	}
+	Field(w, "artifact", evidenceHang, strings.Join(parts, "  "), width)
+}
+
+func (d *textDisplay) resultAnalysis(w io.Writer, m Meta, model string, width int) {
+	if m.Analysis == nil {
+		return
+	}
+	report := m.Analysis
+	if len(report.Diagnoses) == 0 && len(report.Gaps) == 0 && len(report.NextActions) == 0 {
 		return
 	}
 	fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "evidence"))
-	for _, diagnosis := range m.Analysis.Diagnoses {
-		d.headerField(w, "observed", analysis.DiagnosisLabel(diagnosis.Code)+": "+diagnosis.Statement, width, "")
+	for _, diagnosis := range report.Diagnoses {
+		writeDiagnosis(w, d, diagnosis, model, width)
 	}
-	for _, gap := range m.Analysis.Gaps {
+	for _, gap := range report.Gaps {
 		d.headerField(w, "limit", analysis.GapLabel(gap.Code)+": "+gap.Message, width, d.pal.Muted)
 	}
+	if len(report.NextActions) == 0 {
+		return
+	}
+	action := report.NextActions[0]
+	d.headerField(w, "next", analysis.FormatArgv(action.Argv, model), width, d.pal.Accent)
+	if action.Reason != "" {
+		d.headerField(w, "", action.Reason, width, d.pal.Muted)
+	}
+}
+
+func writeDiagnosis(w io.Writer, d *textDisplay, diagnosis analysis.Diagnosis, model string, width int) {
+	presented := analysis.PresentDiagnosis(diagnosis)
+	d.headerField(w, "explain", presented.Support+" · "+presented.Headline, width, "")
+	for _, missing := range presented.Missing {
+		d.headerField(w, "", "missing "+missing, width, d.pal.Muted)
+	}
+	for _, contradiction := range presented.Contradictions {
+		d.headerField(w, "", "contradicted by "+contradiction, width, d.pal.Muted)
+	}
+	if len(presented.NextArgv) == 0 {
+		return
+	}
+	next := analysis.FormatArgv(presented.NextArgv, model)
+	if presented.NextReason != "" {
+		next += "  (" + presented.NextReason + ")"
+	}
+	d.headerField(w, "", "next experiment "+next, width, d.pal.Muted)
 }
 
 func residentContextLabel(ctx int) string {

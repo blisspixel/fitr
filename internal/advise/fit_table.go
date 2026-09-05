@@ -242,6 +242,9 @@ func markSuggested(t *FitTable) {
 			bestCompat = i
 		}
 	}
+	if requested >= 0 && t.Points[requested].Tier == Skip {
+		return
+	}
 	if requested >= 0 && t.Points[requested].Tier == Compatible {
 		t.Points[requested].Suggested = true
 		return

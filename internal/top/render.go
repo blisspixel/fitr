@@ -346,6 +346,9 @@ func renderResultIdentity(w *lineWriter, run Run, glyphs Glyphs) {
 	}
 	build := strings.TrimSpace(strings.Join([]string{run.ParamSize, run.Quant, run.Family}, " "))
 	w.line(Span{Text: "build      ", Role: RoleMuted}, Span{Text: build + glyphs.Dot + fmt.Sprintf("ctx %d", run.Context), Role: RoleDefault})
+	if identity := runArtifactLine(run, glyphs); identity != "" {
+		w.line(Span{Text: "artifact   ", Role: RoleMuted}, Span{Text: identity, Role: RoleDefault})
+	}
 	identity := joinPresent(glyphs.Dot, run.Device, run.Driver, run.Runtime)
 	if identity != "" {
 		w.line(Span{Text: "device     ", Role: RoleMuted}, Span{Text: identity, Role: RoleDefault})
@@ -487,13 +490,48 @@ func renderResultCapacityPlacement(w *lineWriter, placement *analysis.PlacementO
 	}
 }
 
+func runArtifactLine(run Run, glyphs Glyphs) string {
+	if run.Analysis == nil {
+		return ""
+	}
+	artifact := run.Analysis.Artifact
+	digest := analysis.ShortDigest(artifact.Digest)
+	if digest == "" && run.ArtifactDigest != "" {
+		digest = analysis.ShortDigest(run.ArtifactDigest)
+	}
+	parts := make([]string, 0, 3)
+	if digest != "" {
+		parts = append(parts, "sha256:"+digest)
+	}
+	size := artifact.SizeBytes
+	if size == 0 {
+		size = run.ArtifactBytes
+	}
+	if size > 0 {
+		parts = append(parts, fmt.Sprintf("%.1f GB file", float64(size)/(1024*1024*1024)))
+	}
+	if run.Quant != "" && digest != "" {
+		parts = append(parts, "quant "+run.Quant+" is a recipe label")
+	}
+	return strings.Join(parts, glyphs.Dot)
+}
+
 func renderResultAnalysis(w *lineWriter, run Run) {
 	if run.Analysis == nil {
 		return
 	}
 	for _, diagnosis := range run.Analysis.Diagnoses {
-		w.line(Span{Text: "observed   ", Role: RoleMuted},
-			Span{Text: analysis.DiagnosisLabel(diagnosis.Code) + ": " + diagnosis.Statement, Role: RoleDefault})
+		presented := analysis.PresentDiagnosis(diagnosis)
+		w.line(Span{Text: "explain    ", Role: RoleMuted},
+			Span{Text: presented.Support + " · " + presented.Headline, Role: RoleDefault})
+		if len(presented.NextArgv) > 0 {
+			w.line(Span{Text: "           ", Role: RoleMuted},
+				Span{Text: "next experiment " + analysis.FormatArgv(presented.NextArgv, run.Model), Role: RoleMuted})
+		}
+	}
+	for _, gap := range run.Analysis.Gaps {
+		w.line(Span{Text: "limit      ", Role: RoleMuted},
+			Span{Text: analysis.GapLabel(gap.Code) + ": " + gap.Message, Role: RoleDefault})
 	}
 }
 
@@ -742,9 +780,17 @@ func wideBoardDetail(run Run, selected bool, width int, glyphs Glyphs) [][]Span 
 		[]Span{{Text: clipCells(run.Model, width, glyphs.Ellipsis), Role: RoleAccent}},
 		[]Span{{Text: clipCells(strings.TrimSpace(run.ParamSize+" "+run.Quant+glyphs.Dot+"ctx "+shortContext(run.Context)), width, glyphs.Ellipsis), Role: RoleMuted}},
 	)
+	if identity := runArtifactLine(run, glyphs); identity != "" {
+		lines = append(lines, []Span{{Text: clipCells(identity, width, glyphs.Ellipsis), Role: RoleMuted}})
+	}
 	if len(run.Serves) > 0 {
 		lines = append(lines, []Span{{Text: "established  ", Role: RoleMuted}, {
 			Text: clipCells(strings.Join(run.Serves, ", "), max(width-13, 1), glyphs.Ellipsis), Role: RolePass,
+		}})
+	}
+	if why := boardWhyNot(run); why != "" {
+		lines = append(lines, []Span{{Text: "why not     ", Role: RoleWarning}, {
+			Text: clipCells(why, max(width-12, 1), glyphs.Ellipsis), Role: RoleDefault,
 		}})
 	}
 	lines = append(lines, []Span{{Text: "requirements", Role: RoleHeader}})
@@ -778,6 +824,25 @@ func wideBoardDetail(run Run, selected bool, width int, glyphs Glyphs) [][]Span 
 		)
 	}
 	return lines
+}
+
+func boardWhyNot(run Run) string {
+	for _, verdict := range orderedBoardVerdicts(run.Verdicts) {
+		state := strings.ToUpper(strings.TrimSpace(verdict.State))
+		if state != "FAIL" && state != "BLKD" {
+			continue
+		}
+		label := verdict.Label
+		if label == "" {
+			label = verdict.Need
+		}
+		return label + " [" + shortVerdictState(verdict.State) + "]"
+	}
+	if run.Analysis != nil && len(run.Analysis.Diagnoses) > 0 {
+		presented := analysis.PresentDiagnosis(run.Analysis.Diagnoses[0])
+		return presented.Support + " · " + presented.Label
+	}
+	return ""
 }
 
 func orderedBoardVerdicts(verdicts []Verdict) []Verdict {
@@ -996,6 +1061,10 @@ func renderHistory(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: emptyFilterMessage(state), Role: RoleMuted})
 		return
 	}
+	if canvas.Width >= 120 && canvas.Height >= 22 {
+		renderWideHistory(canvas, state, glyphs, runs)
+		return
+	}
 	w.line(Span{Text: fmt.Sprintf("HISTORY  %d run(s)  sort %s%s", len(runs), state.HistorySort, filterSuffix(state.Filter)), Role: RoleHeader})
 	offset := min(state.Offset[ViewHistory], max(len(runs)-1, 0))
 	for _, run := range runs[offset:] {
@@ -1034,6 +1103,64 @@ func renderHistory(canvas *Canvas, state State, glyphs Glyphs) {
 	}
 }
 
+func renderWideHistory(canvas *Canvas, state State, glyphs Glyphs, runs []Run) {
+	w := contentWriter(canvas)
+	run, selected := selectedHistoryRun(runs, state.Selected[ViewHistory])
+	w.line(
+		Span{Text: fmt.Sprintf("HISTORY  %d run(s)", len(runs)), Role: RoleHeader},
+		Span{Text: fmt.Sprintf("  sort %s%s", state.HistorySort, filterSuffix(state.Filter)), Role: RoleMuted},
+	)
+	w.line(Span{Text: strings.Repeat(glyphs.Horizontal, canvas.Width), Role: RoleMuted})
+	leftWidth := max(min(canvas.Width*58/100, 72), 56)
+	left := wideHistoryList(runs, state, leftWidth, glyphs)
+	right := wideBoardDetail(run, selected, canvas.Width-leftWidth-3, glyphs)
+	renderBoardPanes(canvas, w.y, w.end, leftWidth, left, right, glyphs)
+}
+
+func selectedHistoryRun(runs []Run, selectedID string) (Run, bool) {
+	for _, run := range runs {
+		if run.ID == selectedID {
+			return run, true
+		}
+	}
+	if len(runs) > 0 {
+		return runs[0], true
+	}
+	return Run{}, false
+}
+
+func wideHistoryList(runs []Run, state State, width int, glyphs Glyphs) [][]Span {
+	lines := [][]Span{{{Text: "runs", Role: RoleHeader}, {Text: "  newest first unless sorted", Role: RoleMuted}}}
+	offset := min(state.Offset[ViewHistory], max(len(runs)-1, 0))
+	modelWidth := max(width-36, 8)
+	for index, run := range runs {
+		if index < offset {
+			continue
+		}
+		selected := run.ID == state.Selected[ViewHistory]
+		role, prefix := RoleDefault, "  "
+		if selected {
+			role, prefix = RoleSelected, glyphs.Selected+" "
+		}
+		when := "unknown"
+		if !run.StartedAt.IsZero() {
+			when = run.StartedAt.Format("2006-01-02 15:04")
+		}
+		baseline := "   "
+		if run.ID == state.BaselineID {
+			baseline = "[B]"
+		}
+		digest := analysis.ShortDigest(run.ArtifactDigest)
+		line := prefix + baseline + " " + padCells(clipCells(run.Model, modelWidth, glyphs.Ellipsis), modelWidth)
+		line += "  " + when
+		if digest != "" {
+			line += "  " + digest
+		}
+		lines = append(lines, []Span{{Text: clipCells(line, width, glyphs.Ellipsis), Role: role}})
+	}
+	return lines
+}
+
 func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
 	w := contentWriter(canvas)
 	items := VisibleInventory(state)
@@ -1052,14 +1179,14 @@ func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: "unmeasured is a candidate, never a recommendation", Role: RoleMuted})
 		return
 	}
-	w.line(Span{Text: "MODEL                    STATE        FIT        CTX       NEXT", Role: RoleMuted})
+	w.line(Span{Text: "MODEL                    STATE        FIT        EVID      NEXT", Role: RoleMuted})
 	offset := min(state.Offset[ViewInventory], max(len(items)-1, 0))
 	for _, item := range items[offset:] {
 		if !renderInventoryItem(w, item, item.ID == state.Selected[ViewInventory], canvas.Width, glyphs) {
 			break
 		}
 	}
-	w.line(Span{Text: "[L] loaded   CTX measured/serving   Enter opens a measured result   board still ranks only comparable runs", Role: RoleMuted})
+	w.line(Span{Text: "[L] loaded   EVID measured/serving, not artifact max   Enter opens a measured result", Role: RoleMuted})
 }
 
 func renderInventoryItem(w *lineWriter, item InventoryItem, selected bool, width int, glyphs Glyphs) bool {
@@ -1077,6 +1204,10 @@ func renderInventoryItem(w *lineWriter, item InventoryItem, selected bool, width
 	line += padCells(inventoryContextLabel(item.Ctx), 9)
 	line += clipCells(item.Next, max(width-61, 10), glyphs.Ellipsis)
 	if !w.line(Span{Text: line, Role: role}) {
+		return false
+	}
+	if selected && item.Shape != "" &&
+		!w.line(Span{Text: "    " + clipCells(item.Shape, max(width-6, 8), glyphs.Ellipsis), Role: RoleMuted}) {
 		return false
 	}
 	if selected && item.Windows != "" &&
@@ -1176,13 +1307,43 @@ func helpForView(view View) []string {
 	case ViewLive:
 		return []string{"Space            pause / resume display updates", "Enter            open completed Result"}
 	case ViewResult:
-		return []string{"j / k            previous / next saved result", "Esc              return to History"}
+		return []string{
+			"j / k            previous / next saved result",
+			"Esc              return to History",
+			"TTFT             request, loaded, cache-hit, and runtime-unloaded are different claims",
+			"explain          support class is not a score; direct cites a sealed receipt",
+			"capacity         weights, KV, availability, and observed resident stay separate",
+		}
 	case ViewBoard:
-		return []string{"j / k, PgUp/Dn   move selection", "Enter            open selected evidence", "/                edit filter", "Ctrl+U           clear filter", "s                cycle group-local sort"}
+		return []string{
+			"j / k, PgUp/Dn   move selection",
+			"Enter            open selected evidence",
+			"/                edit filter",
+			"Ctrl+U           clear filter",
+			"s                cycle group-local sort",
+			"groups           bars and sort never cross a device or request-config block",
+			"quant            recipe label, not file identity; digest distinguishes artifacts",
+		}
 	case ViewHistory:
-		return []string{"j / k, PgUp/Dn   move selection", "Enter            open selected evidence", "Space            mark comparison baseline", "c                compare with baseline", "/                edit filter", "Ctrl+U           clear filter", "s                cycle sort"}
+		return []string{
+			"j / k, PgUp/Dn   move selection",
+			"Enter            open selected evidence",
+			"Space            mark comparison baseline",
+			"c                compare with baseline",
+			"/                edit filter",
+			"Ctrl+U           clear filter",
+			"s                cycle sort",
+			"compare          exact observations only; no statistical winner here",
+		}
 	case ViewInventory:
-		return []string{"j / k, PgUp/Dn   move selection", "Enter            open measured evidence", "/                edit filter", "Ctrl+U           clear filter"}
+		return []string{
+			"j / k, PgUp/Dn   move selection",
+			"Enter            open measured evidence",
+			"/                edit filter",
+			"Ctrl+U           clear filter",
+			"EVID             measured or serving context, not the artifact maximum",
+			"unmeasured       a candidate, never a recommendation",
+		}
 	default:
 		return nil
 	}

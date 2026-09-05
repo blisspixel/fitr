@@ -335,14 +335,15 @@ func ObservationQualifier(status ObservationStatus, acquisition Acquisition) str
 type DiagnosisCode string
 
 const (
-	DiagnosisContextAdjusted   DiagnosisCode = "context.adjusted"
-	DiagnosisContaminated      DiagnosisCode = "run.resident_contamination"
-	DiagnosisPartialPlacement  DiagnosisCode = "placement.partial_accelerator_allocation"
-	DiagnosisTTFTNotResident   DiagnosisCode = "performance.ttft_not_resident"
-	DiagnosisPrefillCacheHit   DiagnosisCode = "performance.prefill_cache_hit"
-	DiagnosisTTFTCacheHit      DiagnosisCode = "performance.ttft_cache_hit"
-	DiagnosisFirstDecodeSlow   DiagnosisCode = "performance.first_decode_sample_slow"
-	DiagnosisToolCallInContent DiagnosisCode = "behavior.tool_call_in_content"
+	DiagnosisContextAdjusted    DiagnosisCode = "context.adjusted"
+	DiagnosisContaminated       DiagnosisCode = "run.resident_contamination"
+	DiagnosisPartialPlacement   DiagnosisCode = "placement.partial_accelerator_allocation"
+	DiagnosisTTFTNotResident    DiagnosisCode = "performance.ttft_not_resident"
+	DiagnosisPrefillCacheHit    DiagnosisCode = "performance.prefill_cache_hit"
+	DiagnosisTTFTCacheHit       DiagnosisCode = "performance.ttft_cache_hit"
+	DiagnosisFirstDecodeSlow    DiagnosisCode = "performance.first_decode_sample_slow"
+	DiagnosisPrefillSlowerPhase DiagnosisCode = "performance.prefill_slower_than_decode"
+	DiagnosisToolCallInContent  DiagnosisCode = "behavior.tool_call_in_content"
 )
 
 type DiagnosisSupport string
@@ -384,6 +385,8 @@ func DiagnosisLabel(code DiagnosisCode) string {
 		return "TTFT cache state"
 	case DiagnosisFirstDecodeSlow:
 		return "decode stability"
+	case DiagnosisPrefillSlowerPhase:
+		return "phase order"
 	case DiagnosisToolCallInContent:
 		return "tool channel"
 	default:
@@ -413,17 +416,29 @@ type Action struct {
 	Reason string     `json:"reason"`
 }
 
+// ArtifactIdentity is the sealed file the analysis is about. Quant is a recipe
+// label, not identity; Digest is the runtime-bound content address when one
+// exists. Callers must not join two artifacts on the quant string.
+type ArtifactIdentity struct {
+	Digest        string `json:"digest,omitempty"`
+	Quant         string `json:"quant,omitempty"`
+	Family        string `json:"family,omitempty"`
+	ParameterSize string `json:"parameter_size,omitempty"`
+	SizeBytes     int64  `json:"size_bytes,omitempty"`
+}
+
 // Report is a derived, non-persistent analysis of one validated schema-6 run.
-// It intentionally has no fit, headroom, available-memory, limiter, or global
-// score field because the source record cannot support those claims.
+// Capacity may carry a sealed-policy FIT/EXCEEDED observation. The report still
+// has no limiter diagnosis, no global score, and no quality rank.
 type Report struct {
-	Schema      string        `json:"schema"`
-	Policy      string        `json:"policy"`
-	Source      Source        `json:"source"`
-	Context     Context       `json:"context"`
-	Performance Performance   `json:"performance"`
-	Capacity    Capacity      `json:"capacity"`
-	Gaps        []EvidenceGap `json:"gaps,omitempty"`
-	Diagnoses   []Diagnosis   `json:"diagnoses,omitempty"`
-	NextActions []Action      `json:"next_actions"`
+	Schema      string           `json:"schema"`
+	Policy      string           `json:"policy"`
+	Source      Source           `json:"source"`
+	Artifact    ArtifactIdentity `json:"artifact"`
+	Context     Context          `json:"context"`
+	Performance Performance      `json:"performance"`
+	Capacity    Capacity         `json:"capacity"`
+	Gaps        []EvidenceGap    `json:"gaps,omitempty"`
+	Diagnoses   []Diagnosis      `json:"diagnoses,omitempty"`
+	NextActions []Action         `json:"next_actions"`
 }

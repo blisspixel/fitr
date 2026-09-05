@@ -684,7 +684,7 @@ func attachTopInventory(ctx context.Context, snapshot *top.Snapshot) {
 		snapshot.Inventory = append(snapshot.Inventory, top.InventoryItem{
 			ID: row.Model, Model: row.Model, State: row.State, Fit: row.Fit,
 			SizeB: row.SizeB, Loaded: row.Loaded, Next: row.Next, Note: row.Note,
-			Ctx: row.Ctx, Windows: row.Windows,
+			Ctx: row.Ctx, Windows: row.Windows, Shape: row.Shape,
 		})
 	}
 }
@@ -768,7 +768,7 @@ func collectTopBoardGroups(boardRecords []*Result) (map[string][]top.Run, map[st
 		if err != nil {
 			continue
 		}
-		boardKey := groupKey + "\x00" + result.Model
+		boardKey := groupKey + "\x00" + boardArtifactKey(result)
 		if seenBoard[boardKey] {
 			continue
 		}
@@ -817,6 +817,30 @@ func topBoardTitle(representative *Result) string {
 	return title
 }
 
+func boardArtifactKey(result *Result) string {
+	if result == nil {
+		return ""
+	}
+	if digest := runArtifactDigest(result); digest != "" {
+		return digest
+	}
+	return result.Model
+}
+
+func runArtifactDigest(result *Result) string {
+	if result == nil || result.Manifest == nil {
+		return ""
+	}
+	return result.Manifest.Model.RuntimeBoundDigest()
+}
+
+func runArtifactBytes(result *Result) int64 {
+	if result == nil || result.Manifest == nil {
+		return 0
+	}
+	return result.Manifest.Model.SizeBytes
+}
+
 func presentTopRun(result *Result) top.Run {
 	started, _ := time.Parse(time.RFC3339Nano, result.StartedAt)
 	scorecard := topScorecard(result)
@@ -834,8 +858,10 @@ func presentTopRun(result *Result) top.Run {
 	return top.Run{
 		ID: result.StableRunID(), Model: modelLabel,
 		Family: result.ModelMeta.Details.Family, ParamSize: result.ModelMeta.Details.ParameterSize,
-		Quant:    result.ModelMeta.Details.QuantizationLevel,
-		DeviceID: deviceID, HardwareID: hardwareID, Device: result.Device.GPU,
+		Quant:          result.ModelMeta.Details.QuantizationLevel,
+		ArtifactDigest: runArtifactDigest(result),
+		ArtifactBytes:  runArtifactBytes(result),
+		DeviceID:       deviceID, HardwareID: hardwareID, Device: result.Device.GPU,
 		Driver: result.Device.GPUDriver, Runtime: result.Device.Runtime,
 		Config: topRunConfig(result), Profile: result.Profile, Level: result.Level, UseFor: render.UseForLabel(scorecard.UseFor),
 		StartedAt: started, Duration: time.Duration(result.WallSeconds * float64(time.Second)),

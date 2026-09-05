@@ -36,9 +36,10 @@ Inventory answers: what is already serving, and what is the cheapest next comman
 
 Installed models only. Each row is measured, unproven, incompatible, or stale.
 Fit (compatible / low mem / skip) appears when architecture is already known
-from a saved result or a GGUF path the runtime exposed. CTX is the measured
+from a saved result or a GGUF path the runtime exposed. EVID is the measured
 window, or measured/serving when a live process reports a different
-allocation. The selected row shows the compact context-fit graph and whether
+allocation, never the artifact maximum. The selected row shows architecture
+metadata when the file supplied it, the compact context-fit graph, and whether
 apply is still pending. Unmeasured is never ranked. Enter opens a measured
 result; it does not pull or run.
 
@@ -73,9 +74,9 @@ The order is deliberate:
 5. The verified resident and allocation-attribution observation from the
    requested 32K load probe, when the runtime confirms that effective context.
    The non-accelerator value is a derived remainder, not a spill claim.
-6. Direct receipt-state diagnoses and the selected evidence gaps that are most
-   useful in the bounded TUI viewport. The full analysis contract remains
-   available in CLI and HTML output.
+6. Diagnoses with their support class (`direct`, not a quality score) plus the
+   selected evidence gaps that are most useful in the bounded TUI viewport.
+   The full analysis contract remains available in CLI and HTML output.
 7. Per-need uncertainty, family structure, cache, repeat-count, and
    contamination disclosures. Unrelated needs are never combined into one
    global resolution claim.
@@ -106,9 +107,11 @@ and repeats. Stable tie breakers keep equal rows from jumping during refresh.
 History answers: what changed over time, and which pair is valid to compare?
 
 Saved runs are newest first. Every row carries time, model and build, context,
-run level, need summary, and a privacy-safe device/config group. A marked
-baseline can be compared with the selected row only when the existing compare
-rules accept the pair. The UI states the exact mismatch when they do not.
+run level, need summary, and a privacy-safe device/config group. At 120 columns
+the selected run uses the same master-detail evidence pane as Board, including
+artifact digest when one exists. A marked baseline can be compared with the
+selected row only when the existing compare rules accept the pair. The UI
+states the exact mismatch when they do not.
 
 ## Keyboard model
 
@@ -145,7 +148,7 @@ Layout uses terminal-cell width, not byte or rune count.
 
 | Terminal size | Behavior |
 |---|---|
-| Width 120 or greater | Board uses the master-detail layout; other views show full width-qualified values and supported graphs |
+| Width 120 or greater | Board and History use the master-detail layout; other views show full width-qualified values and supported graphs |
 | Width 80 to 119 | One primary column; Result uses a compact full-battery summary below 32 rows |
 | Width 56 to 79 | Priority-trimmed rows with exact primary values and explicit truncation |
 | Width below 56 or height below 14 | Tiny safe view with identity, state, `?`, and `q` |
@@ -161,11 +164,11 @@ Result labels every displayed performance observation with `n`; a single
 runtime-unloaded sample is not visually equivalent to a repeated estimate.
 The footer and `?` help are view-specific and never advertise a no-op key.
 
-Board's selected-detail pane is shipped at 120 columns and above. History and
-Inventory remain single-column collections until their detail panes can carry
-the same selection, clipping, and evidence-integrity guarantees. Narrow Board
-views open the complete selected Result with `Enter` rather than compressing
-its evidence into an unreadable side pane.
+Board and History selected-detail panes are shipped at 120 columns and above.
+Inventory remains a single-column collection with selected-row notes until a
+detail pane can carry the same selection, clipping, and evidence-integrity
+guarantees. Narrow Board and History views open the complete selected Result
+with `Enter` rather than compressing its evidence into an unreadable side pane.
 
 ## Visual language
 

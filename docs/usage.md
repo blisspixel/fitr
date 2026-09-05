@@ -378,8 +378,9 @@ Bare `fitr` and `fitr advise` with no model print the installed inventory:
 what the serving runtime already has, joined to current fitr evidence. Each
 row is **measured**, **unproven**, **incompatible**, or **stale**, with one
 next command. Architecture, when already known, adds a compact context-fit
-graph (`2k ok | 4k ok | *8k ok | 16k no`). CTX is the measured window, or
-`measured/serving` when a live process reports a different allocation.
+graph (`2k ok | 4k ok | *8k ok | 16k no`). EVID is the measured window, or
+`measured/serving` when a live process reports a different allocation, not the
+artifact maximum.
 A measured run at a non-default ctx asks `fitr apply` until the server is
 already serving that window. Unmeasured is a candidate, never a
 recommendation. Color does not carry the state. `fitr <model>` is named

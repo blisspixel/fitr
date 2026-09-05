@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/decision"
 	"github.com/blisspixel/fitr/internal/render"
 )
@@ -74,6 +75,16 @@ func writeDecisionText(evaluation decision.Evaluation) {
 	fmt.Fprintf(os.Stdout, "  %-10s %s\n", "evidence", terminalText(string(evaluation.Evidence)))
 	fmt.Fprintf(os.Stdout, "  %-10s %s\n", "subject", terminalText(evaluation.Subject.ResolvedModel))
 	fmt.Fprintf(os.Stdout, "  %-10s %s\n", "config", terminalText(evaluation.Subject.ID))
+	if digest := analysis.ShortDigest(evaluation.Subject.ArtifactDigest); digest != "" {
+		fmt.Fprintf(os.Stdout, "  %-10s sha256:%s", "artifact", digest)
+		if evaluation.Subject.Quant != "" {
+			fmt.Fprintf(os.Stdout, "  quant %s is a recipe label", terminalText(evaluation.Subject.Quant))
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+	if why := decisionWhyNot(evaluation); why != "" {
+		fmt.Fprintf(os.Stdout, "  %-10s %s\n", "why not", why)
+	}
 	fmt.Fprintln(os.Stdout, "\nREQUIREMENTS")
 	for _, requirement := range evaluation.Requirements {
 		fmt.Fprintf(os.Stdout, "  %-12s %-22s %s\n",
@@ -104,6 +115,26 @@ func writeDecisionText(evaluation decision.Evaluation) {
 		}
 		fmt.Fprintln(os.Stdout, "  "+terminalText(evaluation.NextAction.Reason))
 	}
+}
+
+func decisionWhyNot(evaluation decision.Evaluation) string {
+	switch evaluation.State {
+	case decision.DecisionEligible:
+		return ""
+	case decision.DecisionIneligible:
+		for _, requirement := range evaluation.Requirements {
+			if requirement.State == decision.RequirementDisproven {
+				return terminalText(requirement.ID + " disproven: " + requirement.Reason)
+			}
+		}
+	default:
+		for _, requirement := range evaluation.Requirements {
+			if requirement.State == decision.RequirementBlocked || requirement.State == decision.RequirementUnresolved {
+				return terminalText(requirement.ID + " " + string(requirement.State) + ": " + requirement.Reason)
+			}
+		}
+	}
+	return ""
 }
 
 func decisionObservation(requirement decision.RequirementResult) string {

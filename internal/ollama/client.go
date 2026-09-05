@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -247,10 +248,16 @@ type generateStreamState struct {
 
 func readGenerateStream(r io.Reader, start time.Time) (generateStreamState, error) {
 	var state generateStreamState
-	sc := bufio.NewScanner(r)
+	limited := io.LimitReader(r, maxNativeStream+1)
+	sc := bufio.NewScanner(limited)
 	sc.Buffer(make([]byte, 0, 64*1024), maxNativeLine)
 	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
+		raw := sc.Bytes()
+		state.totalBytes += len(raw) + 1
+		if state.totalBytes > maxNativeStream {
+			return state, errors.New("ollama generate stream exceeds protocol limits")
+		}
+		line := bytes.TrimSpace(raw)
 		if len(line) == 0 {
 			continue
 		}
@@ -268,9 +275,8 @@ func readGenerateStream(r io.Reader, start time.Time) (generateStreamState, erro
 }
 
 func (s *generateStreamState) accept(line []byte, start time.Time) error {
-	s.totalBytes += len(line) + 1
 	s.frames++
-	if s.totalBytes > maxNativeStream || s.frames > maxNativeFrames {
+	if s.frames > maxNativeFrames {
 		return errors.New("ollama generate stream exceeds protocol limits")
 	}
 	if s.terminal {
@@ -920,9 +926,6 @@ func (c *Client) Reachable(ctx context.Context) bool {
 }
 
 func round(v float64, places int) float64 {
-	p := 1.0
-	for range places {
-		p *= 10
-	}
-	return float64(int64(v*p+0.5)) / p
+	p := math.Pow(10, float64(places))
+	return math.Round(v*p) / p
 }

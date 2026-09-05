@@ -48,8 +48,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.9.12 | Public Windows self-update completion and an end-to-end replacement gate |
 | Shipped | 0.10.0 | Decision specifications, typed context and configuration experiments, fresh confirmation, and the first bounded validated-work contract |
 | Shipped | 0.10.1 | Lowercase product language, a wide master-detail Board, exact uncertainty tokens, and README product photography from the real renderer |
-| Current | 0.10.2 | Typed capacity policy, pre-observation component projections, safe-budget fit and headroom, and cross-surface capacity explanations |
-| Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported explanation, and decision-relative views |
+| Current | 0.10.3 | Centralized diagnosis presentation, direct prefill-slower-phase diagnosis, runtime artifact identity, wide master-detail history, and decision-relative explanations |
+| Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported limiter hypotheses, and multi-surface decision relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -69,9 +69,9 @@ evidence paths.
 | Order | State | Build next | Why it comes next |
 |---:|---|---|---|
 | 1 | complete | Versioned capacity policy and pre-observation prediction receipts | FIT now distinguishes addressable capacity, current availability, operator reserve, component projection, observed allocation, and safe headroom. The original policy and projection are sealed before allocation. |
-| 2 | active | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
-| 3 | next | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
-| 4 | queued | Generalized validated-work receipts and explicit evidence classes | The fixed bounded workflow has pressured the schema with real events. It should now graduate into reusable trial, verifier, retry, escalation, timing, authority, and retention contracts before more workflows are added. |
+| 2 | complete | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
+| 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
+| 4 | active | Generalized validated-work receipts and explicit evidence classes | The fixed bounded workflow has pressured the schema with real events. It should now graduate into reusable trial, verifier, retry, escalation, timing, authority, and retention contracts before more workflows are added. |
 | 5 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability are essential, but they depend on the capacity and validated-outcome contracts above. They remain distinct experiments and never contaminate an ordinary scored run. |
 
 Optional OpenRouter validation can develop adversarial cases and grader
@@ -585,7 +585,7 @@ reports:
       capacity policy, safe headroom, model shape, and broader context
       evidence. Keep TTFT, prefill, decode, and load separate from resident
       allocation.
-- [ ] Show dense versus MoE shape with total and active-per-token parameters
+- [x] Show dense versus MoE shape with total and active-per-token parameters
       only when artifact metadata supports those facts. Do not infer either
       from a model name. Expose a compact architecture and KV-strategy label
       in inventory only when the installed artifact supplies that metadata.
@@ -594,15 +594,16 @@ reports:
       references, optional contradictions and missing evidence, and a semantic
       next experiment. Direct diagnoses cover context adjustment, resident
       contamination, partial placement, cache contamination, nonresident TTFT,
-      first-sample decode instability, and tool calls emitted in content.
+      first-sample decode instability, unusual prefill-vs-decode phase order,
+      and tool calls emitted in content.
 - [ ] Add intervention-supported and suggestive limiter diagnoses. Labels such
       as `consistent with memory-traffic pressure` are allowed; an unmeasured
       claim such as `memory-bandwidth bound` is not. Each hypothesis must name
       contradictory or missing evidence and a discriminating experiment.
-- [ ] Make help selection-aware for TTFT, prefill, decode, resident memory,
+- [x] Make help selection-aware for TTFT, prefill, decode, resident memory,
       placement, model shape, and verdict uncertainty. Explain what each fact
       answers and what comparisons remain valid.
-- [ ] Add responsive master-detail views to Board, History, and Inventory:
+- [x] Add responsive master-detail views to Board, History, and Inventory:
       side-by-side at wide widths, stacked at medium widths, and an explicit
       detail surface when narrow. Preserve the decision spine, view-specific
       controls, exact values, and comparison boundaries.
@@ -629,11 +630,11 @@ reports:
       co-residency claim until one runtime receipt proves simultaneous
       residency, spill, and eviction state. Model-set results never enter the
       ordinary single-model Board.
-- [ ] When the requested context is unresolved and advice stays SKIP, title
+- [x] When the requested context is unresolved and advice stays SKIP, title
       enumerated context rows as projections and suppress the suggestion star.
       A projected compatible row must not look like it overrides the headline
       refusal.
-- [ ] Clarify Inventory's `CTX` as measured evidence, not artifact maximum.
+- [x] Clarify Inventory's `CTX` as measured evidence, not artifact maximum.
       Either rename the column to `EVID CTX` or add a separately sourced
       metadata-maximum field without fetching every artifact on the hot path.
 - [x] Prototype a quant and configuration frontier. Every sealed candidate is
@@ -1085,6 +1086,7 @@ These features must preserve the evidence contract.
 | 0.10.0 | Decision specifications, typed context and configuration experiments, fresh confirmation, and the first bounded validated-work contract |
 | 0.10.1 | Lowercase product language, wide master-detail Board, exact uncertainty tokens, and deterministic README product photography |
 | 0.10.2 | Typed capacity policy, timestamped availability, pre-observation component projections, observed safe-budget fit and headroom, and renderer-neutral capacity explanations |
+| 0.10.3 | Centralized diagnosis presentation, direct prefill-slower-phase diagnosis, runtime artifact identity, wide master-detail history, selection-aware help, and decision-relative explanations |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

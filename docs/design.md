@@ -159,6 +159,39 @@ can still be the best thing on your machine for drafting or fast uncensored
 chat. Results are a **set of needs served**, not a rank. The tool never
 prints "not recommended."
 
+### Different artifacts fail differently
+
+fitr is a local decision loop over whatever is installed on this machine, not
+a quant picker for one 27B family on one card. Dense transformers, mixture-of-
+experts, hybrid linear-attention, recurrent or state-space models, vision
+towers, draft or speculative pairs, and sidecars do not share a failure
+mode. A published KL ladder, a "best Q4" table, or a knee measured on one
+checkpoint is not a fitr result: it was not sealed here, it is not a declared
+need, and it does not transfer.
+
+Architecture class changes which claims are even legal:
+
+| Class | Typical real failure | What fitr must not conclude from it |
+|---|---|---|
+| Dense transformer | KV grows with every layer and context; structured output and tool routing break under aggressive quants | Half the bits are not half the intelligence; a Q4 label is not a quality tier |
+| MoE | All experts occupy weight memory; decode only touches routed experts; CPU-MoE is a placement, not a FIT discount | 30B-A3B is not a 3B model for memory and not a 30B dense model for speed |
+| Hybrid linear-attention | Conventional weights+KV is the wrong allocation model; long-context decode can cliff while prefill stays fast | Do not project "¼ KV" or treat 8K→32K as 4× resident |
+| Recurrent / SSM | State is not a growing KV cache | Do not certify 1M context from "constant memory" |
+| Vision / mmproj | Peak activations can dwarf text-only resident; declared vision is not competence | Do not fold the tower into the LLM quant or score images from a capability flag |
+| Speculative / MTP / draft | tok/s is a property of spec-type, draft identity, and acceptance | Do not treat a speedup as free or as a property of the target file |
+| Embedder / reranker / speech | Separate artifacts, usually no chat KV | Do not add isolated FIT rows and call the sum co-residency |
+
+Cards fail differently too. Unified memory, dedicated VRAM, partial offload,
+and KV dtype are fingerprint dimensions. Board never ranks across them. The
+same file on a different driver, runtime, or placement is a different
+configuration.
+
+Single-family quant content is useful as a warning about **label ≠ file**. It
+is not a recipe for fitr. fitr will not ingest KL, top-1 agreement, or
+publisher size tables; will not join artifacts on `Q4_K_M`; will not pick a
+universal sweet-spot quant; and will not let one architecture's curve speak
+for another.
+
 ---
 
 ## Known limits

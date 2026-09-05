@@ -24,7 +24,7 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"fitr 0.6.0", "cpu", "gpu", "ollama", "UNCALIBRATED",
-		"measured", "unproven", "incompatible", "CTX", "16k/8k", "*16k ok",
+		"measured", "unproven", "incompatible", "EVID", "16k/8k", "*16k ok",
 		// The verb survives; the model name and the binary's own name do not,
 		// because the row already carries both.
 		"apply", "advise", "try a smaller quant",

@@ -230,22 +230,28 @@ root-cause claim.
 
 ## Model shape and allocation attribution
 
-The allocation attribution described below is shipped. The compact model-shape
-view remains a planned 0.10 feature and will appear only when artifact metadata
-supports it.
+The allocation attribution described below is shipped. Compact architecture and
+KV-strategy labels appear in inventory and advise only when the installed
+artifact's metadata supplies them. Serving tags and model names are not
+architecture.
 
-Dense and mixture-of-experts models need different labels:
+Different shapes need different labels, and they fail in different ways:
 
 ```text
 MODEL SHAPE
-  architecture       MoE
+  architecture       MoE | dense | hybrid-linear | recurrent
+  kv strategy        full-kv | hybrid-interval-N | recurrent-state
   total parameters   metadata-derived
-  active per token   nominal estimate from routing metadata
-  quant              Q5_K_M
+  active per token   nominal estimate from routing metadata, MoE only
+  quant              Q5_K_M   (recipe label, not identity)
 ```
 
 Total parameters help explain artifact capacity. Nominal active parameters
-help describe the compute path. Neither directly predicts speed.
+help describe the MoE compute path. Hybrid and recurrent classes refuse
+weights-plus-KV FIT until a load receipt exists. None of these labels predict
+speed, tool competence, or "the best quant for 24 GB." A quant string is a
+requested recipe class; two files with the same label remain different
+artifacts.
 
 Allocation attribution is similarly specific. At an exact-context memory probe, fitr can
 show the runtime-classified accelerator bytes and derive the non-accelerator

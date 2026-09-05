@@ -22,6 +22,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/render"
 )
@@ -38,11 +39,14 @@ const (
 // Input is everything Evaluate needs. Zero means unknown: Evaluate must SKIP
 // rather than invent a substitute.
 type Input struct {
-	Model    string
-	Quant    string
-	WeightsB int64   // on-disk size; 0 unknown
-	HaveGB   float64 // capacity input; HaveSrc defines whether it is a budget
-	HaveSrc  string  // where HaveGB came from; empty if unmeasured
+	Model string
+	Quant string
+	// ArtifactDigest is the runtime-bound content address when the serving
+	// runtime supplied one. The quant string is never identity.
+	ArtifactDigest string
+	WeightsB       int64   // on-disk size; 0 unknown
+	HaveGB         float64 // capacity input; HaveSrc defines whether it is a budget
+	HaveSrc        string  // where HaveGB came from; empty if unmeasured
 	// NVIDIAUnifiedMemory is true when device detection identified an NVIDIA
 	// shared-memory SoC. It remains true when --vram-gb replaces HaveGB so a
 	// device-only allocator projection cannot be mistaken for whole-pool use.
@@ -276,34 +280,37 @@ func addInt64(terms ...int64) (int64, bool) {
 const ReportSchema = "fitr.advise.v1"
 
 type Report struct {
-	Schema        string    `json:"schema"`
-	Tier          string    `json:"tier"`
-	Model         string    `json:"model,omitempty"`
-	Quant         string    `json:"quant,omitempty"`
-	Why           string    `json:"why"`
-	Remedy        string    `json:"remedy,omitempty"`
-	KVRemedy      string    `json:"kv_remedy,omitempty"`
-	Hint          string    `json:"hint,omitempty"`
-	Flag          string    `json:"flag,omitempty"`
-	FlagValue     int       `json:"flag_value,omitempty"`
-	NeedGB        float64   `json:"need_gb,omitempty"`
-	HaveGB        float64   `json:"have_gb,omitempty"`
-	WeightsGB     float64   `json:"weights_gb,omitempty"`
-	ObservedGB    float64   `json:"observed_gb,omitempty"`
-	KVGB          float64   `json:"kv_gb,omitempty"`
-	FitsGB        float64   `json:"fits_gb,omitempty"`
-	Ctx           int       `json:"ctx,omitempty"`
-	MaxCtx        int       `json:"max_ctx,omitempty"`
-	TotalParamsB  float64   `json:"total_params_b,omitempty"`
-	ActiveParamsB float64   `json:"active_params_b,omitempty"`
-	ActiveKnown   bool      `json:"active_known,omitempty"`
-	Experts       int       `json:"experts,omitempty"`
-	ExpertUsed    int       `json:"expert_used,omitempty"`
-	Gaps          []string  `json:"gaps,omitempty"`
-	Source        string    `json:"source,omitempty"`
-	HaveSource    string    `json:"have_source,omitempty"`
-	FreeGB        float64   `json:"free_gb,omitempty"`
-	Fit           *FitTable `json:"context_fit,omitempty"`
+	Schema         string    `json:"schema"`
+	Tier           string    `json:"tier"`
+	Model          string    `json:"model,omitempty"`
+	Quant          string    `json:"quant,omitempty"`
+	ArtifactDigest string    `json:"artifact_digest,omitempty"`
+	Architecture   string    `json:"architecture,omitempty"`
+	KVStrategy     string    `json:"kv_strategy,omitempty"`
+	Why            string    `json:"why"`
+	Remedy         string    `json:"remedy,omitempty"`
+	KVRemedy       string    `json:"kv_remedy,omitempty"`
+	Hint           string    `json:"hint,omitempty"`
+	Flag           string    `json:"flag,omitempty"`
+	FlagValue      int       `json:"flag_value,omitempty"`
+	NeedGB         float64   `json:"need_gb,omitempty"`
+	HaveGB         float64   `json:"have_gb,omitempty"`
+	WeightsGB      float64   `json:"weights_gb,omitempty"`
+	ObservedGB     float64   `json:"observed_gb,omitempty"`
+	KVGB           float64   `json:"kv_gb,omitempty"`
+	FitsGB         float64   `json:"fits_gb,omitempty"`
+	Ctx            int       `json:"ctx,omitempty"`
+	MaxCtx         int       `json:"max_ctx,omitempty"`
+	TotalParamsB   float64   `json:"total_params_b,omitempty"`
+	ActiveParamsB  float64   `json:"active_params_b,omitempty"`
+	ActiveKnown    bool      `json:"active_known,omitempty"`
+	Experts        int       `json:"experts,omitempty"`
+	ExpertUsed     int       `json:"expert_used,omitempty"`
+	Gaps           []string  `json:"gaps,omitempty"`
+	Source         string    `json:"source,omitempty"`
+	HaveSource     string    `json:"have_source,omitempty"`
+	FreeGB         float64   `json:"free_gb,omitempty"`
+	Fit            *FitTable `json:"context_fit,omitempty"`
 }
 
 func (r Report) ExitCode() int {
@@ -480,13 +487,16 @@ func evaluateCore(in Input) Report {
 
 func newCoreReport(in Input) Report {
 	r := Report{
-		Model:      in.Model,
-		Quant:      in.Quant,
-		Source:     in.Source,
-		HaveSource: in.HaveSrc,
-		MaxCtx:     in.Arch.MaxCtx,
-		Experts:    in.Arch.Experts,
-		ExpertUsed: in.Arch.ExpertUsed,
+		Model:          in.Model,
+		Quant:          in.Quant,
+		ArtifactDigest: in.ArtifactDigest,
+		Architecture:   in.Arch.ShapeClass(),
+		KVStrategy:     in.Arch.KVStrategy(),
+		Source:         in.Source,
+		HaveSource:     in.HaveSrc,
+		MaxCtx:         in.Arch.MaxCtx,
+		Experts:        in.Arch.Experts,
+		ExpertUsed:     in.Arch.ExpertUsed,
 	}
 	if in.Arch.Params > 0 {
 		r.TotalParamsB = float64(in.Arch.Params) / 1e9
@@ -877,6 +887,7 @@ const adviseLabelWidth = 17
 // Write prints the human report. SKIP never prints a 0.0 GB budget as if it
 // were a measurement.
 func Write(w io.Writer, r Report) {
+	width := render.Width()
 	var bits []string
 	if r.Model != "" {
 		bits = append(bits, render.SingleLine(r.Model))
@@ -890,12 +901,12 @@ func Write(w io.Writer, r Report) {
 	if len(bits) > 0 {
 		fmt.Fprintf(w, "  %s\n\n", strings.Join(bits, "  "))
 	}
-	// Every field wraps under its own column. The verdict line in particular
-	// carries an unbounded sentence -- "resident 19.0 GB exceeds the 24.0 GB
-	// budget reading; the process is running, so the budget is the suspect
-	// number" is 110 characters on its own -- and used to run off the right
-	// edge of any terminal narrower than its longest explanation.
-	width := render.Width()
+	if shape := strings.TrimSpace(strings.Join([]string{r.Architecture, r.KVStrategy}, "  ")); shape != "" {
+		render.Field(w, "  shape", adviseLabelWidth, shape, width)
+	}
+	if digest := analysis.ShortDigest(r.ArtifactDigest); digest != "" {
+		render.Field(w, "  artifact", adviseLabelWidth, "sha256:"+digest+"  (quant string is a recipe label, not identity)", width)
+	}
 	render.Field(w, "  ["+render.SingleLine(r.Label())+"]", adviseLabelWidth, r.Why, width)
 	if r.Remedy != "" {
 		render.Field(w, "  try", adviseLabelWidth, r.Remedy, width)
@@ -1106,9 +1117,77 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	a.FFN = archDim(first(kvs, p+"expert_feed_forward_length", p+"feed_forward_length"))
 	a.FullAttentionInterval = archDim(first(kvs, p+"full_attention_interval"))
 	a.RecurrentLayers = archDim(first(kvs, p+"attention.recurrent_layer_count", "attention.recurrent_layer_count"))
-	a.Hybrid = a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 ||
-		strings.EqualFold(arch, "qwen35") || strings.EqualFold(arch, "qwen3.5")
+	a.Hybrid = a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 || inherentHybridArchitecture(arch)
 	return a
+}
+
+// inherentHybridArchitecture is a GGUF architecture-string gate for families
+// whose conventional KV formula is the wrong physics even when
+// full_attention_interval is omitted from the header. It matches decoder
+// architecture names, never serving tags like "qwen3.8:27b", and must not be
+// grown from marketing names or a single-family quant study.
+func inherentHybridArchitecture(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "qwen35", "qwen3.5", "qwen35moe", "qwen3next":
+		return true
+	default:
+		return false
+	}
+}
+
+// ShapeClass is a compact architecture label from GGUF keys only. Empty means
+// the artifact did not supply enough metadata to name a class.
+func (a Arch) ShapeClass() string {
+	if a.Hybrid {
+		if a.Experts > 0 {
+			return "hybrid-linear+moe"
+		}
+		if a.FullAttentionInterval > 0 || inherentHybridArchitecture(a.Name) {
+			return "hybrid-linear"
+		}
+		return "recurrent"
+	}
+	if a.Experts > 0 {
+		return "moe"
+	}
+	if a.KVReady() {
+		return "dense"
+	}
+	return ""
+}
+
+// KVStrategy names how context memory grows, only when metadata supports it.
+// A missing full_attention_interval is never defaulted to 4.
+func (a Arch) KVStrategy() string {
+	if a.FullAttentionInterval > 0 {
+		return fmt.Sprintf("hybrid-interval-%d", a.FullAttentionInterval)
+	}
+	if a.Hybrid {
+		if a.RecurrentLayers > 0 && !inherentHybridArchitecture(a.Name) {
+			return "recurrent-state"
+		}
+		return "hybrid-linear"
+	}
+	if a.KVReady() {
+		return "full-kv"
+	}
+	return ""
+}
+
+// CompactLabel is the inventory architecture/KV-strategy line. Empty when the
+// installed artifact did not supply the keys.
+func (a Arch) CompactLabel() string {
+	shape := a.ShapeClass()
+	if shape == "" {
+		return ""
+	}
+	if a.Experts > 0 && a.ExpertUsed > 0 {
+		shape = fmt.Sprintf("%s %d/%d", shape, a.ExpertUsed, a.Experts)
+	}
+	if strategy := a.KVStrategy(); strategy != "" && strategy != shape {
+		return shape + "  " + strategy
+	}
+	return shape
 }
 
 // maxArchDim bounds a single architecture dimension. The largest real models

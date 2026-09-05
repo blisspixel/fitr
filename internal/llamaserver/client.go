@@ -319,10 +319,16 @@ type completionStreamState struct {
 
 func readCompletionStream(r io.Reader, start time.Time) (completionStreamState, error) {
 	var state completionStreamState
-	sc := bufio.NewScanner(r)
+	limited := io.LimitReader(r, maxNativeStream+1)
+	sc := bufio.NewScanner(limited)
 	sc.Buffer(make([]byte, 0, 64*1024), maxNativeLine)
 	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
+		raw := sc.Bytes()
+		state.totalBytes += len(raw) + 1
+		if state.totalBytes > maxNativeStream {
+			return state, errors.New("llama-server completion stream exceeds protocol limits")
+		}
+		line := bytes.TrimSpace(raw)
 		if len(line) == 0 || bytes.HasPrefix(line, []byte(":")) {
 			continue
 		}
@@ -340,9 +346,8 @@ func readCompletionStream(r io.Reader, start time.Time) (completionStreamState, 
 }
 
 func (s *completionStreamState) accept(line []byte, start time.Time) error {
-	s.totalBytes += len(line) + 1
 	s.frames++
-	if s.totalBytes > maxNativeStream || s.frames > maxNativeFrames {
+	if s.frames > maxNativeFrames {
 		return errors.New("llama-server completion stream exceeds protocol limits")
 	}
 	frame, doneMarker, err := completionFramePayload(line)

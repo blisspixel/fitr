@@ -44,6 +44,7 @@ type InventoryRow struct {
 	MeasuredCtx  int
 	ServingCtx   int
 	ServingKnown bool
+	Shape        string
 }
 
 type inventoryJSON struct {
@@ -83,6 +84,7 @@ type inventoryJSONRow struct {
 	MeasuredCtx  int    `json:"measured_ctx,omitempty"`
 	ServingCtx   int    `json:"serving_ctx,omitempty"`
 	ServingKnown bool   `json:"serving_known,omitempty"`
+	Shape        string `json:"shape,omitempty"`
 }
 
 // WriteInventory renders the installed list. Unmeasured is a candidate, never
@@ -190,7 +192,7 @@ func writeInventoryTable(w io.Writer, inv Inventory, width int, p palette, g gly
 	modelWidth := max(width-invFixed, 12)
 	fmt.Fprintf(w, "  %s %-*s %-*s %*s  %s\n",
 		pad("MODEL", modelWidth, ""), invStateWidth, "STATE",
-		invCtxWidth, "CTX", invSizeWidth, "SIZE", "NEXT")
+		invCtxWidth, "EVID", invSizeWidth, "SIZE", "NEXT")
 	for _, row := range inv.Rows {
 		writeInventoryRow(w, row, width, modelWidth, p, g)
 	}
@@ -216,6 +218,9 @@ func writeInventoryRow(w io.Writer, row InventoryRow, width, modelWidth int, p p
 		invCtxWidth, ctxCol, invSizeWidth, size,
 		fit(shortNext(row.Next, row.Model), invNextWidth, g.Ell))
 	writeInventoryRowExtra(w, row.Note, width, p)
+	if row.Shape != "" {
+		writeInventoryRowExtra(w, row.Shape, width, p)
+	}
 	if row.Windows != "" {
 		writeInventoryRowExtra(w, "projected windows: "+row.Windows, width, p)
 	}
@@ -247,7 +252,7 @@ func writeInventoryFooter(w io.Writer, inv Inventory, width int, p palette) {
 		}
 		fmt.Fprintln(w, p.wrap(p.Muted, lead+l))
 	}
-	fmt.Fprintln(w, p.wrap(p.Muted, "  [L] loaded model    CTX is measured, or measured/serving when they differ"))
+	fmt.Fprintln(w, p.wrap(p.Muted, "  [L] loaded model    EVID is measured/serving, not artifact max"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  * suggested window   > requested window that does not fit"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  projected windows derive from weights, KV, and the stated memory budget"))
 	fmt.Fprintln(w, p.wrap(p.Muted, "  unmeasured is a candidate, never a recommendation"))
@@ -365,7 +370,7 @@ func writeInventoryJSON(w io.Writer, inv Inventory) {
 			Model: row.Model, State: row.State, Fit: row.Fit, SizeB: row.SizeB,
 			Loaded: row.Loaded, Next: row.Next, Note: row.Note,
 			Ctx: row.Ctx, Windows: row.Windows, MeasuredCtx: row.MeasuredCtx,
-			ServingCtx: row.ServingCtx, ServingKnown: row.ServingKnown,
+			ServingCtx: row.ServingCtx, ServingKnown: row.ServingKnown, Shape: row.Shape,
 		})
 	}
 	enc := json.NewEncoder(w)

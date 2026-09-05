@@ -35,6 +35,38 @@ func TestPresentationLabelsClarifyLegacyAndIndependentEvidence(t *testing.T) {
 	}
 }
 
+func TestResultPrintsDiagnosisSupportClassNotObserved(t *testing.T) {
+	report := &analysis.Report{
+		Artifact: analysis.ArtifactIdentity{
+			Digest: "sha256:abcdef0123456789ffff", Quant: "Q4_K_M", SizeBytes: 17 << 30,
+		},
+		Diagnoses: []analysis.Diagnosis{{
+			Code: analysis.DiagnosisPartialPlacement, Support: analysis.DiagnosisDirect,
+			Statement:      "the runtime reported a partial accelerator share at the exact-context allocation point",
+			NextExperiment: &analysis.Action{Argv: []string{"fitr", "board"}, Reason: "compare compatible receipts"},
+		}},
+		Gaps: []analysis.EvidenceGap{{
+			Code: analysis.GapCapacityPolicyUnsealed, Message: "usable budget was not sealed",
+		}},
+		NextActions: []analysis.Action{{Argv: []string{"fitr", "board"}, Reason: "compare compatible receipts"}},
+	}
+	var output strings.Builder
+	display := plainDisplay(&output)
+	display.Result(score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}}, Meta{Analysis: report})
+	text := output.String()
+	for _, want := range []string{
+		"explain", "direct · allocation attribution", "next experiment fitr board",
+		"limit", "usable capacity", "sha256:abcdef012345", "recipe label",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("result missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "observed   allocation") || strings.Contains(text, "\nobserved ") {
+		t.Fatalf("diagnosis support collapsed to observed:\n%s", text)
+	}
+}
+
 func TestResultMarksDescriptiveOnlyEvidenceAndItsSource(t *testing.T) {
 	decode, ttft := 12.0, 0.2
 	resident := int64(5 * 1024 * 1024 * 1024)

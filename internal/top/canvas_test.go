@@ -151,6 +151,20 @@ func TestWideBoardStartsAtDocumentedBreakpoint(t *testing.T) {
 	}
 }
 
+func TestWideHistoryStartsAtDocumentedBreakpoint(t *testing.T) {
+	for _, tc := range []struct {
+		width int
+		wide  bool
+	}{{119, false}, {120, true}} {
+		state := NewState(testSnapshot())
+		state.View, state.Width, state.Height = ViewHistory, tc.width, 24
+		plain := Render(state, DefaultGlyphs(false)).Plain()
+		if got := strings.Contains(plain, "selected evidence"); got != tc.wide {
+			t.Fatalf("history width %d wide layout=%v, want %v:\n%s", tc.width, got, tc.wide, plain)
+		}
+	}
+}
+
 func TestWideBoardKeepsInconclusiveNeutral(t *testing.T) {
 	snapshot := testSnapshot()
 	snapshot.Board[0].Runs[0].Verdicts = []Verdict{{Need: "structured_output", Label: "structured output", State: "INCONCLUSIVE"}}

@@ -78,6 +78,7 @@ type InventoryRow struct {
 	MeasuredCtx  int
 	ServingCtx   int
 	ServingKnown bool
+	Shape        string // compact architecture/KV-strategy from artifact metadata only
 }
 
 // InventoryTable is the joined, sorted, capped inventory.
@@ -174,7 +175,16 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 	}
 	attachFit(&row, tag, fitEvidence, q)
 	row.Ctx = compactCtxPair(row.MeasuredCtx, row.ServingCtx, row.ServingKnown)
+	row.Shape = inventoryShape(tag, fitEvidence)
 	return row
+}
+
+func inventoryShape(tag InstalledModel, ev *InventoryEvidence) string {
+	arch := tag.Arch
+	if ev != nil && ev.Arch.KVReady() {
+		arch = ev.Arch
+	}
+	return arch.CompactLabel()
 }
 
 func attachFit(row *InventoryRow, tag InstalledModel, ev *InventoryEvidence, q InventoryQuery) {

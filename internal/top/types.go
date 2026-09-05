@@ -56,6 +56,8 @@ type Run struct {
 	Family          string           `json:"family"`
 	ParamSize       string           `json:"param_size"`
 	Quant           string           `json:"quant"`
+	ArtifactDigest  string           `json:"artifact_digest,omitempty"`
+	ArtifactBytes   int64            `json:"artifact_bytes,omitempty"`
 	DeviceID        string           `json:"device_id"`
 	HardwareID      string           `json:"hardware_id"`
 	Device          string           `json:"device"`
@@ -162,6 +164,7 @@ type InventoryItem struct {
 	Note    string `json:"note,omitempty"`
 	Ctx     string `json:"ctx,omitempty"`
 	Windows string `json:"windows,omitempty"`
+	Shape   string `json:"shape,omitempty"`
 }
 
 // Snapshot is a complete point-in-time presentation snapshot.

@@ -42,7 +42,8 @@ func TestDecideEvaluatesSavedEvidenceAndUsesDecisionExitStates(t *testing.T) {
 		})
 	})
 	if code != exitUnresolved || !strings.Contains(output, "DECISION  UNRESOLVED") ||
-		!strings.Contains(output, "NEXT") || !strings.Contains(output, "95% interval") {
+		!strings.Contains(output, "NEXT") || !strings.Contains(output, "95% interval") ||
+		!strings.Contains(output, "why not") {
 		t.Fatalf("unresolved exit=%d output=%q", code, output)
 	}
 }

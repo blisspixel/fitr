@@ -69,14 +69,25 @@ func fromValidatedRecordWithIdentity(result *record.Record, identityIssue string
 
 func fromValidatedRecordWithDisplayOnly(result *record.Record, displayOnly displayOnlyReason) Report {
 	unclaimable := displayOnly != displayOnlyNone
+	manifestSchema := ""
+	if result.Manifest != nil {
+		manifestSchema = result.Manifest.Schema
+	}
+	completionSchema := ""
+	evidenceSHA256 := ""
+	if result.Completion != nil {
+		completionSchema = result.Completion.Schema
+		evidenceSHA256 = result.Completion.EvidenceSHA256
+	}
 	report := Report{
 		Schema: ReportSchema,
 		Policy: PolicySchema,
 		Source: Source{
 			Kind: SourceSealedResult, RecordSchema: result.SchemaVersion,
-			ManifestSchema: result.Manifest.Schema, CompletionSchema: result.Completion.Schema,
-			EvidenceSHA256: result.Completion.EvidenceSHA256, Validated: true,
+			ManifestSchema: manifestSchema, CompletionSchema: completionSchema,
+			EvidenceSHA256: evidenceSHA256, Validated: true,
 		},
+		Artifact:    artifactIdentityFrom(result),
 		Context:     contextFrom(result),
 		Performance: performanceFrom(result, unclaimable),
 		Capacity:    capacityFrom(result, unclaimable),
@@ -85,6 +96,23 @@ func fromValidatedRecordWithDisplayOnly(result *record.Record, displayOnly displ
 	report.Diagnoses = diagnosesFrom(result, unclaimable)
 	report.NextActions = nextActionsFrom(result, unclaimable)
 	return report
+}
+
+func artifactIdentityFrom(result *record.Record) ArtifactIdentity {
+	identity := ArtifactIdentity{
+		Quant:         result.ModelMeta.Details.QuantizationLevel,
+		Family:        result.ModelMeta.Details.Family,
+		ParameterSize: result.ModelMeta.Details.ParameterSize,
+		SizeBytes:     max(result.ModelMeta.Size, 0),
+	}
+	if result.Manifest == nil {
+		return identity
+	}
+	if result.Manifest.Model.SizeBytes > 0 {
+		identity.SizeBytes = result.Manifest.Model.SizeBytes
+	}
+	identity.Digest = result.Manifest.Model.RuntimeBoundDigest()
+	return identity
 }
 
 func contextFrom(result *record.Record) Context {
@@ -370,7 +398,7 @@ func placementFrom(allocation eval.VerifiedAllocation, status ObservationStatus,
 	descriptiveOnly bool) *PlacementObservation {
 	// Schema 6 has no presence bit for accelerator bytes. Zero therefore cannot
 	// distinguish an explicit CPU-only classification from a missing field.
-	if allocation.AcceleratorBytes <= 0 {
+	if allocation.AcceleratorBytes <= 0 || allocation.ResidentBytes <= 0 || allocation.ResidentBytes < allocation.AcceleratorBytes {
 		return nil
 	}
 	percent := 100 * float64(allocation.AcceleratorBytes) / float64(allocation.ResidentBytes)
@@ -666,7 +694,7 @@ func performanceDiagnoses(result *record.Record) []Diagnosis {
 			Evidence: []string{"speed_repeats.gated_prompt_tokens", "speed_repeats.gated_cached_tokens"},
 		}, repeatMeasurementAction(result, "repeat the gated request without cached prompt tokens")))
 	}
-	decode, _, _ := speedValues(result.Speed)
+	decode, prefill, _ := speedValues(result.Speed)
 	if slow, _ := stats.FirstRunSlow(decode); slow {
 		action := repeatMeasurementAction(result, "repeat enough times to separate a first-run effect from unstable throughput")
 		action.Argv = append(action.Argv, "-k", "5")
@@ -675,7 +703,40 @@ func performanceDiagnoses(result *record.Record) []Diagnosis {
 			Evidence: []string{"speed_repeats.decode_tps"},
 		}, action))
 	}
+	if phase := prefillSlowerDiagnosis(decode, prefill); phase != nil {
+		diagnoses = append(diagnoses, *phase)
+	}
 	return diagnoses
+}
+
+func prefillSlowerDiagnosis(decode, prefill []float64) *Diagnosis {
+	decodeMean, decodeOK := meanPositive(decode)
+	prefillMean, prefillOK := meanPositive(prefill)
+	if !decodeOK || !prefillOK || prefillMean >= decodeMean {
+		return nil
+	}
+	diagnosis := directDiagnosis(Diagnosis{
+		Code:      DiagnosisPrefillSlowerPhase,
+		Statement: "prompt processing was the slower observed throughput phase; this does not identify a hardware limiter",
+		Evidence:  []string{"speed_repeats.prefill_tps", "speed_repeats.decode_tps"},
+		Missing:   []string{"memory-traffic counters", "compute counters", "kernel identity"},
+	}, Action{Code: ActionRunContextExperiment, Argv: []string{"fitr", "experiment", "context", CurrentModelPlaceholder},
+		Reason: "measure prefill and decode at more than one verified context before attributing a limiter"})
+	return &diagnosis
+}
+
+func meanPositive(values []float64) (float64, bool) {
+	sum, n := 0.0, 0
+	for _, value := range values {
+		if value > 0 {
+			sum += value
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, false
+	}
+	return sum / float64(n), true
 }
 
 func behaviorDiagnoses(result *record.Record) []Diagnosis {

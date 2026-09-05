@@ -639,6 +639,27 @@ func TestFromRecordDetectsObservedOnlyArtifactBinding(t *testing.T) {
 	}
 }
 
+func TestArtifactIdentityUsesRuntimeBoundDigestNotQuant(t *testing.T) {
+	result := completedTestRecordConfigured(t, "", func(result *record.Record) {
+		result.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
+		result.ModelMeta.Details.Family = "qwen3"
+		result.ModelMeta.Details.ParameterSize = "8B"
+	})
+	report, err := FromRecord(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Artifact.Quant != "Q4_K_M" || report.Artifact.Family != "qwen3" {
+		t.Fatalf("artifact labels = %+v", report.Artifact)
+	}
+	if report.Artifact.Digest != testDigest {
+		t.Fatalf("artifact digest = %q, want runtime-bound %q", report.Artifact.Digest, testDigest)
+	}
+	if ShortDigest(report.Artifact.Digest) == report.Artifact.Quant {
+		t.Fatal("digest collapsed onto the quant label")
+	}
+}
+
 func TestOnlyDirectReceiptDiagnosesAreProduced(t *testing.T) {
 	effective := 4096
 	result := handRecord(validUncachedSamples(3))
@@ -657,6 +678,30 @@ func TestOnlyDirectReceiptDiagnosesAreProduced(t *testing.T) {
 		if strings.Contains(strings.ToLower(string(data)), forbidden) {
 			t.Fatalf("diagnosis invented %q: %s", forbidden, data)
 		}
+	}
+}
+
+func TestPrefillSlowerPhaseIsDirectAndDoesNotInventALimiter(t *testing.T) {
+	samples := validUncachedSamples(3)
+	for i := range samples {
+		samples[i].PrefillTPS = 8
+		samples[i].DecodeTPS = 40
+	}
+	report := fromValidatedRecord(handRecord(samples))
+	var found Diagnosis
+	for _, diagnosis := range report.Diagnoses {
+		if diagnosis.Code == DiagnosisPrefillSlowerPhase {
+			found = diagnosis
+		}
+	}
+	if found.Code == "" || found.Support != DiagnosisDirect {
+		t.Fatalf("phase diagnosis = %+v", report.Diagnoses)
+	}
+	if !strings.Contains(found.Statement, "does not identify a hardware limiter") {
+		t.Fatalf("statement invented a limiter: %s", found.Statement)
+	}
+	if len(found.Missing) == 0 {
+		t.Fatal("limiter evidence must stay missing")
 	}
 }
 

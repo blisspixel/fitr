@@ -359,7 +359,7 @@ func LoadUserChecks(dir string) ([]CheckSpec, error) {
 	}
 	var out []CheckSpec
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() || e.Type()&os.ModeSymlink != 0 || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
 		if len(out) >= maxUserChecks {

@@ -412,6 +412,39 @@ func TestHybridArchitectureRequiresMeasuredAllocation(t *testing.T) {
 	}
 }
 
+func TestInherentHybridArchitectureDoesNotInventInterval(t *testing.T) {
+	arch := ArchFromKVs(map[string]any{"general.architecture": "qwen35moe"})
+	if !arch.Hybrid || arch.FullAttentionInterval != 0 {
+		t.Fatalf("name-only hybrid = %+v", arch)
+	}
+	if arch.ShapeClass() != "hybrid-linear" {
+		t.Fatalf("shape = %q", arch.ShapeClass())
+	}
+	if arch.KVStrategy() != "hybrid-linear" {
+		t.Fatalf("must not invent interval-4: %q", arch.KVStrategy())
+	}
+}
+
+func TestCompactLabelUsesMetadataOnly(t *testing.T) {
+	moe := ArchFromKVs(map[string]any{
+		"general.architecture": "qwen3moe", "qwen3moe.block_count": uint64(48),
+		"qwen3moe.embedding_length": uint64(2048), "qwen3moe.attention.head_count": uint64(32),
+		"qwen3moe.attention.head_count_kv": uint64(4), "qwen3moe.attention.key_length": uint64(128),
+		"qwen3moe.attention.value_length": uint64(128), "qwen3moe.expert_count": uint64(128),
+		"qwen3moe.expert_used_count": uint64(8), "qwen3moe.expert_feed_forward_length": uint64(768),
+	})
+	if got := moe.CompactLabel(); got != "moe 8/128  full-kv" {
+		t.Fatalf("moe label = %q", got)
+	}
+	dense := llama8B()
+	if got := dense.CompactLabel(); got != "dense  full-kv" {
+		t.Fatalf("dense label = %q", got)
+	}
+	if got := (Arch{}).CompactLabel(); got != "" {
+		t.Fatalf("empty arch invented a label: %q", got)
+	}
+}
+
 func TestKVElemBytesUnknownIsNotInvented(t *testing.T) {
 	if _, ok := KVElemBytes("mystery"); ok {
 		t.Fatal("unknown dtype must not invent a packing")

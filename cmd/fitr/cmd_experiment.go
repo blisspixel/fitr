@@ -680,7 +680,33 @@ func writeQuantCandidates(candidates []experiment.QuantCandidate) {
 			terminalText(candidate.Subject.ResolvedModel), formatQuantMetric(candidate.Metrics["decode_tps"]),
 			formatQuantMetric(candidate.Metrics["request_ttft_seconds"]),
 			formatQuantMetric(candidate.Metrics["resident_bytes"]))
+		if digest := analysis.ShortDigest(candidate.Subject.ArtifactDigest); digest != "" {
+			fmt.Fprintf(os.Stdout, "  %-11s  artifact sha256:%s", "", digest)
+			if bytes := candidate.Metrics["artifact_bytes"]; bytes.Estimate != nil {
+				fmt.Fprintf(os.Stdout, "  %.1f GB file", *bytes.Estimate/(1024*1024*1024))
+			}
+			fmt.Fprintln(os.Stdout)
+		}
 	}
+	if quantLabelsCollide(candidates) {
+		fmt.Fprintln(os.Stdout, "  note  quant string is not identity; files above share a recipe label")
+	}
+}
+
+func quantLabelsCollide(candidates []experiment.QuantCandidate) bool {
+	seen := map[string]string{}
+	for _, candidate := range candidates {
+		label := strings.TrimSpace(candidate.Quant)
+		digest := candidate.Subject.ArtifactDigest
+		if label == "" || digest == "" {
+			continue
+		}
+		if previous, ok := seen[label]; ok && previous != digest {
+			return true
+		}
+		seen[label] = digest
+	}
+	return false
 }
 
 func writeQuantFrontier(frontier experiment.QuantFrontier) {
