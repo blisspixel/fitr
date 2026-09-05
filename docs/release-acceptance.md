@@ -6,6 +6,38 @@ against real serving runtimes on clean operating-system installs.
 
 Last updated: 2026-09-05.
 
+### 0.10.8 release receipt
+
+Release 0.10.8 is bound to commit
+`b2a137cb39701b289445a11b0bb5909a68eae3ec`. It passed
+[main CI 33960172659](https://github.com/blisspixel/fitr/actions/runs/33960172659)
+with **83.87% aggregate coverage** and
+[native acceptance 33960172436](https://github.com/blisspixel/fitr/actions/runs/33960172436)
+before tagging. The
+[release workflow 33960420332](https://github.com/blisspixel/fitr/actions/runs/33960420332)
+repeated all release gates before publishing
+[v0.10.8](https://github.com/blisspixel/fitr/releases/tag/v0.10.8).
+
+All ten independently downloaded public assets matched the nine-entry manifest.
+The Windows amd64 binary is **13,440,512 bytes**, reports `fitr 0.10.8`, and has
+SHA-256 `f7b2931d5b63e310a1e15d3a239482d34244eb5463630c0d978b63f536f6ea9a`.
+Source attachments and concurrency fixes add 69,632 bytes over 0.10.7. The
+13,600,000-byte six-target ceiling retains approximately 1.2% headroom.
+
+The tagged Windows installer preserved persistent user PATH. `update --check`
+reported current; `update --reinstall` completed deferred replacement with the
+expected hash/version, an advanced timestamp and no staged files remaining.
+The public MCP binary smoke passed with clean stdio framing and no evidence
+writes.
+
+The public discovery binary captured an isolated idea, attached a previously
+resolved source receipt, produced a plan v2 with runtime unbound and no executable
+alias recipe, and detached only the managed copy. Original idea and source
+receipt hashes remained unchanged. Offline regressions additionally exercise
+concurrent capture, exactly 1,000 existing ideas, a single source-store snapshot,
+custom-inbox isolation, strict receipt selection and Windows lock-reader cleanup.
+No model weights were downloaded or executed. Paid model API spending remains $0.
+
 ### 0.10.7 release receipt
 
 Release 0.10.7 is bound to commit
