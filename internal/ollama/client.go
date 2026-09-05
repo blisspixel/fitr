@@ -46,6 +46,12 @@ var serverLibraryPattern = regexp.MustCompile(`library=([A-Za-z0-9_]+)`)
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client
+	// Admission is configured before use. It runs for every actual inference
+	// attempt, including Chat's bounded retry, before measurement starts.
+	Admission InferenceAdmission
+	// ObserveInference checks every admitted attempt before exposing its output
+	// or permitting Chat's empty-response retry. Control-plane calls bypass it.
+	ObserveInference InferenceObservation
 }
 
 func New() *Client {
@@ -104,14 +110,20 @@ func Deterministic(numPredict, numCtx int) Sampling {
 
 // Metrics are the timing facts for one generation.
 type Metrics struct {
-	TTFTSeconds  float64 `json:"ttft_s"`
-	WallSeconds  float64 `json:"wall_s"`
-	EvalCount    int     `json:"eval_count"`
-	DecodeTPS    float64 `json:"decode_tps"`
-	PromptTokens int     `json:"prompt_eval_count"`
-	PrefillTPS   float64 `json:"prefill_tps"`
-	LoadSeconds  float64 `json:"load_s"`
-	DoneReason   string  `json:"done_reason"`
+	// InferenceElapsed is transient client timing for hook-enabled attempts:
+	// after admission through HTTP, parsing and body close, before observation.
+	// It excludes both hooks but remains inside the caller's wall/deadline.
+	// Ordinary clients leave it unknown so existing consumers keep their timing.
+	InferenceElapsed      time.Duration `json:"-"`
+	InferenceElapsedKnown bool          `json:"-"`
+	TTFTSeconds           float64       `json:"ttft_s"`
+	WallSeconds           float64       `json:"wall_s"`
+	EvalCount             int           `json:"eval_count"`
+	DecodeTPS             float64       `json:"decode_tps"`
+	PromptTokens          int           `json:"prompt_eval_count"`
+	PrefillTPS            float64       `json:"prefill_tps"`
+	LoadSeconds           float64       `json:"load_s"`
+	DoneReason            string        `json:"done_reason"`
 	// CachedTokens is how much of the prompt was served from the prefix cache
 	// rather than evaluated - the receipt that separates a warm TTFT from a
 	// cold one, which differ by 70-200x. Ollama does not report it (always 0);
@@ -152,6 +164,11 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if (c.Admission != nil || c.ObserveInference != nil) && (path == "/api/generate" || path == "/api/chat") {
+		// A replayable body lets net/http retry a failed reused connection
+		// beneath inference hooks. Each new attempt must pass the configured hooks.
+		req.GetBody = nil
+	}
 	return c.HTTP.Do(req)
 }
 
@@ -214,6 +231,26 @@ func validateGenFrame(g genResp) error {
 // chunk -- not derived from the server's own counters, because what the user
 // experiences is the wall clock.
 func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling) (string, Metrics, error) {
+	ctx, cancel, err := c.admitInference(ctx, InferenceRequest{Kind: InferenceGenerate, Model: model, MaxOutputTokens: s.NumPredict})
+	if err != nil {
+		return "", Metrics{}, err
+	}
+	defer cancel()
+	started := time.Now()
+	output, metrics, err := c.generateAdmitted(ctx, model, prompt, s)
+	observed, observationErr := c.finishInference(ctx, InferenceAttempt{
+		Kind: InferenceGenerate, Model: model, NumCtx: s.NumCtx, MaxOutputTokens: s.NumPredict,
+	}, started, metrics)
+	if observationErr != nil {
+		return "", Metrics{}, observationErr
+	}
+	if err != nil {
+		return output, metrics, err
+	}
+	return output, observed, nil
+}
+
+func (c *Client) generateAdmitted(ctx context.Context, model, prompt string, s Sampling) (string, Metrics, error) {
 	payload := map[string]any{
 		"model": model, "prompt": prompt, "stream": true,
 		"options": map[string]any{
@@ -389,14 +426,19 @@ type chatResp struct {
 // Chat sends one turn. A non-terminal reply that evaluated no tokens is
 // retried once: see chatOnce for why that specific case, and only that case.
 func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools []Tool, s Sampling) (Message, Metrics, error) {
-	msg, m, err := c.chatOnce(ctx, model, msgs, tools, s)
-	if err == nil || !errors.Is(err, errEmptyNonTerminal) {
-		return msg, m, err
+	var msg Message
+	var metrics Metrics
+	var err error
+	for range ChatMaxAttempts {
+		msg, metrics, err = c.chatOnce(ctx, model, msgs, tools, s)
+		if err == nil || IsLocalityError(err) || !errors.Is(err, errEmptyNonTerminal) {
+			return msg, metrics, err
+		}
 	}
 	// The server produced no generation at all, so there is nothing measured
 	// to protect and nothing to contaminate. Ask again rather than throw away
 	// a battery that has already run for minutes.
-	return c.chatOnce(ctx, model, msgs, tools, s)
+	return msg, metrics, err
 }
 
 // errEmptyNonTerminal marks a reply that is neither finished nor a generation:
@@ -425,6 +467,26 @@ func decodeChatResponse(body io.Reader) (chatResp, error) {
 }
 
 func (c *Client) chatOnce(ctx context.Context, model string, msgs []Message, tools []Tool, s Sampling) (Message, Metrics, error) {
+	ctx, cancel, err := c.admitInference(ctx, InferenceRequest{Kind: InferenceChat, Model: model, MaxOutputTokens: s.NumPredict})
+	if err != nil {
+		return Message{}, Metrics{}, err
+	}
+	defer cancel()
+	started := time.Now()
+	message, metrics, err := c.chatAdmitted(ctx, model, msgs, tools, s)
+	observed, observationErr := c.finishInference(ctx, InferenceAttempt{
+		Kind: InferenceChat, Model: model, NumCtx: s.NumCtx, MaxOutputTokens: s.NumPredict,
+	}, started, metrics)
+	if observationErr != nil {
+		return Message{}, Metrics{}, observationErr
+	}
+	if err != nil {
+		return message, metrics, err
+	}
+	return message, observed, nil
+}
+
+func (c *Client) chatAdmitted(ctx context.Context, model string, msgs []Message, tools []Tool, s Sampling) (Message, Metrics, error) {
 	payload := map[string]any{
 		"model": model, "messages": msgs, "stream": false,
 		"options": map[string]any{
@@ -500,10 +562,14 @@ var ErrRemoteExecution = errors.New("ollama reports remote execution; local meas
 // as an ordinary unavailable-metadata fallback before local measurement.
 var ErrInvalidRemoteMetadata = errors.New("ollama remote execution metadata is malformed")
 
+// ErrUnverifiedLocalExecution marks an owned execution whose process, listener
+// or placement cannot be verified. It does not assert execution was remote.
+var ErrUnverifiedLocalExecution = errors.New("local execution ownership is no longer verified")
+
 // IsLocalityError identifies failures that disqualify local measurement.
 // Malformed metadata is uncertainty, not proof of remote execution.
 func IsLocalityError(err error) bool {
-	return errors.Is(err, ErrRemoteExecution) || errors.Is(err, ErrInvalidRemoteMetadata)
+	return errors.Is(err, ErrRemoteExecution) || errors.Is(err, ErrInvalidRemoteMetadata) || errors.Is(err, ErrUnverifiedLocalExecution)
 }
 
 func remoteExecution(model, host string) bool { return model != "" || host != "" }
@@ -638,6 +704,7 @@ func (c *Client) Show(ctx context.Context, model string) (ModelInfo, error) {
 
 type RunningModel struct {
 	Name          string `json:"name"`
+	Digest        string `json:"digest,omitempty"`
 	Size          int64  `json:"size"`
 	SizeVRAM      int64  `json:"size_vram"`
 	ContextLength int    `json:"context_length,omitempty"`

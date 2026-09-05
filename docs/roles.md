@@ -123,7 +123,7 @@ fitr role status coding
 fitr role rollback coding
 ```
 
-<img src="assets/selection.svg?v=0.10.10" alt="Role status fixture with a qualified incumbent and a separate failed challenger attempt" width="900">
+<img src="assets/selection.svg?v=0.10.11" alt="Role status fixture with a qualified incumbent and a separate failed challenger attempt" width="900">
 
 Confirmation keeps the incumbent reference until explicit adoption. Adoption
 stores fitr's selection; it does not change a serving configuration. Rollback

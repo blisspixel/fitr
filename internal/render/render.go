@@ -88,7 +88,7 @@ func pickPalette(color bool) palette {
 	return palette{
 		Pass: "\x1b[32m", Fail: "\x1b[31m", Skip: "\x1b[90m", NA: "\x1b[90m",
 		Blocked: "\x1b[33m", Warn: "\x1b[33m", Muted: "\x1b[90m",
-		Head: "\x1b[1;34m", Accent: "\x1b[35m",
+		Head: "\x1b[1;36m", Accent: "\x1b[36m",
 	}
 }
 

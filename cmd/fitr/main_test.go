@@ -968,7 +968,7 @@ func TestScreenshotsWriteDemoSVGs(t *testing.T) {
 	if got := os.Getenv("NO_COLOR"); got != "1" {
 		t.Fatalf("screenshot generation did not restore NO_COLOR: %q", got)
 	}
-	for _, name := range []string{"advise.svg", "run.svg", "apply.svg", "board.svg", "top.svg", "discovery.svg", "roles.svg", "selection.svg", "source.svg", "artifact.svg"} {
+	for _, name := range []string{"advise.svg", "run.svg", "apply.svg", "board.svg", "top.svg", "discovery.svg", "roles.svg", "selection.svg", "source.svg", "artifact.svg", "auto.svg"} {
 		b, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatal(err)
@@ -980,7 +980,7 @@ func TestScreenshotsWriteDemoSVGs(t *testing.T) {
 		if name == "top.svg" && strings.Contains(got, "$ fitr top") {
 			t.Fatalf("top screenshot should show the full-screen surface, not a shell prompt:\n%.400s", got)
 		}
-		if name == "board.svg" && !strings.Contains(got, "#d2a8ff") {
+		if name == "board.svg" && !strings.Contains(got, "#56d4dd") {
 			t.Fatalf("board screenshot lost its rich terminal color:\n%.400s", got)
 		}
 		if name == "top.svg" && !strings.Contains(got, "#56d4dd") {

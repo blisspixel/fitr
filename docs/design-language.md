@@ -4,6 +4,21 @@ fitr should make the next decision clear before exposing the full receipt.
 The terminal is a product surface: role, configuration, evidence state and
 next action lead; implementation details belong in inspection views.
 
+## Product character
+
+fitr is a tailor for local AI. The model is the starting material; the fitting
+is specific to the person's machine, work and preferences. Express that care
+through useful defaults, clear measurements, restrained choices and follow-up.
+Avoid luxury decoration or confidence that the evidence has not earned.
+
+The [mark](assets/fitr-mark.svg) is an open measuring frame with a separate
+fitted block. The space around the block represents room for context and
+runtime overhead; the opening represents a configuration that can be refined.
+It is an identity mark, never a qualification badge. Use the transparent cyan
+SVG on light or dark surfaces, preserve its clear space, and pair it with the
+[lowercase wordmark](assets/fitr-lockup.svg) on introductions. Terminal output
+keeps the text name instead of approximating the mark with ambiguous glyphs.
+
 ## Shared rules
 
 - Use lowercase `fitr` product language, consistent gutters and a restrained
@@ -53,6 +68,19 @@ A failed challenger must not visually become a failed incumbent. Stale and
 unselected roles retain a clear review action. Operational fallback and
 multi-role placement views remain future work.
 Avoid a hero score that mixes model quality, speed, fit and popularity.
+
+Auto status uses the same field alignment and cyan focus as role views. Role,
+current selection, candidate and acceptance state precede completed evidence
+points and allowance consumption. Requested output-token caps are not actual
+token use. The protected confirmation allowance is explicit. A session that
+has expired must not offer first adoption, and historical outcomes remain
+visible after their session deadline. JSON and plain output use the same exit
+status. The TUI selected strip shows failed and unresolved needs before speed.
+
+Personal preference controls should show meaningful units and fixed anchors.
+An optional 100-point allocation can explain relative priorities, but mandatory
+quality, context and resource floors remain separate. Never fill an unmeasured
+attribute bar from a model card, parameter count or advertised context window.
 
 README assets are rendered from deterministic fixtures through real display
 paths. CI checks screenshot drift, output width and hostile text. Refresh

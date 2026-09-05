@@ -87,10 +87,25 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.10.10" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.10.10" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.10.10" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.10.10" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.10.11" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.10.11" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.10.11" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.10.11" alt="fitr top (demo data)" width="820">
+
+### Bounded fitting
+
+`fitr auto` collects an explicit installed shortlist for one role under a fixed
+runtime configuration. The first runtime owner supports Windows CPU-only
+machines or one NVIDIA GPU with Ollama. It checks feasibility and resources
+before inference, charges each actual request before dispatch, protects a
+fresh confirmation allowance, and retains uncertainty and failed quality
+floors. Manual adoption is the default.
+
+Use `auto runtime` to inspect the installation, `auto start` to declare a
+finite investigation, and `auto status` to inspect its outcome and evidence
+gaps. Read [bounded auto mode](auto-mode.md) for the full preparation and
+adoption contract. Discovery, source resolution and cleanup remain separately
+invoked operations.
 
 ### Disk
 

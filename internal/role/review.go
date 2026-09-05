@@ -85,6 +85,10 @@ func reviewAttachment(attachment Attachment, spec Spec, records record.Store, no
 		candidate.Reasons = []string{"The source no longer matches the attached evidence identity."}
 		return candidate, nil
 	}
+	return reviewResult(candidate, result, spec, now)
+}
+
+func reviewResult(candidate Candidate, result *record.Record, spec Spec, now time.Time) (Candidate, *record.Record) {
 	if issue := result.EvidenceIntegrityIssue(); issue != "" {
 		candidate.Reasons = []string{issue}
 		return candidate, nil

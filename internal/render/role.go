@@ -36,7 +36,9 @@ func WriteRoleReview(w io.Writer, report role.ReviewReport, mode string) {
 	if report.State == "no-qualified-candidate" {
 		style = p.Fail
 	}
-	fmt.Fprintf(w, "  %s\n", p.wrap(style, strings.ToUpper(SingleLine(report.State))))
+	for _, line := range wrap(roleReviewLabel(report.State), width-4) {
+		fmt.Fprintf(w, "  %s\n", p.wrap(style, line))
+	}
 	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, strings.Repeat("-", width-4)))
 	for index, candidate := range report.Candidates {
 		fmt.Fprintln(w)
@@ -73,6 +75,21 @@ func WriteRoleReview(w io.Writer, report role.ReviewReport, mode string) {
 	Field(w, "  next", 14, report.Next, width)
 	fmt.Fprintln(w)
 	Field(w, "  ", 2, "Battery screening only. Preference bounds are not a joint confidence interval. No automatic adoption.", width)
+}
+
+func roleReviewLabel(state string) string {
+	switch state {
+	case "single-qualified":
+		return "One candidate clears floors; fresh confirmation needed"
+	case "exploration-lead":
+		return "A candidate leads within the tested preferences; confirm next"
+	case "no-qualified-candidate":
+		return "No candidate clears every required floor"
+	case "tradeoff":
+		return "Evidence leaves a tradeoff; no clear preference"
+	default:
+		return SingleLine(state)
+	}
 }
 
 func WriteRoleSelection(w io.Writer, status role.SelectionStatus, mode string) {

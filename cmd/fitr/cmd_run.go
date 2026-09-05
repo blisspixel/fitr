@@ -389,6 +389,16 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	}
 	defer lk.Release() //nolint:errcheck // cleanup failure is not worth failing a run over
 
+	return executeUnderLease(ctx, c, model, opts, disp, lk)
+}
+
+// executeUnderLease shares preparation and the complete battery with callers
+// that must acquire the machine lease before starting their owned runtime.
+func executeUnderLease(ctx context.Context, c llm.Backend, model string, opts runOpts,
+	disp render.Display, lease *lock.Lock) (*Result, error) {
+	if lease == nil {
+		return nil, errors.New("measurement requires the machine evaluation lease")
+	}
 	run := &runExecution{ctx: ctx, backend: c, model: model, opts: opts, display: disp}
 	if err := run.prepare(); err != nil {
 		return nil, err
@@ -515,6 +525,14 @@ func (run *runExecution) initializeResult() error {
 		return err
 	}
 	fp := device.Detect(run.ctx, run.backend)
+	if run.opts.ownedConfiguration != nil {
+		// Detect normally consults the caller's environment and a global server
+		// log. An owned process has its own explicitly sealed launch settings.
+		fp.Config = make(map[string]string, len(run.opts.ownedConfiguration))
+		for key, value := range run.opts.ownedConfiguration {
+			fp.Config[key] = value
+		}
+	}
 	run.profile, err = device.SelectProfile(run.opts.profile, fp)
 	if err != nil {
 		return err
@@ -543,6 +561,9 @@ func (run *runExecution) initializeResult() error {
 		Experiment:      cloneRunExperimentBinding(run.opts.experiment),
 		TaskPlan: runTaskPlan(run.opts.level, run.opts.reps, run.opts.checksReps,
 			len(run.spec.Checks), len(run.spec.Refusal.Prompts)),
+	}
+	if run.opts.runID != "" {
+		run.result.RunID = run.opts.runID
 	}
 	if run.opts.allowUnsafeExec {
 		run.result.ExecutionPolicy = record.ExecutionUnsafe
@@ -663,6 +684,11 @@ func (run *runExecution) observeContext() (device.ContextVerification, error) {
 		receipt.EffectiveTokens = &effective
 		receipt.EffectiveSource = device.ContextSourceRuntimeReport
 	}
+	if run.opts.validateLoaded != nil {
+		if err := run.opts.validateLoaded(run, receipt); err != nil {
+			return receipt, err
+		}
+	}
 	if run.backend.Name() == "ollama" {
 		if err := run.stopAll(); err != nil {
 			return receipt, fmt.Errorf("reset after context verification: %w", err)
@@ -673,7 +699,7 @@ func (run *runExecution) observeContext() (device.ContextVerification, error) {
 
 func (run *runExecution) preloadContextProbe() (*device.ContextProbe, error) {
 	_, metrics, err := run.backend.Generate(run.ctx, run.model, "Reply with OK.",
-		ollama.Deterministic(1, run.result.NumCtx))
+		ollama.Deterministic(eval.ContextProbeOutputTokens, run.result.NumCtx))
 	if err != nil {
 		return nil, fmt.Errorf("preload model for context verification: %w", err)
 	}
@@ -1220,7 +1246,7 @@ func runWithdrawalLoop(ctx context.Context, c llm.Backend, model string, spec *e
 	}
 	// The loop is self-contained, so a transport fault makes only this task
 	// undecidable. Cancellation still aborts the complete run.
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || errors.Is(err, ollama.ErrInferenceAdmission) || ollama.IsLocalityError(err) {
 		return err
 	}
 	res.Withdrawal = &eval.ToolLoopResult{

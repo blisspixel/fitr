@@ -42,9 +42,11 @@ type LifecycleEvent struct {
 // ConfirmationPoint pins the current canonical evidence observed at completion.
 // The completed records themselves remain in the record store and bundle.
 type ConfirmationPoint struct {
-	Attachment Attachment           `json:"attachment"`
-	Model      record.ModelIdentity `json:"model"`
-	StartedAt  string               `json:"started_at"`
+	Attachment     Attachment              `json:"attachment"`
+	Model          record.ModelIdentity    `json:"model"`
+	StartedAt      string                  `json:"started_at"`
+	StoreRef       *record.ManagedStoreRef `json:"store_ref,omitempty"`
+	RuntimeBinding *record.RuntimeBinding  `json:"runtime_binding,omitempty"`
 }
 
 type ConfirmationAttemptReceipt struct {
@@ -259,7 +261,8 @@ func planIncludesIncumbent(plan ConfirmationPlan, prior Lifecycle) error {
 		return errors.New("incumbent receipt is missing")
 	}
 	for _, candidate := range plan.Candidates {
-		if candidate.Model.RuntimeBoundDigest() == incumbent.Selection.Selected.Model.RuntimeBoundDigest() {
+		if candidate.Model.RuntimeBoundDigest() == incumbent.Selection.Selected.Model.RuntimeBoundDigest() &&
+			record.SameRuntimeConfiguration(candidate.RuntimeBinding, incumbent.Selection.Selected.RuntimeBinding) {
 			return nil
 		}
 	}
@@ -282,6 +285,22 @@ func validateAttemptReceipt(receipt ConfirmationAttemptReceipt, plan Confirmatio
 	}
 	seen := map[string]bool{}
 	for index, point := range receipt.Points {
+		if !record.SameRuntimeConfiguration(point.RuntimeBinding, plan.Candidates[index].RuntimeBinding) {
+			return errors.New("confirmation receipt changed the planned runtime configuration")
+		}
+		if point.RuntimeBinding != nil {
+			if err := point.RuntimeBinding.ValidateFor(point.Model); err != nil {
+				return err
+			}
+		}
+		if point.StoreRef != nil {
+			if err := point.StoreRef.Validate(); err != nil {
+				return err
+			}
+		}
+		if index > 0 && !sameLifecycleValue(point.StoreRef, receipt.Points[0].StoreRef) {
+			return errors.New("confirmation points mix evidence store references")
+		}
 		if err := validateAttachment(point.Attachment); err != nil {
 			return err
 		}

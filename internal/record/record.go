@@ -35,6 +35,7 @@ type Record struct {
 	TaskPlan        TaskPlan           `json:"task_plan,omitempty"`
 	Experiment      *ExperimentBinding `json:"experiment,omitempty"`
 	CapacityPlan    *capacity.Plan     `json:"capacity_plan,omitempty"`
+	RuntimeBinding  *RuntimeBinding    `json:"runtime_binding,omitempty"`
 	// SeedSet names the instance set the generated checks were drawn from.
 	// Unique per run by default; pinned seed sets enable paired comparison.
 	SeedSet     string                `json:"seedset,omitempty"`
@@ -78,6 +79,9 @@ type Record struct {
 
 var validRunID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$`)
 
+// ValidRunID shares the signed-record identity contract with execution journals.
+func ValidRunID(value string) bool { return validRunID.MatchString(value) }
+
 const EvidenceSchemaVersion = 6
 
 // ContextSize returns the measured request context. It understands the legacy
@@ -104,7 +108,15 @@ func (r *Record) ComparableDeviceKey() (string, error) {
 		return "", errors.New("result is unavailable")
 	}
 	if r.DeviceV2 != nil {
-		return r.DeviceV2.ComparabilityKey()
+		key, err := r.DeviceV2.ComparabilityKey()
+		if err != nil || r.RuntimeBinding == nil {
+			return key, err
+		}
+		profile, err := r.RuntimeBinding.comparisonKey()
+		if err != nil {
+			return "", err
+		}
+		return key + ";runtime=" + profile, nil
 	}
 	if r.SchemaVersion >= EvidenceSchemaVersion {
 		return "", errors.New("current result is missing fingerprint v2")

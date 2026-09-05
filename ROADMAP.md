@@ -55,9 +55,9 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.7 | Bounded immutable HF file metadata resolution, dependency gaps and private receipts without weight downloads |
 | Shipped | 0.10.8 | Private source attachments, explicit receipt selection and source-aware investigation plans with unmeasured fit and quality |
 | Shipped | 0.10.9 | Bounded local artifact observations, explicit file mappings and source hash comparisons without runtime promotion |
-| Current | 0.10.10 | Official MCP SDK binary acceptance and Ollama remote-provenance checks before local experiments |
-| Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported limiter hypotheses, and multi-surface decision relative views |
-| Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
+| Shipped | 0.10.10 | Official MCP SDK binary acceptance and Ollama remote-provenance checks before local experiments |
+| Current | 0.10.11 | Bounded auto fitting with an explicit shortlist, owned Windows runtime, resource gates, quality-first comparison and fresh confirmation; a consistent terminal identity |
+| Now | 0.11 | Typed usable-context quality and one pinned model-plus-harness workflow, extending validated-work receipts and personal preferences |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
 | Active | Candidate discovery | Capture ideas now; next resolve artifacts and build evidence-backed model and harness choices by role |
@@ -79,7 +79,7 @@ evidence paths.
 | 2 | complete | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | active | Generalized validated-work receipts and explicit evidence classes | 0.10.4 seals the fixed contract and reconstructs timing with typed proof classes. Multi-attempt, approval, escalation and external protocol receipts remain work before arbitrary workflows. |
-| 5 | active | Source ideas into a personal role library | 0.10.9 adds bounded observations of explicitly mapped local files. Source receipts, private ideas and local hashes retain separate claims. Next establish dependency compatibility and exact loaded-runtime identity before bounded fit/experiment plans. See [artifact binding](docs/artifact-binding.md), [source attachments](docs/source-attachments.md) and [roles](docs/roles.md). |
+| 5 | active | Source ideas into a personal role library and bounded fitting | Source receipts, private ideas and local hashes retain separate claims. The first connected auto cycle now collects and confirms an explicit installed shortlist under owned-runtime and resource checks. Search-driven shortlisting and scheduled refinement remain work. See [auto mode](docs/auto-mode.md), [artifact binding](docs/artifact-binding.md) and [roles](docs/roles.md). |
 | 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. |
 
 Automatic selection must pass programmatic resource preflight and a separate
@@ -88,6 +88,16 @@ smaller model or quantization is a new candidate, not an automatic quality
 equivalent. Preserve `no-qualified-candidate` when none earns the role, and
 evaluate retries, human corrections and verified completion cost before
 throughput. The bounded auto-mode contract is in [discovery](docs/discovery.md).
+
+The next fitting adds typed usable-context quality and one pinned
+model-plus-harness workflow. Personal preference weights should express what
+the person values, including longer demonstrated context, while mandatory
+floors remain independent. Compaction and restart must preserve decisions,
+constraints and completed effects under external verification. The
+[personal fitting design](docs/personal-fitting.md) separates this future
+measurement work from today's runtime-window requirement. The
+[host compatibility matrix](docs/agent-interop.md) records current protocol
+gaps before any named-harness support is claimed.
 
 Tracked implementation work: [quality-first role library](https://github.com/blisspixel/fitr/issues/1),
 [bounded auto mode](https://github.com/blisspixel/fitr/issues/2), and

@@ -39,6 +39,7 @@ type completedEvidencePayload struct {
 	RunID             string                         `json:"run_id"`
 	WallSeconds       float64                        `json:"wall_s"`
 	ModelMeta         ollama.ModelInfo               `json:"model_meta"`
+	RuntimeBinding    *RuntimeBinding                `json:"runtime_binding,omitempty"`
 	Speed             []eval.SpeedResult             `json:"speed_repeats"`
 	DecodeSum         stats.Summary                  `json:"decode_summary"`
 	TTFTSum           stats.Summary                  `json:"ttft_summary"`
@@ -202,6 +203,7 @@ func (r *Record) completedEvidenceJSON(profile device.Profile) ([]byte, error) {
 		manifestSHA256 = r.Manifest.ManifestSHA256
 	}
 	return json.Marshal(completedEvidencePayload{
+		RuntimeBinding: CloneRuntimeBinding(r.RuntimeBinding),
 		ManifestSHA256: manifestSHA256,
 		RunID:          r.RunID, WallSeconds: r.WallSeconds, ModelMeta: r.ModelMeta,
 		Speed: r.Speed, DecodeSum: r.DecodeSum, TTFTSum: r.TTFTSum, PrefillSum: r.PrefillSum,
@@ -214,6 +216,9 @@ func (r *Record) completedEvidenceJSON(profile device.Profile) ([]byte, error) {
 }
 
 func (r *Record) validateDerivedEvidence() error {
+	if err := r.validateRuntimeBinding(); err != nil {
+		return err
+	}
 	if r.WallSeconds < 0 || math.IsNaN(r.WallSeconds) || math.IsInf(r.WallSeconds, 0) {
 		return errors.New("run wall time is not a finite non-negative measurement")
 	}

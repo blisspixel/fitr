@@ -226,7 +226,7 @@ func runToolChannelCheck(ctx context.Context, c llm.Backend, model string, cs Ch
 // narrow, and a miss degrades to the existing behaviour rather than to a wrong
 // answer.
 func declinesTools(err error) bool {
-	if err == nil {
+	if err == nil || errors.Is(err, ollama.ErrInferenceAdmission) {
 		return false
 	}
 	msg := strings.ToLower(err.Error())

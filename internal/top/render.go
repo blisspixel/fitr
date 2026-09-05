@@ -713,6 +713,7 @@ func selectedBoardRun(groups []BoardGroup, selectedID string) (Run, bool) {
 
 func wideBoardMetricSpans(run Run, glyphs Glyphs) []Span {
 	spans := []Span{{Text: "selected  ", Role: RoleMuted}, {Text: run.Model, Role: RoleAccent}}
+	spans = append(spans, boardQualitySpans(run)...)
 	if run.DecodePresent {
 		spans = append(spans, Span{Text: fmt.Sprintf("  decode %.2f tok/s", run.DecodeMean), Role: RoleDefault})
 	}
@@ -725,16 +726,36 @@ func wideBoardMetricSpans(run Run, glyphs Glyphs) []Span {
 	if run.Context > 0 {
 		spans = append(spans, Span{Text: glyphs.Dot + "ctx " + shortContext(run.Context), Role: RoleMuted})
 	}
-	passes := 0
+	return spans
+}
+
+func boardQualitySpans(run Run) []Span {
+	if len(run.Verdicts) == 0 {
+		return []Span{{Text: "  quality unmeasured", Role: RoleWarning}}
+	}
+	passes, failures, unresolved := 0, 0, 0
 	for _, verdict := range run.Verdicts {
-		if strings.EqualFold(strings.TrimSpace(verdict.State), "PASS") {
+		switch strings.ToUpper(strings.TrimSpace(verdict.State)) {
+		case "PASS":
 			passes++
+		case "FAIL":
+			failures++
+		default:
+			unresolved++
 		}
 	}
-	if passes > 0 {
-		spans = append(spans, Span{Text: fmt.Sprintf("  %d pass", passes), Role: RolePass})
+	failRole, gapRole := RoleMuted, RoleMuted
+	if failures > 0 {
+		failRole = RoleFail
 	}
-	return spans
+	if unresolved > 0 {
+		gapRole = RoleWarning
+	}
+	return []Span{
+		{Text: fmt.Sprintf("  %d fail", failures), Role: failRole},
+		{Text: fmt.Sprintf("  %d unresolved", unresolved), Role: gapRole},
+		{Text: fmt.Sprintf("  %d pass", passes), Role: RolePass},
+	}
 }
 
 func wideBoardList(groups []BoardGroup, state State, width int, glyphs Glyphs) [][]Span {

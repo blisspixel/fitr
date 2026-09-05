@@ -633,6 +633,7 @@ type RunManifest struct {
 	TaskPlan                TaskPlan              `json:"task_plan"`
 	Experiment              *ExperimentBinding    `json:"experiment,omitempty"`
 	CapacityPlan            *capacity.Plan        `json:"capacity_plan,omitempty"`
+	RuntimeBinding          *RuntimeBinding       `json:"runtime_binding,omitempty"`
 	SeedSet                 string                `json:"seedset"`
 	Repeats                 int                   `json:"repeats"`
 	NumCtx                  int                   `json:"num_ctx"`
@@ -698,8 +699,9 @@ func (r *Record) attachManifest(identity ModelIdentity, executor *eval.ExecutorR
 		Model: identity, DeviceKey: r.DeviceKey, Profile: r.Profile,
 		Level: r.Level, ExecutionPolicy: r.ExecutionPolicy, TaskPlan: r.TaskPlan,
 		Experiment: cloneExperimentBinding(r.Experiment), Executor: executor,
-		CapacityPlan: capacity.ClonePlan(r.CapacityPlan),
-		SeedSet:      r.SeedSet, Repeats: r.Repeats,
+		CapacityPlan:   capacity.ClonePlan(r.CapacityPlan),
+		RuntimeBinding: CloneRuntimeBinding(r.RuntimeBinding),
+		SeedSet:        r.SeedSet, Repeats: r.Repeats,
 		NumCtx: r.ContextSize(), Provenance: receipt,
 	}
 	if schema == RunManifestSchema && r.DeviceV2 != nil {
@@ -847,6 +849,14 @@ func (m RunManifest) validatePlanFields() error {
 }
 
 func (m RunManifest) validateOptionalReceipts() error {
+	if m.RuntimeBinding != nil {
+		if m.Schema != RunManifestSchema {
+			return errors.New("legacy manifest cannot contain owned runtime binding")
+		}
+		if err := m.RuntimeBinding.ValidateFor(m.Model); err != nil {
+			return err
+		}
+	}
 	if m.Provenance != nil {
 		if err := m.Provenance.Validate(); err != nil {
 			return err
@@ -955,6 +965,11 @@ func (m RunManifest) digest() (string, error) {
 // checks make the manifest immutable within a persisted result while leaving
 // legacy records without a manifest readable.
 func (r *Record) ValidateManifest() error {
+	if r != nil {
+		if err := r.validateRuntimeBinding(); err != nil {
+			return err
+		}
+	}
 	if r == nil || r.Manifest == nil {
 		return nil
 	}

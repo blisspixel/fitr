@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="208" height="80" viewBox="0 0 208 80" role="img" aria-labelledby="fitr-lockup-title fitr-lockup-desc">
+  <title id="fitr-lockup-title">fitr</title>
+  <desc id="fitr-lockup-desc">The fitr measuring-frame mark beside a lowercase geometric wordmark.</desc>
+  <g fill="#0891b2">
+    <g transform="translate(0 8)">
+      <path d="M18 8h28a10 10 0 0 1 10 10v6h-8v-6a2 2 0 0 0-2-2H18a2 2 0 0 0-2 2v28a2 2 0 0 0 2 2h38a10 10 0 0 1-10 8H18A10 10 0 0 1 8 46V18A10 10 0 0 1 18 8Z"/>
+      <rect x="28" y="28" width="28" height="16" rx="2"/>
+    </g>
+    <g transform="translate(-20)">
+      <path d="M103 64V30c0-10 6-16 16-16h6v8h-5c-6 0-9 3-9 9v3h14v8h-14v22Z"/>
+      <circle cx="139" cy="23" r="4"/>
+      <path d="M135 34h8v30h-8Z"/>
+      <path d="M156 24h8v10h13v8h-13v10c0 4 2 5 6 5h7v7h-9c-8 0-12-4-12-12V42h-7v-8h7Z"/>
+      <path d="M190 64V34h8v5c3-4 6-6 13-6h4v8h-5c-8 0-12 4-12 13v10Z"/>
+    </g>
+  </g>
+</svg>

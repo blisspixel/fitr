@@ -1,11 +1,13 @@
-# fitr
+<h1><img src="docs/assets/fitr-lockup.svg" alt="fitr" width="208" height="80"></h1>
 
 [![CI](https://github.com/blisspixel/fitr/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/fitr/actions/workflows/ci.yml)
 [![Native acceptance](https://github.com/blisspixel/fitr/actions/workflows/native-acceptance.yml/badge.svg)](https://github.com/blisspixel/fitr/actions/workflows/native-acceptance.yml)
 
-**fitr determines what local AI actually works for your workload on this
-machine, shows the evidence, and helps choose a configuration without reducing
-everything to one benchmark score.**
+**Your tailor for local AI.**
+
+Start with a model. Find the configuration that fits your machine, your work,
+and your priorities. fitr measures the fit, tests the output, and keeps the
+evidence behind each choice.
 
 Model names and public leaderboards do not answer the local questions. Will
 this artifact fit at the context you need? Is the runtime really using the
@@ -17,7 +19,13 @@ fitr measures those questions against the model bytes, runtime, context,
 placement, and device that produced the evidence. Missing evidence stays
 missing. An unmeasured model stays a candidate, not a recommendation.
 
-<img src="docs/assets/top.svg?v=0.10.10" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
+Each role has its own requirements and preferences. A coding agent, daily
+driver and classifier need different fittings. Quality requirements come
+first; speed and resource preferences help choose among models that meet them.
+See the [personal fitting direction](docs/personal-fitting.md) for usable
+context, compaction and model-plus-harness scorecards now being designed.
+
+<img src="docs/assets/top.svg?v=0.10.11" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
 The wide Board keeps the comparable configurations, selected evidence, exact
 measurements, unresolved requirements, and one next action on one screen. The
@@ -25,7 +33,8 @@ same facts remain available as compact terminal output, JSON, and HTML.
 
 ## Install
 
-The full loop needs a running supported backend with at least one model. See
+Ordinary measurements need a running supported backend with at least one model.
+Auto mode can own an installed Windows Ollama runtime. See
 [backend requirements and identity limits](docs/backends.md).
 
 macOS and Linux:
@@ -69,7 +78,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.10.10" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.10.11" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 
@@ -94,7 +103,7 @@ fitr discover attach-source <idea-id> candidate.json
 fitr discover plan <idea-id>
 ```
 
-<img src="docs/assets/source.svg?v=0.10.10" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
+<img src="docs/assets/source.svg?v=0.10.11" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
 
 The receipt pins a commit, preserves declared file sizes and hashes, and
 surfaces dependency gaps. It downloads no weights and does not qualify the
@@ -105,7 +114,7 @@ flow, and [agent interoperability](docs/agent-interop.md) for the portable
 Agent Plugins package, read-only MCP tools, and the researched A2A, Hermes,
 Pi and OpenClaw integration boundaries.
 
-<img src="docs/assets/discovery.svg?v=0.10.10" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
+<img src="docs/assets/discovery.svg?v=0.10.11" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
 
 For files already on disk, an explicit mapping can compare their local hashes
 with the pinned receipt before any runtime experiment:
@@ -116,7 +125,7 @@ fitr artifact bind --source candidate.json --mapping local-files.json --max-byte
 
 Read [artifact binding](docs/artifact-binding.md) for the mapping and I/O bounds.
 
-<img src="docs/assets/artifact.svg?v=0.10.10" alt="Local artifact fixture with a whole-file hash match and separate unverified dependencies, unbound runtime and unmeasured quality" width="820">
+<img src="docs/assets/artifact.svg?v=0.10.11" alt="Local artifact fixture with a whole-file hash match and separate unverified dependencies, unbound runtime and unmeasured quality" width="820">
 
 Matching local bytes still leaves runtime unbound, and capacity and quality
 unmeasured.
@@ -132,7 +141,7 @@ fitr role attach coding /path/to/canonical-result.json
 fitr role review coding
 ```
 
-<img src="docs/assets/roles.svg?v=0.10.10" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
+<img src="docs/assets/roles.svg?v=0.10.11" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
 
 A candidate must clear every floor before preferences matter. Comparisons
 retain uncertainty and check sensitivity to weight changes; missing evidence
@@ -142,6 +151,31 @@ evidence after runtime and memory preflight. Explicit `role adopt` records the
 selection; `role status` rechecks its evidence and expiry. A failed challenger
 keeps the incumbent reference. See [roles](docs/roles.md) for the battery
 screening scope and rollback limits. Automatic serving changes remain future work.
+
+## Let fitr run a bounded fitting
+
+For a role whose requirements the text battery can measure, declare two to
+four installed candidates and a fixed runtime configuration:
+
+```powershell
+fitr auto runtime C:/runtime/ollama.exe --models D:/ollama-models --out runtime.json
+fitr auto start daily --mode establish --runtime runtime.json --candidate first:tag --candidate second:tag
+fitr auto status auto-<id>
+fitr auto adopt auto-<id>
+```
+
+fitr checks feasibility and resources, starts its own local runtime, reserves
+each request, and collects comparable evidence. A preselected choice gets one
+fresh confirmation attempt before adoption. Quality floors stay fixed, and
+an uncertain result stays unresolved. Status explains each candidate's gaps.
+
+<img src="docs/assets/auto.svg?v=0.10.11" alt="Auto fitting fixture with a confirmed preselected model, separate evidence progress and consumed allowances, and explicit adoption" width="820">
+
+Manual adoption is the default. `--adoption confirmed-only` can authorize
+selection in fitr after confirmation and runtime cleanup. The first owner is
+Windows-only, for CPU-only machines or one NVIDIA GPU, explicit installed text artifacts,
+and finite time, request and output-cap allowances. See [auto mode](docs/auto-mode.md)
+for preparation, supported requirements, resume rules and limits.
 
 ## Review what occupies your model storage
 

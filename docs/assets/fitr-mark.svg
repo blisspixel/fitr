@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="fitr-mark-title fitr-mark-desc">
+  <title id="fitr-mark-title">fitr</title>
+  <desc id="fitr-mark-desc">An open measuring frame with a fitted block and clear space above it.</desc>
+  <g fill="#0891b2">
+    <path d="M18 8h28a10 10 0 0 1 10 10v6h-8v-6a2 2 0 0 0-2-2H18a2 2 0 0 0-2 2v28a2 2 0 0 0 2 2h38a10 10 0 0 1-10 8H18A10 10 0 0 1 8 46V18A10 10 0 0 1 18 8Z"/>
+    <rect x="28" y="28" width="28" height="16" rx="2"/>
+  </g>
+</svg>

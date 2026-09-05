@@ -88,8 +88,13 @@ func (store Store) lifecycleDirectory(name string, create bool) (string, error) 
 }
 
 type lifecycleMutation func(Library, Lifecycle, *LifecycleEvent) error
+type lifecycleAdmission func(LifecycleEvent) (time.Time, error)
 
 func (store Store) transition(name, expected string, event LifecycleEvent, now time.Time, check lifecycleMutation) (Lifecycle, error) {
+	return store.transitionAdmitted(name, expected, event, now, check, nil)
+}
+
+func (store Store) transitionAdmitted(name, expected string, event LifecycleEvent, now time.Time, check lifecycleMutation, admit lifecycleAdmission) (Lifecycle, error) {
 	if now.IsZero() || !roleDigestValid(expected) {
 		return Lifecycle{}, errors.New("lifecycle transition requires a current time and expected digest")
 	}
@@ -131,12 +136,17 @@ func (store Store) transition(name, expected string, event LifecycleEvent, now t
 		return Lifecycle{}, err
 	}
 	life.appendEvent(event)
-	return store.writeLifecycle(life)
+	return store.writeLifecycle(life, admit)
 }
 
-func (store Store) writeLifecycle(life Lifecycle) (Lifecycle, error) {
+func (store Store) writeLifecycle(life Lifecycle, admit lifecycleAdmission) (Lifecycle, error) {
 	if err := life.Validate(); err != nil {
 		return Lifecycle{}, err
+	}
+	if admit != nil {
+		if err := admitLifecycleAdoption(&life, admit); err != nil {
+			return Lifecycle{}, err
+		}
 	}
 	data, err := json.MarshalIndent(life, "", "  ")
 	if err != nil {
@@ -224,6 +234,10 @@ func (store Store) BeginConfirmation(name, planSHA256, expected string, now time
 // FinishConfirmation records a terminal outcome. Interrupted work stays started
 // until explicitly failed or cancelled; it never gains a second attempt.
 func (store Store) FinishConfirmation(name, planSHA256, status string, bundle *ConfirmationBundle, records record.Store, expected string, now time.Time) (Lifecycle, error) {
+	return store.finishConfirmation(name, planSHA256, status, bundle, records, nil, expected, now)
+}
+
+func (store Store) finishConfirmation(name, planSHA256, status string, bundle *ConfirmationBundle, records record.Store, ref *record.ManagedStoreRef, expected string, now time.Time) (Lifecycle, error) {
 	if status != "completed" && status != "cancelled" && status != "failed" {
 		return Lifecycle{}, errors.New("confirmation outcome must be completed, cancelled or failed")
 	}
@@ -232,7 +246,7 @@ func (store Store) FinishConfirmation(name, planSHA256, status string, bundle *C
 		if bundle == nil || bundle.Plan.PlanSHA256 != planSHA256 {
 			return Lifecycle{}, errors.New("completed attempt requires its exact confirmation bundle")
 		}
-		receipt, err := confirmationAttempt(*bundle, records, now)
+		receipt, err := confirmationAttemptWithStore(*bundle, records, ref, now)
 		if err != nil {
 			return Lifecycle{}, err
 		}
@@ -253,6 +267,10 @@ func (store Store) FinishConfirmation(name, planSHA256, status string, bundle *C
 }
 
 func confirmationAttempt(bundle ConfirmationBundle, records record.Store, now time.Time) (ConfirmationAttemptReceipt, error) {
+	return confirmationAttemptWithStore(bundle, records, nil, now)
+}
+
+func confirmationAttemptWithStore(bundle ConfirmationBundle, records record.Store, ref *record.ManagedStoreRef, now time.Time) (ConfirmationAttemptReceipt, error) {
 	report, err := bundle.Validate()
 	if err != nil {
 		return ConfirmationAttemptReceipt{}, err
@@ -273,14 +291,14 @@ func confirmationAttempt(bundle ConfirmationBundle, records record.Store, now ti
 		if point == nil || point.Completion == nil || point.Manifest == nil || point.EvidenceIntegrityIssue() != "" {
 			return ConfirmationAttemptReceipt{}, errors.New("completed confirmation requires all sealed point records")
 		}
-		attachment, err := AttachRecord(records.CanonicalPath(point.Model), records)
+		attachment, err := confirmationAttachment(point, records, ref)
 		if err != nil {
 			return ConfirmationAttemptReceipt{}, err
 		}
 		if attachment.EvidenceSHA256 != point.Completion.EvidenceSHA256 || attachment.RunID != point.StableRunID() {
 			return ConfirmationAttemptReceipt{}, errors.New("confirmation requires exact canonical current twins")
 		}
-		receipt.Points = append(receipt.Points, ConfirmationPoint{Attachment: attachment, Model: point.Manifest.Model, StartedAt: point.StartedAt})
+		receipt.Points = append(receipt.Points, ConfirmationPoint{Attachment: attachment, Model: point.Manifest.Model, StartedAt: point.StartedAt, StoreRef: cloneManagedStoreRef(ref), RuntimeBinding: record.CloneRuntimeBinding(point.RuntimeBinding)})
 		started, err := time.Parse(time.RFC3339Nano, point.StartedAt)
 		if err != nil || started.After(now) {
 			return ConfirmationAttemptReceipt{}, errors.New("confirmation point has an invalid live timestamp")
@@ -295,10 +313,18 @@ func confirmationAttempt(bundle ConfirmationBundle, records record.Store, now ti
 }
 
 func (store Store) AdoptConfirmation(name, planSHA256 string, bundle ConfirmationBundle, records record.Store, expected string, now time.Time) (Lifecycle, error) {
+	return store.adoptConfirmation(name, planSHA256, bundle, records, nil, expected, now)
+}
+
+func (store Store) adoptConfirmation(name, planSHA256 string, bundle ConfirmationBundle, records record.Store, ref *record.ManagedStoreRef, expected string, now time.Time) (Lifecycle, error) {
+	return store.adoptConfirmationAdmitted(name, planSHA256, bundle, records, ref, expected, now, nil)
+}
+
+func (store Store) adoptConfirmationAdmitted(name, planSHA256 string, bundle ConfirmationBundle, records record.Store, ref *record.ManagedStoreRef, expected string, now time.Time, admit lifecycleAdmission) (Lifecycle, error) {
 	if bundle.Plan.PlanSHA256 != planSHA256 || bundle.Plan.Spec.Name != name {
 		return Lifecycle{}, errors.New("adoption bundle belongs to another role or plan")
 	}
-	attempt, err := confirmationAttempt(bundle, records, now)
+	attempt, err := confirmationAttemptWithStore(bundle, records, ref, now)
 	if err != nil {
 		return Lifecycle{}, err
 	}
@@ -308,9 +334,9 @@ func (store Store) AdoptConfirmation(name, planSHA256 string, bundle Confirmatio
 	}
 	selection := SelectionReceipt{SpecSHA256: bundle.Plan.SpecSHA256, PlanSHA256: planSHA256, BundleSHA256: attempt.BundleSHA256, ChosenEvidenceSHA256: bundle.Plan.ChosenEvidenceSHA256, Selected: selected, Points: attempt.Points, ExpiresAt: attempt.ExpiresAt, EvaluatedAt: attempt.EvaluatedAt}
 	event := LifecycleEvent{Action: "adopted", PlanSHA256: planSHA256, Selection: &selection}
-	return store.transition(name, expected, event, now, func(library Library, _ Lifecycle, _ *LifecycleEvent) error {
+	return store.transitionAdmitted(name, expected, event, now, func(library Library, _ Lifecycle, _ *LifecycleEvent) error {
 		return currentSelection(selection, bundle.Plan, library, records, now)
-	})
+	}, admit)
 }
 
 func currentSelection(selection SelectionReceipt, plan ConfirmationPlan, library Library, records record.Store, now time.Time) error {
@@ -323,9 +349,12 @@ func currentSelection(selection SelectionReceipt, plan ConfirmationPlan, library
 	}
 	var points []*record.Record
 	for _, point := range selection.Points {
-		current, canonical, err := readCanonicalRoleRecord(point.Attachment.Path, records)
+		current, canonical, err := readLifecyclePoint(point, records)
 		if err != nil || current.Completion == nil || current.Manifest == nil || current.Completion.EvidenceSHA256 != point.Attachment.EvidenceSHA256 || current.StableRunID() != point.Attachment.RunID || canonical != point.Attachment.Path || current.StartedAt != point.StartedAt || current.Manifest.Model != point.Model {
 			return errors.New("confirmation evidence no longer has exact canonical current twins")
+		}
+		if !sameLifecycleValue(current.RuntimeBinding, point.RuntimeBinding) {
+			return errors.New("selected evidence runtime binding changed")
 		}
 		points = append(points, current)
 	}

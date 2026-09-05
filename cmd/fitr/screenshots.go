@@ -80,7 +80,7 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		{"advise", shotAdvise}, {"run", shotRun}, {"apply", shotApply},
 		{"board", shotBoard}, {"top", shotTop}, {"doctor", shotDoctor}, {"compare", shotCompare},
 		{"discovery", shotDiscovery}, {"roles", shotRoles}, {"selection", shotSelection}, {"source", shotSource},
-		{"artifact", shotArtifact},
+		{"artifact", shotArtifact}, {"auto", shotAuto},
 	}
 	for _, s := range shots {
 		text, err := captureStdout(ctx, s.fn)
@@ -96,6 +96,20 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		fmt.Fprintf(os.Stderr, "wrote %s\n", terminalText(path))
 	}
 	return exitOK
+}
+
+func shotAuto(context.Context) (string, error) {
+	fmt.Println("$ fitr auto status auto-example")
+	fmt.Println()
+	render.WriteAutoStatus(os.Stdout, render.AutoStatus{
+		SessionID: "auto-example", Role: "daily driver", State: "awaiting_adoption",
+		Label:     "Fresh confirmation complete; adoption pending",
+		Incumbent: "daily-model:q5 (qualified)", Choice: "candidate-model:q4",
+		ExplorationPoints: 2, ConfirmationPoints: 2, CandidateCount: 2,
+		Requests: 276, RequestLimit: 600, OutputTokens: 103200, OutputTokenLimit: 250000,
+		ExpiresAt: "2026-09-05T14:00:00Z", Next: "fitr auto adopt auto-example",
+	}, "rich")
+	return "", nil
 }
 
 func shotDiscovery(context.Context) (string, error) {

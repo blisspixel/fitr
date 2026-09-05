@@ -218,7 +218,7 @@ func checkPlumbingCapability(ctx context.Context, c llm.Backend, model string, r
 
 func checkPlumbingEmission(ctx context.Context, c llm.Backend, model string, spec PlumbingSpec,
 	r *PlumbingResult) (ollama.Message, string, ollama.Sampling, bool, error) {
-	samp := ollama.Deterministic(300, numCtx(ctx))
+	samp := ollama.Deterministic(PlumbingOutputTokens, numCtx(ctx))
 	ask := plumbingPrompt(spec, "2_emits_tool_call", "What is the temperature in Oslo right now?")
 	msg, _, err := c.Chat(ctx, model, []ollama.Message{{Role: "user", Content: ask}}, spec.Tools, samp)
 	if err != nil {
@@ -479,11 +479,12 @@ func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (Me
 	}
 
 	start := time.Now()
-	samp := ollama.Deterministic(4, numCtx)
-	if _, _, err := c.Generate(ctx, model, "Say OK.", samp); err != nil {
+	samp := ollama.Deterministic(MemoryProbeOutputTokens, numCtx)
+	_, metrics, err := c.Generate(ctx, model, "Say OK.", samp)
+	if err != nil {
 		return r, err
 	}
-	r.LoadS = round2(time.Since(start).Seconds())
+	r.LoadS = round2(memoryInferenceElapsed(start, metrics).Seconds())
 
 	running, err := c.PS(ctx)
 	if err != nil {
@@ -507,6 +508,15 @@ func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (Me
 		}
 	}
 	return r, nil
+}
+
+func memoryInferenceElapsed(start time.Time, metrics ollama.Metrics) time.Duration {
+	if metrics.InferenceElapsedKnown {
+		// Owned clients measure after durable admission and before execution
+		// validation. Those control-plane costs still count toward the deadline.
+		return metrics.InferenceElapsed
+	}
+	return time.Since(start)
 }
 
 func memoryDiskGB(ctx context.Context, c llm.Backend, model string) (float64, error) {

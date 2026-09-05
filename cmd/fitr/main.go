@@ -108,6 +108,9 @@ usage:
   fitr role define <role.json> | list | show <name> | review <name>
   fitr role attach <name> <result.json> | detach <name> <evidence-sha256>
   fitr role confirm <name|bundle.json> | adopt <name> <bundle.json> | status <name> | rollback <name>
+  fitr auto runtime <ollama.exe> --models <directory> --out runtime.json
+  fitr auto start <role> --mode establish|improve --runtime runtime.json --candidate <model> --candidate <model>
+  fitr auto status|resume|adopt <session-id>
   fitr mcp serve
   fitr source resolve hf --repo <owner/model> --revision <revision> --file <path> --out <receipt.json>
   fitr source show <receipt.json> [--display MODE]
@@ -225,7 +228,7 @@ func commandHandler(name string) commandFunc {
 		return cmdCalibrate
 	case "compare":
 		return cmdCompare
-	case "decide", "discover", "role", "experiment", "cleanup", "mcp", "source", "artifact":
+	case "decide", "discover", "role", "experiment", "cleanup", "mcp", "source", "artifact", "auto":
 		return planningCommandHandler(name)
 	case "screenshots": // dev-only: regenerate docs/assets from mock data
 		return cmdScreenshots
@@ -241,6 +244,8 @@ func planningCommandHandler(name string) commandFunc {
 		return cmdDiscover
 	case "role":
 		return cmdRole
+	case "auto":
+		return cmdAuto
 	case "mcp":
 		return cmdMCP
 	case "source":
@@ -285,7 +290,8 @@ func takesValue(flagArg string) bool {
 	switch name {
 	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec",
 		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim", "repo", "revision", "file", "source",
-		"quality", "minimum-rate", "memory-gb", "max-age-days", "min-age-days", "mapping", "max-bytes", "timeout":
+		"quality", "minimum-rate", "memory-gb", "max-age-days", "min-age-days", "mapping", "max-bytes", "timeout",
+		"models", "runtime", "mode", "adoption", "candidate", "max-wall", "confirmation-wall", "max-requests", "max-requested-output-tokens", "max-points":
 		return true
 	}
 	return false
@@ -536,9 +542,12 @@ type runOpts struct {
 	capacityBudgetGB        *float64
 	capacityReserveGB       *float64
 	allowUnsafeExec         bool
+	runID                   string
+	ownedConfiguration      map[string]string
 	validatePrepared        func(*runExecution) error
 	validateCapacity        func(*runExecution) error
 	validateContext         func(*runExecution) error
+	validateLoaded          func(*runExecution, device.ContextVerification) error
 }
 
 // liveTelemetry is an optional extension implemented by the full-screen

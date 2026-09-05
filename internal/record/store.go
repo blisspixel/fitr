@@ -98,6 +98,9 @@ func (s Store) HistoryDir() string { return filepath.Join(s.dir(), historyDirNam
 // ClearHistory removes only immutable history entries and recreates the
 // private archive directory. Canonical latest results are untouched.
 func (s Store) ClearHistory() (int, error) {
+	if managedNamespace(s.dir()) {
+		return 0, errors.New("managed evidence history is immutable")
+	}
 	root := filepath.Clean(s.dir())
 	target := filepath.Clean(s.HistoryDir())
 	rel, err := filepath.Rel(root, target)
@@ -136,6 +139,9 @@ func (s Store) dir() string {
 // if the canonical update then fails, the returned HistoryPath identifies the
 // recoverable copy even though Save still returns an error.
 func (s Store) Save(r *Record) (SavedPaths, error) {
+	if managedNamespace(s.dir()) {
+		return SavedPaths{}, errors.New("managed evidence must be written through its open managed store")
+	}
 	saveMu.Lock()
 	defer saveMu.Unlock()
 	if r == nil {
@@ -172,9 +178,7 @@ func (s Store) Save(r *Record) (SavedPaths, error) {
 		return SavedPaths{}, err
 	}
 
-	contentSum := sha256.Sum256(b)
-	stamp := historyStamp(r.StartedAt)
-	historyName := fmt.Sprintf("%s-%s-%s.json", stamp, runID, hex.EncodeToString(contentSum[:6]))
+	historyName := historyRecordName(r, b)
 	historyPath := filepath.Join(historyDir, historyName)
 	if err := rejectDivergentRunID(historyDir, historyName, runID); err != nil {
 		return SavedPaths{}, err
@@ -190,6 +194,11 @@ func (s Store) Save(r *Record) (SavedPaths, error) {
 	}
 	saved.CanonicalPath = canonicalPath
 	return saved, nil
+}
+
+func historyRecordName(r *Record, data []byte) string {
+	contentSum := sha256.Sum256(data)
+	return fmt.Sprintf("%s-%s-%s.json", historyStamp(r.StartedAt), r.StableRunID(), hex.EncodeToString(contentSum[:6]))
 }
 
 func rejectDivergentRunID(historyDir, targetName, runID string) error {
@@ -220,7 +229,9 @@ func (s Store) Read(path string) (*Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	if sameDirectory(filepath.Dir(path), s.dir()) {
+	if managedNamespace(s.dir()) {
+		r.storageIntegrityIssue = "managed evidence requires its pinned closed-store reference"
+	} else if sameDirectory(filepath.Dir(path), s.dir()) {
 		s.reconcileWithHistory(r)
 	} else if r.SchemaVersion >= EvidenceSchemaVersion {
 		r.storageIntegrityIssue = "external or archived result is display-only without an exact canonical current twin"
@@ -249,6 +260,9 @@ func (s Store) LoadAll() (LoadResult, error) {
 	currentIndex := indexRecordFiles(current)
 	for _, record := range loaded.Records {
 		reconcileWithCurrentIndex(record, currentIndex)
+		if managedNamespace(s.dir()) {
+			record.storageIntegrityIssue = "managed evidence requires its pinned closed-store reference"
+		}
 	}
 	return loaded, nil
 }
@@ -272,6 +286,9 @@ func (s Store) LoadCurrent() (LoadResult, error) {
 	}
 	for _, record := range loaded.Records {
 		reconcileWithHistoryIndex(record, historyIndex)
+		if managedNamespace(s.dir()) {
+			record.storageIntegrityIssue = "managed evidence requires its pinned closed-store reference"
+		}
 	}
 	seen := map[string]bool{}
 	latest := make([]*Record, 0, len(loaded.Records))

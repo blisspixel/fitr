@@ -28,6 +28,7 @@ type ConfirmationCandidate struct {
 	Model          record.ModelIdentity      `json:"model"`
 	Capacity       ConfirmationCapacity      `json:"capacity"`
 	Experiment     *record.ExperimentBinding `json:"experiment,omitempty"`
+	RuntimeBinding *record.RuntimeBinding    `json:"runtime_binding,omitempty"`
 	EvidenceSHA256 string                    `json:"evidence_sha256"`
 	RunID          string                    `json:"run_id"`
 	SeedSet        string                    `json:"seedset"`
@@ -137,7 +138,8 @@ func (plan *ConfirmationPlan) setExploration(results []*record.Record) error {
 		}
 		plan.Candidates = append(plan.Candidates, ConfirmationCandidate{
 			Model: result.Manifest.Model, Capacity: allocation, Experiment: result.Experiment, EvidenceSHA256: result.Completion.EvidenceSHA256,
-			RunID: result.StableRunID(), SeedSet: result.SeedSet, StartedAt: result.StartedAt,
+			RuntimeBinding: record.CloneRuntimeBinding(result.RuntimeBinding),
+			RunID:          result.StableRunID(), SeedSet: result.SeedSet, StartedAt: result.StartedAt,
 		})
 	}
 	return nil
@@ -218,6 +220,9 @@ func (plan ConfirmationPlan) validateCandidates(created time.Time) error {
 	chosen := false
 	first := plan.Candidates[0].Model
 	for _, candidate := range plan.Candidates {
+		if err := validateCandidateRuntime(candidate, plan.Candidates[0]); err != nil {
+			return err
+		}
 		if err := candidate.Capacity.validate(); err != nil {
 			return err
 		}
@@ -316,6 +321,25 @@ func ConfirmationPlanBinding(plan ConfirmationPlan, pointIndex int) record.Exper
 // are checked again against the completed, sealed evidence during analysis.
 func ValidatePreparedConfirmationPoint(plan ConfirmationPlan, pointIndex int, result *record.Record,
 	identity record.ModelIdentity, provenance record.RunProvenance) error {
+	return validatePreparedConfirmationPoint(plan, pointIndex, result, identity, provenance, true)
+}
+
+// ValidatePreparedOwnedConfirmationPoint permits the compute backend to remain
+// unobserved before an owned runtime's first load. The caller must independently
+// bind the physical device and settings before using this check, then call
+// ValidateConfirmationContextPoint after loading and before the battery. This
+// API cannot validate sealed or already observed evidence; final analysis uses
+// ValidatePreparedConfirmationPoint and retains its strict device comparison.
+func ValidatePreparedOwnedConfirmationPoint(plan ConfirmationPlan, pointIndex int, result *record.Record,
+	identity record.ModelIdentity, provenance record.RunProvenance) error {
+	if result == nil || result.RuntimeBinding == nil || result.DeviceV2 != nil || result.Manifest != nil || result.Completion != nil {
+		return errors.New("owned confirmation preflight requires an unsealed point before context observation")
+	}
+	return validatePreparedConfirmationPoint(plan, pointIndex, result, identity, provenance, result.Device.GPUBackend != "")
+}
+
+func validatePreparedConfirmationPoint(plan ConfirmationPlan, pointIndex int, result *record.Record,
+	identity record.ModelIdentity, provenance record.RunProvenance, checkDevice bool) error {
 	if err := plan.Validate(); err != nil {
 		return err
 	}
@@ -323,11 +347,19 @@ func ValidatePreparedConfirmationPoint(plan ConfirmationPlan, pointIndex int, re
 		return errors.New("invalid confirmation point position")
 	}
 	want := ConfirmationPlanBinding(plan, pointIndex)
+	if !record.SameRuntimeConfiguration(result.RuntimeBinding, plan.Candidates[pointIndex-1].RuntimeBinding) {
+		return errors.New("confirmation runtime configuration differs from exploration")
+	}
+	if result.RuntimeBinding != nil {
+		if err := result.RuntimeBinding.ValidateFor(identity); err != nil {
+			return err
+		}
+	}
 	if result.Experiment == nil || *result.Experiment != want || !sameConfirmationModel(identity, plan.Candidates[pointIndex-1].Model) {
 		return errors.New("confirmation point binding or artifact differs")
 	}
 	p := plan.Protocol
-	if result.Device.Key() != p.DeviceKey || result.ContextSize() != p.RequestedContext || result.Profile != p.Profile ||
+	if (checkDevice && result.Device.Key() != p.DeviceKey) || result.ContextSize() != p.RequestedContext || result.Profile != p.Profile ||
 		result.Level != p.Level || result.ExecutionPolicy != p.ExecutionPolicy || result.Repeats != p.Repeats || result.SeedSet != plan.SeedSet ||
 		result.TaskPlan != p.TaskPlan || provenance != p.Provenance {
 		return errors.New("confirmation preparation differs from the sealed protocol")

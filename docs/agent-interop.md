@@ -107,10 +107,13 @@ accepted wheel hash for CPython 3.14. These packages do not become Go runtime or
 plugin dependencies. This lock targets Linux x64, macOS arm64 and Windows x64,
 matching the CI matrix. It does not support Intel macOS because the pinned
 [cryptography release](https://pypi.org/pypi/cryptography/50.0.1/json) has no
-matching wheel. A local Windows run with the published fitr 0.10.9 binary
+matching wheel. A local Windows run with the published fitr 0.10.10 binary
 passed both explicit `2026-07-28` and ordinary default client modes against
-empty and synthetic current-schema evidence stores. CI receipts must establish each later binary
-and operating-system result; this is not a named-host acceptance result.
+empty and synthetic current-schema evidence stores. The
+[0.10.10 release receipt](release-acceptance.md#01010-release-receipt)
+also records official SDK acceptance for the Linux x64, macOS arm64 and Windows
+x64 CI binaries. Each receipt binds its own binary and inputs; these are not
+named-host acceptance results.
 
 The script uses the released SDK's `Client(stdio_client(...))` transport
 contract. In explicit mode, `session.discover()` can return synthetic cached
@@ -173,46 +176,68 @@ transcript digests; and measured SDK cleanup. Input file identities are checked
 before and after all cases so a concurrent rebuild cannot silently relabel a
 pass. Raw transcripts and temporary private fixture paths are not published.
 
-## Next bounded host acceptance
+## Named-host compatibility
 
-The next useful step is one version-pinned live host row using the same
-temporary evidence fixture. SDK acceptance establishes a real client flow;
-portable package metadata alone establishes no harness support. Record a host's
-unsupported revision as an acceptance failure.
+These are source-based assessments checked September 5, 2026, not recorded
+live fitr acceptance results. The official SDK acceptance above does not change
+any row's status.
 
-Hermes Agent's released
-[`29112bef099274229cadff79cdff7bf7b99c4b77` MCP connector](https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/tools/mcp_tool.py)
-provides an explicit `protocol: stateless` option. Its default `auto` path
-starts with legacy initialization and has specific fallback error handling,
-which differs from the Python SDK's default discovery-first behavior. A later
-Hermes row should explicitly select `stateless`, restrict its tool allowlist
-to these two tools and observe the actual wire exchange. This is a source-based
-configuration proposal, not a live Hermes compatibility result.
+| Host and inspected release | Current boundary with fitr |
+|---|---|
+| Hermes Agent v2026.8.31 / 0.21.0 | **Plausible, unaccepted.** The [released connector](https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/tools/mcp_tool.py) offers explicit `protocol: stateless`. Default `auto` starts with legacy initialization; even stateless discovery has fallback handling. Observe the actual exchange. |
+| Pi v0.85.1 | **Extension required, unaccepted.** The [released agent](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/README.md) leaves MCP to extensions. Pin and test a specific adapter; the portable package does not establish built-in support. |
+| Official DeepSeek Harness `dsh-v0.1.3-alpha.1` | **Legacy protocol mismatch, unaccepted.** This is a [developer-preview harness](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.3-alpha.1), distinct from DeepSeek models. Its [lock](https://github.com/deepseek-ai/deepseek-harness/blob/d347e703908d0406b7a7ef80e3a0e594d86b2215/pnpm-lock.yaml) selects SDK 1.29.0 and its [connector](https://github.com/deepseek-ai/deepseek-harness/blob/d347e703908d0406b7a7ef80e3a0e594d86b2215/packages/mcp/mcp-client/src/connection.ts) uses the legacy client handshake. |
+| OpenClaw v2026.9.1 | **Legacy protocol mismatch, unaccepted.** Its [release manifest](https://github.com/openclaw/openclaw/blob/v2026.9.1/package.json) pins SDK 1.30.0, whose [protocol declarations](https://github.com/modelcontextprotocol/typescript-sdk/blob/2d889f2b329e46680ec9bdd565de4616c497825a/src/types.ts) stop at `2025-11-25`. A catalog probe cannot make that client speak fitr's stateless revision. |
+| NVIDIA NemoClaw v0.0.120 | **Managed transport mismatch, unaccepted.** Its [managed MCP contract](https://github.com/NVIDIA/NemoClaw/blob/2444537f5a77c7b2789de4d59430e228328b8279/docs/deployment/set-up-mcp-bridge.mdx) accepts authenticated Streamable HTTP and explicitly excludes host stdio bridges. fitr currently exposes stdio only. |
 
-Pi's [v0.85.0 coding-agent documentation](https://github.com/earendil-works/pi/blob/v0.85.0/packages/coding-agent/README.md)
-states that MCP belongs in extensions rather than its built-in agent. Pin an
-actual extension before claiming a Pi integration. OpenClaw's official
-[`mcp probe` contract](https://docs.openclaw.ai/cli/mcp) provides a catalog probe;
-a successful probe alone would not establish tool execution or evidence
-semantics. Neither host has been installed or configured by this acceptance.
+The legacy SDK [initialization path](https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.29.0/src/client/index.ts)
+is incompatible with fitr's modern-only server. This is a source-level finding;
+a negative named-host binary test still needs to be recorded. A future legacy
+profile or transport adapter must be explicit and separately tested.
 
-The proposed sequence is package discovery, stdio launch, optional discovery,
-catalog/schema inspection, both tool calls, an invalid role, cancellation and
-shutdown. Confirm that the returned review matches local CLI evidence and
-omits private fields. Record the host build, fitr binary/plugin digests,
-requested MCP revision, sanitized configuration and transcript digest. A
-successful row covers this read-only profile only; it does not establish model
-or workflow quality. A named-host acceptance run has not been performed.
+## Ordered integration roadmap
 
-| Harness candidate | Official configuration surface | Bind before a later workflow experiment |
-|---|---|---|
-| Hermes Agent | [Model configuration](https://hermes-agent.nousresearch.com/docs/user-guide/configuring-models) | Main, auxiliary and fallback model slots; actual routing |
-| Pi | [Custom model configuration](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md) | Harness build, API adapter, extensions, model resolution and session state |
-| OpenClaw | [Model selection](https://docs.openclaw.ai/concepts/models) | Effective provider/model, fallback and session overrides |
+1. **Accept one Hermes read-only client path.** Use explicit stateless mode,
+   the two-tool allowlist, a pinned host and a temporary canonical evidence
+   fixture. Disable unused sampling, elicitation, resources and prompts.
+   Exercise real discovery, catalog/schema inspection, both calls, invalid
+   arguments, idle keepalive, cancellation and bounded shutdown without an LLM.
+2. **Add one small Pi extension.** Use the pinned
+   [extension API](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/extensions.md)
+   to expose only the same read-only tools. Fix executable and results paths
+   outside tool arguments, propagate errors and cancellation, and apply the
+   same acceptance fixture. Keep the adapter and its dependencies testable
+   independently from model inference.
+3. **Explain the remaining host gaps.** Record OpenClaw and DeepSeek protocol
+   failures honestly. Consider an explicit CLI integration while awaiting a
+   compatible client, with a fixed redacted projection or explicit disclosure
+   scope: ordinary CLI JSON is richer than MCP output. For NemoClaw, first
+   consider an inert import of its versioned
+   [host readiness report](https://github.com/NVIDIA/NemoClaw/blob/2444537f5a77c7b2789de4d59430e228328b8279/docs/reference/system-readiness.mdx).
+   Preserve producer identity and inconclusive findings; imported readiness
+   cannot establish local fit or justify starting a sandbox.
+4. **Evaluate one bounded model-plus-harness workflow.** Seal the harness
+   build, effective provider configuration, tool surface, task/verifier,
+   context and runtime/artifact identity. Count auxiliary requests and every
+   retry, verify final effects independently, and test interruption and
+   compaction. A tool connection, successful exit or model claim cannot earn
+   workflow quality. Require fresh role confirmation before selection.
+5. **Add deployment or A2A only for a demonstrated need.** HTTP service
+   exposure, credentials, shared-route changes and abort semantics introduce
+   separate authority boundaries. Keep them outside the read-only profile.
 
-Pi configuration can contain executable credential commands. A future importer
-must inspect inert data and omit secrets; invoking a configuration resolver is
-not a read-only import.
+Each accepted host row must record host/dependency identities, fitr
+binary/plugin/configuration digests, requested protocol and transcript digest.
+Require exact agreement with local CLI evidence, redacted output and unchanged
+fixture contents. Do not count synthetic cached discovery as a wire exchange.
+SDK and adapter dependencies stay outside fitr's standalone runtime.
+
+Future configuration imports must remain inert. Pi's pinned
+[model configuration](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/models.md)
+allows executable credential commands. Hermes's
+[model configuration](https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/website/docs/user-guide/configuring-models.md)
+includes auxiliary and fallback routes. Neither executing a resolver nor
+recording only the main model establishes a read-only, reproducible import.
 
 ## Next bounded A2A adapter
 
@@ -235,6 +260,12 @@ end-to-end latency. Keep remote status, verified outcome, observed authority
 and data boundary separate; opaque worker timing and model identity remain
 unknown. Exclude streaming, webhooks, credential flows, arbitrary remote tools
 and cross-version fallback. This proposal is not implemented or live-tested.
+
+OpenClaw v2026.9.1 is not a suitable execution target for this bounded profile:
+its [A2A implementation contract](https://github.com/openclaw/openclaw/blob/v2026.9.1/docs/channels/a2a.md)
+refuses `CancelTask` because dispatched work cannot be stopped through that
+plugin. A reply timeout can leave the task working. Do not relabel either
+condition as observed cancellation.
 
 ## Source resolution and preflight options
 

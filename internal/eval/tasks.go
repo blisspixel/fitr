@@ -157,7 +157,7 @@ func runSpeedWarmup(ctx context.Context, c llm.Backend, model string, out *Speed
 	// with residents cleared, so on the first repeat it does), its wall-clock
 	// first token IS the honest cold-start figure - record it instead of
 	// discarding it.
-	warm := ollama.Deterministic(8, numCtx(ctx))
+	warm := ollama.Deterministic(SpeedWarmupOutputTokens, numCtx(ctx))
 	warm.IgnoreEOS = true
 	_, m0, err := c.Generate(ctx, model, "Say OK.", warm)
 	if err != nil {
