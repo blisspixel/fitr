@@ -6,6 +6,33 @@ against real serving runtimes on clean operating-system installs.
 
 Last updated: 2026-09-05.
 
+### 0.10.5 release receipt
+
+Release 0.10.5 is bound to commit
+`2a4fc13beaa44399092aacb0d48fd6563340a9da`. The exact commit passed
+[main CI](https://github.com/blisspixel/fitr/actions/runs/33953933128), including
+83.10% aggregate coverage, and
+[native Linux/macOS acceptance](https://github.com/blisspixel/fitr/actions/runs/33953933030)
+before the
+[release workflow](https://github.com/blisspixel/fitr/actions/runs/33954218252)
+published [v0.10.5](https://github.com/blisspixel/fitr/releases/tag/v0.10.5).
+
+All ten public assets were downloaded independently and the nine-entry
+manifest matched every asset. The Windows amd64 binary is 12,983,808 bytes
+and has SHA-256
+`8ce6bc508468cc58dde75da4b400607a47c425085443ecb3b5ba253f13d73626`.
+The tagged PowerShell installer verified and installed it to an isolated
+directory with persistent user PATH unchanged. Public `update --check`
+identified the current release; `update --reinstall` staged the verified asset
+and the hidden helper completed replacement after exit. The replacement
+reported `fitr 0.10.5`, matched the public hash and left no staged files.
+
+The role and cleanup commands add about 1.25% to the Windows binary relative
+to 0.10.4. CI and release retain a size ceiling of 13,140,000 bytes, roughly
+1.2% above the measured candidate. Read-only storage acceptance also exercised
+a local tree exceeding 100,000 files; no personal paths or inventory receipts
+are published here.
+
 ## Automated gates
 
 | Gate | Coverage |
