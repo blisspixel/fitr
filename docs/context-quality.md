@@ -2,10 +2,10 @@
 
 The next Extended fit scorecard tests whether a model uses a long document
 correctly at a fixed operating window. The deterministic task pack, the opt-in
-Ollama request accounting and the execution adapter that submits one sealed
-plan are implemented as internal foundations. Signed run evidence, role
-preferences and auto confirmation are not connected yet. No command currently
-earns this scorecard.
+Ollama request accounting, the execution adapter that submits one sealed plan
+and the signed run evidence that persists it are implemented as internal
+foundations. Role preferences and auto confirmation are not connected yet. No
+command currently earns this scorecard.
 
 ## What the document pack measures
 
@@ -96,6 +96,24 @@ recorded as not attempted rather than left silently missing. A per-cell
 transport fault or unknown accounting is recorded and the phase continues,
 because an incomplete phase already cannot qualify and the remaining cells
 still carry their own diagnostics. None of these become model-quality zeroes.
+
+## Persisting a phase
+
+A run seals the plan's digest and cell count into its task plan before the
+manifest exists, so a finished phase cannot present a shorter or easier
+schedule than the run committed to. The observations are then part of the
+signed completion payload.
+
+The stored report is never taken from a caller. It is derived from the plan and
+the observations when the phase is attached, and derived again by every loader
+before the evidence is accepted, so a record cannot carry a verdict its own
+observations deny. A sealed plan with no observations, observations with no
+sealed plan, and a plan that differs from the one sealed before inference are
+each refused.
+
+A run without a context phase omits these fields entirely rather than writing
+an empty one, so every manifest, record and completion payload written before
+the phase existed keeps its exact bytes and its signature.
 
 ## Remaining connected acceptance
 

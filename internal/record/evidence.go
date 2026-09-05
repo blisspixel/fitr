@@ -59,8 +59,12 @@ type completedEvidencePayload struct {
 	Contamination     []string                       `json:"contamination"`
 	EvidenceCounts    map[string]eval.OutcomeCounts  `json:"evidence_counts"`
 	AdaptiveDecisions []eval.AdaptiveDecision        `json:"adaptive_decisions"`
-	Scorecard         score.Scorecard                `json:"scorecard"`
-	Profile           device.Profile                 `json:"profile"`
+	// ContextQuality carries omitempty so a run without a context phase signs
+	// exactly the bytes it signed before this field existed. Every completion
+	// receipt written earlier must keep verifying unchanged.
+	ContextQuality *ContextQuality `json:"context_quality,omitempty"`
+	Scorecard      score.Scorecard `json:"scorecard"`
+	Profile        device.Profile  `json:"profile"`
 }
 
 // CompleteEvidence seals a finished current-schema run. It must be called exactly
@@ -211,7 +215,8 @@ func (r *Record) completedEvidenceJSON(profile device.Profile) ([]byte, error) {
 		Tools: r.Tools, Withdrawal: r.Withdrawal, Agentic: r.Agentic, Refusal: r.Refusal,
 		Refused: r.Refused, Plumbing: r.Plumbing, Rep: r.Rep, Density: r.Density,
 		Contamination: r.Contamination, EvidenceCounts: r.EvidenceCounts,
-		AdaptiveDecisions: r.AdaptiveDecisions, Scorecard: r.Scorecard, Profile: profile,
+		AdaptiveDecisions: r.AdaptiveDecisions, ContextQuality: cloneContextQuality(r.ContextQuality),
+		Scorecard: r.Scorecard, Profile: profile,
 	})
 }
 
@@ -226,6 +231,9 @@ func (r *Record) validateDerivedEvidence() error {
 		return err
 	}
 	if err := r.validatePlannedObservations(); err != nil {
+		return err
+	}
+	if err := r.validateContextQuality(); err != nil {
 		return err
 	}
 	if err := r.validateEvidenceCounts(); err != nil {

@@ -124,6 +124,13 @@ type TaskPlan struct {
 	// inference. A count alone cannot detect replacing a difficult prompt.
 	RefusalPlanSHA256 string `json:"refusal_plan_sha256,omitempty"`
 	AgenticTrials     int    `json:"agentic_trials"`
+	// ContextCells and ContextPlanSHA256 seal an optional context task phase.
+	// The digest binds the policy, seed set and ordered cells, so a finished
+	// phase cannot present a shorter or easier plan than the run committed to.
+	// Both are omitted when no phase was planned, which keeps every manifest
+	// written before this field byte-identical and its signature valid.
+	ContextCells      int    `json:"context_cells,omitempty"`
+	ContextPlanSHA256 string `json:"context_plan_sha256,omitempty"`
 }
 
 // RunProvenance identifies every mutable definition that can alter a verdict
@@ -216,14 +223,16 @@ func (p RunProvenance) Validate() error {
 
 func (p TaskPlan) Validate() error {
 	if p.SpeedSamples < 0 || p.CodeTrials < 0 || p.CheckTrialsLimit < 0 ||
-		p.ToolTrials < 0 || p.RefusalTrials < 0 || p.AgenticTrials < 0 {
+		p.ToolTrials < 0 || p.RefusalTrials < 0 || p.AgenticTrials < 0 || p.ContextCells < 0 {
 		return errors.New("task plan counts cannot be negative")
 	}
 	if p.AdaptiveChecks && p.CheckTrialsLimit < 1 {
 		return errors.New("adaptive checks require a positive trial limit")
 	}
+	// A context phase is planned work in its own right, so a run consisting
+	// only of one is a complete plan rather than an empty one.
 	if p.SpeedSamples+p.CodeTrials+p.CheckTrialsLimit+p.ToolTrials+
-		p.RefusalTrials+p.AgenticTrials == 0 && !p.Memory && !p.Plumbing && !p.Withdrawal {
+		p.RefusalTrials+p.AgenticTrials+p.ContextCells == 0 && !p.Memory && !p.Plumbing && !p.Withdrawal {
 		return errors.New("task plan is empty")
 	}
 	return nil
@@ -245,6 +254,12 @@ func (p TaskPlan) validateCurrentSeals() error {
 	}
 	if p.RefusalTrials == 0 && p.RefusalPlanSHA256 != "" {
 		return errors.New("current run manifest empty refusal plan cannot carry a refusal-plan digest")
+	}
+	if p.ContextCells > 0 && !sha256Digest.MatchString(p.ContextPlanSHA256) {
+		return errors.New("current run manifest context tasks require a sealed context plan")
+	}
+	if p.ContextCells == 0 && p.ContextPlanSHA256 != "" {
+		return errors.New("current run manifest empty context plan cannot carry a context-plan digest")
 	}
 	return nil
 }

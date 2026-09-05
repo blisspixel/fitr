@@ -70,6 +70,9 @@ type Record struct {
 	Contamination     []string                      `json:"contamination,omitempty"`
 	EvidenceCounts    map[string]eval.OutcomeCounts `json:"evidence_counts,omitempty"`
 	AdaptiveDecisions []eval.AdaptiveDecision       `json:"adaptive_decisions,omitempty"`
+	// ContextQuality is an optional finite document-task phase. It is omitted
+	// when no phase ran, so records written before it stay byte-identical.
+	ContextQuality *ContextQuality `json:"context_quality,omitempty"`
 
 	Scorecard score.Scorecard `json:"scorecard"`
 

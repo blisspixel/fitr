@@ -358,7 +358,12 @@ func TestCurrentSchemaContractRejectsMissingAndScoreableExecutableEvidence(t *te
 	}
 }
 
-func completedEvidenceRecord(t *testing.T, code []eval.ExecResult, checks []eval.CheckOutcome) *Record {
+// completedEvidenceRecord builds one signed current-schema run. Each seal hook
+// runs after the derived evidence is final and before the manifest is
+// attached, which is the only window in which a phase can still seal a plan.
+func completedEvidenceRecord(t *testing.T, code []eval.ExecResult, checks []eval.CheckOutcome,
+	seal ...func(*Record),
+) *Record {
 	t.Helper()
 	profile := device.Profile{Name: "default", Description: "test", Gates: map[string]device.Gate{}}
 	r := manifestRecord("model", "2026-08-21T12:00:00Z")
@@ -386,6 +391,9 @@ func completedEvidenceRecord(t *testing.T, code []eval.ExecResult, checks []eval
 		CurrentScoringPolicy(), testSoftwareReceipt())
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, hook := range seal {
+		hook(r)
 	}
 	if err := r.AttachManifest(digestIdentity(t, "model", "model"), provenance); err != nil {
 		t.Fatal(err)

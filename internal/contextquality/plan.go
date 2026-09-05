@@ -42,6 +42,18 @@ func NewPlan(policy Policy, seedSet string) (Plan, error) {
 	return plan, err
 }
 
+// Clone returns a deep copy. Plan carries nested slices, so a sealed plan that
+// shared them would still change under the caller that supplied it.
+func (plan Plan) Clone() Plan {
+	dup := plan
+	dup.Policy.PayloadUTF8Bytes = append([]int(nil), plan.Policy.PayloadUTF8Bytes...)
+	dup.Cells = append([]Cell(nil), plan.Cells...)
+	for index := range dup.Cells {
+		dup.Cells[index].Spans = append([]Span(nil), plan.Cells[index].Spans...)
+	}
+	return dup
+}
+
 func (plan Plan) Validate() error {
 	if plan.Schema != PlanSchema || len(plan.Cells) < 2*CellsPerTier || len(plan.Cells) > 4*CellsPerTier {
 		return errors.New("invalid context task plan schema or cell bounds")
