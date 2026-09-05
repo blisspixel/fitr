@@ -102,6 +102,8 @@ usage:
   fitr experiment confirm <confirmation-bundle.json> [--display MODE]
   fitr experiment workload <model> [-n N] [--ctx N] [--backend B]
   fitr experiment workload <workload-bundle.json> [--display MODE]
+  fitr discover add <source> --role <role> [--model <reference>] [--harness <name>]
+  fitr discover list|plan [--role <role>] [--display MODE]
 
 flags:
   --display  auto|rich|plain|json|none   output mode (default auto)
@@ -215,6 +217,8 @@ func commandHandler(name string) commandFunc {
 		return cmdCompare
 	case "decide":
 		return cmdDecide
+	case "discover":
+		return cmdDiscover
 	case "experiment":
 		return cmdExperiment
 	case "screenshots": // dev-only: regenerate docs/assets from mock data
@@ -251,7 +255,7 @@ func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
 	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec",
-		"capacity-budget-gb", "capacity-reserve-gb":
+		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim":
 		return true
 	}
 	return false

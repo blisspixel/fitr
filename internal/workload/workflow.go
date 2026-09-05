@@ -128,7 +128,7 @@ func verifyWorkflow(state workflowState) VerifierReceipt {
 	protected, _ := hashValue("fitr.workload.protected.v1", state.files[requirementsFile])
 	policyHash, _ := hashValue("fitr.workload.policy.v1", policyRaw)
 	checks := []VerificationCheck{
-		check("policy_json", parseErr == nil, errorDetail(parseErr, "strict JSON object")),
+		check("policy_json", parseErr == nil, "policy must be a strict JSON object with the declared fields and types"),
 		check("version", parseErr == nil && policy.Version == 2, "version must equal 2"),
 		check("enabled", parseErr == nil && policy.Enabled, "enabled must be true"),
 		check("retries", parseErr == nil && policy.Retries == 3, "retries must equal 3"),
@@ -143,7 +143,7 @@ func verifyWorkflow(state workflowState) VerifierReceipt {
 		accepted = accepted && item.Passed
 	}
 	return VerifierReceipt{
-		EvidenceClass: "deterministic_assertion", PolicySHA256: policyHash,
+		EvidenceClass: EvidenceDeterministic, PolicySHA256: policyHash,
 		ProtectedStateSHA256: protected, Checks: checks, Accepted: accepted,
 	}
 }
@@ -169,13 +169,6 @@ func decodePolicy(data []byte, destination *expectedPolicy) error {
 
 func check(code string, passed bool, detail string) VerificationCheck {
 	return VerificationCheck{Code: code, Passed: passed, Detail: detail}
-}
-
-func errorDetail(err error, fallback string) string {
-	if err == nil {
-		return fallback
-	}
-	return err.Error()
 }
 
 func equalStrings(left, right []string) bool {

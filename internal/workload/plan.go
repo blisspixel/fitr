@@ -44,6 +44,8 @@ func NewPlan(model record.ModelIdentity, deviceKey string, trials, maxTurns,
 		Trials: trials, MaxTurns: maxTurns, TimeoutSeconds: timeoutSeconds,
 		RequestedContext: requestedContext, Retention: RetainHashesAndVerifier,
 	}
+	contract := policyRepairContract()
+	plan.Contract = &contract
 	digest, err := planDigest(plan)
 	if err != nil {
 		return nil, err
@@ -53,8 +55,16 @@ func NewPlan(model record.ModelIdentity, deviceKey string, trials, maxTurns,
 }
 
 func (plan Plan) Validate() error {
-	if plan.Schema != PlanSchema || plan.Workflow != WorkflowID || plan.WorkflowVersion != WorkflowVersion {
+	if (plan.Schema != PlanSchema && plan.Schema != LegacyPlanSchema) ||
+		plan.Workflow != WorkflowID || plan.WorkflowVersion != WorkflowVersion {
 		return errors.New("unsupported workload plan schema or workflow")
+	}
+	if plan.Schema == PlanSchema {
+		if plan.Contract == nil || *plan.Contract != policyRepairContract() {
+			return errors.New("workload plan contract does not match the supported workflow")
+		}
+	} else if plan.Contract != nil {
+		return errors.New("legacy workload plan cannot carry a workflow contract")
 	}
 	if plan.Retention != RetainHashesAndVerifier {
 		return fmt.Errorf("unsupported workload retention policy %q", plan.Retention)
@@ -97,7 +107,7 @@ func ValidatePlanBounds(trials, maxTurns, timeoutSeconds, requestedContext int) 
 
 func planDigest(plan Plan) (string, error) {
 	plan.PlanSHA256 = ""
-	return hashValue("fitr.workload.plan.v1", plan)
+	return hashValue(plan.Schema, plan)
 }
 
 func hashValue(domain string, value any) (string, error) {

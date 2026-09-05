@@ -262,6 +262,13 @@ do not move the user's selection to a different result.
 
 ## Terminal architecture
 
+The Live view uses an ASCII activity marker only during an active run. It
+stops on completion, cancellation or error, and freezes with a paused
+viewport. Set `FITR_REDUCED_MOTION=1` to keep static status labels while
+elapsed time still updates. `NO_COLOR=1` removes color and `FITR_ASCII=1`
+selects ASCII graph glyphs. See the [terminal design language](design-language.md)
+for the shared CLI and TUI conventions.
+
 The full-screen adapter uses
 [tcell v3](https://github.com/gdamore/tcell/tree/v3.4.2) for terminal input,
 resize events, cell output, and restoration. The application does not use

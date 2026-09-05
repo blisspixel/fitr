@@ -196,6 +196,8 @@ of installed RAM as an unconditional model budget.
 | `fitr experiment quant <result.json>... --spec decision.json [--lineage conversion.json]` | build a decision-relative conservative configuration frontier; optional lineage verifies a shared base revision |
 | `fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N]` | seal the selected candidate set, collect fresh paired full-run evidence, and confirm only a separated decision objective |
 | `fitr experiment workload <model> [-n 3] [--ctx N]` | run the fixed bounded policy-repair workflow with independent deterministic verification and signed per-trial receipts |
+| `fitr discover add <source> --role <role> [--model <reference>]` | capture a private, unmeasured model or harness idea |
+| `fitr discover list\|plan [--role <role>]` | inspect the private inbox or draft next evidence steps without network access |
 | `fitr device [--display MODE]` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
 | `fitr calibrate <a> <b> [--out PATH] [--lineage PATH]` | paired item discrimination; optional same-base lineage receipt |
 | `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads without claiming verified campaign readiness |
@@ -735,7 +737,8 @@ virtual filesystem and exposes only `list_files`, `read_file`, `write_file`,
 and `run_checks`. Only `policy.json` is writable. There is no arbitrary shell,
 process, network, clock, receipt, or verifier access.
 
-The command creates `fitr.workload.plan.v1` before contacting the model. The
+The command creates `fitr.workload.plan.v2` after backend identity and device
+probes, before the first workload generation request. The
 plan binds the runtime-backed artifact identity, device fingerprint, requested
 context, trial count, turn and time budgets, retention policy, fixed workflow
 version, and an ephemeral completion public key. Each trial records monotonic
@@ -743,6 +746,20 @@ model, tool, worker, verifier, and terminal events. A deterministic verifier
 runs after the worker stops and independently reconstructs the final state.
 The trial digest and signature cover the complete event sequence, counters,
 outcome, and verifier receipt.
+
+The v2 plan also seals a `fitr.workload.contract.v1` declaration covering the
+scenario and tool digests, deterministic verifier, virtual-file authority,
+capability isolation, one-attempt policy, unsupported approvals and requested
+context. The bundle and trial envelopes remain v1; their plan digest binds
+the new contract. Older v1 plans and analysis remain readable without being
+upgraded to claims their schema did not carry.
+
+Analysis v2 reconstructs worker, model, tool, verifier queue, verifier and
+harness-overhead time. Model and tool time are components of worker time.
+Time to valid result exists only for independently accepted terminal outcomes.
+Retries are not permitted in this fixed workflow; human wait and escalation
+are unsupported, not measured zeroes. The plan's requested context does not
+establish the runtime's effective context.
 
 The aggregate never hides unsuccessful exposure:
 

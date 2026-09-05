@@ -23,6 +23,7 @@ import (
 	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/capacity"
 	"github.com/blisspixel/fitr/internal/device"
+	"github.com/blisspixel/fitr/internal/discovery"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/record"
@@ -74,6 +75,7 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		{"inventory", shotInventory},
 		{"advise", shotAdvise}, {"run", shotRun}, {"apply", shotApply},
 		{"board", shotBoard}, {"top", shotTop}, {"doctor", shotDoctor}, {"compare", shotCompare},
+		{"discovery", shotDiscovery},
 	}
 	for _, s := range shots {
 		text, err := captureStdout(ctx, s.fn)
@@ -89,6 +91,26 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		fmt.Fprintf(os.Stderr, "wrote %s\n", terminalText(path))
 	}
 	return exitOK
+}
+
+func shotDiscovery(context.Context) (string, error) {
+	stamp := time.Date(2026, time.September, 5, 0, 0, 0, 0, time.UTC)
+	coder, err := discovery.New("model-card fixture", "qwen3.8:27b-q4", "coding", "Pi (version to pin)",
+		"Reported strong coding; verify tool use and context on this machine.", stamp)
+	if err != nil {
+		return "", err
+	}
+	small, err := discovery.New("classifier fixture", "small-model:q8", "classifier", "",
+		"Try lower latency against the current classifier's held-out examples.", stamp)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println("$ fitr discover list")
+	fmt.Println()
+	if renderDiscovery([]discovery.Idea{coder, small}, false, "rich") != exitOK {
+		return "", errors.New("could not render discovery fixture")
+	}
+	return "", nil
 }
 
 func shotTop(context.Context) (string, error) {

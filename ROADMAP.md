@@ -48,12 +48,13 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.9.12 | Public Windows self-update completion and an end-to-end replacement gate |
 | Shipped | 0.10.0 | Decision specifications, typed context and configuration experiments, fresh confirmation, and the first bounded validated-work contract |
 | Shipped | 0.10.1 | Lowercase product language, a wide master-detail Board, exact uncertainty tokens, and README product photography from the real renderer |
-| Current | 0.10.3 | Centralized diagnosis presentation, direct prefill-slower-phase diagnosis, runtime artifact identity, wide master-detail history, and decision-relative explanations |
+| Shipped | 0.10.3 | Centralized diagnosis presentation, direct prefill-slower-phase diagnosis, runtime artifact identity, wide master-detail history, and decision-relative explanations |
+| Current | 0.10.4 | Private discovery inbox, portable evidence skill, sealed workflow contract, typed proof classes, timing partitions and receipt privacy fixes |
 | Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported limiter hypotheses, and multi-surface decision relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
-| Later | Candidate discovery | Find models worth measuring, then measure them; plus loop extensions |
+| Active | Candidate discovery | Capture ideas now; next resolve artifacts and build evidence-backed model and harness choices by role |
 
 Progress is counted in releases, not dates. Each pre-1.0 release below states
 its own exit criterion. 1.0 ships when those criteria are met and not before:
@@ -71,8 +72,20 @@ evidence paths.
 | 1 | complete | Versioned capacity policy and pre-observation prediction receipts | FIT now distinguishes addressable capacity, current availability, operator reserve, component projection, observed allocation, and safe headroom. The original policy and projection are sealed before allocation. |
 | 2 | complete | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
-| 4 | active | Generalized validated-work receipts and explicit evidence classes | The fixed bounded workflow has pressured the schema with real events. It should now graduate into reusable trial, verifier, retry, escalation, timing, authority, and retention contracts before more workflows are added. |
-| 5 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability are essential, but they depend on the capacity and validated-outcome contracts above. They remain distinct experiments and never contaminate an ordinary scored run. |
+| 4 | active | Generalized validated-work receipts and explicit evidence classes | 0.10.4 seals the fixed contract and reconstructs timing with typed proof classes. Multi-attempt, approval, escalation and external protocol receipts remain work before arbitrary workflows. |
+| 5 | active | Source ideas into a personal role library | The private inbox ships in 0.10.4. Resolve artifacts, attach measured evidence, apply role constraints and preference weights, and preserve an incumbent until a challenger earns replacement. See [discovery](docs/discovery.md). |
+| 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. |
+
+Automatic selection must pass programmatic resource preflight and a separate
+role quality floor. Speed cannot compensate for failed task outcomes. A
+smaller model or quantization is a new candidate, not an automatic quality
+equivalent. Preserve `no-qualified-candidate` when none earns the role, and
+evaluate retries, human corrections and verified completion cost before
+throughput. The bounded auto-mode contract is in [discovery](docs/discovery.md).
+
+Tracked implementation work: [quality-first role library](https://github.com/blisspixel/fitr/issues/1),
+[bounded auto mode](https://github.com/blisspixel/fitr/issues/2), and
+[MCP, A2A and harness adapters](https://github.com/blisspixel/fitr/issues/3).
 
 Optional OpenRouter validation can develop adversarial cases and grader
 calibration alongside this sequence. It remains experiment-scoped, explicitly
@@ -692,13 +705,19 @@ queue, scheduler, or organizational memory.
       Arbitrary workflows and generated-code execution remain out of scope for
       this slice.
 
-- [ ] Add sealed per-trial receipts for scenario release, worker start/end,
+- [ ] Complete generalized sealed per-trial receipts for scenario release, worker start/end,
       model and tool intervals, verifier queue/start/end, verifier outcome,
       independent acceptance, approval and escalation events, retries, and
       terminal state. Analysis separates worker, tool, queue, verifier, and
       human-wait time. Aggregate result files alone must never be reverse-joined
       into a time-to-valid-result claim.
-- [ ] Define evidence classes: deterministic assertion, external system state,
+- [x] Ship the fixed-workflow receipt foundation in 0.10.4: plan v2 seals
+      scenario/tool digests, verifier, authority, isolation, retry, approval
+      and context policies. Analysis v2 partitions worker, model, tool, queue,
+      verifier and harness time from the signed sequence. Model/tool time is
+      inside worker time. Unsupported human wait and escalation remain explicit.
+      Legacy plans and reports retain their original v1 semantics.
+- [x] Define evidence classes: deterministic assertion, external system state,
       independent verifier, harness state machine, heuristic, model judged,
       self-reported, and none. Core workflow PASS and FAIL require an allowed
       independent class; self-report never upgrades itself into proof.
@@ -871,7 +890,23 @@ Exit criterion: an independent reviewer can reproduce the protocol and
 distinguish unsupported, inconclusive, contaminated, and measured outcomes
 without reading the implementation.
 
-## Later: candidate discovery
+## Active: candidate discovery and the personal role library
+
+0.10.4 ships a private, deduplicated idea inbox with `discover add`, `list`,
+and `plan`. It records source claims and intended model, role and harness.
+It does not perform live search, install models or promote claims to evidence.
+The next milestone and acceptance rules are in [discovery](docs/discovery.md),
+with researched protocol and harness profiles in [agent interoperability](docs/agent-interop.md).
+
+- [x] Capture ideas from user-selected sources without executing their content.
+- [ ] Resolve source provenance and immutable artifact metadata through bounded adapters.
+- [ ] Attach role-specific measured evidence; bind model, runtime and harness changes.
+- [ ] Add user weights after hard constraints, fixed normalization, uncertainty
+      and sensitivity checks; never fabricate missing metrics.
+- [ ] Maintain an incumbent and fallback per role, with fresh confirmation and
+      an explicit adoption record.
+- [ ] Build bounded opt-in automation over the same steps, with separate
+      research, download, measurement, refinement and adoption authority.
 
 Today fitr answers "is what I already have any good here?" The larger question
 is "what should I get?" fitr is positioned to answer it with the same local
@@ -905,8 +940,8 @@ Design constraints, in priority order:
 3. **Candidates never enter the evidence path.** Everything discovery produces
    is a candidate, and candidates are never recommendations. The measurement
    is what promotes one.
-4. **Every candidate resolves before it is shown as anything but a guess.** An
-   unresolvable artifact is dropped, not displayed.
+4. **Every candidate resolves before it becomes an experiment.** An
+   unresolvable idea stays visible as unresolved, outside the measured Board.
 
 - [ ] **A shipped starting point.** An empty machine is the moment of highest
       user intent and lowest product value: bare `fitr` has nothing to say to
@@ -958,9 +993,9 @@ operator who tunes context, KV dtype, and quant reads the fit table and the
 calibration pairs; the user who just wants a good model reads one line a week.
 The second surface is only trustworthy because the first one exists.
 
-Sequence matters: this composes the candidate catalog, the measurement queue,
-and fingerprint-scoped comparison. It is post-1.0 work. Attempting it earlier
-would spend the 1.0 polish budget on a second product.
+Sequence matters: this composes the candidate inbox, role library, measurement
+queue and fingerprint-scoped comparison. It follows the explicit acceptance
+criteria in [discovery](docs/discovery.md); the inbox alone is not auto mode.
 
 - [ ] **Opt-in recurring reevaluation.** Produce an OS-native scheduled plan
       only after explicit confirmation. Default to a dry run with network,

@@ -6,12 +6,14 @@ package workload
 import "github.com/blisspixel/fitr/internal/record"
 
 const (
-	PlanSchema      = "fitr.workload.plan.v1"
-	TrialSchema     = "fitr.workload.trial.v1"
-	ReportSchema    = "fitr.workload.analysis.v1"
-	BundleSchema    = "fitr.workload.bundle.v1"
-	WorkflowID      = "policy-repair"
-	WorkflowVersion = 1
+	PlanSchema         = "fitr.workload.plan.v2"
+	LegacyPlanSchema   = "fitr.workload.plan.v1"
+	TrialSchema        = "fitr.workload.trial.v1"
+	ReportSchema       = "fitr.workload.analysis.v2"
+	LegacyReportSchema = "fitr.workload.analysis.v1"
+	BundleSchema       = "fitr.workload.bundle.v1"
+	WorkflowID         = "policy-repair"
+	WorkflowVersion    = 1
 )
 
 type RetentionPolicy string
@@ -31,6 +33,7 @@ type Plan struct {
 	TimeoutSeconds   int                  `json:"timeout_seconds"`
 	RequestedContext int                  `json:"requested_context"`
 	Retention        RetentionPolicy      `json:"retention"`
+	Contract         *WorkflowContract    `json:"contract,omitempty"`
 }
 
 type EventType string
@@ -79,7 +82,7 @@ type VerificationCheck struct {
 }
 
 type VerifierReceipt struct {
-	EvidenceClass        string              `json:"evidence_class"`
+	EvidenceClass        EvidenceClass       `json:"evidence_class"`
 	PolicySHA256         string              `json:"policy_sha256"`
 	ProtectedStateSHA256 string              `json:"protected_state_sha256"`
 	Checks               []VerificationCheck `json:"checks"`
@@ -128,6 +131,7 @@ type Report struct {
 	AcceptedOutcomesPerHour RateObservation `json:"accepted_outcomes_per_hour"`
 	Coverage                string          `json:"coverage"`
 	Gaps                    []string        `json:"gaps,omitempty"`
+	TrialAnalysis           []TrialAnalysis `json:"trial_analysis,omitempty"`
 }
 
 type Bundle struct {

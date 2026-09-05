@@ -859,6 +859,18 @@ func writeWorkloadExperimentText(bundle workload.Bundle) {
 			trial.Index, strings.ToUpper(string(trial.Outcome)), float64(trial.ElapsedMillis)/1000,
 			trial.Turns, trial.ToolCalls, trial.AuthorityViolations)
 	}
+	for _, trial := range report.TrialAnalysis {
+		if timing := trial.Timing; timing != nil {
+			fmt.Fprintf(os.Stdout, "  timing       worker %.3fs (model %.3fs, tools %.3fs), queue %.3fs, verifier %.3fs\n",
+				float64(timing.WorkerMillis)/1000, float64(timing.ModelMillis)/1000,
+				float64(timing.ToolMillis)/1000, float64(timing.VerifierQueueMillis)/1000,
+				float64(timing.VerifierMillis)/1000)
+		}
+	}
+	if bundle.Plan.Contract != nil {
+		fmt.Fprintln(os.Stdout, "  proof        deterministic assertion; retries not permitted; human wait and escalation unsupported")
+		fmt.Fprintln(os.Stdout, "  context      requested only; effective context is not established")
+	}
 	if len(report.Gaps) > 0 {
 		fmt.Fprintln(os.Stdout, "\nGAPS")
 		for _, gap := range report.Gaps {

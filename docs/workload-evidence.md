@@ -13,6 +13,13 @@ an authority envelope, and independent proof.
 
 ## What exists today
 
+The separate `experiment workload` path ships a fixed policy-repair contract,
+signed per-trial events and independent deterministic verification. In 0.10.4,
+plan v2 binds scenario/tool digests and authority/proof policies, and analysis
+v2 reconstructs timing partitions. See [usage](usage.md#validated-work-experiment)
+for the exact supported fields. Human approvals, escalation, multiple attempts,
+arbitrary workflows and live harness/protocol adapters remain unsupported.
+
 The current task battery already provides strong foundations:
 
 - deterministic Go graders for generated checks;
@@ -24,7 +31,7 @@ The current task battery already provides strong foundations:
 - unisolated executable observations kept INCONCLUSIVE rather than promoted to
   PASS or FAIL.
 
-The current result also seals one aggregate battery-core duration. It does not
+The ordinary task-battery result also seals one aggregate battery-core duration. It does not
 seal per-trial wall time, retry and fallback attempts, validator duration,
 tool-step duration, human intervention, endpoint locality, or energy. Those
 missing receipts are why current history cannot honestly produce time to valid

@@ -4,17 +4,17 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/clipperhouse/displaywidth"
 )
 
-// wrap breaks already-sanitized text into lines of at most width runes,
+// wrap breaks already-sanitized text into lines of at most width display cells,
 // preferring spaces. A word longer than the width is hard-split rather than
 // allowed to overhang, because an overhanging line is what the terminal wraps
 // for us at an arbitrary column, which is the failure this exists to prevent.
 //
-// It counts runes, not display cells. fitr's own text is ASCII; the only
-// untrusted text reaching here has been through SingleLine, which strips
-// controls and format runes. A wide CJK rune would still under-count, so the
-// budget is spent conservatively elsewhere rather than by measuring here.
+// Grapheme boundaries preserve combining marks. A grapheme wider than the
+// entire available column is represented by ? rather than overflowing it.
 func wrap(s string, width int) []string {
 	if width < 1 {
 		return nil
@@ -32,16 +32,23 @@ func wrap(s string, width int) []string {
 		}
 	}
 	for _, word := range fields {
-		for len([]rune(word)) > width {
+		for displaywidth.String(word) > width {
 			flush()
-			r := []rune(word)
-			lines = append(lines, string(r[:width]))
-			word = string(r[width:])
+			part := displaywidth.TruncateString(word, width, "")
+			if part == "" {
+				graphemes := displaywidth.StringGraphemes(word)
+				graphemes.Next()
+				word = word[len(graphemes.Value()):]
+				lines = append(lines, "?")
+			} else {
+				lines = append(lines, part)
+				word = word[len(part):]
+			}
 		}
 		switch {
 		case cur == "":
 			cur = word
-		case len([]rune(cur))+1+len([]rune(word)) <= width:
+		case displaywidth.String(cur)+1+displaywidth.String(word) <= width:
 			cur += " " + word
 		default:
 			flush()
@@ -55,8 +62,7 @@ func wrap(s string, width int) []string {
 // Field prints one label/value pair with the value wrapped under its own
 // column, so a long value hangs rather than running past the rule.
 //
-// Callers pass already-styled text at their own risk: the wrap counts runes,
-// and ANSI escapes are runes. Style the label, not the value.
+// Values are sanitized before wrapping. Style the label, not the value.
 func Field(w io.Writer, label string, labelWidth int, value string, width int) {
 	// The label is not sanitized: it is fitr's own text, and SingleLine would
 	// trim the leading gutter that puts the whole block in from the margin.

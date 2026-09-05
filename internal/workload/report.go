@@ -18,9 +18,9 @@ func Analyze(plan Plan, trials []Trial) Report {
 		},
 	}
 	acceptedDurations := make([]float64, 0, len(trials))
-	var totalMillis int64
+	var totalMillis float64
 	for _, trial := range trials {
-		totalMillis += trial.ElapsedMillis
+		totalMillis += float64(trial.ElapsedMillis)
 		switch trial.Outcome {
 		case OutcomeAccepted:
 			report.Counts.Accepted++
@@ -40,7 +40,7 @@ func Analyze(plan Plan, trials []Trial) Report {
 		report.Gaps = append(report.Gaps, "fewer than three accepted trials; median accepted time is withheld")
 	}
 	if totalMillis > 0 {
-		rate := float64(report.Counts.Accepted) / (float64(totalMillis) / (60 * 60 * 1000))
+		rate := float64(report.Counts.Accepted) / (totalMillis / (60 * 60 * 1000))
 		report.AcceptedOutcomesPerHour = RateObservation{
 			Estimate: &rate, Unit: "accepted_outcomes_per_hour", Status: "available",
 			Reason: "accepted trials divided by elapsed time across every terminal outcome",
@@ -52,6 +52,13 @@ func Analyze(plan Plan, trials []Trial) Report {
 	}
 	if report.Counts.TimedOut > 0 {
 		report.Gaps = append(report.Gaps, "timed-out trials remain in the denominator")
+	}
+	if plan.Schema == LegacyPlanSchema {
+		report.Schema = LegacyReportSchema
+	} else {
+		for _, trial := range trials {
+			report.TrialAnalysis = append(report.TrialAnalysis, analyzeTrial(trial))
+		}
 	}
 	return report
 }
@@ -124,6 +131,9 @@ func validateOutcomeSemantics(trial Trial, workerStatus string) error {
 	case OutcomeRejected:
 		if workerStatus == "timeout" || workerStatus == "error" {
 			return errors.New("rejected workload trial conflicts with the worker event")
+		}
+		if trial.Verifier.Accepted && trial.AuthorityViolations == 0 && workerStatus == "clean_stop" {
+			return errors.New("rejected workload trial has independently accepted completion")
 		}
 	}
 	return nil
@@ -227,10 +237,14 @@ func validateWorkerEvents(events []Event) (eventStats, int, error) {
 			(events[cursor].Type == EventToolStarted || events[cursor].Type == EventModelStarted) {
 			return stats, cursor, errors.New("workload trial continued after a failed model request")
 		}
+		priorCalls := stats.toolCalls
 		for cursor < len(events) && events[cursor].Type == EventToolStarted {
 			if err := consumeToolEvents(events, &cursor, seenCalls, &stats); err != nil {
 				return stats, cursor, err
 			}
+		}
+		if stats.toolCalls-priorCalls > maximumToolCallsPerTurn {
+			return stats, cursor, errors.New("workload trial exceeds the per-turn tool-call limit")
 		}
 	}
 	if stats.turns == 0 || len(events)-cursor != 5 {
@@ -306,7 +320,7 @@ func validWorkerCompletionStatus(status string) bool {
 }
 
 func validateVerifier(verifier VerifierReceipt, authorityViolations int) error {
-	if verifier.EvidenceClass != "deterministic_assertion" ||
+	if !verifier.EvidenceClass.CanEstablishCompletion() || verifier.EvidenceClass != EvidenceDeterministic ||
 		!validSHA256(verifier.PolicySHA256) || !validSHA256(verifier.ProtectedStateSHA256) {
 		return errors.New("workload trial verifier identity is invalid")
 	}

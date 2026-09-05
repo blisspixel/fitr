@@ -85,6 +85,8 @@ jobs:
         run: go test ./internal/calibration -run='^$' -fuzz=FuzzConversionManifest -fuzztime=20000x -parallel=4
       - name: validated-work bundle fuzz smoke
         run: go test ./internal/workload -run='^$' -fuzz=FuzzDecodeBundle -fuzztime=20000x -parallel=4
+      - name: discovery inbox fuzz smoke
+        run: go test ./internal/discovery -run='^$' -fuzz=FuzzDecodeIdea -fuzztime=20000x -parallel=4
       - name: confirmation bundle fuzz smoke
         run: go test ./internal/experiment -run='^$' -fuzz=FuzzDecodeConfirmationBundle -fuzztime=20000x -parallel=4
       - name: context bundle fuzz smoke

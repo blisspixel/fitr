@@ -149,14 +149,15 @@ func executeWorkflow(ctx context.Context, backend llm.Backend, plan Plan,
 		for _, call := range message.ToolCalls {
 			execution.toolCalls++
 			arguments := canonicalToolArguments(call.Function.Arguments)
-			evidence := recorder.add(EventToolStarted, "harness", "started", call.Function.Name, arguments)
-			signature := call.Function.Name + "\x00" + evidence
+			name := retainedToolName(call.Function.Name)
+			evidence := recorder.add(EventToolStarted, "harness", "started", name, arguments)
+			signature := name + "\x00" + evidence
 			seenCalls[signature]++
 			if seenCalls[signature] > 1 {
 				execution.duplicateCalls++
 			}
 			result, status := state.invoke(call.Function.Name, call.Function.Arguments)
-			recorder.add(EventToolCompleted, "harness", status, call.Function.Name, result)
+			recorder.add(EventToolCompleted, "harness", status, name, result)
 			messages = append(messages, ollama.Message{
 				Role: "tool", ToolName: call.Function.Name, ToolCallID: call.ID, Content: result,
 			})
@@ -164,6 +165,18 @@ func executeWorkflow(ctx context.Context, backend llm.Backend, plan Plan,
 	}
 	recorder.add(EventWorkerCompleted, "worker", "turn_cap", "", nil)
 	return execution
+}
+
+// Only harness-owned names are retained verbatim. A digest keeps unknown calls
+// distinct for duplicate accounting without persisting arbitrary model text.
+func retainedToolName(name string) string {
+	switch name {
+	case "list_files", "read_file", "write_file", "run_checks":
+		return name
+	default:
+		digest, _ := hashValue("fitr.workload.tool-name.v1", name)
+		return "unknown:" + digest
+	}
 }
 
 func canonicalToolArguments(raw json.RawMessage) any {

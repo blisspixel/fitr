@@ -300,6 +300,7 @@ type State struct {
 	FilterBeforeEdit string
 	EditingFilter    bool
 	Paused, Help     bool
+	ReducedMotion    bool
 	BaselineID       string
 	Comparison       *Comparison
 	ConfirmQuit      bool

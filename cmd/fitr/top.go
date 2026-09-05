@@ -311,6 +311,7 @@ func runTopBrowser(ctx context.Context, state top.State, cancel context.CancelFu
 			}
 		})
 	}
+	state.ReducedMotion = os.Getenv("FITR_REDUCED_MOTION") != ""
 	app := top.App{
 		Initial: state, Events: events,
 		Theme:  top.DefaultTheme(os.Getenv("NO_COLOR") != ""),

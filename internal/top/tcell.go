@@ -87,6 +87,7 @@ func (app App) initialState(screen Screen) State {
 	state := app.Initial
 	if state.Revision == 0 {
 		state = NewState(state.Snapshot)
+		state.ReducedMotion = app.Initial.ReducedMotion
 	}
 	width, height := screen.Size()
 	state, _ = Update(state, ResizeEvent{Width: width, Height: height})
@@ -99,7 +100,10 @@ func (app App) initialState(screen Screen) State {
 func (app App) tickInterval() time.Duration {
 	interval := app.TickInterval
 	if interval <= 0 {
-		interval = time.Second
+		interval = 250 * time.Millisecond
+		if app.Initial.ReducedMotion {
+			interval = time.Second
+		}
 	}
 	return interval
 }

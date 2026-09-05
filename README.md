@@ -17,7 +17,7 @@ fitr measures those questions against the model bytes, runtime, context,
 placement, and device that produced the evidence. Missing evidence stays
 missing. An unmeasured model stays a candidate, not a recommendation.
 
-<img src="docs/assets/top.svg?v=0.10.2" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
+<img src="docs/assets/top.svg?v=0.10.4" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
 The wide Board keeps the comparable configurations, selected evidence, exact
 measurements, unresolved requirements, and one next action on one screen. The
@@ -69,7 +69,29 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.10.2" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
+<img src="docs/assets/inventory.svg?v=0.10.4" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
+
+## Start with something you heard about
+
+A post, video, podcast, model card, or selected email excerpt can become an
+idea to investigate for coding, a daily driver, classification, or another
+role. Capture the claim and intended harness without turning it into evidence:
+
+```bash
+fitr discover add https://huggingface.co/Qwen/Qwen3.8-27B --role coding --model qwen3.8:27b --harness Pi
+fitr discover list
+fitr discover plan --role coding
+```
+
+<img src="docs/assets/discovery.svg?v=0.10.4" alt="Private discovery inbox fixture with coding and classifier ideas, both unmeasured" width="1000">
+
+The private inbox deduplicates ideas and drafts the next evidence steps. It
+does not fetch sources, install models, or run experiments. Role-specific
+preferences, evidence-backed incumbents and bounded auto mode are the next
+milestone. See [discovery and the model library](docs/discovery.md) for the
+flow, and [agent interoperability](docs/agent-interop.md) for the portable
+Agent Plugins package and the researched MCP, A2A, Hermes, Pi and OpenClaw
+integration boundaries.
 
 ## What ships today
 
@@ -82,7 +104,7 @@ requirement semantics.
 | Context experiments | A predeclared exploratory context plan with shared task seeds, point-specific allocation, required-equal factors, and replayable bundles | [Context experiment](docs/usage.md#context-experiment) |
 | Configuration tradeoffs | Conservative frontiers across sealed candidates, optional same-base conversion lineage, and no point-estimate winner when intervals overlap | [Quant experiment](docs/usage.md#quant-configuration-experiment), [calibration](docs/calibration.md) |
 | Fresh confirmation | A sealed candidate set, a fresh shared task seed, full paired runs, and confirmation only when requirements resolve and the objective separates | [Confirmation](docs/usage.md#fresh-configuration-confirmation) |
-| Validated work | One fixed policy-repair workflow with capability-scoped tools, harness-owned time and state, an independent deterministic verifier, signed trial receipts, and explicit terminal outcomes | [Validated work](docs/usage.md#validated-work-experiment), [workload evidence](docs/workload-evidence.md) |
+| Validated work | A sealed workflow contract, typed proof classes, per-trial timing partitions, fixed policy-repair tools, independent verification, and signed terminal outcomes | [Validated work](docs/usage.md#validated-work-experiment), [workload evidence](docs/workload-evidence.md) |
 
 The broader 1.0 thesis has seven evidence layers:
 
@@ -195,6 +217,10 @@ not described as full replayability.
   optional terminal monitor.
 - [Optional external validation](docs/external-validation.md): the narrow,
   opt-in OpenRouter role and its evidence boundary.
+- [Discovery](docs/discovery.md) and [agent interoperability](docs/agent-interop.md):
+  ideas, role-specific choices, bounded automation and integration contracts.
+- [Terminal design language](docs/design-language.md): color, layout, live
+  activity and reduced-motion behavior.
 - [Roadmap](ROADMAP.md) and [release acceptance](docs/release-acceptance.md):
   what comes next and the receipts required to publish.
 

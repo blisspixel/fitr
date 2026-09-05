@@ -161,18 +161,30 @@ func renderLive(canvas *Canvas, state State, glyphs Glyphs) {
 		w.line(Span{Text: "Start one with: fitr top run <model>", Role: RoleAccent})
 		return
 	}
-	renderLiveIdentity(w, live)
+	renderLiveIdentity(w, state)
 	renderLiveProgress(w, canvas, state, live, glyphs)
 	renderLiveMessages(w, live)
 	renderLivePhases(w, live, canvas.Height)
 }
 
-func renderLiveIdentity(w *lineWriter, live Live) {
+func renderLiveIdentity(w *lineWriter, state State) {
+	live := state.Snapshot.Live
 	status, role := liveStatus(live)
-	w.line(Span{Text: "LIVE  ", Role: RoleHeader}, Span{Text: status, Role: role})
+	w.line(Span{Text: "LIVE  ", Role: RoleHeader}, Span{Text: status + liveActivity(state), Role: role})
 	w.line(Span{Text: "model      ", Role: RoleMuted}, Span{Text: live.Model, Role: RoleDefault})
 	w.line(Span{Text: "phase      ", Role: RoleMuted}, Span{Text: live.Phase, Role: RoleAccent},
 		Span{Text: "  " + live.Detail, Role: RoleMuted})
+}
+
+// Activity indicates an active operation, never a completion estimate. It is
+// presentation state only and does not enter measurement receipts.
+func liveActivity(state State) string {
+	live := state.Snapshot.Live
+	if state.ReducedMotion || !live.Active || live.Completed || live.Cancelled || live.Error != "" {
+		return ""
+	}
+	frame := max(state.Now.Sub(live.StartedAt), 0) / (250 * time.Millisecond) % 4
+	return " " + string("|/-\\"[frame])
 }
 
 func liveStatus(live Live) (string, Role) {

@@ -87,7 +87,8 @@ func applyLiveEvent(s State, event LiveEvent) (State, bool) {
 }
 
 func applyTickEvent(s State, event TickEvent) (State, bool) {
-	if !s.Snapshot.Live.Active || s.Paused || event.Now.IsZero() || event.Now.Equal(s.Now) {
+	live := s.Snapshot.Live
+	if !live.Active || live.Completed || live.Cancelled || live.Error != "" || s.Paused || event.Now.IsZero() || !event.Now.After(s.Now) {
 		return s, false
 	}
 	s.Now = event.Now
