@@ -122,9 +122,11 @@ jobs:
       - name: binary size gate
         shell: bash
         run: |
-          # The owned auto runtime and evidence lifecycle measure 15,053,824
-          # bytes on windows/amd64; all six targets retain this measured cap.
-          max_bytes=15150000
+          # The context task pack is reachable from record evidence validation,
+          # so its generator and verifier are linked rather than eliminated.
+          # That is 127 KiB across every target. Measured 15,239,680 bytes on
+          # windows/amd64; all six targets retain this measured cap.
+          max_bytes=15290000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"
             printf '%-32s %10d bytes\n' "$binary" "$size"
