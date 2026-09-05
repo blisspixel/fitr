@@ -31,6 +31,7 @@ import (
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/role"
 	"github.com/blisspixel/fitr/internal/score"
+	"github.com/blisspixel/fitr/internal/source"
 	"github.com/blisspixel/fitr/internal/stats"
 	"github.com/blisspixel/fitr/internal/top"
 )
@@ -77,7 +78,7 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		{"inventory", shotInventory},
 		{"advise", shotAdvise}, {"run", shotRun}, {"apply", shotApply},
 		{"board", shotBoard}, {"top", shotTop}, {"doctor", shotDoctor}, {"compare", shotCompare},
-		{"discovery", shotDiscovery}, {"roles", shotRoles}, {"selection", shotSelection},
+		{"discovery", shotDiscovery}, {"roles", shotRoles}, {"selection", shotSelection}, {"source", shotSource},
 	}
 	for _, s := range shots {
 		text, err := captureStdout(ctx, s.fn)
@@ -134,6 +135,20 @@ func shotRoles(context.Context) (string, error) {
 			}},
 		},
 		Next: "One candidate clears the declared screening floors. Test the full workflow before granting agentic authority.",
+	}, "rich")
+	return "", nil
+}
+
+func shotSource(context.Context) (string, error) {
+	fmt.Println("$ fitr source show candidate.json")
+	fmt.Println()
+	size := int64(16810714528)
+	render.WriteSourceResolution(os.Stdout, source.Resolution{
+		State: "resolved", Request: source.HFRequest{RepoID: "example/daily-model-GGUF", Revision: "main"},
+		ResolvedCommit: strings.Repeat("a", 40),
+		Files:          []source.FileMetadata{{Path: "daily-model-Q4_K_M.gguf", State: "present", SizeBytes: &size, DeclaredSHA256: "sha256:fixture"}},
+		Dependencies:   []source.DependencyFinding{{Kind: "projector", Status: "candidate", TargetFile: "mmproj-F16.gguf"}},
+		Gaps:           []string{"dependency_closure_unverified", "local_artifact_unverified"},
 	}, "rich")
 	return "", nil
 }

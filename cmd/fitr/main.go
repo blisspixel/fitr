@@ -109,6 +109,8 @@ usage:
   fitr role attach <name> <result.json> | detach <name> <evidence-sha256>
   fitr role confirm <name|bundle.json> | adopt <name> <bundle.json> | status <name> | rollback <name>
   fitr mcp serve
+  fitr source resolve hf --repo <owner/model> --revision <revision> --file <path> --out <receipt.json>
+  fitr source show <receipt.json> [--display MODE]
   fitr cleanup plan <directory> [--min-age-days N] [--display MODE]
 
 flags:
@@ -221,7 +223,7 @@ func commandHandler(name string) commandFunc {
 		return cmdCalibrate
 	case "compare":
 		return cmdCompare
-	case "decide", "discover", "role", "experiment", "cleanup", "mcp":
+	case "decide", "discover", "role", "experiment", "cleanup", "mcp", "source":
 		return planningCommandHandler(name)
 	case "screenshots": // dev-only: regenerate docs/assets from mock data
 		return cmdScreenshots
@@ -239,6 +241,8 @@ func planningCommandHandler(name string) commandFunc {
 		return cmdRole
 	case "mcp":
 		return cmdMCP
+	case "source":
+		return cmdSource
 	case "experiment":
 		return cmdExperiment
 	case "cleanup":
@@ -276,7 +280,7 @@ func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
 	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec",
-		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim",
+		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim", "repo", "revision", "file",
 		"quality", "minimum-rate", "memory-gb", "max-age-days", "min-age-days":
 		return true
 	}

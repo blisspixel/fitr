@@ -51,7 +51,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.3 | Centralized diagnosis presentation, direct prefill-slower-phase diagnosis, runtime artifact identity, wide master-detail history, and decision-relative explanations |
 | Shipped | 0.10.4 | Private discovery inbox, portable evidence skill, sealed workflow contract, typed proof classes, timing partitions and receipt privacy fixes |
 | Shipped | 0.10.5 | Personal role screening with quality floors and uncertainty-aware preferences, canonical evidence attachments, and read-only cleanup planning |
-| Current | 0.10.6 | Fresh role confirmation, explicit selection and validated rollback, runtime and memory preflight, and read-only MCP role tools |
+| Shipped | 0.10.6 | Fresh role confirmation, explicit selection and validated rollback, runtime and memory preflight, and read-only MCP role tools |
+| Current | 0.10.7 | Bounded immutable HF file metadata resolution, dependency gaps and private receipts without weight downloads |
 | Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported limiter hypotheses, and multi-surface decision relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
@@ -75,7 +76,7 @@ evidence paths.
 | 2 | complete | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | active | Generalized validated-work receipts and explicit evidence classes | 0.10.4 seals the fixed contract and reconstructs timing with typed proof classes. Multi-attempt, approval, escalation and external protocol receipts remain work before arbitrary workflows. |
-| 5 | active | Source ideas into a personal role library | 0.10.6 seals preferences before fresh confirmation and preserves explicit selections with current-evidence checks. Next resolve immutable artifacts and dependencies, then compose bounded automation. See [roles](docs/roles.md) and [discovery](docs/discovery.md). |
+| 5 | active | Source ideas into a personal role library | 0.10.7 resolves explicit HF file metadata at a pinned commit. Roles already seal preferences before confirmation and retain explicit selections. Next link source receipts to ideas, resolve dependency closure and build bounded fit/experiment plans. See [roles](docs/roles.md) and [discovery](docs/discovery.md). |
 | 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. |
 
 Automatic selection must pass programmatic resource preflight and a separate
@@ -903,7 +904,8 @@ The next milestone and acceptance rules are in [discovery](docs/discovery.md),
 with researched protocol and harness profiles in [agent interoperability](docs/agent-interop.md).
 
 - [x] Capture ideas from user-selected sources without executing their content.
-- [ ] Resolve source provenance and immutable artifact metadata through bounded adapters.
+- [x] Resolve explicit public HF file metadata at an immutable commit through a bounded adapter.
+- [ ] Extract source claims, link resolution receipts to inbox ideas and establish dependency closure.
 - [x] Attach role-specific battery evidence; bind model and runtime changes.
 - [ ] Bind independently validated external harness evidence to role qualification.
 - [x] Add user weights after hard constraints, fixed normalization, uncertainty
@@ -916,11 +918,12 @@ with researched protocol and harness profiles in [agent interoperability](docs/a
 - [ ] Build bounded opt-in automation over the same steps, with separate
       research, download, measurement, refinement and adoption authority.
 
-The next bounded build is [immutable artifact resolution](https://github.com/blisspixel/fitr/issues/5):
-explicit Hugging Face repository, revision and files; commit-pinned metadata;
-separate declared hashes and verified bytes; unresolved dependency groups;
-and no weight downloads. This supplies a reliable input to fit planning before
-automation can choose an experiment.
+[Immutable artifact resolution](https://github.com/blisspixel/fitr/issues/5)
+now supports explicit public HF repository, revision and file metadata. Declared
+hashes remain separate from verified bytes, dependency groups remain unresolved
+and no weights are downloaded. The next build should link these receipts to
+inbox ideas and produce explicit dependency and fit-planning gaps before any
+download or experiment authorization.
 
 Today fitr answers "is what I already have any good here?" The larger question
 is "what should I get?" fitr is positioned to answer it with the same local
@@ -1139,6 +1142,7 @@ These features must preserve the evidence contract.
 | 0.10.4 | Private candidate inbox, bounded planning, portable agent skill, and live terminal activity controls |
 | 0.10.5 | Quality-first role screening, fixed preferences and uncertainty, canonical evidence attachments, and read-only cleanup planning |
 | 0.10.6 | Fresh weighted role confirmation, explicit selection and rollback, capacity and context preflight, and read-only MCP evidence tools |
+| 0.10.7 | Immutable public HF file metadata, separate declared hashes, explicit dependency gaps, private no-overwrite receipts and source terminal cards |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

@@ -1,7 +1,7 @@
 # Agent ecosystem compatibility
 
-Research checked September 5, 2026. This describes the implementation prepared
-for v0.10.6. Package discovery, wire-protocol behavior and independently
+Research checked September 5, 2026. The MCP profile was introduced in v0.10.6.
+Package discovery, wire-protocol behavior and independently
 verified model-plus-harness work are separate acceptance boundaries.
 
 ## Implemented profile
@@ -147,24 +147,23 @@ and cross-version fallback. This proposal is not implemented or live-tested.
 
 ## Source resolution and preflight options
 
-These are upstream options for a later bounded importer, not features of the
-MCP server or new authority to download or run a model.
+The public HF metadata resolver ships in v0.10.7; llmfit remains a proposed
+importer. Neither is a feature of the MCP server or authority to run a model.
 
 **Hugging Face metadata:** the official
 [`model_info`](https://huggingface.co/docs/huggingface_hub/package_reference/hf_api#huggingface_hub.HfApi.model_info)
 API can resolve a requested revision and return file sizes, optional LFS
 metadata, configuration and gating information. File-level
 [`get_hf_file_metadata`](https://huggingface.co/docs/huggingface_hub/package_reference/file_download#huggingface_hub.get_hf_file_metadata)
-exposes commit, ETag, size and download location. A proposed resolver should
-store repository plus immutable commit, explicit filenames, byte counts,
-available content hashes, observation time and unresolved dependencies. A Git
-object ID or arbitrary ETag must not be relabeled as a SHA-256 of model bytes.
+exposes commit, ETag, size and download location. fitr's
+[metadata resolver](source-resolution.md) records an immutable commit, explicit
+filenames, declared byte counts and content hashes, query observation times and
+unresolved dependencies. A Git object ID is not relabeled as a SHA-256 of model bytes.
 
-Start with explicit repository/file inputs and bounded metadata responses.
-Validate redirects and returned locations before any later fetch; omit tokens
-and signed URLs from persisted evidence. Treat unavailable hashes, gated files
-and ambiguous shard/encoder dependencies as gaps. Do not execute model-card
-instructions, custom model code or download weights during resolution.
+It uses explicit repository/revision/file inputs, at most two fixed-host
+anonymous metadata requests and no redirects. Unavailable hashes, denied
+metadata and ambiguous shard/encoder dependencies remain gaps. No model-card
+instructions, custom code, weight downloads or returned download URLs are used.
 
 **llmfit:** its [official CLI documentation](https://github.com/AlexsJones/llmfit/blob/main/docs/cli.md)
 and [project overview](https://github.com/AlexsJones/llmfit) expose hardware/model

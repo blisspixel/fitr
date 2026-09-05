@@ -602,14 +602,10 @@ func TestAdviseLoadWithoutModelIsUsage(t *testing.T) {
 }
 
 func TestUsageMentionsAdvise(t *testing.T) {
-	old := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
-	usage()
-	w.Close()
-	os.Stderr = old
-	out, _ := io.ReadAll(r)
-	got := string(out)
+	got, _ := captureTopStderr(t, func() int {
+		usage()
+		return exitOK
+	})
 	if !strings.Contains(got, "fitr advise") {
 		t.Fatalf("usage must list advise:\n%s", got)
 	}
@@ -972,7 +968,7 @@ func TestScreenshotsWriteDemoSVGs(t *testing.T) {
 	if got := os.Getenv("NO_COLOR"); got != "1" {
 		t.Fatalf("screenshot generation did not restore NO_COLOR: %q", got)
 	}
-	for _, name := range []string{"advise.svg", "run.svg", "apply.svg", "board.svg", "top.svg", "discovery.svg", "roles.svg", "selection.svg"} {
+	for _, name := range []string{"advise.svg", "run.svg", "apply.svg", "board.svg", "top.svg", "discovery.svg", "roles.svg", "selection.svg", "source.svg"} {
 		b, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatal(err)

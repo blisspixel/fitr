@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "fitr",
-  "version": "0.10.6",
+  "version": "0.10.7",
   "description": "Capture local AI candidates, interpret measured evidence, and expose read-only role summaries through MCP.",
   "repository": "https://github.com/blisspixel/fitr"
 }

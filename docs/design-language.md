@@ -54,3 +54,8 @@ README assets are rendered from deterministic fixtures through real display
 paths. CI checks screenshot drift, output width and hostile text. Refresh
 images whenever visible behavior changes and inspect the result at actual
 reading size, not just the SVG source.
+
+Source cards label their state `METADATA RESOLVED` or `METADATA INCOMPLETE`,
+then show the selected file, declared size and dependency gaps. Amber remains
+appropriate for resolved metadata because it is not a quality or fit pass.
+The footer keeps local bytes, runtime fit and role quality explicitly unmeasured.

@@ -40,8 +40,10 @@ them. A digest detects accidental edits; it is not external provenance.
 ## The next product milestone
 
 The local role library provides screening, preferences, fresh confirmation
-and explicit selection in 0.10.6. Source resolution and bounded automation are
-the next missing steps in the complete flow:
+and explicit selection. In 0.10.7, [source resolution](source-resolution.md)
+pins public metadata for explicitly selected Hugging Face files without
+downloading weights. Source extraction, automatic fit planning and bounded
+automation are the next missing steps in the complete flow:
 
 ```text
 idea -> source check -> exact artifact -> fit plan -> bounded experiment
@@ -92,7 +94,8 @@ canonical evidence and compare eligible candidates using fixed preference
 anchors, uncertainty and weight sensitivity. [Fresh confirmation](role-confirmation.md)
 seals that policy before new trials; explicit adoption stores an incumbent
 with evidence expiry and validated rollback. It does not switch a serving
-model. Operational fallbacks, source extraction and automatic adoption remain work.
+model. Explicit HF metadata resolution ships separately; operational fallbacks,
+source extraction and automatic adoption remain work.
 
 [Cleanup planning](cleanup.md) inventories existing storage without deletion.
 Replacement research must preserve dependency groups, including shared
@@ -138,8 +141,9 @@ LLM-assisted search is an optional source adapter. It reads retrieved material
 and produces source-bound claims; it does not answer from remembered model
 names. LLMfit or another inventory/fit tool may contribute attributed external
 observations after its schema and version are checked. Those observations
-cannot replace fitr's runtime-bound local measurements. No such adapter ships
-in 0.10.6.
+cannot replace fitr's runtime-bound local measurements. LLM-assisted search and
+llmfit imports are not implemented. The metadata resolver is a deterministic
+source adapter with a bounded request contract.
 
 ## Qwen example and verification boundary
 
