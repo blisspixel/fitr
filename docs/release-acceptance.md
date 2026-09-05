@@ -4,7 +4,7 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-09-01.
+Last updated: 2026-09-05.
 
 ## Automated gates
 
@@ -156,6 +156,32 @@ The public manifest and Windows amd64 binary were downloaded independently
 after publication. The executable matched SHA-256
 `3f3ec62e60fdd6e01e926523a50e57eb2cf1739fa4d7d5934fa7b8f78ff56cea`,
 reported `fitr 0.10.2`, and identified 0.10.2 as current through
+`update --check`. The checksum-verifying public installer then replaced the
+existing Windows PATH installation; the installed executable matched the same
+public checksum and version.
+
+### 0.10.3 release receipt
+
+Release 0.10.3 is bound to commit
+`4724971d07a94b6a36622f08d6ed9760fb022c15`. The exact commit passed
+[aggregate CI run 33943207005](https://github.com/blisspixel/fitr/actions/runs/33943207005)
+and
+[native acceptance run 33943209271](https://github.com/blisspixel/fitr/actions/runs/33943209271)
+before
+[release workflow run 33943415531](https://github.com/blisspixel/fitr/actions/runs/33943415531)
+published the public
+[v0.10.3 release](https://github.com/blisspixel/fitr/releases/tag/v0.10.3).
+
+The release workflow re-ran the full test, coverage, race, vulnerability,
+fuzz, lint, file-length, reproducibility, static-binary, size, CLI, checksum,
+and three-platform installer gates. It downloaded and verified the published
+asset set before exposing the release. GitHub then reported the stable release
+as non-draft and non-prerelease with exactly ten public assets.
+
+The public manifest and Windows amd64 binary were downloaded independently
+after publication. The executable matched SHA-256
+`b6644a8d9195e8233251d7045304200f64f30bbb127877e86cecee303b95095e`,
+reported `fitr 0.10.3`, and identified 0.10.3 as current through
 `update --check`. The checksum-verifying public installer then replaced the
 existing Windows PATH installation; the installed executable matched the same
 public checksum and version.
