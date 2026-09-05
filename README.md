@@ -22,8 +22,8 @@ missing. An unmeasured model stays a candidate, not a recommendation.
 Each role has its own requirements and preferences. A coding agent, daily
 driver and classifier need different fittings. Quality requirements come
 first; speed and resource preferences help choose among models that meet them.
-See the [personal fitting direction](docs/personal-fitting.md) for usable
-context, compaction and model-plus-harness scorecards now being designed.
+See the [personal fitting direction](docs/personal-fitting.md) for the proposed
+Fit and Extended fit scopes, usable context, compaction and harness scorecards.
 
 <img src="docs/assets/top.svg?v=0.10.11" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 

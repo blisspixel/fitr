@@ -6,6 +6,61 @@ against real serving runtimes on clean operating-system installs.
 
 Last updated: 2026-09-05.
 
+### 0.10.11 release receipt
+
+Release 0.10.11 is bound to commit
+`e595f1c8fb84b258a1e532c5700a1c2683da394d`. It passed
+[main CI 33982479224](https://github.com/blisspixel/fitr/actions/runs/33982479224)
+with **81.67% aggregate coverage**, including the three official MCP SDK
+platform cases, and
+[native acceptance 33982479223](https://github.com/blisspixel/fitr/actions/runs/33982479223).
+The [release workflow 33982697166](https://github.com/blisspixel/fitr/actions/runs/33982697166)
+repeated the release gates and published
+[v0.10.11](https://github.com/blisspixel/fitr/releases/tag/v0.10.11).
+The macOS test fixture now resolves its platform temporary-directory alias;
+production runtime-path symlink rejection is unchanged.
+
+All ten independently downloaded public assets matched the nine-entry manifest.
+The Windows amd64 binary is **15,053,824 bytes**, reports `fitr 0.10.11`, and has
+SHA-256 `c59fb2e73010021fa38ee33159bab95343d666470722ef4146c71b9bafc64540`.
+Embedded source metadata matches the release commit and reports an unmodified
+tree. All six targets pass the new measured 15,100,000-byte ceiling. Tagged
+installation preserved persistent user PATH. Public update check and deferred
+reinstall completed with the expected version/hash, an advanced timestamp and
+no staged files remaining.
+
+The public binary passed the raw MCP stdio smoke and all four official Python
+SDK cases. Independent review matched the three CI receipts to their candidate
+binaries and the public receipt to the separately built public binary; all
+input groups matched. The public locality fixture passed all 27 cases without
+skips. These are protocol and synthetic locality checks. Linux/macOS native
+acceptance uses llama-server; it does not establish owned Windows auto support.
+Current MCP tools review canonical manual attachments and do not yet expose
+auto-managed selections. Named-harness quality remains a separate boundary.
+
+The independently downloaded Windows binary also completed a real owned-Ollama
+auto cycle with two explicitly installed text artifacts at an 8192-token
+operating window. A separate engineering role required output-health checks
+and a memory ceiling, then preferred lower resident memory. It completed
+**two exploration and two fresh confirmation points**, consumed **340 of 600
+requests** and **126364 of 250000 requested output-token caps**, and adopted
+the qualified choice under predeclared `confirmed-only` policy. Inspection
+bound four distinct run IDs and evidence digests, a fresh confirmation seed,
+closed managed stores and identical signed canonical/history twins. Repeated
+adoption preserved lifecycle bytes. The owned runtime home was removed and
+the pre-existing Ollama process identity remained unchanged.
+
+That profile verifies lifecycle behavior, not coding, reasoning or
+classification competence. Separate pre-release acceptance exercised manual
+adoption and a stricter structured-output fitting that correctly remained
+unresolved without changing its floor or selecting a model. Programmatic
+runtime ownership, allocation and per-request checks are not an OS network
+sandbox or proof of exclusive physical-memory ownership.
+
+Local final coverage was 81.84%, pinned lint passed and dependency vulnerability
+checks found none. README screenshots were regenerated from the actual
+renderers. No user model files were deleted. Paid model API spending remains $0.
+
 ### 0.10.10 release receipt
 
 Release 0.10.10 is bound to commit

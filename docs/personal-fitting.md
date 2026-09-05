@@ -26,6 +26,39 @@ adds owned Windows runtime collection and confirmation in 0.10.11.
 Search-driven shortlisting, automatic discovery and
 scheduled reassessment remain future work.
 
+## Fit and Extended fit
+
+The proposed interface offers two scopes within the same fitting:
+
+| Scope | What it establishes |
+|---|---|
+| Fit | The current configuration's capacity, observed runtime window, supported behavioral screening and performance |
+| Extended fit | Results on a named workload through a pinned harness, with independently verified outcomes and an explicit recovery policy |
+
+Fit keeps the behavioral checks already present today. Capacity advice alone
+does not establish that full scope. Extended fit is proposed work and does not
+automatically qualify a model for unattended use. Each role can eventually
+require the scorecards relevant to its work, then apply preferences only after
+every mandatory floor passes.
+
+Pi is a useful first candidate for an Extended fit workflow: a constrained
+workspace change, verified resulting files, a real compaction, and reopening
+the exact saved session without repeating a completed effect. The evidence
+must identify Pi, its model adapter, tools, task pack and settings. The pinned
+[Pi SDK](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/sdk.md)
+and [compaction contract](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/compaction.md)
+provide integration points; they do not establish fitr compatibility or model
+quality before actual acceptance. The first prototype will use deterministic
+fake responses to verify harness mechanics before local-model evaluation.
+
+Show separate outcomes for local screening, document context checks and each
+harness workload. A failed challenger preserves a qualified incumbent. A
+successful harness test cannot erase a failed capacity or behavioral floor.
+Before work starts, the fitting should preview the role, shortlist, required
+outcomes, allowed tools and complete allowance, including fresh confirmation.
+Existing auto status and the terminal's live/result views should carry this
+flow, rather than adding a second command tree.
+
 See [model comparison](model-comparison.md) for how public discovery signals,
 personal quality gates, uncertainty and cost fit into this flow.
 

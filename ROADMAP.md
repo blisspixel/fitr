@@ -89,8 +89,10 @@ equivalent. Preserve `no-qualified-candidate` when none earns the role, and
 evaluate retries, human corrections and verified completion cost before
 throughput. The bounded auto-mode contract is in [discovery](docs/discovery.md).
 
-The next fitting adds typed usable-context quality and one pinned
-model-plus-harness workflow. Personal preference weights should express what
+The next fitting adds typed usable-context quality and one pinned Pi
+model-plus-harness workflow. The proposed Fit scope retains today's behavioral
+screening; Extended fit adds named, independently verified workload scorecards.
+Personal preference weights should express what
 the person values, including longer demonstrated context, while mandatory
 floors remain independent. Compaction and restart must preserve decisions,
 constraints and completed effects under external verification. The

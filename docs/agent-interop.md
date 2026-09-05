@@ -190,6 +190,18 @@ any row's status.
 | OpenClaw v2026.9.1 | **Legacy protocol mismatch, unaccepted.** Its [release manifest](https://github.com/openclaw/openclaw/blob/v2026.9.1/package.json) pins SDK 1.30.0, whose [protocol declarations](https://github.com/modelcontextprotocol/typescript-sdk/blob/2d889f2b329e46680ec9bdd565de4616c497825a/src/types.ts) stop at `2025-11-25`. A catalog probe cannot make that client speak fitr's stateless revision. |
 | NVIDIA NemoClaw v0.0.120 | **Managed transport mismatch, unaccepted.** Its [managed MCP contract](https://github.com/NVIDIA/NemoClaw/blob/2444537f5a77c7b2789de4d59430e228328b8279/docs/deployment/set-up-mcp-bridge.mdx) accepts authenticated Streamable HTTP and explicitly excludes host stdio bridges. fitr currently exposes stdio only. |
 
+The 0.10.11 tools review canonical manually attached role candidates. They do
+not expose the selected incumbent in auto's separate managed evidence stores.
+Use `fitr role status` or `fitr auto status` locally for that selection. A
+bounded read-only MCP selection-status extension is the next connector slice;
+it must revalidate the original lifecycle and preserve the same redaction
+boundary before any host can rely on its response.
+
+The proposed [Fit and Extended fit scopes](personal-fitting.md#fit-and-extended-fit)
+separate connector acceptance from model-plus-harness task evaluation. A Pi
+SDK workflow with externally verified state, actual compaction and exact
+checkpoint restart is being prototyped with fake model responses first.
+
 The legacy SDK [initialization path](https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.29.0/src/client/index.ts)
 is incompatible with fitr's modern-only server. This is a source-level finding;
 a negative named-host binary test still needs to be recorded. A future legacy
@@ -202,12 +214,13 @@ profile or transport adapter must be explicit and separately tested.
    fixture. Disable unused sampling, elicitation, resources and prompts.
    Exercise real discovery, catalog/schema inspection, both calls, invalid
    arguments, idle keepalive, cancellation and bounded shutdown without an LLM.
-2. **Add one small Pi extension.** Use the pinned
-   [extension API](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/extensions.md)
-   to expose only the same read-only tools. Fix executable and results paths
-   outside tool arguments, propagate errors and cancellation, and apply the
-   same acceptance fixture. Keep the adapter and its dependencies testable
-   independently from model inference.
+2. **Prototype one Pi Extended fit workflow.** Use the pinned SDK with
+   explicit resources, restricted tools and a native fitr model adapter.
+   First prove normal turns, built-in compaction and exact session reopening
+   with deterministic fake responses. Then evaluate a constrained workspace
+   task through the owned local runtime, with an independent verifier and one
+   budget across turns, summaries and restart. This is a model-plus-adapter
+   workflow, separate from Pi's default provider or MCP-extension support.
 3. **Explain the remaining host gaps.** Record OpenClaw and DeepSeek protocol
    failures honestly. Consider an explicit CLI integration while awaiting a
    compatible client, with a fixed redacted projection or explicit disclosure
@@ -216,6 +229,8 @@ profile or transport adapter must be explicit and separately tested.
    [host readiness report](https://github.com/NVIDIA/NemoClaw/blob/2444537f5a77c7b2789de4d59430e228328b8279/docs/reference/system-readiness.mdx).
    Preserve producer identity and inconclusive findings; imported readiness
    cannot establish local fit or justify starting a sandbox.
+   A Pi MCP extension can separately expose the bounded read-only tools when
+   that connector is needed; it requires its own binary acceptance.
 4. **Evaluate one bounded model-plus-harness workflow.** Seal the harness
    build, effective provider configuration, tool surface, task/verifier,
    context and runtime/artifact identity. Count auxiliary requests and every
