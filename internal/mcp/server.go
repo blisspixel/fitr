@@ -93,7 +93,11 @@ func serve(ctx context.Context, input io.ReadCloser, output io.Writer, source ev
 			}
 		}
 	}
-	return nil
+	// A select chooses uniformly among ready cases, so a cancelled context and
+	// a closed input are both live at the same moment. Taking the closed input
+	// first ends the loop, and returning nil there would report a clean stop
+	// for a server that was actually interrupted.
+	return ctx.Err()
 }
 
 func readLines(ctx context.Context, input io.Reader, lines chan<- inputLine) {

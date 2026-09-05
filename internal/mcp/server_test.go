@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -176,5 +177,36 @@ func TestMalformedAndDifferentlyTypedCancellationCannotCancel(t *testing.T) {
 	s.notification(request{method: "notifications/cancelled", params: fields})
 	if ctx.Err() == nil {
 		t.Fatal("valid cancellation ignored")
+	}
+}
+
+// A cancelled server must never report a clean stop. When the input closes at
+// the same moment the context is cancelled, the loop's select is ready on both
+// and chooses between them at random, so the answer cannot depend on which one
+// it takes.
+//
+// Catching a regression means letting the reader goroutine close the input
+// before the loop reaches its first select, which needs real scheduling
+// pressure: an unloaded machine wins that race every time and a handful of
+// sequential attempts prove nothing. At this width the unfixed code fails on
+// every invocation, while the fixed code is ordering-independent by
+// construction. CI reached the same state through the race detector instead.
+func TestCancelledServeNeverReportsACleanStop(t *testing.T) {
+	const attempts = 4096
+	results := make(chan error, attempts)
+	var wait sync.WaitGroup
+	for range attempts {
+		wait.Go(func() {
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			results <- serve(ctx, io.NopCloser(strings.NewReader("")), io.Discard, fixtureSource{}, "fixture")
+		})
+	}
+	wait.Wait()
+	close(results)
+	for err := range results {
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled serve reported %v instead of an interruption", err)
+		}
 	}
 }
