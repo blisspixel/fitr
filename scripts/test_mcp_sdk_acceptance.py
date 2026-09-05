@@ -91,8 +91,15 @@ class EvidenceTests(unittest.TestCase):
                   "lifecycle_sha256": "sha256:life", "adoption_authorized": False, "evaluated_at": "2026-09-05T00:00:00.123456789Z"}
         start, end = status_interval()
         smoke.validate_selection_status(actual, expected, start, end)
+        # Two clocks read by two runtimes disagree by more than a serialization
+        # precision, so the window is widened by a fixed tolerance. Readings
+        # inside it stay acceptable; a replayed or mis-zoned timestamp does not.
+        for value in ((start - timedelta(seconds=1)).isoformat(), (end + timedelta(seconds=1)).isoformat()):
+            actual["evaluated_at"] = value
+            with self.subTest(inside=value):
+                smoke.validate_selection_status(actual, expected, start, end)
         for value in ("1900-01-01T00:00:00Z", "2999-01-01T00:00:00Z", "2026-09-05T00:00:00",
-                      (start - timedelta(microseconds=2)).isoformat(), (end + timedelta(microseconds=2)).isoformat()):
+                      (start - timedelta(seconds=30)).isoformat(), (end + timedelta(seconds=30)).isoformat()):
             actual["evaluated_at"] = value
             with self.subTest(value=value), self.assertRaises(smoke.AcceptanceError):
                 smoke.validate_selection_status(actual, expected, start, end)

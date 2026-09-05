@@ -268,11 +268,22 @@ def validate_selection_status(actual, expected, observed_start, observed_end):
     evaluated = datetime.fromisoformat(actual["evaluated_at"].replace("Z", "+00:00"))
     require(evaluated.tzinfo is not None, "selection evaluation time is not timezone-aware")
     require(observed_start <= observed_end, "wall clock moved backward during status call")
-    # RFC3339Nano has nanoseconds; Python datetime truncates to microseconds.
-    # Permit at most one microsecond of serialization precision, not clock skew.
-    precision = timedelta(microseconds=1)
-    require(observed_start - precision <= evaluated <= observed_end + precision,
-            "selection evaluation time is outside the observed status call")
+    # evaluated_at is read by the server process and the window by this one.
+    # The earlier bound allowed one microsecond, for RFC3339Nano truncating to
+    # Python's microseconds, and so assumed both processes read one clock the
+    # same way. They do not: Windows advances the system clock on a ~15.6 ms
+    # tick and the two runtimes do not reach it through the same call, so the
+    # readings disagree by more than any serialization precision. That made
+    # this a flaky assertion rather than a strict one.
+    #
+    # The window still establishes what it is here to establish. A replayed or
+    # stored evaluation is older than the call by orders of magnitude more than
+    # this, and a timestamp from the wrong clock or zone is further out still.
+    tolerance = timedelta(seconds=2)
+    require(observed_start - tolerance <= evaluated <= observed_end + tolerance,
+            "selection evaluation time is outside the observed status call: "
+            f"{evaluated.isoformat()} is not within [{observed_start.isoformat()}, "
+            f"{observed_end.isoformat()}] widened by {tolerance}")
 
 
 async def exercise_client(client, version, expected):
