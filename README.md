@@ -17,7 +17,7 @@ fitr measures those questions against the model bytes, runtime, context,
 placement, and device that produced the evidence. Missing evidence stays
 missing. An unmeasured model stays a candidate, not a recommendation.
 
-<img src="docs/assets/top.svg?v=0.10.4" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
+<img src="docs/assets/top.svg?v=0.10.5" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
 The wide Board keeps the comparable configurations, selected evidence, exact
 measurements, unresolved requirements, and one next action on one screen. The
@@ -69,7 +69,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.10.4" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
+<img src="docs/assets/inventory.svg?v=0.10.5" alt="fitr inventory from a deterministic RTX 4090 validation fixture" width="820">
 
 ## Start with something you heard about
 
@@ -83,15 +83,44 @@ fitr discover list
 fitr discover plan --role coding
 ```
 
-<img src="docs/assets/discovery.svg?v=0.10.4" alt="Private discovery inbox fixture with coding and classifier ideas, both unmeasured" width="1000">
+<img src="docs/assets/discovery.svg?v=0.10.5" alt="Private discovery inbox fixture with coding and classifier ideas, both unmeasured" width="1000">
 
 The private inbox deduplicates ideas and drafts the next evidence steps. It
-does not fetch sources, install models, or run experiments. Role-specific
-preferences, evidence-backed incumbents and bounded auto mode are the next
-milestone. See [discovery and the model library](docs/discovery.md) for the
+does not fetch sources, install models, or run experiments. See
+[discovery and the model library](docs/discovery.md) for the
 flow, and [agent interoperability](docs/agent-interop.md) for the portable
 Agent Plugins package and the researched MCP, A2A, Hermes, Pi and OpenClaw
 integration boundaries.
+
+## Choose for a role, with quality first
+
+Declare the quality, context and memory requirements for a job, then attach
+canonical measurements. Each role keeps its own versioned preferences:
+
+```bash
+fitr role init coding --quality user_tasks --memory-gb 22 --ctx 8192
+fitr role attach coding /path/to/canonical-result.json
+fitr role review coding
+```
+
+<img src="docs/assets/roles.svg?v=0.10.5" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
+
+A candidate must clear every floor before preferences matter. Comparisons
+retain uncertainty and check sensitivity to weight changes; missing evidence
+and `no-qualified-candidate` are useful answers. This release provides battery
+screening and exploratory choices. Fresh weighted confirmation, incumbents
+and automatic adoption are the next contract. See [roles](docs/roles.md).
+
+## Review what occupies your model storage
+
+```powershell
+fitr cleanup plan D:\models
+```
+
+The read-only plan shows apparent storage, large files and aged partial
+downloads worth investigating. It does not delete files or assume a large
+encoder, projector, shard or cache is unused. Links, incomplete scans and
+unresolved dependencies remain explicit. See [cleanup planning](docs/cleanup.md).
 
 ## What ships today
 
@@ -101,6 +130,8 @@ integration boundaries.
 | Local measurement | Structured output, instruction following, refusal, tool-channel behavior, degeneration, load state, TTFT, prefill, decode, context, placement, and allocation when the backend exposes them | [Design](docs/design.md), [tasks](docs/tasks.md) |
 | Capacity policy | A pre-load sealed resource domain, timestamped availability, explicit operator budget or reserve, exact usable-budget formula, component projection, and observed safe headroom | [Choosing hardware](docs/choosing-hardware.md#capacity), [usage](docs/usage.md#capacity-policy-for-a-run) |
 | Workload decisions | Constraint-based eligibility under a versioned declaration, with no universal weighted score | [Decisions](docs/decisions.md) |
+| Personal roles | Mandatory quality and resource floors, digest-pinned evidence, fixed preference anchors, uncertainty and weight sensitivity | [Roles](docs/roles.md) |
+| Cleanup planning | Read-only bounded storage inventory and aged partial-download review candidates, with no inferred deletion authority | [Cleanup](docs/cleanup.md) |
 | Context experiments | A predeclared exploratory context plan with shared task seeds, point-specific allocation, required-equal factors, and replayable bundles | [Context experiment](docs/usage.md#context-experiment) |
 | Configuration tradeoffs | Conservative frontiers across sealed candidates, optional same-base conversion lineage, and no point-estimate winner when intervals overlap | [Quant experiment](docs/usage.md#quant-configuration-experiment), [calibration](docs/calibration.md) |
 | Fresh confirmation | A sealed candidate set, a fresh shared task seed, full paired runs, and confirmation only when requirements resolve and the objective separates | [Confirmation](docs/usage.md#fresh-configuration-confirmation) |

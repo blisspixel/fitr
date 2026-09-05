@@ -1,0 +1,22 @@
+{
+  "schema": "fitr.role.spec.v1",
+  "name": "coding",
+  "description": "Quality first on independently checked coding tasks",
+  "max_age_days": 30,
+  "decision": {
+    "schema": "fitr.decision.spec.v1",
+    "name": "coding",
+    "evidence_level": "decide",
+    "requirements": [
+      {"id": "quality", "behavior": {"need": "user_tasks", "minimum_rate": 0.9}},
+      {"id": "context", "context": {"minimum_effective_tokens": 8192}},
+      {"id": "memory", "capacity": {"maximum_resident_gb": 22, "requested_context": 8192}},
+      {"id": "latency", "performance": {"metric": "loaded_ttft_seconds", "at_most": 5}}
+    ]
+  },
+  "preferences": [
+    {"requirement": "quality", "weight": 8, "worst": 0.8, "best": 1},
+    {"requirement": "latency", "weight": 1, "worst": 5, "best": 0.2},
+    {"requirement": "memory", "weight": 1, "worst": 23622320128, "best": 0}
+  ]
+}

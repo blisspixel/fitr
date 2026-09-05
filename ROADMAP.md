@@ -49,7 +49,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.0 | Decision specifications, typed context and configuration experiments, fresh confirmation, and the first bounded validated-work contract |
 | Shipped | 0.10.1 | Lowercase product language, a wide master-detail Board, exact uncertainty tokens, and README product photography from the real renderer |
 | Shipped | 0.10.3 | Centralized diagnosis presentation, direct prefill-slower-phase diagnosis, runtime artifact identity, wide master-detail history, and decision-relative explanations |
-| Current | 0.10.4 | Private discovery inbox, portable evidence skill, sealed workflow contract, typed proof classes, timing partitions and receipt privacy fixes |
+| Shipped | 0.10.4 | Private discovery inbox, portable evidence skill, sealed workflow contract, typed proof classes, timing partitions and receipt privacy fixes |
+| Current | 0.10.5 | Personal role screening with quality floors and uncertainty-aware preferences, canonical evidence attachments, and read-only cleanup planning |
 | Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported limiter hypotheses, and multi-surface decision relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
@@ -73,7 +74,7 @@ evidence paths.
 | 2 | complete | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | active | Generalized validated-work receipts and explicit evidence classes | 0.10.4 seals the fixed contract and reconstructs timing with typed proof classes. Multi-attempt, approval, escalation and external protocol receipts remain work before arbitrary workflows. |
-| 5 | active | Source ideas into a personal role library | The private inbox ships in 0.10.4. Resolve artifacts, attach measured evidence, apply role constraints and preference weights, and preserve an incumbent until a challenger earns replacement. See [discovery](docs/discovery.md). |
+| 5 | active | Source ideas into a personal role library | 0.10.5 attaches canonical evidence and applies role floors, fixed preference anchors, uncertainty and weight sensitivity. Next seal those preferences before fresh confirmation, preserve incumbents, and resolve exact artifacts and dependencies. See [roles](docs/roles.md) and [discovery](docs/discovery.md). |
 | 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. |
 
 Automatic selection must pass programmatic resource preflight and a separate
@@ -86,6 +87,8 @@ throughput. The bounded auto-mode contract is in [discovery](docs/discovery.md).
 Tracked implementation work: [quality-first role library](https://github.com/blisspixel/fitr/issues/1),
 [bounded auto mode](https://github.com/blisspixel/fitr/issues/2), and
 [MCP, A2A and harness adapters](https://github.com/blisspixel/fitr/issues/3).
+[Storage review and safe replacements](https://github.com/blisspixel/fitr/issues/4)
+tracks dependency-aware cleanup beyond the read-only inventory in 0.10.5.
 
 Optional OpenRouter validation can develop adversarial cases and grader
 calibration alongside this sequence. It remains experiment-scoped, explicitly

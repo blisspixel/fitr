@@ -22,12 +22,14 @@ import (
 	"github.com/blisspixel/fitr/internal/atomicfile"
 	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/capacity"
+	"github.com/blisspixel/fitr/internal/decision"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/discovery"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
+	"github.com/blisspixel/fitr/internal/role"
 	"github.com/blisspixel/fitr/internal/score"
 	"github.com/blisspixel/fitr/internal/stats"
 	"github.com/blisspixel/fitr/internal/top"
@@ -75,7 +77,7 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		{"inventory", shotInventory},
 		{"advise", shotAdvise}, {"run", shotRun}, {"apply", shotApply},
 		{"board", shotBoard}, {"top", shotTop}, {"doctor", shotDoctor}, {"compare", shotCompare},
-		{"discovery", shotDiscovery},
+		{"discovery", shotDiscovery}, {"roles", shotRoles},
 	}
 	for _, s := range shots {
 		text, err := captureStdout(ctx, s.fn)
@@ -110,6 +112,29 @@ func shotDiscovery(context.Context) (string, error) {
 	if renderDiscovery([]discovery.Idea{coder, small}, false, "rich") != exitOK {
 		return "", errors.New("could not render discovery fixture")
 	}
+	return "", nil
+}
+
+func shotRoles(context.Context) (string, error) {
+	fmt.Println("$ fitr role review daily-driver")
+	fmt.Println()
+	render.WriteRoleReview(os.Stdout, role.ReviewReport{
+		Role: "daily-driver", State: "single-qualified", Scope: "battery_screening",
+		Candidates: []role.Candidate{
+			{Model: "daily-model:q5", State: "eligible", Evaluation: &decision.Evaluation{
+				Requirements: []decision.RequirementResult{
+					{ID: "quality", State: decision.RequirementEstablished},
+					{ID: "context", State: decision.RequirementEstablished},
+					{ID: "memory", State: decision.RequirementEstablished},
+				},
+			}},
+			{Model: "tiny-model:q4", State: "ineligible", Reasons: []string{
+				"quality: independent output checks did not clear the required rate",
+				"Fitting memory and generating quickly do not establish useful work.",
+			}},
+		},
+		Next: "One candidate clears the declared screening floors. Test the full workflow before granting agentic authority.",
+	}, "rich")
 	return "", nil
 }
 

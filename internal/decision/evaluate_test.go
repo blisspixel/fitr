@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -222,6 +223,66 @@ func TestConfirmedEvaluationRequiresSealedExperimentBinding(t *testing.T) {
 	spec.Evidence = EvidenceDecide
 	if _, err := EvaluateConfirmed(result, spec); err == nil || !strings.Contains(err.Error(), "evidence_level") {
 		t.Fatalf("decide-level spec entered confirmed path: %v", err)
+	}
+}
+
+func TestConfirmedEvaluationPreservesUserLineageRequirements(t *testing.T) {
+	binding := &record.ExperimentBinding{
+		Schema: record.ExperimentBindingSchema, Kind: "configuration", Stage: "confirm",
+		PlanSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		PointIndex: 1, PointCount: 2,
+	}
+	result := sealedDecisionRecordWithExperiment(t, binding, "fresh-confirmation")
+	for _, test := range []struct {
+		name        string
+		requirement Requirement
+		state       EvaluationState
+	}{
+		{
+			name: "disproven context",
+			requirement: Requirement{ID: "confirmation_lineage",
+				Context: &ContextRequirement{MinimumEffectiveTokens: 1 << 20}},
+			state: DecisionIneligible,
+		},
+		{
+			name: "unresolved capability",
+			requirement: Requirement{ID: "confirmation_lineage",
+				Capability: &CapabilityRequirement{Name: "unmeasured-capability", MinimumSupport: score.CapabilityProtocolVerified}},
+			state: DecisionUnresolved,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			spec := DecisionSpec{
+				Schema: SpecSchema, Name: "colliding requirement IDs", Evidence: EvidenceConfirm,
+				Requirements: []Requirement{test.requirement, {
+					ID: "confirmation_lineage_2", Context: &ContextRequirement{MinimumEffectiveTokens: 4096},
+				}},
+			}
+			before, err := Evaluate(result, spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := EvaluateConfirmed(result, spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before.Requirements[:2], after.Requirements[:2]) {
+				t.Fatalf("confirmation changed declared requirements: before=%+v after=%+v", before.Requirements, after.Requirements)
+			}
+			if after.State != test.state || after.Eligibility != test.state {
+				t.Fatalf("confirmation bypassed declared requirements: %+v", after)
+			}
+			lineage := after.Requirements[2]
+			if lineage.ID != "confirmation_lineage_3" || lineage.State != RequirementEstablished {
+				t.Fatalf("internal lineage check = %+v", lineage)
+			}
+			if test.state == DecisionUnresolved {
+				wantGap := after.Requirements[0].ID + ": " + after.Requirements[0].Reason
+				if !stringInSlice(after.Gaps, wantGap) || after.NextAction == nil || after.NextAction.Code != "probe_capability" {
+					t.Fatalf("confirmation hid the user's unresolved requirement: %+v", after)
+				}
+			}
+		})
 	}
 }
 

@@ -40,9 +40,11 @@ claim, optional harness and the next planning command. Sources remain private
 unless explicitly requested as JSON. The same proposal objects feed text and
 JSON plans; the renderer does not make a compatibility decision.
 
-The future role library should add an incumbent, challenger, fallback and
-compact evidence gaps. A detail pane explains the role's hard constraints,
-preference weights, confidence and the reason a candidate is unresolved.
+Role review cards now lead with the role and screening state, followed by
+each candidate's requirements, preference bounds and evidence gaps. Failed
+quality remains visible beside a qualifying candidate. Explicit JSON carries
+the full definition and receipts. The next role view will add an incumbent,
+challenger, fallback and fresh confirmation status.
 Avoid a hero score that mixes model quality, speed, fit and popularity.
 
 README assets are rendered from deterministic fixtures through real display

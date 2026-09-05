@@ -104,6 +104,10 @@ usage:
   fitr experiment workload <workload-bundle.json> [--display MODE]
   fitr discover add <source> --role <role> [--model <reference>] [--harness <name>]
   fitr discover list|plan [--role <role>] [--display MODE]
+  fitr role init <name> --quality <need> --memory-gb <limit> [--ctx N]
+  fitr role define <role.json> | list | show <name> | review <name>
+  fitr role attach <name> <result.json> | detach <name> <evidence-sha256>
+  fitr cleanup plan <directory> [--min-age-days N] [--display MODE]
 
 flags:
   --display  auto|rich|plain|json|none   output mode (default auto)
@@ -215,16 +219,29 @@ func commandHandler(name string) commandFunc {
 		return cmdCalibrate
 	case "compare":
 		return cmdCompare
-	case "decide":
-		return cmdDecide
-	case "discover":
-		return cmdDiscover
-	case "experiment":
-		return cmdExperiment
+	case "decide", "discover", "role", "experiment", "cleanup":
+		return planningCommandHandler(name)
 	case "screenshots": // dev-only: regenerate docs/assets from mock data
 		return cmdScreenshots
 	}
 	return nil
+}
+
+func planningCommandHandler(name string) commandFunc {
+	switch name {
+	case "decide":
+		return cmdDecide
+	case "discover":
+		return cmdDiscover
+	case "role":
+		return cmdRole
+	case "experiment":
+		return cmdExperiment
+	case "cleanup":
+		return cmdCleanup
+	default:
+		return nil
+	}
 }
 
 // permute moves positional arguments after flags.
@@ -255,7 +272,8 @@ func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
 	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec",
-		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim":
+		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim",
+		"quality", "minimum-rate", "memory-gb", "max-age-days", "min-age-days":
 		return true
 	}
 	return false

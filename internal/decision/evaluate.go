@@ -61,17 +61,16 @@ func EvaluateConfirmed(result *record.Record, spec DecisionSpec) (Evaluation, er
 		result.Experiment.PlanSHA256 == "" || strings.TrimSpace(result.SeedSet) == "" {
 		return Evaluation{}, errors.New("evaluate confirmed decision: sealed confirmation binding is missing")
 	}
-	for index := range evaluation.Requirements {
-		if evaluation.Requirements[index].ID != "confirmation_lineage" {
-			continue
-		}
-		evaluation.Requirements[index] = RequirementResult{
-			ID: "confirmation_lineage", State: RequirementEstablished,
-			Reason:       "the run is bound to a predeclared confirmation plan and fresh task seed set",
-			EvidenceRefs: []string{"experiment.plan_sha256", "run.seedset"},
-		}
+	// Evaluate appends its lineage check after the declared requirements.
+	// Its position, not a user-controlled ID, identifies the internal check.
+	lineageIndex := len(spec.Requirements)
+	lineage := evaluation.Requirements[lineageIndex]
+	evaluation.Requirements[lineageIndex] = RequirementResult{
+		ID: lineage.ID, State: RequirementEstablished,
+		Reason:       "the run is bound to a predeclared confirmation plan and fresh task seed set",
+		EvidenceRefs: []string{"experiment.plan_sha256", "run.seedset"},
 	}
-	evaluation.Gaps = removeConfirmationGaps(evaluation.Gaps)
+	evaluation.Gaps = removeConfirmationGaps(evaluation.Gaps, lineage)
 	evaluation.State = aggregateState(evaluation.Requirements)
 	if evaluation.Objective != nil && evaluation.State == DecisionEligible {
 		evaluation.State = DecisionUnresolved
@@ -83,16 +82,27 @@ func EvaluateConfirmed(result *record.Record, spec DecisionSpec) (Evaluation, er
 	return evaluation, nil
 }
 
-func removeConfirmationGaps(gaps []string) []string {
+func removeConfirmationGaps(gaps []string, lineage RequirementResult) []string {
 	filtered := make([]string, 0, len(gaps))
 	for _, gap := range gaps {
-		if strings.Contains(gap, "fresh confirmation lineage") ||
-			strings.HasPrefix(gap, "confirmation_lineage:") {
+		if gap == lineage.Reason || gap == lineage.ID+": "+lineage.Reason {
 			continue
 		}
 		filtered = append(filtered, gap)
 	}
 	return filtered
+}
+
+func confirmationLineageID(requirements []Requirement) string {
+	used := make(map[string]bool, len(requirements))
+	for _, requirement := range requirements {
+		used[requirement.ID] = true
+	}
+	id := "confirmation_lineage"
+	for suffix := 2; used[id]; suffix++ {
+		id = "confirmation_lineage_" + strconv.Itoa(suffix)
+	}
+	return id
 }
 
 // ConfigurationFromRecord derives the typed configuration identity from one
@@ -129,7 +139,7 @@ func evaluateValidated(result *record.Record, report analysis.Report, subject Co
 		const gap = "fresh confirmation lineage is not present in an ordinary run receipt"
 		evaluation.Gaps = append(evaluation.Gaps, gap)
 		evaluation.Requirements = append(evaluation.Requirements, RequirementResult{
-			ID: "confirmation_lineage", State: RequirementUnresolved, Reason: gap,
+			ID: confirmationLineageID(spec.Requirements), State: RequirementUnresolved, Reason: gap,
 			Missing: []string{"predeclared candidate", "fresh sealed observations"},
 			NextAction: &Action{Code: "confirm_candidate", Experiment: "confirmation",
 				Reason: "collect fresh evidence after sealing the selected candidate"},
@@ -269,6 +279,13 @@ func evaluateRateOutcome(outcome RequirementResult, pool score.Pool, planned, in
 		outcome.NextAction = behaviorAction(need)
 	}
 	return outcome
+}
+
+// SupportsBehaviorRate reports whether current evidence has a numeric rate
+// estimand for a need. Other needs can still have categorical verdicts.
+func SupportsBehaviorRate(need string) bool {
+	_, ok := behaviorPool(score.Measured{}, need)
+	return ok
 }
 
 func behaviorPool(measured score.Measured, need string) (score.Pool, bool) {

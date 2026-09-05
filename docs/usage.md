@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.9.12" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.9.12" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.9.12" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.9.12" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.10.5" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.10.5" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.10.5" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.10.5" alt="fitr top (demo data)" width="820">
 
 ### Disk
 
@@ -198,6 +198,11 @@ of installed RAM as an unconditional model budget.
 | `fitr experiment workload <model> [-n 3] [--ctx N]` | run the fixed bounded policy-repair workflow with independent deterministic verification and signed per-trial receipts |
 | `fitr discover add <source> --role <role> [--model <reference>]` | capture a private, unmeasured model or harness idea |
 | `fitr discover list\|plan [--role <role>]` | inspect the private inbox or draft next evidence steps without network access |
+| `fitr role init <name> --quality <need> --memory-gb <limit> [--ctx N]` | declare mandatory quality and resource floors for a personal role |
+| `fitr role define <role.json>` / `show <name>` | version or export explicit requirements, preferences and freshness limits |
+| `fitr role list` / `review <name>` | inspect role screening, evidence gaps, preference bounds and sensitivity; see [roles](roles.md) |
+| `fitr role attach <name> <result.json>` / `detach <name> <digest>` | pin or remove a canonical evidence reference without deleting its source |
+| `fitr cleanup plan <directory> [--min-age-days 7]` | bounded read-only storage inventory with aged partial-download review candidates; see [cleanup](cleanup.md) |
 | `fitr device [--display MODE]` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
 | `fitr calibrate <a> <b> [--out PATH] [--lineage PATH]` | paired item discrimination; optional same-base lineage receipt |
 | `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads without claiming verified campaign readiness |

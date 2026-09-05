@@ -5,7 +5,7 @@ excerpt, model card, hosted article, or a model that another tool suggests.
 The useful question is what that candidate can do for a particular role on
 your machine, with your runtime and agent harness.
 
-## Available in 0.10.4
+## Capture an idea
 
 Capture a private idea without contacting its source:
 
@@ -39,8 +39,9 @@ them. A digest detects accidental edits; it is not external provenance.
 
 ## The next product milestone
 
-The local role library comes before an unattended researcher. Its intended
-flow is:
+The local role library provides the screening and preference layer in 0.10.5.
+The complete flow still needs source resolution, fresh weighted confirmation
+and explicit adoption:
 
 ```text
 idea -> source check -> exact artifact -> fit plan -> bounded experiment
@@ -71,7 +72,7 @@ preferences among eligible, comparable candidates. Preference weights belong
 to a versioned role, never to a universal leaderboard. Missing required
 evidence remains unresolved; an unknown measurement is not zero.
 
-Before weighted recommendations ship, require:
+The role contract requires:
 
 - Named metrics, direction, units and normalization anchors. Never normalize
   against only the current candidates, which makes adding an option change
@@ -86,10 +87,16 @@ Before weighted recommendations ship, require:
 - Fresh confirmation after exploratory tuning. The observations that selected
   a winner cannot also certify it.
 
-The inbox ships now. Role assignment, weighted recommendations, evidence
-attachment, source extraction and automatic adoption are not implemented yet.
-Current `fitr decide` evaluates explicit requirements against sealed run
-evidence; it does not provide the planned preference-ranking layer.
+The inbox and [role screening library](roles.md) ship now. Roles attach
+canonical evidence and compare eligible candidates using fixed preference
+anchors, uncertainty and weight sensitivity. Incumbents, fallbacks, fresh
+weighted confirmation, source extraction and automatic adoption remain work.
+An exploratory lead is not permission to switch a serving model.
+
+[Cleanup planning](cleanup.md) inventories existing storage without deletion.
+Replacement research must preserve dependency groups, including shared
+encoders, projectors, draft models, shards and runtime environments. Apparent
+duplicate bytes or an old filename cannot prove a component is unused.
 
 ## Auto mode contract
 
@@ -131,7 +138,7 @@ and produces source-bound claims; it does not answer from remembered model
 names. LLMfit or another inventory/fit tool may contribute attributed external
 observations after its schema and version are checked. Those observations
 cannot replace fitr's runtime-bound local measurements. No such adapter ships
-in 0.10.4.
+in 0.10.5.
 
 ## Qwen example and verification boundary
 
