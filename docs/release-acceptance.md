@@ -6,6 +6,58 @@ against real serving runtimes on clean operating-system installs.
 
 Last updated: 2026-09-05.
 
+### 0.10.12 release receipt
+
+Release 0.10.12 is bound to commit
+`43544f6126c027575f026f34cfaa4ed5051fd00d`. It passed
+[main CI 33985587792](https://github.com/blisspixel/fitr/actions/runs/33985587792)
+with **81.80% aggregate coverage**, all three official SDK platform jobs, and
+[native acceptance 33985587571](https://github.com/blisspixel/fitr/actions/runs/33985587571).
+[Release workflow 33985850646](https://github.com/blisspixel/fitr/actions/runs/33985850646)
+passed its source, CI/native, race, coverage, vulnerability, lint, six-build,
+installer and asset gates before publishing
+[v0.10.12](https://github.com/blisspixel/fitr/releases/tag/v0.10.12).
+
+All ten independently downloaded public assets matched the nine-entry manifest.
+The Windows amd64 executable reports `fitr 0.10.12`, embeds the tagged revision
+with `vcs.modified=false`, and is **15,101,952 bytes**, 48,128 bytes larger than
+0.10.11. All six targets pass the measured 15,150,000-byte ceiling. Public
+Windows SHA-256:
+`7a31f3535c2b4839f08d1be9da0bbadf5a87fe5646dbe112af13a1a80f156eac`.
+Manifest SHA-256:
+`3986fb0bd2ea2e161db37de5a689f9d037f1bd64ea43f31eb5b99fcbec943754`.
+Tagged installation preserved persistent user PATH. The public update check
+and deferred reinstall completed with the expected hash/version, a newer
+replacement timestamp and no staged files remaining.
+
+The public binary passed raw MCP and **eight official SDK cases**: empty,
+manually attached, managed qualified and managed stale evidence under explicit
+and default client modes. Each CI/public receipt matched its actual binary and
+seven source input groups, including the new managed-fixture helper. The
+independent verifier checked artifact ZIP digests, selected revision/state
+relationships and twelve rejected receipt mutations. The public SDK receipt
+SHA-256 is `55e4c49a43d37dc6685908cc869ed06f95391e65cbcddbc503ebe50016364445`.
+These are synthetic lifecycle/client tests, with the SDK cleanup and transcript
+limits documented in [agent interoperability](agent-interop.md).
+
+A separate read-only acceptance used the retained real Windows auto selection
+from the 0.10.11 run below. The public 0.10.12 binary returned the same qualified
+incumbent, selected receipt and lifecycle through both SDK modes. Its status
+timestamp fell inside each actual call interval, redaction held, and the
+evidence tree stayed unchanged. No model requests were made for this check.
+This establishes compatibility with existing measured evidence; it does not
+repeat the auto experiment or turn its engineering profile into a coding,
+reasoning or classification recommendation.
+The retained-selection receipt SHA-256 is
+`9300037166a52637412345087a0ad1dd5e9d1b6c2c41db46feff7ba63c9c0322`.
+
+Local final coverage was **81.95%**; pinned lint and `go vet` passed, and reachable
+dependency checks found no vulnerabilities. Nineteen SDK assertion tests passed.
+README assets were regenerated through the real renderers and visually checked.
+No user model files were deleted. Paid model API spending remains $0. The
+[compatibility matrix](agent-interop.md#named-host-compatibility) retains the
+Hermes client blocker and separates Pi prototype mechanics from model quality.
+
 ### 0.10.11 release receipt
 
 Release 0.10.11 is bound to commit

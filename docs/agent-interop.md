@@ -122,6 +122,13 @@ also records official SDK acceptance for the Linux x64, macOS arm64 and Windows
 x64 CI binaries. Each receipt binds its own binary and inputs; these are not
 named-host acceptance results.
 
+The [0.10.12 release receipt](release-acceptance.md#01012-release-receipt)
+records the expanded eight-case suite on all three CI platforms and the public
+Windows binary, plus a read-only check of the retained real auto incumbent
+through both client modes. The selected receipt and lifecycle remained
+unchanged. This checks existing evidence compatibility without repeating model
+inference or changing its original battery-screening scope.
+
 The script uses the released SDK's `Client(stdio_client(...))` transport
 contract. In explicit mode, `session.discover()` can return synthetic cached
 discovery. The smoke instead calls `send_discover`, validates the real reply
