@@ -6,6 +6,36 @@ against real serving runtimes on clean operating-system installs.
 
 Last updated: 2026-09-05.
 
+### 0.10.7 release receipt
+
+Release 0.10.7 is bound to commit
+`a977533f4791b8e92297168bc7e7477dd4ec6cf8`. The exact commit passed
+[main CI 33958533161](https://github.com/blisspixel/fitr/actions/runs/33958533161)
+with **83.70% aggregate coverage** and
+[native acceptance 33958533181](https://github.com/blisspixel/fitr/actions/runs/33958533181)
+before tagging. The
+[release workflow 33958822198](https://github.com/blisspixel/fitr/actions/runs/33958822198)
+repeated all release gates and published
+[v0.10.7](https://github.com/blisspixel/fitr/releases/tag/v0.10.7).
+
+Independent download verification matched all ten public assets against the
+nine-entry checksum manifest. The Windows amd64 binary is **13,370,880 bytes**,
+reports `fitr 0.10.7`, and has SHA-256
+`1909521a88b174ec3d446dfebf60c526dd864e9045d1fc6020f40a887abeb691`.
+It remains below the unchanged 13,420,000-byte six-target ceiling.
+The tagged PowerShell installer left persistent user PATH unchanged. Public
+`update --check` reported current; `update --reinstall` completed its deferred
+replacement with an advanced target timestamp, correct hash/version and no
+staged files left behind.
+
+The downloaded Windows binary passed the real MCP stdio smoke. Its source
+resolver also completed two anonymous metadata requests at an explicitly pinned
+public HF commit, saved a resolved private receipt, and reopened it offline.
+No weights were downloaded and no fit or quality result was inferred. Review
+regressions cover raw parent traversal, symlink paths, impossible rehashed HTTP
+observations, malformed metadata and report write failures. Paid model API
+spending remains $0.
+
 ### 0.10.6 release receipt
 
 Release 0.10.6 is bound to commit
