@@ -1,10 +1,11 @@
 # Context task evidence
 
 The next Extended fit scorecard tests whether a model uses a long document
-correctly at a fixed operating window. The deterministic task pack and opt-in
-Ollama request accounting are implemented as internal foundations. Collection,
-signed run evidence, role preferences and auto confirmation are not connected
-yet. No command currently earns this scorecard.
+correctly at a fixed operating window. The deterministic task pack, the opt-in
+Ollama request accounting and the execution adapter that submits one sealed
+plan are implemented as internal foundations. Signed run evidence, role
+preferences and auto confirmation are not connected yet. No command currently
+earns this scorecard.
 
 ## What the document pack measures
 
@@ -35,8 +36,8 @@ above an already failed tier. Diagnostic bounds remain available.
 
 A wrong answer, declared output limit or verified context refusal differs from
 unavailable transport, cancellation, unknown accounting or unverified runtime
-evidence. The future execution adapter must establish those dispositions.
-The pure analyzer accepts no claimed pass; it rechecks the actual answer.
+evidence. The execution adapter establishes those dispositions. The pure
+analyzer accepts no claimed pass; it rechecks the actual answer.
 
 This is a finite synthetic task-set result. It is not a statistical confidence
 interval, maximum model context, general document benchmark, compaction test or
@@ -71,6 +72,30 @@ behavior. It is transient until a signed execution contract binds it to exact
 input, model artifact, template, runtime build, placement and observed window.
 It does not establish payload-only token counts or independent tokenizer
 identity.
+
+## Submitting a sealed plan
+
+The execution adapter submits every sealed cell in plan order at one fixed
+operating window, with deterministic sampling and the declared 128-token
+reserve. It never lowers the window, the payload or the reserve, and never
+retries a cell. It refuses a client that would not send the declared overflow
+controls, and dispatches nothing at all when the plan, model or client is
+unusable.
+
+The adapter holds no expected answer, so it cannot leak one into a request or
+grade its own work. It records a disposition per cell and the pure analyzer
+re-derives the report from those records alone.
+
+A terminal success qualifies only when the entire declared reserve fits beside
+the accepted prompt tokens. A short answer that fits only because the model
+stopped early fails the reserve gate rather than passing on its content.
+
+A refused reservation, a cancelled context, a runtime that cannot be shown
+local, or an invalid request policy ends the phase; the remaining cells are
+recorded as not attempted rather than left silently missing. A per-cell
+transport fault or unknown accounting is recorded and the phase continues,
+because an incomplete phase already cannot qualify and the remaining cells
+still carry their own diagnostics. None of these become model-quality zeroes.
 
 ## Remaining connected acceptance
 

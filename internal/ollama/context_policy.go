@@ -30,6 +30,12 @@ type ContextTokenAccounting struct {
 	OutputTokens       *int `json:"output_tokens,omitempty"`
 }
 
+// ContextRequestPolicy reports the policy this client will send with every
+// inference attempt. A consumer that requires specific overflow controls can
+// refuse an unconfigured client before dispatching anything. The reported
+// policy describes the request, never the server's actual treatment of it.
+func (c *Client) ContextRequestPolicy() ContextRequestPolicy { return c.ContextPolicy }
+
 func (p ContextRequestPolicy) validate(s Sampling) error {
 	if p == "" {
 		return nil

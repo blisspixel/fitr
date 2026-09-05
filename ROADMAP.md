@@ -100,8 +100,9 @@ constraints and completed effects under external verification. The
 [personal fitting design](docs/personal-fitting.md) separates this future
 measurement work from today's runtime-window requirement. The
 [context task foundation](docs/context-quality.md) now supplies a deterministic
-document pack, independent verifier and opt-in nontruncating request accounting;
-owned collection, signed evidence and personal selection remain to be connected.
+document pack, independent verifier, opt-in nontruncating request accounting and
+the execution adapter that submits one sealed plan; signed evidence, owned auto
+collection and personal selection remain to be connected.
 The [host compatibility matrix](docs/agent-interop.md) records current protocol
 gaps before any named-harness support is claimed.
 

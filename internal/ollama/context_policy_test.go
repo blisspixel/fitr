@@ -40,6 +40,11 @@ func checkContextLegacyMetrics(t *testing.T, kind string, policy ContextRequestP
 		checkContextRequestPolicy(t, req, policy)
 		return inferenceResponse(req, contextReply(`,"prompt_eval_count":100,"prompt_eval_cached_count":40,"eval_count":3`)), nil
 	})}}
+	// A consumer that needs these controls must be able to refuse a client
+	// that would not send them, without reading the struct field itself.
+	if c.ContextRequestPolicy() != policy {
+		t.Fatalf("reported policy = %q, configured %q", c.ContextRequestPolicy(), policy)
+	}
 	output, metrics, err := contextPolicyCall(t.Context(), c, kind, Deterministic(128, 8192))
 	if err != nil || output != "ok" || metrics.PromptTokens != 100 || metrics.EvalCount != 3 || metrics.CacheKnown || metrics.CachedTokens != 0 {
 		t.Fatalf("output=%q metrics=%+v error=%v", output, metrics, err)
