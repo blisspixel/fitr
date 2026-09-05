@@ -55,7 +55,13 @@ func TestSpecPortableStructuralContract(t *testing.T) {
 }
 
 func TestInstallationHashBoundsAndPathIntegrity(t *testing.T) {
-	root := t.TempDir()
+	// macOS temporary directories can have /var -> /private/var ancestors.
+	// Only canonicalize the fixture root; deliberate dependency links below
+	// remain untouched so production rejection is still exercised.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	file := filepath.Join(root, "input.bin")
 	if err := os.WriteFile(file, []byte("runtime content"), 0o600); err != nil {
 		t.Fatal(err)
