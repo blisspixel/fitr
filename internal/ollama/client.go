@@ -130,14 +130,16 @@ type Metrics struct {
 }
 
 type genResp struct {
-	Response           string `json:"response"`
-	Done               bool   `json:"done"`
-	DoneReason         string `json:"done_reason"`
-	EvalCount          int    `json:"eval_count"`
-	EvalDuration       int64  `json:"eval_duration"`
-	PromptEvalCount    int    `json:"prompt_eval_count"`
-	PromptEvalDuration int64  `json:"prompt_eval_duration"`
-	LoadDuration       int64  `json:"load_duration"`
+	Response           string       `json:"response"`
+	RemoteModel        remoteMarker `json:"remote_model,omitempty"`
+	RemoteHost         remoteMarker `json:"remote_host,omitempty"`
+	Done               bool         `json:"done"`
+	DoneReason         string       `json:"done_reason"`
+	EvalCount          int          `json:"eval_count"`
+	EvalDuration       int64        `json:"eval_duration"`
+	PromptEvalCount    int          `json:"prompt_eval_count"`
+	PromptEvalDuration int64        `json:"prompt_eval_duration"`
+	LoadDuration       int64        `json:"load_duration"`
 }
 
 func (c *Client) post(ctx context.Context, path string, body any) (*http.Response, error) {
@@ -196,6 +198,9 @@ func nativeHTTPError(resp *http.Response) error {
 }
 
 func validateGenFrame(g genResp) error {
+	if remoteExecution(string(g.RemoteModel), string(g.RemoteHost)) {
+		return ErrRemoteExecution
+	}
 	if g.EvalCount < 0 || g.EvalDuration < 0 || g.PromptEvalCount < 0 ||
 		g.PromptEvalDuration < 0 || g.LoadDuration < 0 {
 		return errors.New("ollama generate frame contains a negative metric")
@@ -233,6 +238,9 @@ func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling)
 	}
 	state, err := readGenerateStream(resp.Body, start)
 	if err != nil {
+		if IsLocalityError(err) {
+			return "", Metrics{}, err
+		}
 		return state.output.String(), Metrics{}, err
 	}
 	return state.output.String(), generateMetrics(state.final, state.ttft, time.Since(start)), nil
@@ -279,15 +287,19 @@ func (s *generateStreamState) accept(line []byte, start time.Time) error {
 	if s.frames > maxNativeFrames {
 		return errors.New("ollama generate stream exceeds protocol limits")
 	}
-	if s.terminal {
-		return errors.New("ollama generate stream contains data after the terminal frame")
-	}
 	var frame genResp
-	if err := decodeJSONFrame(line, &frame); err != nil {
+	err := decodeJSONFrame(line, &frame)
+	if remoteExecution(string(frame.RemoteModel), string(frame.RemoteHost)) {
+		return ErrRemoteExecution
+	}
+	if err != nil {
 		return fmt.Errorf("ollama generate frame: %w", err)
 	}
 	if err := validateGenFrame(frame); err != nil {
 		return err
+	}
+	if s.terminal {
+		return errors.New("ollama generate stream contains data after the terminal frame")
 	}
 	if frame.Response != "" && s.ttft == 0 {
 		s.ttft = time.Since(start).Seconds()
@@ -359,13 +371,15 @@ type Message struct {
 }
 
 type chatResp struct {
-	Message            Message `json:"message"`
-	Done               bool    `json:"done"`
-	DoneReason         string  `json:"done_reason"`
-	EvalCount          int     `json:"eval_count"`
-	EvalDuration       int64   `json:"eval_duration"`
-	PromptEvalCount    int     `json:"prompt_eval_count"`
-	PromptEvalDuration int64   `json:"prompt_eval_duration"`
+	Message            Message      `json:"message"`
+	RemoteModel        remoteMarker `json:"remote_model,omitempty"`
+	RemoteHost         remoteMarker `json:"remote_host,omitempty"`
+	Done               bool         `json:"done"`
+	DoneReason         string       `json:"done_reason"`
+	EvalCount          int          `json:"eval_count"`
+	EvalDuration       int64        `json:"eval_duration"`
+	PromptEvalCount    int          `json:"prompt_eval_count"`
+	PromptEvalDuration int64        `json:"prompt_eval_duration"`
 }
 
 // Chat returns the message plus per-turn metrics. The prompt token count is
@@ -401,6 +415,15 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools [
 // HTTP error, and a second failure here all return unretried.
 var errEmptyNonTerminal = errors.New("ollama chat returned no generation and no terminal receipt")
 
+func decodeChatResponse(body io.Reader) (chatResp, error) {
+	var r chatResp
+	err := decodeBoundedJSON(body, &r)
+	if remoteExecution(string(r.RemoteModel), string(r.RemoteHost)) {
+		return chatResp{}, ErrRemoteExecution
+	}
+	return r, err
+}
+
 func (c *Client) chatOnce(ctx context.Context, model string, msgs []Message, tools []Tool, s Sampling) (Message, Metrics, error) {
 	payload := map[string]any{
 		"model": model, "messages": msgs, "stream": false,
@@ -424,8 +447,8 @@ func (c *Client) chatOnce(ctx context.Context, model string, msgs []Message, too
 	if resp.StatusCode != http.StatusOK {
 		return Message{}, Metrics{}, nativeHTTPError(resp)
 	}
-	var r chatResp
-	if err := decodeBoundedJSON(resp.Body, &r); err != nil {
+	r, err := decodeChatResponse(resp.Body)
+	if err != nil {
 		return Message{}, Metrics{}, err
 	}
 	if !r.Done {
@@ -467,10 +490,48 @@ func (c *Client) chatOnce(ctx context.Context, model string, msgs []Message, too
 }
 
 // ---------------------------------------------------------------- inspection
+
+// ErrRemoteExecution rejects explicit Ollama remote execution metadata. An
+// endpoint on localhost can still delegate inference to a remote service.
+// Missing markers are not independent proof that execution stayed local.
+var ErrRemoteExecution = errors.New("ollama reports remote execution; local measurement requires a locally served model")
+
+// ErrInvalidRemoteMetadata prevents malformed provenance from being treated
+// as an ordinary unavailable-metadata fallback before local measurement.
+var ErrInvalidRemoteMetadata = errors.New("ollama remote execution metadata is malformed")
+
+// IsLocalityError identifies failures that disqualify local measurement.
+// Malformed metadata is uncertainty, not proof of remote execution.
+func IsLocalityError(err error) bool {
+	return errors.Is(err, ErrRemoteExecution) || errors.Is(err, ErrInvalidRemoteMetadata)
+}
+
+func remoteExecution(model, host string) bool { return model != "" || host != "" }
+
+// The JSON decoder accepts case aliases for struct keys. Retain a positive
+// marker if another spelling appears later with an empty value. This parser
+// runs only for present marker fields, not for ordinary local token chunks.
+type remoteMarker string
+
+func (m *remoteMarker) UnmarshalJSON(data []byte) error {
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidRemoteMetadata, err)
+	}
+	if *m == "" {
+		*m = remoteMarker(value)
+	}
+	return nil
+}
+
 type ModelInfo struct {
 	Name   string `json:"name"`
 	Size   int64  `json:"size"`
 	Digest string `json:"digest,omitempty"`
+	// RemoteModel and RemoteHost preserve runtime assertions even in a mixed
+	// inventory. Either marker disqualifies local measurement of that entry.
+	RemoteModel string `json:"remote_model,omitempty"`
+	RemoteHost  string `json:"remote_host,omitempty"`
 	// ReportedDigest is an untrusted server assertion that requires an
 	// independent backend-specific verifier before it can become Digest.
 	ReportedDigest string   `json:"reported_digest,omitempty"`
@@ -487,6 +548,26 @@ type ModelInfo struct {
 		QuantizationLevel string `json:"quantization_level"`
 		Family            string `json:"family"`
 	} `json:"details"`
+}
+
+// IsRemote reports an explicit remote marker, not inferred locality from a
+// name, endpoint, file size, or the absence of a marker.
+func (m ModelInfo) IsRemote() bool { return remoteExecution(m.RemoteModel, m.RemoteHost) }
+
+func (m *ModelInfo) UnmarshalJSON(data []byte) error {
+	// An alias preserves all ordinary metadata and its existing JSON shape.
+	// The explicit fields override only the two remote provenance markers.
+	type plain ModelInfo
+	var info plain
+	wire := struct {
+		*plain
+		RemoteModel remoteMarker `json:"remote_model"`
+		RemoteHost  remoteMarker `json:"remote_host"`
+	}{plain: &info}
+	err := json.Unmarshal(data, &wire)
+	info.RemoteModel, info.RemoteHost = string(wire.RemoteModel), string(wire.RemoteHost)
+	*m = ModelInfo(info)
+	return err
 }
 
 func (c *Client) Tags(ctx context.Context) ([]ModelInfo, error) {

@@ -65,16 +65,20 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 		runs = 2
 	}
 	r := DoctorResult{Model: model, Runs: runs}
-	if !doctorRealToken(ctx, c, model, &r) {
-		return r, nil
+	if ready, err := doctorRealToken(ctx, c, model, &r); !ready {
+		return r, err
 	}
 	doctorPlacement(ctx, opts, &r)
-	doctorServedContext(ctx, c, model, &r)
+	if err := doctorServedContext(ctx, c, model, &r); err != nil {
+		return r, err
+	}
 	textDeterministic, err := doctorTextDeterminism(ctx, c, model, runs, &r)
 	if err != nil {
 		return r, err
 	}
-	doctorJSONDeterminism(ctx, c, model, runs, textDeterministic, &r)
+	if err := doctorJSONDeterminism(ctx, c, model, runs, textDeterministic, &r); err != nil {
+		return r, err
+	}
 	doctorConfig(opts.Config, &r)
 	finishDoctor(&r)
 	return r, nil
@@ -84,24 +88,27 @@ func addDoctorCheck(r *DoctorResult, id, state, detail string) {
 	r.Checks = append(r.Checks, DoctorCheck{ID: id, State: state, Detail: detail})
 }
 
-func doctorRealToken(ctx context.Context, c llm.Backend, model string, r *DoctorResult) bool {
+func doctorRealToken(ctx context.Context, c llm.Backend, model string, r *DoctorResult) (bool, error) {
 	// 1. A real generated token, not an HTTP 200. Cold on purpose: load time
 	// is part of what this box is.
 	text, m, err := c.Generate(ctx, model, "Say OK.", ollama.Deterministic(8, numCtx(ctx)))
+	if ollama.IsLocalityError(err) {
+		return false, err
+	}
 	if err != nil {
 		addDoctorCheck(r, "real_token", "FAIL", "generation failed: "+err.Error())
 		r.Verdict = "the server is reachable but did not generate - nothing else is measurable"
-		return false
+		return false, nil //nolint:nilerr // ordinary generation faults remain explicit diagnostic findings
 	}
 	if strings.TrimSpace(text) == "" {
 		addDoctorCheck(r, "real_token", "FAIL", fmt.Sprintf(
 			"0 tokens of text produced (done_reason=%s) - a reachable server that does not infer", m.DoneReason))
 		r.Verdict = "the server accepts requests but emits no tokens - fix the stack before measuring anything"
-		return false
+		return false, nil
 	}
 	addDoctorCheck(r, "real_token", "PASS", fmt.Sprintf(
 		"generated %d token(s), TTFT %.2fs, load %.1fs", m.EvalCount, m.TTFTSeconds, m.LoadSeconds))
-	return true
+	return true, nil
 }
 
 func doctorPlacement(ctx context.Context, opts DoctorOpts, r *DoctorResult) {
@@ -124,10 +131,13 @@ func doctorPlacement(ctx context.Context, opts DoctorOpts, r *DoctorResult) {
 	}
 }
 
-func doctorServedContext(ctx context.Context, c llm.Backend, model string, r *DoctorResult) {
+func doctorServedContext(ctx context.Context, c llm.Backend, model string, r *DoctorResult) error {
 	// 3. Served context. A server can silently evaluate less prompt than you
 	// sent; prompt_eval_count is the receipt. Nonce defeats the prefix cache.
 	_, mp, err := c.Generate(ctx, model, buildLongPrompt("doctor-ctx-probe"), ollama.Deterministic(16, numCtx(ctx)))
+	if ollama.IsLocalityError(err) {
+		return err
+	}
 	// Cached prompt tokens count as served: on backends that report the split,
 	// prompt_n alone under-reads a partially cached prompt.
 	served := mp.PromptTokens + mp.CachedTokens
@@ -140,6 +150,7 @@ func doctorServedContext(ctx context.Context, c llm.Backend, model string, r *Do
 	default:
 		addDoctorCheck(r, "served_context", "PASS", fmt.Sprintf("~2.8k-token prompt evaluated as %d tokens", served))
 	}
+	return nil
 }
 
 func doctorTextDeterminism(ctx context.Context, c llm.Backend, model string, runs int,
@@ -158,7 +169,7 @@ func doctorTextDeterminism(ctx context.Context, c llm.Backend, model string, run
 }
 
 func doctorJSONDeterminism(ctx context.Context, c llm.Backend, model string, runs int,
-	textDeterministic bool, r *DoctorResult) {
+	textDeterministic bool, r *DoctorResult) error {
 	// 5. Determinism, grammar-constrained JSON mode. The constrained path is a
 	// DIFFERENT code path and is known to break seed reproducibility on some
 	// stacks while plain text reproduces.
@@ -168,6 +179,9 @@ func doctorJSONDeterminism(ctx context.Context, c llm.Backend, model string, run
 	jsonOK := true
 	for range runs {
 		t, _, err := c.Generate(ctx, model, doctorJSONPrompt, samp)
+		if ollama.IsLocalityError(err) {
+			return err
+		}
 		if err != nil {
 			addDoctorCheck(r, "determinism_json", "SKIP", "JSON-mode generation failed: "+err.Error())
 			jsonOK = false
@@ -184,6 +198,7 @@ func doctorJSONDeterminism(ctx context.Context, c llm.Backend, model string, run
 				"is the culprit (a known local-stack bug class); prefer prompt-level JSON when you need repeatability"
 		}
 	}
+	return nil
 }
 
 func doctorConfig(config map[string]string, r *DoctorResult) {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/device"
+	"github.com/blisspixel/fitr/internal/modelref"
 )
 
 // Inventory states are plain text. Color must never carry them alone.
@@ -16,6 +17,7 @@ const (
 	StateUnproven     = "unproven"
 	StateIncompatible = "incompatible"
 	StateStale        = "stale"
+	StateRemote       = "remote"
 )
 
 const maxInventoryRows = 100
@@ -30,6 +32,7 @@ type InstalledModel struct {
 	ArtifactDigest string // verified runtime-bound SHA-256; empty is unmeasured
 	Arch           Arch   // zero unless the caller already has architecture
 	ResidentB      int64  // live PS allocation when the process is loaded; 0 unknown
+	Remote         bool   // explicit upstream provenance; excluded from local evidence
 }
 
 // InventoryEvidence is the saved-run facts inventory needs. Callers map
@@ -101,6 +104,12 @@ func Join(q InventoryQuery) InventoryTable {
 	evidence := q.Evidence
 
 	seen := map[string]bool{}
+	remote := map[string]bool{}
+	for _, tag := range q.Tags {
+		if tag.Remote {
+			remote[InventoryModelKey(tag.Name)] = true
+		}
+	}
 	var rows []InventoryRow
 	for _, tag := range q.Tags {
 		name := strings.TrimSpace(tag.Name)
@@ -108,6 +117,7 @@ func Join(q InventoryQuery) InventoryTable {
 			continue
 		}
 		seen[name] = true
+		tag.Remote = remote[InventoryModelKey(name)]
 		rows = append(rows, classify(tag, loaded[name] || loadedMatch(loaded, name), evidence, q))
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -128,6 +138,10 @@ func Join(q InventoryQuery) InventoryTable {
 }
 
 func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q InventoryQuery) InventoryRow {
+	if tag.Remote {
+		return InventoryRow{Model: tag.Name, State: StateRemote, Next: "choose local model",
+			Note: "Runtime reports remote execution; excluded from local fit and measurement."}
+	}
 	row := InventoryRow{
 		Model:  tag.Name,
 		SizeB:  tag.Size,
@@ -455,15 +469,12 @@ func loadedMatch(loaded map[string]bool, name string) bool {
 }
 
 func sameInventoryModel(a, b string) bool {
-	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
-	if a == b {
-		return true
-	}
-	trim := func(s string) string {
-		s = strings.TrimSuffix(s, ":latest")
-		return strings.TrimSuffix(s, ":LATEST")
-	}
-	return trim(a) == trim(b)
+	return InventoryModelKey(a) == InventoryModelKey(b)
+}
+
+// InventoryModelKey matches installed names, including the default :latest tag.
+func InventoryModelKey(name string) string {
+	return modelref.ServedKey(strings.TrimSpace(name))
 }
 
 func stateOrder(state string) int {
@@ -476,6 +487,8 @@ func stateOrder(state string) int {
 		return 2
 	case StateIncompatible:
 		return 3
+	case StateRemote:
+		return 4
 	default:
 		return 9
 	}

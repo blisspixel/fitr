@@ -7,15 +7,14 @@ import "strings"
 // SameServed treats a tag and its optional :latest spelling as the same model.
 // All other names remain distinct.
 func SameServed(want, have string) bool {
-	if want == have {
-		return true
+	return ServedKey(want) == ServedKey(have)
+}
+
+// ServedKey removes one case-insensitive default tag using SameServed's rules.
+func ServedKey(value string) string {
+	const suffix = ":latest"
+	if len(value) >= len(suffix) && strings.EqualFold(value[len(value)-len(suffix):], suffix) {
+		return value[:len(value)-len(suffix)]
 	}
-	trimLatest := func(value string) string {
-		const suffix = ":latest"
-		if len(value) >= len(suffix) && strings.EqualFold(value[len(value)-len(suffix):], suffix) {
-			return value[:len(value)-len(suffix)]
-		}
-		return value
-	}
-	return trimLatest(want) == trimLatest(have)
+	return value
 }

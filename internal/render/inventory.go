@@ -324,7 +324,7 @@ func isWholeArg(s string, start, length int) bool {
 
 func exampleModel(rows []InventoryRow) string {
 	for _, row := range rows {
-		if row.Model != "" {
+		if row.Model != "" && row.State != "remote" {
 			return SingleLine(row.Model)
 		}
 	}
@@ -335,7 +335,7 @@ func stateColor(p palette, state string) string {
 	switch state {
 	case "measured":
 		return p.Pass
-	case "stale":
+	case "stale", "remote":
 		return p.Warn
 	case "incompatible":
 		return p.Fail

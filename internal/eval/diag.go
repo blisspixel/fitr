@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/llm"
+	"github.com/blisspixel/fitr/internal/modelref"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/strictjson"
 )
@@ -194,6 +195,9 @@ func plumbingTransportError(r *PlumbingResult, operation string, err error) erro
 
 func checkPlumbingCapability(ctx context.Context, c llm.Backend, model string, r *PlumbingResult) (bool, error) {
 	info, err := c.Show(ctx, model)
+	if info.IsRemote() {
+		return false, plumbingTransportError(r, "plumbing.show", ollama.ErrRemoteExecution)
+	}
 	if err != nil {
 		return false, plumbingTransportError(r, "plumbing.show", err)
 	}
@@ -455,6 +459,12 @@ func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (Me
 		r.UnavailableReason = "llama-server does not report resident allocation bytes"
 		return r, nil
 	}
+	diskGB, err := memoryDiskGB(ctx, c, model)
+	if err != nil {
+		r.Outcome = OutcomeError
+		return r, err
+	}
+	r.DiskGB = diskGB
 	// Leftovers are recorded by the caller as a contamination warning; a model
 	// that will not unload must not abort the whole run.
 	if _, err := c.StopAll(ctx); err != nil {
@@ -468,13 +478,6 @@ func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (Me
 	case <-timer.C:
 	}
 
-	if tags, err := c.Tags(ctx); err == nil {
-		for _, t := range tags {
-			if t.Name == model {
-				r.DiskGB = round2(float64(t.Size) / (1024 * 1024 * 1024))
-			}
-		}
-	}
 	start := time.Now()
 	samp := ollama.Deterministic(4, numCtx)
 	if _, _, err := c.Generate(ctx, model, "Say OK.", samp); err != nil {
@@ -504,6 +507,26 @@ func RunMemory(ctx context.Context, c llm.Backend, model string, numCtx int) (Me
 		}
 	}
 	return r, nil
+}
+
+func memoryDiskGB(ctx context.Context, c llm.Backend, model string) (float64, error) {
+	tags, err := c.Tags(ctx)
+	if ollama.IsLocalityError(err) {
+		return 0, err
+	}
+	if err != nil {
+		return 0, nil //nolint:nilerr // ordinary unavailable weight metadata remains optional
+	}
+	var size float64
+	for _, tag := range tags {
+		if modelref.SameServed(tag.Name, model) && tag.IsRemote() {
+			return 0, ollama.ErrRemoteExecution
+		}
+		if tag.Name == model {
+			size = round2(float64(tag.Size) / (1024 * 1024 * 1024))
+		}
+	}
+	return size, nil
 }
 
 func round2(v float64) float64 { return float64(int64(v*100+0.5)) / 100 }

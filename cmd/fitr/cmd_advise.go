@@ -193,7 +193,11 @@ func readBackendAdviseSource(ctx context.Context, command adviseCommand,
 		in.HaveSrc = fp.VRAMSource
 	}
 	setAdviseKV(in, fp.Config["OLLAMA_KV_CACHE_TYPE"])
-	ggufPath := readShownAdviseSource(ctx, c, command.model, in)
+	ggufPath, err := readShownAdviseSource(ctx, c, command.model, in)
+	if err != nil {
+		errPrint(err.Error(), "", "select a locally installed model")
+		return nil, "", device.Fingerprint{}, exitError
+	}
 	if in.WeightsB == 0 {
 		in.WeightsB = weightsFromTags(ctx, c, command.model)
 	}
@@ -204,10 +208,16 @@ func readBackendAdviseSource(ctx context.Context, command adviseCommand,
 	return c, ggufPath, fp, exitOK
 }
 
-func readShownAdviseSource(ctx context.Context, c llm.Backend, model string, in *advise.Input) string {
+func readShownAdviseSource(ctx context.Context, c llm.Backend, model string, in *advise.Input) (string, error) {
 	info, err := c.Show(ctx, model)
+	if info.IsRemote() {
+		return "", ollama.ErrRemoteExecution
+	}
+	if ollama.IsLocalityError(err) {
+		return "", err
+	}
 	if err != nil {
-		return ""
+		return "", nil //nolint:nilerr // unavailable architecture metadata retains the inventory-only fallback
 	}
 	in.Quant = info.Details.QuantizationLevel
 	if info.Digest != "" {
@@ -223,7 +233,7 @@ func readShownAdviseSource(ctx context.Context, c llm.Backend, model string, in 
 	if !in.Arch.KVReady() && info.Path != "" {
 		readAdviseGGUFFallback(info.Path, in)
 	}
-	return info.Path
+	return info.Path, nil
 }
 
 func readAdviseGGUFFallback(path string, in *advise.Input) {
@@ -319,6 +329,11 @@ func loadAdviseResident(ctx context.Context, command adviseCommand, c llm.Backen
 	}
 	fmt.Fprintf(os.Stderr, "  loading %s at num_ctx=%d to measure resident size\n", terminalText(command.model), ctxLen)
 	_, _, err = c.Generate(ctx, command.model, ".", ollama.Deterministic(1, ctxLen))
+	if ollama.IsLocalityError(err) {
+		_ = lk.Release()
+		errPrint(err.Error(), "", "select a locally installed model")
+		return nil, exitError
+	}
 	if err != nil {
 		in.LoadErr = err.Error()
 	} else {

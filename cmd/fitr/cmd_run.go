@@ -982,7 +982,7 @@ func largerFittingContext(ctx context.Context, c llm.Backend, model string, fp d
 		return 0
 	}
 	info, err := c.Show(ctx, model)
-	if err != nil || len(info.Info) == 0 {
+	if err != nil || info.IsRemote() || len(info.Info) == 0 {
 		return 0
 	}
 	in := advise.Input{

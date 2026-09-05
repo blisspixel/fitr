@@ -216,6 +216,14 @@ func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pul
 	}
 	found, near := findServedModel(model, tags)
 	if found {
+		if b.Name() == "ollama" {
+			selected, err := selectResolvedModel(b.Name(), model, tags)
+			if err != nil {
+				backendError(disp, "could not select a local model", err.Error(), "")
+				return nil, exitError
+			}
+			return checkOllamaLocality(ctx, b, selected, disp)
+		}
 		return b, exitOK
 	}
 	if b.Name() != "ollama" {
@@ -235,6 +243,25 @@ func checkModelWithDisplay(ctx context.Context, b llm.Backend, model string, pul
 	backendError(disp, fmt.Sprintf("model %q is not installed", presentationModelLabel(model)),
 		fmt.Sprintf("%d model(s) available", len(tags)), hint)
 	return nil, exitUsage
+}
+
+// Inspection happens outside inference timers. Unavailable Show metadata keeps
+// the existing inspection-only fallback; absence of remote markers is not a
+// locality attestation. resolveRunModel requires Show for measured runs.
+func checkOllamaLocality(ctx context.Context, b llm.Backend, selected ollama.ModelInfo,
+	disp render.Display) (llm.Backend, int) {
+	if !selected.IsRemote() {
+		shown, err := b.Show(ctx, selected.Name)
+		if ollama.IsLocalityError(err) {
+			backendError(disp, err.Error(), "", "check the selected model's runtime metadata")
+			return nil, exitError
+		}
+		if !shown.IsRemote() {
+			return b, exitOK
+		}
+	}
+	backendError(disp, ollama.ErrRemoteExecution.Error(), "", "select a locally installed model")
+	return nil, exitError
 }
 
 func findServedModel(model string, tags []ollama.ModelInfo) (bool, []string) {
@@ -305,7 +332,7 @@ func pullOllamaModel(ctx context.Context, client *ollama.Client, backend llm.Bac
 		backendError(disp, "model pull failed", err.Error(), "")
 		return nil, exitError
 	}
-	return backend, exitOK
+	return checkOllamaLocality(ctx, backend, ollama.ModelInfo{Name: model}, disp)
 }
 
 type pullProgress struct {
@@ -357,12 +384,19 @@ func weightsFromTags(ctx context.Context, c llm.Backend, model string) int64 {
 	if err != nil {
 		return 0
 	}
+	var size int64
 	for _, t := range tags {
-		if modelref.SameServed(model, t.Name) && t.Size > 0 {
-			return t.Size
+		if !modelref.SameServed(model, t.Name) {
+			continue
+		}
+		if t.IsRemote() {
+			return 0
+		}
+		if size == 0 && t.Size > 0 {
+			size = t.Size
 		}
 	}
-	return 0
+	return size
 }
 
 // verifiedModelArtifactDigest returns the exact runtime-bound artifact digest
@@ -380,6 +414,9 @@ func verifiedModelArtifactDigest(ctx context.Context, c llm.Backend, model strin
 	for _, tag := range tags {
 		if !modelref.SameServed(model, tag.Name) {
 			continue
+		}
+		if tag.IsRemote() {
+			return ""
 		}
 		digest := tag.Digest
 		if verifier, ok := c.(llm.ModelDigestVerifier); ok {
@@ -415,10 +452,16 @@ func resolveRunModel(ctx context.Context, b llm.Backend, requested string) (reso
 	if err != nil {
 		return resolvedRunModel{}, err
 	}
+	if selected.IsRemote() {
+		return resolvedRunModel{}, ollama.ErrRemoteExecution
+	}
 	resolved := selected.Name
 	shown, err := b.Show(ctx, resolved)
 	if err != nil {
 		return resolvedRunModel{}, fmt.Errorf("inspect resolved model %q: %w", resolved, err)
+	}
+	if shown.IsRemote() {
+		return resolvedRunModel{}, ollama.ErrRemoteExecution
 	}
 	info := mergeModelInfo(selected, shown)
 	info.Name = resolved
@@ -453,6 +496,12 @@ type resolvedRunModel struct {
 
 func mergeModelInfo(listed, shown ollama.ModelInfo) ollama.ModelInfo {
 	out := listed
+	if shown.RemoteModel != "" {
+		out.RemoteModel = shown.RemoteModel
+	}
+	if shown.RemoteHost != "" {
+		out.RemoteHost = shown.RemoteHost
+	}
 	if shown.Size > 0 {
 		out.Size = shown.Size
 	}

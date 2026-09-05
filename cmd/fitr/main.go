@@ -1015,7 +1015,17 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 func installedInventoryModels(b llm.Backend, tags []ollama.ModelInfo) ([]advise.InstalledModel, []string) {
 	warnings := []string{}
 	installed := make([]advise.InstalledModel, 0, len(tags))
+	remote := map[string]bool{}
 	for _, tag := range tags {
+		if tag.IsRemote() {
+			remote[advise.InventoryModelKey(tag.Name)] = true
+		}
+	}
+	for _, tag := range tags {
+		if remote[advise.InventoryModelKey(tag.Name)] {
+			installed = append(installed, advise.InstalledModel{Name: tag.Name, Remote: true})
+			continue
+		}
 		digest, warning := inventoryArtifactDigest(b, tag)
 		if warning != "" {
 			warnings = append(warnings, warning)
@@ -1031,6 +1041,9 @@ func installedInventoryModels(b llm.Backend, tags []ollama.ModelInfo) ([]advise.
 }
 
 func inventoryArtifactDigest(b llm.Backend, tag ollama.ModelInfo) (string, string) {
+	if tag.IsRemote() {
+		return "", ""
+	}
 	if tag.Digest != "" || tag.ReportedDigest == "" {
 		return tag.Digest, ""
 	}
@@ -1046,7 +1059,7 @@ func inventoryArtifactDigest(b llm.Backend, tag ollama.ModelInfo) (string, strin
 }
 
 func enrichInstalledArtifact(item *advise.InstalledModel) {
-	if item.Path == "" {
+	if item.Remote || item.Path == "" {
 		return
 	}
 	kvs, size, err := advise.OpenGGUF(item.Path)
