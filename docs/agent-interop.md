@@ -98,12 +98,103 @@ batches, the Tasks extension and legacy protocol fallback. Supplying client
 capabilities does not enable them. A legacy-only host can therefore fail to
 connect even when it recognizes the plugin package.
 
+## Official SDK acceptance
+
+[`scripts/mcp_sdk_acceptance.py`](../scripts/mcp_sdk_acceptance.py) runs a built
+fitr executable through the official Python SDK **`mcp==2.0.0`**. Its
+[test-only lock](../scripts/mcp-sdk-requirements.txt) pins every dependency and
+accepted wheel hash for CPython 3.14. These packages do not become Go runtime or
+plugin dependencies. This lock targets Linux x64, macOS arm64 and Windows x64,
+matching the CI matrix. It does not support Intel macOS because the pinned
+[cryptography release](https://pypi.org/pypi/cryptography/50.0.1/json) has no
+matching wheel. A local Windows run with the published fitr 0.10.9 binary
+passed both explicit `2026-07-28` and ordinary default client modes against
+empty and synthetic current-schema evidence stores. CI receipts must establish each later binary
+and operating-system result; this is not a named-host acceptance result.
+
+The script uses the released SDK's `Client(stdio_client(...))` transport
+contract. In explicit mode, `session.discover()` can return synthetic cached
+discovery. The smoke instead calls `send_discover`, validates the real reply
+and adopts it. The default client also performs its own initial discovery;
+the transcript must contain both actual probes and no legacy `initialize`.
+These details follow the pinned
+[client implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v2.0.0/src/mcp/client/client.py)
+and [session implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v2.0.0/src/mcp/client/session.py).
+
+Each case validates the catalog, closed schemas, both tools, exact response
+IDs and complete results, an invalid role and an unknown tool. The synthetic
+fixture passes through the canonical record store and real role CLI. Its
+integrity-sealed evidence exercises qualification and preference bounds; it is
+fabricated test data and establishes no model quality. MCP summaries must
+match the local CLI, including optional exploration leads and clamped
+preference intervals. Checks reject exposed paths, model/run identities,
+descriptions and requirement identifiers, including escaped JSON text.
+
+After setup, each case snapshots the temporary home/config/results tree and
+requires its file contents and directory entries to remain unchanged. This
+does not observe transient writes or all filesystem metadata. The SDK receives a minimal child environment
+with those locations redirected and no configured model backend. Python socket
+connections are denied during the smoke; this is not an OS network sandbox
+for subprocesses. No model requests are made. Temporary directory permissions
+follow the host OS, including inherited Windows ACLs.
+
+Every SDK phase has a 20-second deadline and its cleanup must finish within
+five seconds. This establishes bounded SDK cleanup, not observed graceful
+child exit: the official
+[stdio transport](https://github.com/modelcontextprotocol/python-sdk/blob/v2.0.0/src/mcp/client/stdio.py)
+can terminate an unresponsive child after its own two-second wait. The
+separate [native raw-wire smoke](../scripts/mcp-acceptance.py) checks the child's
+exit status. SDK acceptance does not test cancellation races or every protocol
+feature; existing Go protocol fixtures cover those narrower server contracts.
+
+Run from the repository using Go and CPython 3.14.7. On Linux x64/macOS arm64:
+
+```bash
+python3.14 -m venv .tmp/mcp-sdk-venv
+.tmp/mcp-sdk-venv/bin/python -I -m pip install --require-hashes -r scripts/mcp-sdk-requirements.txt
+.tmp/mcp-sdk-venv/bin/python -I -m pip check
+go build -o .tmp/fitr-sdk ./cmd/fitr
+.tmp/mcp-sdk-venv/bin/python -I -B -m unittest discover -s scripts -p test_mcp_sdk_acceptance.py
+.tmp/mcp-sdk-venv/bin/python -I scripts/mcp_sdk_acceptance.py .tmp/fitr-sdk --out .tmp/mcp-sdk-receipt.json
+```
+
+On Windows, use `python -m venv .tmp/mcp-sdk-venv`, the interpreter
+`.tmp/mcp-sdk-venv/Scripts/python.exe`, and binary `.tmp/fitr-sdk.exe` with the
+same arguments. Keep `-I`; the test requires an isolated venv interpreter.
+Use a new receipt path on each run. Dependency installation needs PyPI; the
+acceptance cases use local stdio only. Update the lock deliberately from
+official [PyPI release metadata](https://pypi.org/pypi/mcp/2.0.0/json), retain
+exact versions and matching wheel hashes, and rerun installation with
+`--require-hashes`, `pip check` and all platform acceptance jobs.
+
+The receipt records binary, script, fixture, helper, lock and plugin digests;
+installed dependency versions; OS/Python identity; per-case evidence and
+transcript digests; and measured SDK cleanup. Input file identities are checked
+before and after all cases so a concurrent rebuild cannot silently relabel a
+pass. Raw transcripts and temporary private fixture paths are not published.
+
 ## Next bounded host acceptance
 
-The next useful step is one version-pinned live host row using a temporary
-local evidence fixture, before adding execution tools. Hermes Agent is a
-candidate for that first row; its actual requested protocol revision must be
-observed, not assumed. Record an unsupported revision as an acceptance failure.
+The next useful step is one version-pinned live host row using the same
+temporary evidence fixture. SDK acceptance establishes a real client flow;
+portable package metadata alone establishes no harness support. Record a host's
+unsupported revision as an acceptance failure.
+
+Hermes Agent's released
+[`29112bef099274229cadff79cdff7bf7b99c4b77` MCP connector](https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/tools/mcp_tool.py)
+provides an explicit `protocol: stateless` option. Its default `auto` path
+starts with legacy initialization and has specific fallback error handling,
+which differs from the Python SDK's default discovery-first behavior. A later
+Hermes row should explicitly select `stateless`, restrict its tool allowlist
+to these two tools and observe the actual wire exchange. This is a source-based
+configuration proposal, not a live Hermes compatibility result.
+
+Pi's [v0.85.0 coding-agent documentation](https://github.com/earendil-works/pi/blob/v0.85.0/packages/coding-agent/README.md)
+states that MCP belongs in extensions rather than its built-in agent. Pin an
+actual extension before claiming a Pi integration. OpenClaw's official
+[`mcp probe` contract](https://docs.openclaw.ai/cli/mcp) provides a catalog probe;
+a successful probe alone would not establish tool execution or evidence
+semantics. Neither host has been installed or configured by this acceptance.
 
 The proposed sequence is package discovery, stdio launch, optional discovery,
 catalog/schema inspection, both tool calls, an invalid role, cancellation and
@@ -111,7 +202,7 @@ shutdown. Confirm that the returned review matches local CLI evidence and
 omits private fields. Record the host build, fitr binary/plugin digests,
 requested MCP revision, sanitized configuration and transcript digest. A
 successful row covers this read-only profile only; it does not establish model
-or workflow quality. This acceptance run has not been performed.
+or workflow quality. A named-host acceptance run has not been performed.
 
 | Harness candidate | Official configuration surface | Bind before a later workflow experiment |
 |---|---|---|

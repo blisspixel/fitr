@@ -7,3 +7,5 @@ fitr.exe
 *.test
 coverage*.out
 .tmp/
+__pycache__/
+*.py[cod]

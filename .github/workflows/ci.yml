@@ -145,6 +145,54 @@ jobs:
         with: { go-version: '1.25.14' }
       - run: go test ./... -count=1
 
+  mcp-sdk:
+    needs: dist
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version: '1.27.0' }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: '3.14.7' }
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries
+          path: dist
+      - name: install locked test-only SDK
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/fitr-mcp-sdk"
+          sdk_python="$RUNNER_TEMP/fitr-mcp-sdk/bin/python"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            sdk_python="$RUNNER_TEMP/fitr-mcp-sdk/Scripts/python.exe"
+          fi
+          "$sdk_python" -I -m pip install --require-hashes -r scripts/mcp-sdk-requirements.txt
+          "$sdk_python" -I -m pip check
+          printf 'MCP_SDK_PYTHON=%s\n' "$sdk_python" >> "$GITHUB_ENV"
+      - name: official SDK accepts actual candidate binary
+        shell: bash
+        run: |
+          binary="$(pwd)/dist/fitr-$(go env GOOS)-$(go env GOARCH)"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            binary="$binary.exe"
+          fi
+          chmod +x "$binary"
+          "$MCP_SDK_PYTHON" -I -B -m unittest discover -s scripts -p test_mcp_sdk_acceptance.py
+          "$MCP_SDK_PYTHON" -I scripts/mcp_sdk_acceptance.py "$binary" --out "$RUNNER_TEMP/mcp-sdk-acceptance.json"
+      - name: upload official SDK acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mcp-sdk-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/mcp-sdk-acceptance.json
+
   installer:
     needs: dist
     strategy:
@@ -358,7 +406,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [test, dist, coverage, compatibility, installer, security]
+    needs: [test, dist, coverage, compatibility, mcp-sdk, installer, security]
     runs-on: ubuntu-latest
     steps:
       - name: require every CI gate
