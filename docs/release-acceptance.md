@@ -6,6 +6,41 @@ against real serving runtimes on clean operating-system installs.
 
 Last updated: 2026-09-05.
 
+### 0.10.6 release receipt
+
+Release 0.10.6 is bound to commit
+`8622ba8d796484c87718e8968021cd9727b2c1d8`. The exact commit passed
+[main CI 33957092930](https://github.com/blisspixel/fitr/actions/runs/33957092930)
+with **83.44% aggregate coverage** and
+[native acceptance 33957093133](https://github.com/blisspixel/fitr/actions/runs/33957093133)
+before tagging. The
+[release workflow 33957316679](https://github.com/blisspixel/fitr/actions/runs/33957316679)
+repeated the test, coverage, race, vulnerability, fuzz, lint, reproducibility,
+static binary, size and installer gates before publishing
+[v0.10.6](https://github.com/blisspixel/fitr/releases/tag/v0.10.6).
+
+An earlier candidate failed MCP tests on macOS and Windows because saved
+attachment paths used platform aliases while the server pinned a physical
+root. The fix resolves each attachment parent to that same root, preserves
+the saved evidence, and still rejects escaping aliases and symlinked leaves.
+The successful final CI covers this production fix and its regressions.
+
+All ten public assets were downloaded independently and matched the nine-entry
+checksum manifest. The public Windows amd64 binary is **13,257,216 bytes**,
+reports `fitr 0.10.6`, and has SHA-256
+`445de2129ca5ef89d0c5ddb656c079932a5caa9e95dc567da2e55e813643d872`.
+The tagged PowerShell installer installed that asset into an isolated directory
+with `FITR_NO_PATH=1` and left persistent user PATH unchanged. `update --check`
+reported current. `update --reinstall` staged the verified asset and its hidden
+helper completed replacement: the target write time advanced, no staged files
+remained, and version plus checksum still matched the public release.
+
+Native Linux/macOS acceptance and the downloaded public Windows binary passed
+the real MCP stdio smoke: three typed request IDs, current protocol metadata,
+discovery, exact tool catalog, empty-role output, clean framing and no evidence
+writes. This is binary/profile acceptance, not live acceptance by a named agent
+harness. A2A remains unimplemented. No paid model API calls were used.
+
 ### 0.10.5 release receipt
 
 Release 0.10.5 is bound to commit
