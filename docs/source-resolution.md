@@ -80,11 +80,15 @@ the actual behavior and quality floors for that exact configuration.
 - Duplicate JSON keys, malformed sizes and hashes, conflicting metadata,
   traversal filenames and modified receipt semantics are rejected. New upstream
   fields are allowed; fitr's saved schema rejects unknown fields.
-- Output uses a synced private temporary file and exclusive publication.
+- Output uses a synced temporary file and exclusive publication.
   Existing targets, parent-traversal paths and symbolic-link components are rejected. On
   systems with directory aliases, use the physical directory path. Filesystems
   without hard-link support fail closed. These path checks do not sandbox a
   hostile local process with the same filesystem permissions.
+- Unix writes use mode `0600`; Windows access follows the destination
+  directory's ACL. Use a directory restricted to the intended account. fitr
+  does not encrypt receipts or replace Windows ACLs. A writer can edit a saved
+  receipt and recompute its unkeyed integrity seal.
 
 Resolution does not download weights, execute repository code, alter a role,
 grant adoption authority or delete files. Attach a receipt to a discovery idea

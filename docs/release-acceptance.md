@@ -6,6 +6,47 @@ against real serving runtimes on clean operating-system installs.
 
 Last updated: 2026-09-05.
 
+### 0.10.9 release receipt
+
+Release 0.10.9 is bound to commit
+`968f76a1444a379896670df224cfd3e3d3fb8a6b`. It passed
+[main CI 33962071184](https://github.com/blisspixel/fitr/actions/runs/33962071184)
+with **84.01% aggregate coverage** and
+[native acceptance 33962071033](https://github.com/blisspixel/fitr/actions/runs/33962071033)
+before tagging. The
+[release workflow 33962265419](https://github.com/blisspixel/fitr/actions/runs/33962265419)
+repeated all release gates and published
+[v0.10.9](https://github.com/blisspixel/fitr/releases/tag/v0.10.9).
+
+All ten independently downloaded public assets matched the nine-entry manifest.
+The Windows amd64 binary is **13,557,248 bytes**, reports `fitr 0.10.9`, and has
+SHA-256 `bb6f6a1aa94a2f73ab527dcfaa2f668c3315e0a9745cbfc23922e11135c79656`.
+It adds 116,736 bytes over 0.10.8 and remains below the unchanged
+13,600,000-byte six-target ceiling.
+
+The tagged Windows installer preserved persistent user PATH. `update --check`
+reported current; `update --reinstall` completed deferred replacement with the
+expected hash/version, an advanced timestamp and no staged files remaining.
+The public MCP stdio binary smoke passed without evidence writes.
+
+An offline public-binary artifact fixture matched two explicitly mapped files
+at an exact 45-byte budget. It rejected a wrong source digest and existing
+output, retained provider hash and size mismatches, and reported zero reads
+when the byte budget was insufficient. Historical display still validated
+after only fixture-owned inputs were moved or removed. Original source and
+mapping bytes remained unchanged. The fixture used injected metadata and tiny
+synthetic files; it did not measure a model's fit or quality. Configured
+backend/proxy canaries received zero requests; this is not an OS network
+sandbox claim.
+
+Native regressions cover replacement with preserved size/time, real Windows
+short-path aliases, final-set change detection, cancellation and rehashed
+inconsistent observations. Local final coverage was 82.63%, lint reported zero
+issues and dependency vulnerability checks found none. Documentation clarifies
+that Unix mode `0600` does not replace inherited Windows ACLs or encrypt saved
+receipts. No user model files were modified or deleted. Paid model API spending
+remains $0.
+
 ### 0.10.8 release receipt
 
 Release 0.10.8 is bound to commit

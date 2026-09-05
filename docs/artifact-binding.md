@@ -59,9 +59,15 @@ filesystem snapshot and does not prove that a writable file remains unchanged
 after the observation. A later loader must verify the bytes it consumes.
 
 The receipt embeds its source selection, mapping, limits, actual byte counts,
-per-file outcomes and integrity seal. It is private and immutable; output must
+per-file outcomes and integrity seal. fitr never overwrites it; output must
 use a new filename and cannot overlap a mapped input. Reopening a receipt
 validates the saved observation without reopening the mapped model files.
+
+Receipts may contain absolute local paths. Unix writes use mode `0600`; on
+Windows, access follows the containing directory's ACL. Use a directory already
+restricted to the intended account. fitr does not encrypt receipts or replace
+Windows ACLs. Another process with write access can edit the file and recompute
+an unkeyed integrity seal.
 
 For automation, exit code `0` means all selected local bytes matched their
 declared source hashes. Other valid observations, including local hashes without

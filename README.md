@@ -256,7 +256,7 @@ experiment-scoped provider receipt are documented in
 Installed-model evaluation talks only to the selected endpoint. With a local
 backend and installed artifact, the measurement path can run offline. Network
 access otherwise occurs only for an explicit install, update, pull, or remote
-endpoint.
+endpoint. Explicit source resolution also fetches public file metadata.
 
 Results remain on your machine unless you explicitly export them. The HTML
 export omits raw model output, hostnames, local paths, the raw device
@@ -264,6 +264,10 @@ fingerprint key, and arbitrary runtime configuration. Private workload bundles
 retain hashes and deterministic verifier output rather than raw prompts,
 replies, or tool contents. The resulting integrity receipt is intentionally
 not described as full replayability.
+
+Local storage permissions matter: source and artifact receipts use mode `0600`
+on Unix and inherit the destination directory's ACL on Windows. Use a directory
+restricted to your account. fitr does not encrypt receipts or replace Windows ACLs.
 
 ## Documentation
 
