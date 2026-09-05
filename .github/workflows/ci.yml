@@ -109,8 +109,8 @@ jobs:
       - name: binary size gate
         shell: bash
         run: |
-          # Source attachments and concurrency fixes add about 70 KB to
-          # windows/amd64 (13.44 MB). Keep about 1.2% measured-growth headroom.
+          # Local artifact binding brings windows/amd64 to 13,557,248 bytes.
+          # Retain the existing ceiling; growth must be measured per release.
           max_bytes=13600000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"

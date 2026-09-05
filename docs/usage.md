@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.10.8" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.10.8" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.10.8" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.10.8" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.10.9" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.10.9" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.10.9" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.10.9" alt="fitr top (demo data)" width="820">
 
 ### Disk
 
@@ -209,6 +209,8 @@ of installed RAM as an unconditional model budget.
 | `fitr role adopt <name> <bundle.json>` / `status <name>` / `rollback <name>` | explicitly retain a qualified selection, recheck it or restore valid previous evidence |
 | `fitr mcp serve` | serve bounded read-only role tools over MCP 2026-07-28 stdio; see [interop](agent-interop.md) |
 | `fitr source resolve hf --repo <owner/model> --revision <revision> --file <path> --out <receipt.json>` | resolve explicit public file metadata at an immutable commit without downloading weights; see [source resolution](source-resolution.md) |
+| `fitr artifact bind --source <receipt.json> --mapping <files.json> --out <artifact.json>` | hash explicitly mapped local files within byte/time bounds; see [artifact binding](artifact-binding.md) |
+| `fitr artifact show <artifact.json>` | validate and inspect a saved local-byte observation without reopening model files |
 | `fitr source show <receipt.json>` | validate and inspect a saved metadata receipt offline |
 | `fitr cleanup plan <directory> [--min-age-days 7]` | bounded read-only storage inventory with aged partial-download review candidates; see [cleanup](cleanup.md) |
 | `fitr device [--display MODE]` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |

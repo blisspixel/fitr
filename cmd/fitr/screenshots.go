@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/artifact"
 	"github.com/blisspixel/fitr/internal/atomicfile"
 	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/capacity"
@@ -79,6 +80,7 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		{"advise", shotAdvise}, {"run", shotRun}, {"apply", shotApply},
 		{"board", shotBoard}, {"top", shotTop}, {"doctor", shotDoctor}, {"compare", shotCompare},
 		{"discovery", shotDiscovery}, {"roles", shotRoles}, {"selection", shotSelection}, {"source", shotSource},
+		{"artifact", shotArtifact},
 	}
 	for _, s := range shots {
 		text, err := captureStdout(ctx, s.fn)
@@ -154,6 +156,24 @@ func shotSource(context.Context) (string, error) {
 		Files:          []source.FileMetadata{{Path: "daily-model-Q4_K_M.gguf", State: "present", SizeBytes: &size, DeclaredSHA256: "sha256:fixture"}},
 		Dependencies:   []source.DependencyFinding{{Kind: "projector", Status: "candidate", TargetFile: "mmproj-F16.gguf"}},
 		Gaps:           []string{"dependency_closure_unverified", "local_artifact_unverified"},
+	}, "rich")
+	return "", nil
+}
+
+func shotArtifact(context.Context) (string, error) {
+	fmt.Println("$ fitr artifact show artifact.json")
+	fmt.Println()
+	size := int64(16810714528)
+	render.WriteArtifactBinding(os.Stdout, artifact.Binding{
+		State: "matched", BytesRead: size, Limits: artifact.Limits{MaxBytes: 64 << 30},
+		Source: source.Resolution{Request: source.HFRequest{RepoID: "example/daily-model-GGUF"},
+			ResolvedCommit: strings.Repeat("a", 40),
+			Dependencies:   []source.DependencyFinding{{Kind: "projector", Status: "candidate", TargetFile: "mmproj-F16.gguf", Basis: "filename_only"}}},
+		Files: []artifact.FileObservation{{SourcePath: "daily-model-Q4_K_M.gguf", LocalPath: "/models/daily-model-Q4_K_M.gguf",
+			ComponentRole: "weights", State: "matched", Before: &artifact.FileFacts{SizeBytes: size},
+			ObservedSHA256: "sha256:" + strings.Repeat("b", 64)}},
+		Gaps: []string{"dependency_closure_unverified"}, DependencyState: "unverified",
+		RuntimeState: "unbound", CapacityState: "unmeasured", QualityState: "unmeasured",
 	}, "rich")
 	return "", nil
 }

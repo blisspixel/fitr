@@ -53,7 +53,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.5 | Personal role screening with quality floors and uncertainty-aware preferences, canonical evidence attachments, and read-only cleanup planning |
 | Shipped | 0.10.6 | Fresh role confirmation, explicit selection and validated rollback, runtime and memory preflight, and read-only MCP role tools |
 | Shipped | 0.10.7 | Bounded immutable HF file metadata resolution, dependency gaps and private receipts without weight downloads |
-| Current | 0.10.8 | Private source attachments, explicit receipt selection and source-aware investigation plans with unmeasured fit and quality |
+| Shipped | 0.10.8 | Private source attachments, explicit receipt selection and source-aware investigation plans with unmeasured fit and quality |
+| Current | 0.10.9 | Bounded local artifact observations, explicit file mappings and source hash comparisons without runtime promotion |
 | Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported limiter hypotheses, and multi-surface decision relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
@@ -77,7 +78,7 @@ evidence paths.
 | 2 | complete | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | active | Generalized validated-work receipts and explicit evidence classes | 0.10.4 seals the fixed contract and reconstructs timing with typed proof classes. Multi-attempt, approval, escalation and external protocol receipts remain work before arbitrary workflows. |
-| 5 | active | Source ideas into a personal role library | 0.10.8 links pinned metadata receipts to ideas and keeps dependency, runtime and quality gaps separate. Roles already seal preferences before confirmation and retain explicit selections. Next establish dependency closure and exact runtime binding before bounded fit/experiment plans. See [source attachments](docs/source-attachments.md), [roles](docs/roles.md) and [discovery](docs/discovery.md). |
+| 5 | active | Source ideas into a personal role library | 0.10.9 adds bounded observations of explicitly mapped local files. Source receipts, private ideas and local hashes retain separate claims. Next establish dependency compatibility and exact loaded-runtime identity before bounded fit/experiment plans. See [artifact binding](docs/artifact-binding.md), [source attachments](docs/source-attachments.md) and [roles](docs/roles.md). |
 | 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. |
 
 Automatic selection must pass programmatic resource preflight and a separate
@@ -1148,6 +1149,7 @@ These features must preserve the evidence contract.
 | 0.10.6 | Fresh weighted role confirmation, explicit selection and rollback, capacity and context preflight, and read-only MCP evidence tools |
 | 0.10.7 | Immutable public HF file metadata, separate declared hashes, explicit dependency gaps, private no-overwrite receipts and source terminal cards |
 | 0.10.8 | Private source associations, individual source-aware plans, explicit receipt selection and concurrent inbox capture protection |
+| 0.10.9 | Bounded local artifact hashes, explicit source mappings, immutable observation receipts and separate runtime/capacity/quality gaps |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

@@ -44,6 +44,9 @@ and explicit selection. [Source resolution](source-resolution.md) pins public
 metadata for explicitly selected Hugging Face files without downloading weights.
 In 0.10.8, [source attachments](source-attachments.md) retain those receipts with
 ideas and expose dependency, runtime and quality gaps in individual plans.
+In 0.10.9, [artifact binding](artifact-binding.md) compares explicitly mapped
+local files with the source receipt under byte and time bounds. These local
+observations do not establish loaded-runtime identity or qualify a role.
 Dependency closure, exact runtime binding, source extraction, automatic fit
 planning and bounded automation remain work in the complete flow:
 

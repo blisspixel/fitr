@@ -1,6 +1,8 @@
 # Next: bind the files to a runnable configuration
 
-Status: researched design, not an implemented command. Reviewed 2026-09-05.
+Status: local [artifact binding](artifact-binding.md) implements bounded byte
+observations in 0.10.9. Runtime binding remains a researched design.
+Reviewed 2026-09-05.
 
 Source attachments preserve a candidate investigation. The next step must
 establish what would actually be loaded before estimating fit or running a

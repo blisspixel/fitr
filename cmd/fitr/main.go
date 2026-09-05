@@ -111,6 +111,8 @@ usage:
   fitr mcp serve
   fitr source resolve hf --repo <owner/model> --revision <revision> --file <path> --out <receipt.json>
   fitr source show <receipt.json> [--display MODE]
+  fitr artifact bind --source <resolution.json> --mapping <local-files.json> --out <artifact.json>
+  fitr artifact show <artifact.json> [--display MODE]
   fitr cleanup plan <directory> [--min-age-days N] [--display MODE]
 
 flags:
@@ -223,7 +225,7 @@ func commandHandler(name string) commandFunc {
 		return cmdCalibrate
 	case "compare":
 		return cmdCompare
-	case "decide", "discover", "role", "experiment", "cleanup", "mcp", "source":
+	case "decide", "discover", "role", "experiment", "cleanup", "mcp", "source", "artifact":
 		return planningCommandHandler(name)
 	case "screenshots": // dev-only: regenerate docs/assets from mock data
 		return cmdScreenshots
@@ -243,6 +245,8 @@ func planningCommandHandler(name string) commandFunc {
 		return cmdMCP
 	case "source":
 		return cmdSource
+	case "artifact":
+		return cmdArtifact
 	case "experiment":
 		return cmdExperiment
 	case "cleanup":
@@ -281,7 +285,7 @@ func takesValue(flagArg string) bool {
 	switch name {
 	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec",
 		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim", "repo", "revision", "file", "source",
-		"quality", "minimum-rate", "memory-gb", "max-age-days", "min-age-days":
+		"quality", "minimum-rate", "memory-gb", "max-age-days", "min-age-days", "mapping", "max-bytes", "timeout":
 		return true
 	}
 	return false

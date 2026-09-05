@@ -3,7 +3,7 @@ name: fitr-evidence
 description: Capture candidate models in fitr and interpret local fit, workload, and decision evidence when choosing a configuration for a specific role.
 ---
 
-Requires an installed fitr CLI version 0.10.8 or later and user-selected local evidence.
+Requires an installed fitr CLI version 0.10.9 or later and user-selected local evidence.
 
 Use `fitr --help` for the installed command contract. For a model discovered in
 a post, video, model card, or selected email excerpt, capture its source and
@@ -30,6 +30,15 @@ that the original source recommended that exact artifact. Use `discover plan
 Multiple receipts require explicit `--source <resolution-sha256>` selection;
 never blend commits or translate the idea's mutable alias into an exact runtime
 binding. `detach-source` removes only the managed association copy.
+
+For explicitly selected existing local files, `fitr artifact bind --source
+<receipt.json> --mapping <files.json> --max-bytes <budget> --timeout <duration>
+--out <new.json>` records bounded whole-file observations. The mapping names
+absolute local paths and declared component roles; it does not search model
+storage. Inspect it and the user's I/O authority before hashing large files.
+`artifact show` validates historical observations without reopening model files.
+A local hash or source match remains runtime-unbound and cannot establish fit,
+task quality, projector compatibility or adoption authority.
 
 Validate a saved workload bundle with `fitr experiment workload <bundle.json>`.
 Use `fitr view <result.json>` for ordinary run evidence and
