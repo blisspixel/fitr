@@ -120,10 +120,10 @@ jobs:
       - name: binary size gate
         shell: bash
         run: |
-          # Decision, tradeoff, confirmation, and validated work moved the
-          # windows/amd64 binary to 12,606,976 bytes. Keep about 1.21% headroom, the
-          # same narrow margin used by the prior evidence-analyzer ceiling.
-          max_bytes=12760000
+          # Central diagnosis presentation, decision-relative explanations, and
+          # wide history views moved the windows/amd64 binary to 12,772,352 bytes.
+          # Keep about 1.2% headroom, the same narrow margin used by the prior ceiling.
+          max_bytes=12930000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"
             printf '%-32s %10d bytes\n' "$binary" "$size"
