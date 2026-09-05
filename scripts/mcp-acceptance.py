@@ -84,7 +84,7 @@ def main():
     assert discovery["supportedVersions"] == [PROTOCOL], discovery
     assert discovery["capabilities"] == {"tools": {}}, discovery
     tools = by_id[int, 23]["tools"]
-    assert [tool["name"] for tool in tools] == ["fitr_role_review", "fitr_roles_list"], tools
+    assert [tool["name"] for tool in tools] == ["fitr_role_review", "fitr_role_status", "fitr_roles_list"], tools
     for tool in tools:
         assert tool["annotations"] == {
             "readOnlyHint": True, "destructiveHint": False,

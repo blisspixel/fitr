@@ -8,10 +8,11 @@ named-harness integration test or an OS sandbox for the child executable.
 
 import argparse
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.metadata
 import json
+import os
 from pathlib import Path
 import platform
 import re
@@ -31,12 +32,14 @@ ROOT = Path(__file__).resolve().parent.parent
 LOCK = ROOT / "scripts/mcp-sdk-requirements.txt"
 FIXTURE = ROOT / "internal/record/testdata/schema5-signed-v0.9.8.json"
 HELPER = ROOT / "scripts/mcp-sdk-fixture.go"
+SELECTION_HELPER = ROOT / "scripts/mcp-selection-fixture.go"
 PROTOCOL = "2026-07-28"
 MODES = (PROTOCOL, "auto")
-TOOL_NAMES = ["fitr_role_review", "fitr_roles_list"]
+TOOL_NAMES = ["fitr_role_review", "fitr_role_status", "fitr_roles_list"]
 MAX_TRANSCRIPT_BYTES = 1 << 20
 INVALID_ROLE = "Provide role as 1 to 64 lowercase letters, digits or hyphens, starting with a letter or digit."
 UNAVAILABLE = "Local evidence is unavailable, invalid or exceeds this profile's limits. Inspect it with fitr role review locally."
+STATUS_UNAVAILABLE = "Local selection evidence is unavailable, invalid or exceeds this profile's limits. Inspect it with fitr role status locally."
 
 
 class AcceptanceError(RuntimeError):
@@ -90,11 +93,24 @@ def run_local(arguments, environment=None, timeout=30, allowed=(0,)):
     return process.stdout
 
 
+def fixture_environment(temporary, results):
+    # Preserve the caller's build pins and resolve home-derived Go cache paths
+    # before redirecting the helper's runtime home/config/temp to its fixture.
+    environment = dict(os.environ)
+    keys = ("GOCACHE", "GOMODCACHE", "GOPATH", "GOENV")
+    build = json.loads(run_local(["go", "env", "-json", *keys], environment, timeout=10))
+    require(all(isinstance(build.get(key), str) and build[key] for key in keys),
+            "Go fixture build configuration is unavailable")
+    environment.update(build)
+    environment.update(child_environment(temporary, results))
+    return environment
+
+
 def prepare_fixture(binary, temporary, results):
     results.mkdir()
     saved = json.loads(run_local([
         "go", "run", str(HELPER), str(results), str(FIXTURE),
-    ], timeout=60))
+    ], fixture_environment(temporary, results), timeout=60))
     environment = dict(get_default_environment(), **child_environment(temporary, results))
     spec = {
         "schema": "fitr.role.spec.v1", "name": "coding", "description": "private-role-canary",
@@ -118,6 +134,37 @@ def prepare_fixture(binary, temporary, results):
             "fixture failed integrity or identity checks before decision evaluation")
     require(review["state"] == "single-qualified" and review["candidates"][0].get("preference") is not None,
             "synthetic fixture did not exercise qualification and preference bounds")
+    review["_selection_status"] = json.loads(run_local(
+        [str(binary), "role", "status", "coding", "--display", "json"], environment, allowed=(0, 3, 4)))
+    return review
+
+
+def prepare_selection_fixture(binary, temporary, results, state):
+    require(state in {"qualified", "stale"}, "unknown managed selection fixture state")
+    results.mkdir()
+    saved = json.loads(run_local([
+        "go", "run", str(SELECTION_HELPER), str(results), str(FIXTURE), state,
+    ], fixture_environment(temporary, results), timeout=60))
+    require(saved["state"] == state and saved.get("selection") is not None,
+            "managed fixture did not produce the requested selection")
+    selected = saved["selection"]["selected"]
+    require(selected.get("store_ref", {}).get("schema") == "fitr.evidence.store.ref.v1"
+            and selected.get("runtime_binding", {}).get("kind") == "owned_ollama",
+            "managed fixture lacks sealed store and owned runtime evidence")
+    require(selected["model"]["requested"] != selected["model"]["resolved"],
+            "managed fixture must exercise a distinct private requested alias")
+    environment = dict(get_default_environment(), **child_environment(temporary, results))
+    review = json.loads(run_local([str(binary), "role", "review", "coding", "--display", "json"],
+                                  environment, allowed=(0, 3, 4)))
+    status = json.loads(run_local([str(binary), "role", "status", "coding", "--display", "json"],
+                                 environment, allowed=(0, 3, 4)))
+    require(review["candidates"] == [], "managed selection leaked into ordinary exploration attachments")
+    require(status["state"] == state and status.get("selection") == saved["selection"]
+            and status["receipt_sha256"] == saved["receipt_sha256"],
+            "binary CLI disagrees with public-API managed selection fixture")
+    require((review["revision"] != status["selection"]["spec_sha256"]) is (state == "stale"),
+            "managed stale fixture did not exercise a changed role revision")
+    review["_selection_status"] = status
     return review
 
 
@@ -204,6 +251,30 @@ def validate_review(actual, expected):
         require(candidate.get("preference") == displayed, "preference estimate or uncertainty bounds changed")
 
 
+def validate_selection_status(actual, expected, observed_start, observed_end):
+    status = expected["_selection_status"]
+    for field in ("role", "scope", "state"):
+        require(actual[field] == status[field], f"MCP and CLI selection disagree on {field}")
+    require(actual["revision"] == expected["revision"], "MCP selection current revision changed")
+    require(actual["lifecycle_sha256"] == status["lifecycle_digest"], "MCP selection lifecycle changed")
+    require(actual["adoption_authorized"] is False, "MCP selection status authorized adoption")
+    original = status.get("selection")
+    projected = None if original is None else {
+        "receipt_sha256": status["receipt_sha256"], "revision": original["spec_sha256"],
+        "evidence_sha256": original["selected"]["attachment"]["evidence_sha256"],
+        "expires_at": original["expires_at"],
+    }
+    require(actual.get("selection") == projected, "MCP selected evidence differs from CLI")
+    evaluated = datetime.fromisoformat(actual["evaluated_at"].replace("Z", "+00:00"))
+    require(evaluated.tzinfo is not None, "selection evaluation time is not timezone-aware")
+    require(observed_start <= observed_end, "wall clock moved backward during status call")
+    # RFC3339Nano has nanoseconds; Python datetime truncates to microseconds.
+    # Permit at most one microsecond of serialization precision, not clock skew.
+    precision = timedelta(microseconds=1)
+    require(observed_start - precision <= evaluated <= observed_end + precision,
+            "selection evaluation time is outside the observed status call")
+
+
 async def exercise_client(client, version, expected):
     # Explicit Client mode installs synthetic discovery. send_discover forces
     # actual wire I/O; discover() alone would return that synthetic cached value.
@@ -222,18 +293,28 @@ async def exercise_client(client, version, expected):
     validate_result(listed, "fitr.mcp.roles.v1")
     reviewed = await client.call_tool("fitr_role_review", {"role": "coding"})
     validate_result(reviewed, "fitr.mcp.review.v1", expected_error=expected is None)
+    status_started = datetime.now(timezone.utc)
+    selected = await client.call_tool("fitr_role_status", {"role": "coding"})
+    status_finished = datetime.now(timezone.utc)
+    validate_result(selected, "fitr.mcp.role-status.v1", expected_error=expected is None)
     if expected is None:
         require(listed.structured_content["roles"] == [], "empty store exposed role evidence")
         require(reviewed.content[0].text == UNAVAILABLE, "unavailable evidence diagnostic changed")
+        require(selected.content[0].text == STATUS_UNAVAILABLE, "unavailable selection diagnostic changed")
     else:
-        require(listed.structured_content["roles"] == [{"name": "coding", "revision": expected["revision"], "candidate_count": 1}],
+        require(listed.structured_content["roles"] == [{"name": "coding", "revision": expected["revision"], "candidate_count": len(expected["candidates"])}],
                 "role list differs from the fixture")
         validate_review(reviewed.structured_content, expected)
+        validate_selection_status(selected.structured_content, expected, status_started, status_finished)
         await client.session.validate_tool_result("fitr_role_review", reviewed)
+        await client.session.validate_tool_result("fitr_role_status", selected)
     await client.session.validate_tool_result("fitr_roles_list", listed)
     bad = await client.call_tool("fitr_role_review", {"role": "../private-path-canary"})
     validate_result(bad, "", expected_error=True)
     require(bad.content[0].text == INVALID_ROLE, "invalid role diagnostic changed")
+    bad_status = await client.call_tool("fitr_role_status", {"role": "../private-path-canary"})
+    validate_result(bad_status, "", expected_error=True)
+    require(bad_status.content[0].text == INVALID_ROLE, "invalid selection role diagnostic changed")
     try:
         await client.call_tool("does_not_exist", {})
     except MCPError as error:
@@ -241,10 +322,15 @@ async def exercise_client(client, version, expected):
     else:
         raise AcceptanceError("unknown tool did not produce a protocol error")
     summary = {"listed_roles": len(listed.structured_content["roles"]),
-               "review_state": reviewed.structured_content["state"] if expected else "tool_error"}
+               "review_state": reviewed.structured_content["state"] if expected else "tool_error",
+               "selection_state": selected.structured_content["state"] if expected else "tool_error"}
     if expected:
         summary.update(role_revision=expected["revision"],
-                       evidence_sha256=[candidate["id"] for candidate in expected["candidates"]])
+                       evidence_sha256=[candidate["id"] for candidate in expected["candidates"]],
+                       cli_selection_sha256=digest_bytes(canonical(expected["_selection_status"])))
+        if selected.structured_content.get("selection"):
+            summary["selection"] = selected.structured_content["selection"]
+            summary["lifecycle_sha256"] = selected.structured_content["lifecycle_sha256"]
     return summary
 
 
@@ -296,11 +382,17 @@ def validate_redaction(value, private_values, depth=0):
             validate_redaction(decoded, private_values, depth + 1)
 
 
-async def run_case(binary, version, mode, with_fixture):
+async def run_case(binary, version, mode, fixture):
     with tempfile.TemporaryDirectory(prefix="fitr-sdk-acceptance-") as raw:
         temporary = Path(raw).resolve()
         results = temporary / "results"
-        expected = prepare_fixture(binary, temporary, results) if with_fixture else None
+        if fixture == "manual":
+            expected = prepare_fixture(binary, temporary, results)
+        elif fixture in {"managed-qualified", "managed-stale"}:
+            expected = prepare_selection_fixture(binary, temporary, results, fixture.removeprefix("managed-"))
+        else:
+            require(fixture == "empty", "unknown SDK acceptance fixture")
+            expected = None
         before = snapshot(temporary)
         transcript = []
         parameters = StdioServerParameters(command=str(binary), args=["mcp", "serve"],
@@ -319,11 +411,19 @@ async def run_case(binary, version, mode, with_fixture):
             require(stderr.read() == "", "server emitted unexpected stderr")
         require(snapshot(temporary) == before, "read-only SDK calls changed the fixture filesystem")
         private = [str(temporary), "private-role-canary", "private-decision-canary", "private-quality-canary",
-                   "private-path-canary", "private-model-canary"]
+                   "private-path-canary", "private-model-canary", "private-runtime-canary",
+                   "private-confirmation", "private-auto-session"]
         if expected:
             private.extend(item["run_id"] for item in expected["candidates"])
+            selection = expected["_selection_status"].get("selection")
+            if selection:
+                for point in selection["points"]:
+                    private.extend([point["attachment"]["path"], point["attachment"]["run_id"],
+                                    point["model"]["requested"], point["model"]["resolved"]])
         validate_transcript(transcript, private, mode)
-        return {"mode": mode, "fixture": "synthetic-current-schema-sealed-canonical" if with_fixture else "empty",
+        return {"mode": mode, "fixture": {"manual": "synthetic-current-schema-sealed-canonical",
+                                         "managed-qualified": "synthetic-sealed-managed-qualified",
+                                         "managed-stale": "synthetic-sealed-managed-stale-role-revision"}.get(fixture, fixture),
                 "protocol": PROTOCOL, "state": "passed", "summary": summary,
                 "transcript_kind": "sdk-decoded-jsonrpc", "transcript_sha256": digest_bytes(canonical(transcript)),
                 "message_count": len(transcript), "evidence_unchanged": True,
@@ -360,9 +460,12 @@ async def accept(binary):
             "binary version differs from this checkout")
     sys.addaudithook(deny_network)
     cases = []
-    for mode in MODES:
-        for with_fixture in (False, True):
-            cases.append(await run_case(binary, version, mode, with_fixture))
+    # Preserve the original empty/manual four cases, then add both managed
+    # selection states under both real SDK negotiation modes.
+    for fixtures in (("empty", "manual"), ("managed-qualified", "managed-stale")):
+        for mode in MODES:
+            for fixture in fixtures:
+                cases.append(await run_case(binary, version, mode, fixture))
     require(input_identities(binary) == identities, "acceptance inputs changed during the run")
     return {"schema": "fitr.acceptance.mcp-sdk.v1", "state": "passed", "scope": "official-sdk-stdio",
             "recorded_at": datetime.now(timezone.utc).isoformat(), "fitr_version": version,
@@ -377,7 +480,7 @@ async def accept(binary):
 def input_identities(binary):
     return {"binary_sha256": digest_file(binary), "dependency_lock_sha256": digest_file(LOCK),
             "script_sha256": digest_file(Path(__file__)), "fixture_sha256": digest_file(FIXTURE),
-            "fixture_helper_sha256": digest_file(HELPER),
+            "fixture_helper_sha256": digest_file(HELPER), "selection_fixture_helper_sha256": digest_file(SELECTION_HELPER),
             "plugin_files_sha256": {path.relative_to(ROOT / "plugins/fitr").as_posix(): digest_file(path)
                                      for path in sorted((ROOT / "plugins/fitr").rglob("*")) if path.is_file()}}
 
@@ -394,7 +497,7 @@ def main():
     with args.out.open("x", encoding="utf-8") as stream:
         json.dump(receipt, stream, indent=2)
         stream.write("\n")
-    print(f"Official MCP SDK 2.0.0 acceptance passed: fitr {receipt['fitr_version']}; four cases; no named harness claim.")
+    print(f"Official MCP SDK 2.0.0 acceptance passed: fitr {receipt['fitr_version']}; {len(receipt['cases'])} cases; no named harness claim.")
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ first; speed and resource preferences help choose among models that meet them.
 See the [personal fitting direction](docs/personal-fitting.md) for the proposed
 Fit and Extended fit scopes, usable context, compaction and harness scorecards.
 
-<img src="docs/assets/top.svg?v=0.10.11" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
+<img src="docs/assets/top.svg?v=0.10.12" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
 The wide Board keeps the comparable configurations, selected evidence, exact
 measurements, unresolved requirements, and one next action on one screen. The
@@ -78,7 +78,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.10.11" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.10.12" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 
@@ -103,7 +103,7 @@ fitr discover attach-source <idea-id> candidate.json
 fitr discover plan <idea-id>
 ```
 
-<img src="docs/assets/source.svg?v=0.10.11" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
+<img src="docs/assets/source.svg?v=0.10.12" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
 
 The receipt pins a commit, preserves declared file sizes and hashes, and
 surfaces dependency gaps. It downloads no weights and does not qualify the
@@ -114,7 +114,7 @@ flow, and [agent interoperability](docs/agent-interop.md) for the portable
 Agent Plugins package, read-only MCP tools, and the researched A2A, Hermes,
 Pi and OpenClaw integration boundaries.
 
-<img src="docs/assets/discovery.svg?v=0.10.11" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
+<img src="docs/assets/discovery.svg?v=0.10.12" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
 
 For files already on disk, an explicit mapping can compare their local hashes
 with the pinned receipt before any runtime experiment:
@@ -125,7 +125,7 @@ fitr artifact bind --source candidate.json --mapping local-files.json --max-byte
 
 Read [artifact binding](docs/artifact-binding.md) for the mapping and I/O bounds.
 
-<img src="docs/assets/artifact.svg?v=0.10.11" alt="Local artifact fixture with a whole-file hash match and separate unverified dependencies, unbound runtime and unmeasured quality" width="820">
+<img src="docs/assets/artifact.svg?v=0.10.12" alt="Local artifact fixture with a whole-file hash match and separate unverified dependencies, unbound runtime and unmeasured quality" width="820">
 
 Matching local bytes still leaves runtime unbound, and capacity and quality
 unmeasured.
@@ -141,7 +141,7 @@ fitr role attach coding /path/to/canonical-result.json
 fitr role review coding
 ```
 
-<img src="docs/assets/roles.svg?v=0.10.11" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
+<img src="docs/assets/roles.svg?v=0.10.12" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
 
 A candidate must clear every floor before preferences matter. Comparisons
 retain uncertainty and check sensitivity to weight changes; missing evidence
@@ -169,7 +169,7 @@ each request, and collects comparable evidence. A preselected choice gets one
 fresh confirmation attempt before adoption. Quality floors stay fixed, and
 an uncertain result stays unresolved. Status explains each candidate's gaps.
 
-<img src="docs/assets/auto.svg?v=0.10.11" alt="Auto fitting fixture with a confirmed preselected model, separate evidence progress and consumed allowances, and explicit adoption" width="820">
+<img src="docs/assets/auto.svg?v=0.10.12" alt="Auto fitting fixture with a confirmed preselected model, separate evidence progress and consumed allowances, and explicit adoption" width="820">
 
 Manual adoption is the default. `--adoption confirmed-only` can authorize
 selection in fitr after confirmation and runtime cleanup. The first owner is
@@ -200,7 +200,7 @@ unresolved dependencies remain explicit. See [cleanup planning](docs/cleanup.md)
 | Source resolution | Commit-pinned public file metadata, distinct declared hashes and unresolved dependencies, with no weight downloads | [Source metadata](docs/source-resolution.md) |
 | Discovery investigations | Private source attachments and separately stated metadata, dependency, runtime and quality gaps | [Source attachments](docs/source-attachments.md) |
 | Local artifact observations | Bounded whole-file hashes for explicit mappings, source comparisons and change detection without runtime promotion | [Artifact binding](docs/artifact-binding.md) |
-| Agent interoperability | Read-only MCP 2026-07-28 role tools, official SDK acceptance and an Agent Plugins 1.0.0 package | [Protocol and client limits](docs/agent-interop.md) |
+| Agent interoperability | Read-only MCP 2026-07-28 candidate review and selected status, official SDK acceptance and an Agent Plugins 1.0.0 package | [Protocol and client limits](docs/agent-interop.md) |
 | Cleanup planning | Read-only bounded storage inventory and aged partial-download review candidates, with no inferred deletion authority | [Cleanup](docs/cleanup.md) |
 | Context experiments | A predeclared exploratory context plan with shared task seeds, point-specific allocation, required-equal factors, and replayable bundles | [Context experiment](docs/usage.md#context-experiment) |
 | Configuration tradeoffs | Conservative frontiers across sealed candidates, optional same-base conversion lineage, and no point-estimate winner when intervals overlap | [Quant experiment](docs/usage.md#quant-configuration-experiment), [calibration](docs/calibration.md) |

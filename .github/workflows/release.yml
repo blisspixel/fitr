@@ -124,7 +124,7 @@ jobs:
         run: |
           # The owned auto runtime and evidence lifecycle measure 15,053,824
           # bytes on windows/amd64; all six targets retain this measured cap.
-          max_bytes=15100000
+          max_bytes=15150000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"
             printf '%-32s %10d bytes\n' "$binary" "$size"

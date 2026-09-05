@@ -414,7 +414,11 @@ func (store Store) ReviewSelection(name string, records record.Store, now time.T
 	if err != nil {
 		return SelectionStatus{}, err
 	}
-	status := SelectionStatus{Schema: LifecycleSchema + ".status", Role: name, Scope: "battery_screening", State: "unselected", LifecycleDigest: life.Digest, PreviousSHA256: life.PreviousSHA256, EvaluatedAt: now.UTC().Format(time.RFC3339Nano)}
+	return reviewSelectionSnapshot(library, life, records, now)
+}
+
+func reviewSelectionSnapshot(library Library, life Lifecycle, records record.Store, now time.Time) (SelectionStatus, error) {
+	status := SelectionStatus{Schema: LifecycleSchema + ".status", Role: library.Name, Scope: "battery_screening", State: "unselected", LifecycleDigest: life.Digest, PreviousSHA256: life.PreviousSHA256, EvaluatedAt: now.UTC().Format(time.RFC3339Nano)}
 	status.Attempts, status.LastAttempt = lifecycleAttempts(life)
 	if life.IncumbentSHA256 == "" {
 		return status, nil

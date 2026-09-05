@@ -29,16 +29,23 @@ func (s *server) call(ctx context.Context, req request) response {
 			return s.toolError(req.id, "This tool accepts an empty argument object.")
 		}
 		data, err = s.source.list(ctx)
-	case "fitr_role_review":
+	case "fitr_role_review", "fitr_role_status":
 		var roleName string
 		if !onlyKeys(arguments, "role") || json.Unmarshal(arguments["role"], &roleName) != nil || !roleNamePattern.MatchString(roleName) {
 			return s.toolError(req.id, "Provide role as 1 to 64 lowercase letters, digits or hyphens, starting with a letter or digit.")
 		}
-		data, err = s.source.review(ctx, roleName)
+		if name == "fitr_role_status" {
+			data, err = s.source.status(ctx, roleName)
+		} else {
+			data, err = s.source.review(ctx, roleName)
+		}
 	default:
 		return failure(req.id, -32602, "Unknown tool")
 	}
 	if err != nil {
+		if name == "fitr_role_status" {
+			return s.toolError(req.id, "Local selection evidence is unavailable, invalid or exceeds this profile's limits. Inspect it with fitr role status locally.")
+		}
 		return s.toolError(req.id, "Local evidence is unavailable, invalid or exceeds this profile's limits. Inspect it with fitr role review locally.")
 	}
 	encoded, err := json.Marshal(data)
@@ -61,6 +68,9 @@ func catalog() []map[string]any {
 		{"name": "fitr_role_review", "description": "Recheck a local role's canonical battery screening evidence. Returns redacted states and preference bounds; never authorizes model adoption.",
 			"inputSchema":  objectSchema(map[string]any{"role": map[string]any{"type": "string", "pattern": roleNamePattern.String(), "maxLength": 64}}, "role"),
 			"outputSchema": reviewSchema(), "annotations": annotations},
+		{"name": "fitr_role_status", "description": "Recheck an existing local role selection against its lifecycle and canonical or closed managed evidence. Returns only redacted qualification, digests and expiry; never authorizes execution or adoption.",
+			"inputSchema":  objectSchema(map[string]any{"role": map[string]any{"type": "string", "pattern": roleNamePattern.String(), "maxLength": 64}}, "role"),
+			"outputSchema": statusSchema(), "annotations": annotations},
 		{"name": "fitr_roles_list", "description": "List local role names, revision digests and attachment counts. No model names, descriptions, source paths or raw evidence are shared.",
 			"inputSchema": objectSchema(map[string]any{}), "outputSchema": listSchema(), "annotations": annotations},
 	}

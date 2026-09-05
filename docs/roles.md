@@ -123,7 +123,12 @@ fitr role status coding
 fitr role rollback coding
 ```
 
-<img src="assets/selection.svg?v=0.10.11" alt="Role status fixture with a qualified incumbent and a separate failed challenger attempt" width="900">
+<img src="assets/selection.svg?v=0.10.12" alt="Role status fixture with a qualified incumbent and a separate failed challenger attempt" width="900">
+
+An explicitly connected MCP host can use `fitr_role_status` for a bounded,
+redacted observation of this incumbent, including selections from auto-managed
+stores. It returns the current state and evidence digests; stale evidence never
+becomes authority to adopt or execute. See [agent interoperability](agent-interop.md).
 
 Confirmation keeps the incumbent reference until explicit adoption. Adoption
 stores fitr's selection; it does not change a serving configuration. Rollback

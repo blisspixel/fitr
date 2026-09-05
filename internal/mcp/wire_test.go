@@ -25,6 +25,7 @@ func (f fixtureSource) list(context.Context) (any, error) {
 	return roleList{Schema: "fitr.mcp.roles.v1", Roles: []roleSummary{}}, nil
 }
 func (f fixtureSource) review(ctx context.Context, _ string) (any, error) { return f.list(ctx) }
+func (f fixtureSource) status(ctx context.Context, _ string) (any, error) { return f.list(ctx) }
 
 func TestIndependentProtocolFixtures(t *testing.T) {
 	data, err := os.ReadFile("testdata/protocol.json")
@@ -130,7 +131,7 @@ func TestNotificationsProduceNoResponse(t *testing.T) {
 
 func TestCatalogIsStableAndBoundToStrictSchemas(t *testing.T) {
 	first, second := catalog(), catalog()
-	if !reflect.DeepEqual(first, second) || len(first) != 2 {
+	if !reflect.DeepEqual(first, second) || len(first) != 3 {
 		t.Fatal("unstable catalog")
 	}
 	for _, tool := range first {

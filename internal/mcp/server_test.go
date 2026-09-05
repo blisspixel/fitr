@@ -28,6 +28,10 @@ func (source blockingSource) review(ctx context.Context, _ string) (any, error) 
 	return source.list(ctx)
 }
 
+func (source blockingSource) status(ctx context.Context, _ string) (any, error) {
+	return source.list(ctx)
+}
+
 type channelWriter chan []byte
 
 func (writer channelWriter) Write(data []byte) (int, error) {

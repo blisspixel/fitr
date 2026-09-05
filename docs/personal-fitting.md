@@ -48,8 +48,11 @@ must identify Pi, its model adapter, tools, task pack and settings. The pinned
 [Pi SDK](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/sdk.md)
 and [compaction contract](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/compaction.md)
 provide integration points; they do not establish fitr compatibility or model
-quality before actual acceptance. The first prototype will use deterministic
-fake responses to verify harness mechanics before local-model evaluation.
+quality before actual acceptance. The private deterministic prototype now
+passes real compaction and exact checkpoint reopening, including tamper and
+cancellation cases. Fake responses establish those mechanics; local-model
+evaluation and independently verified task quality remain work. See the
+[recorded boundaries](agent-interop.md#named-host-compatibility).
 
 Show separate outcomes for local screening, document context checks and each
 harness workload. A failed challenger preserves a qualified incumbent. A

@@ -56,7 +56,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.8 | Private source attachments, explicit receipt selection and source-aware investigation plans with unmeasured fit and quality |
 | Shipped | 0.10.9 | Bounded local artifact observations, explicit file mappings and source hash comparisons without runtime promotion |
 | Shipped | 0.10.10 | Official MCP SDK binary acceptance and Ollama remote-provenance checks before local experiments |
-| Current | 0.10.11 | Bounded auto fitting with an explicit shortlist, owned Windows runtime, resource gates, quality-first comparison and fresh confirmation; a consistent terminal identity |
+| Shipped | 0.10.11 | Bounded auto fitting with an explicit shortlist, owned Windows runtime, resource gates, quality-first comparison and fresh confirmation; a consistent terminal identity |
+| Current | 0.10.12 | Read-only MCP selection status for managed incumbents, bounded local path resolution and expanded official SDK acceptance |
 | Now | 0.11 | Typed usable-context quality and one pinned model-plus-harness workflow, extending validated-work receipts and personal preferences |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |

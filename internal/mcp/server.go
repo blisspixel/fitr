@@ -14,6 +14,7 @@ const maxInFlight = 4
 type evidenceSource interface {
 	list(context.Context) (any, error)
 	review(context.Context, string) (any, error)
+	status(context.Context, string) (any, error)
 }
 
 type pending struct {

@@ -75,10 +75,14 @@ command and the client supports MCP 2026-07-28. The server does not support the
 legacy initialize handshake. Live acceptance by a particular client must be
 tested separately from package-format compatibility.
 
-The MCP tools `fitr_roles_list` and `fitr_role_review` share role names, revision
-and evidence digests, states, counts and preference bounds from the configured
-local `FITR_RESULTS` directory. They omit paths, model names, descriptions and
-raw diagnostics. Role names themselves are shared, so keep secrets out of names.
+The MCP tools `fitr_roles_list`, `fitr_role_review` and `fitr_role_status` share
+role names, revision and evidence digests, states, counts and preference bounds
+from the configured local `FITR_RESULTS` directory. Review screens manually
+attached candidates. Status revalidates a confirmed selection, including closed
+auto-managed evidence, and reports qualified, stale or unselected. A stale
+selection digest is historical evidence, not current qualification. The tools
+omit paths, model names, descriptions and raw diagnostics. Role names themselves
+are shared, so keep secrets out of names.
 Use the local CLI when detailed diagnostics are needed. The server cannot
 attach evidence, execute models, change preferences or authorize adoption.
 

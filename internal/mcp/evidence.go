@@ -30,8 +30,8 @@ type localEvidence struct {
 }
 
 func newLocalEvidence(dir string) (*localEvidence, error) {
-	if strings.TrimSpace(dir) == "" || strings.HasPrefix(dir, `\\`) || strings.HasPrefix(dir, "//") {
-		return nil, errors.New("result root is required")
+	if err := localEvidencePath(dir); err != nil {
+		return nil, err
 	}
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
@@ -187,7 +187,7 @@ func samePath(first, second string) bool {
 }
 
 func checkedDirectory(path string) error {
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := resolveLocalEvidence(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}

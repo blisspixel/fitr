@@ -8,7 +8,7 @@ verified model-plus-harness work are separate acceptance boundaries.
 
 | Surface | Version | Current fitr implementation |
 |---|---|---|
-| MCP | 2026-07-28 | Read-only evidence server over stateless stdio; two bounded tools |
+| MCP | 2026-07-28 | Read-only evidence server over stateless stdio; three bounded tools |
 | Agent Plugins | 1.0.0 | Portable skill plus root MCP configuration |
 | A2A | 1.0.0 specification, `1.0` wire version | Researched future evaluation adapter; no endpoint or adapter implemented |
 
@@ -16,8 +16,9 @@ The [MCP July release](https://blog.modelcontextprotocol.io/posts/2026-07-28/)
 replaces the initialization/session lifecycle with self-contained requests and
 moves Tasks to an extension. fitr implements a specific stdio profile, not every
 feature of that revision. Literal protocol fixtures and sealed local evidence
-tests cover its behavior. **No named harness has a recorded live fitr acceptance
-result yet.**
+tests cover its behavior. **No named harness has passed complete live fitr
+acceptance yet.** A pinned Hermes binary exchange below records a client trust
+gate blocker after successful discovery.
 
 ## Load the portable package
 
@@ -71,13 +72,19 @@ the current [stdio binding](https://modelcontextprotocol.io/specification/2026-0
 |---|---|---|
 | `fitr_roles_list` | `{}` | Role names, revision digests and attachment counts |
 | `fitr_role_review` | `{"role":"coding"}` | Rechecked battery-screening state, evidence digests, candidate states, reason/gap counts, preference bounds and comparison readiness |
+| `fitr_role_status` | `{"role":"coding"}` | Rechecked current selection, including auto-managed evidence: current revision, lifecycle digest, evaluation time, unselected/qualified/stale state and optional selected receipt, original revision, evidence digest and expiry |
 
-The review invokes existing local role checks and always returns
+Review and status invoke existing local role checks and always return
 `adoption_authorized: false`. It does not expose confirmation, adoption,
 rollback, downloads, model execution, arbitrary paths or endpoint selection.
 Model names, source paths, run IDs, descriptions and raw diagnostics are
 omitted. Role names and digests are shared, so role names must not contain
 secrets. The host selects the evidence root; tool input cannot change it.
+
+Review reports manually attached candidates. Status checks the selected
+incumbent and its complete confirmation set without reading obsolete former
+stores. A stale incumbent's digests remain visible with `state: "stale"`;
+neither that identity nor a successful MCP call authorizes adoption or execution.
 
 Results use `resultType: "complete"`. Unknown methods/tools are protocol
 errors; invalid tool arguments or unavailable evidence return `isError: true`
@@ -124,7 +131,7 @@ These details follow the pinned
 [client implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v2.0.0/src/mcp/client/client.py)
 and [session implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v2.0.0/src/mcp/client/session.py).
 
-Each case validates the catalog, closed schemas, both tools, exact response
+Each case validates the catalog, closed schemas, all three tools, exact response
 IDs and complete results, an invalid role and an unknown tool. The synthetic
 fixture passes through the canonical record store and real role CLI. Its
 integrity-sealed evidence exercises qualification and preference bounds; it is
@@ -132,6 +139,15 @@ fabricated test data and establishes no model quality. MCP summaries must
 match the local CLI, including optional exploration leads and clamped
 preference intervals. Checks reject exposed paths, model/run identities,
 descriptions and requirement identifiers, including escaped JSON text.
+
+The suite now has eight cases: empty, manually attached, managed qualified and
+managed stale evidence under both explicit and default client modes. The
+[managed fixture helper](../scripts/mcp-selection-fixture.go) creates and closes
+real stores, finishes fresh confirmation and adopts through public lifecycle
+APIs using synthetic records. Its stale case changes the role revision after
+adoption. Status must match CLI state, lifecycle, selected receipt, original
+revision, evidence and expiry while keeping private aliases and store identity
+out of the wire projection. Its helper hash is bound before and after the run.
 
 After setup, each case snapshots the temporary home/config/results tree and
 requires its file contents and directory entries to remain unchanged. This
@@ -178,41 +194,63 @@ pass. Raw transcripts and temporary private fixture paths are not published.
 
 ## Named-host compatibility
 
-These are source-based assessments checked September 5, 2026, not recorded
-live fitr acceptance results. The official SDK acceptance above does not change
-any row's status.
+These assessments were checked September 5, 2026. Hermes has a recorded real
+connector exchange; the other rows remain source-based. Official SDK acceptance
+does not establish named-host compatibility.
 
 | Host and inspected release | Current boundary with fitr |
 |---|---|
-| Hermes Agent v2026.8.31 / 0.21.0 | **Plausible, unaccepted.** The [released connector](https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/tools/mcp_tool.py) offers explicit `protocol: stateless`. Default `auto` starts with legacy initialization; even stateless discovery has fallback handling. Observe the actual exchange. |
+| Hermes Agent v2026.8.31 / 0.21.0 | **Discovery accepted; tool calls blocked by the pinned client.** Explicit stateless mode discovers the public fitr 0.10.11 binary and its two-tool catalog. The [connector trust reader](https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/tools/mcp_tool.py#L4627-L4716) checks camelCase `readOnlyHint`, while its locked SDK exposes `read_only_hint`. The unchanged untrusted gate rejects dispatch before any `tools/call`. |
 | Pi v0.85.1 | **Extension required, unaccepted.** The [released agent](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/README.md) leaves MCP to extensions. Pin and test a specific adapter; the portable package does not establish built-in support. |
 | Official DeepSeek Harness `dsh-v0.1.3-alpha.1` | **Legacy protocol mismatch, unaccepted.** This is a [developer-preview harness](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.3-alpha.1), distinct from DeepSeek models. Its [lock](https://github.com/deepseek-ai/deepseek-harness/blob/d347e703908d0406b7a7ef80e3a0e594d86b2215/pnpm-lock.yaml) selects SDK 1.29.0 and its [connector](https://github.com/deepseek-ai/deepseek-harness/blob/d347e703908d0406b7a7ef80e3a0e594d86b2215/packages/mcp/mcp-client/src/connection.ts) uses the legacy client handshake. |
 | OpenClaw v2026.9.1 | **Legacy protocol mismatch, unaccepted.** Its [release manifest](https://github.com/openclaw/openclaw/blob/v2026.9.1/package.json) pins SDK 1.30.0, whose [protocol declarations](https://github.com/modelcontextprotocol/typescript-sdk/blob/2d889f2b329e46680ec9bdd565de4616c497825a/src/types.ts) stop at `2025-11-25`. A catalog probe cannot make that client speak fitr's stateless revision. |
 | NVIDIA NemoClaw v0.0.120 | **Managed transport mismatch, unaccepted.** Its [managed MCP contract](https://github.com/NVIDIA/NemoClaw/blob/2444537f5a77c7b2789de4d59430e228328b8279/docs/deployment/set-up-mcp-bridge.mdx) accepts authenticated Streamable HTTP and explicitly excludes host stdio bridges. fitr currently exposes stdio only. |
 
-The 0.10.11 tools review canonical manually attached role candidates. They do
-not expose the selected incumbent in auto's separate managed evidence stores.
-Use `fitr role status` or `fitr auto status` locally for that selection. A
-bounded read-only MCP selection-status extension is the next connector slice;
-it must revalidate the original lifecycle and preserve the same redaction
-boundary before any host can rely on its response.
+### Recorded Hermes boundary
+
+The isolated Windows acceptance used Hermes commit
+`29112bef099274229cadff79cdff7bf7b99c4b77`, Python 3.13.15, its unchanged source
+and lock, 80 hash-verified locked wheels, and the public fitr 0.10.11 executable
+with SHA-256 `c59fb2e73010021fa38ee33159bab95343d666470722ef4146c71b9bafc64540`.
+Actual wire discovery and catalog inspection succeeded. The wire annotation was
+`readOnlyHint: true`; the locked `mcp-types==2.0.0` object exposed
+`read_only_hint=True`. The connector registered the tools but classified them
+as write-capable, so its normal trust gate blocked dispatch. No trust override
+or upstream patch was used. The definitive stateless receipt digest is
+`8c7a11bca1cae779e2d748f8e099d94b8b1b0b69b3db03811724bec198dc4ae6`.
+
+The legacy negative case recorded three actual `initialize` attempts with
+`2025-11-25`, each rejected with `-32602` for missing stateless metadata. All
+three children exited cleanly. The successful stateless child also exited
+cleanly; evidence contents stayed unchanged. Dependent sealed-evidence, idle
+and invalid-argument positive cases remain unaccepted because dispatch was
+blocked. No model requests were made. This is a bounded client compatibility
+finding, not complete Hermes acceptance or an OS network-confinement claim.
 
 The proposed [Fit and Extended fit scopes](personal-fitting.md#fit-and-extended-fit)
 separate connector acceptance from model-plus-harness task evaluation. A Pi
 SDK workflow with externally verified state, actual compaction and exact
 checkpoint restart is being prototyped with fake model responses first.
+The pinned Pi 0.85.1 prototype passed nine separate process cases covering
+normal tool state, built-in compaction, exact reopening, four checkpoint-tamper
+rejections, cancellation and provider errors. It uses restricted resources and
+tools with a fake provider; this proves harness wiring, not model retention or
+task quality. A native fitr adapter must still account for all requests: a
+split compaction can make two summary calls, ordinary turns may omit an output
+cap, and a canceled callback can arrive already aborted before admission.
 
 The legacy SDK [initialization path](https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.29.0/src/client/index.ts)
-is incompatible with fitr's modern-only server. This is a source-level finding;
-a negative named-host binary test still needs to be recorded. A future legacy
-profile or transport adapter must be explicit and separately tested.
+is incompatible with fitr's modern-only server. Hermes now has the negative
+binary exchange above; other host paths still need their own acceptance. A
+future legacy profile or transport adapter must be explicit and separately
+tested.
 
 ## Ordered integration roadmap
 
-1. **Accept one Hermes read-only client path.** Use explicit stateless mode,
-   the two-tool allowlist, a pinned host and a temporary canonical evidence
-   fixture. Disable unused sampling, elicitation, resources and prompts.
-   Exercise real discovery, catalog/schema inspection, both calls, invalid
+1. **Resolve the Hermes trust-reader boundary, then finish acceptance.** Keep
+   the failed pinned path as a regression. A separately pinned corrected client
+   must accept read-only annotations without relaxing trust and pass an explicit
+   three-tool allowlist. Exercise canonical and managed evidence, invalid
    arguments, idle keepalive, cancellation and bounded shutdown without an LLM.
 2. **Prototype one Pi Extended fit workflow.** Use the pinned SDK with
    explicit resources, restricted tools and a native fitr model adapter.
