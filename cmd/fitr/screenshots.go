@@ -454,7 +454,9 @@ func shotInventory(context.Context) (string, error) {
 			{Model: "qwen3.5:27b", State: "unproven", SizeB: 17394617543,
 				Next: "fitr advise qwen3.5:27b"},
 			{Model: "llama3:70b", State: "incompatible", SizeB: 39943195892,
-				Next: "try a smaller quant", Note: "weights 37.2 GB exceed 24.0 GB (nvidia-smi)"},
+				Next: "try a smaller quant", Note: "weights 37.2 GiB exceed 24.0 GiB (nvidia-smi)"},
+			{Model: "hosted-model:cloud", State: "remote", Next: "choose local model",
+				Note: "Runtime reports remote execution; excluded from local fit and measurement."},
 		},
 	}, "rich")
 	return "", nil

@@ -131,13 +131,13 @@ func writeInventoryHeader(w io.Writer, inv Inventory, width int, p palette, g gl
 		Field(w, "  gpu", invHeaderLabel, gpu, width)
 	}
 	if inv.MemoryGB > 0 && inv.MemorySource != "" {
-		mem := fmt.Sprintf("%.1f (%s)", inv.MemoryGB, inv.MemorySource)
+		mem := fmt.Sprintf("%.1f GiB (%s)", inv.MemoryGB, inv.MemorySource)
 		// The FIT column is computed against the whole card. On a machine that
 		// is also doing other work, what is free is the number that decides
 		// whether anything actually loads, so it belongs beside the total
 		// rather than behind a separate command.
 		if inv.FreeGB > 0 && inv.FreeGB < inv.MemoryGB*0.9 {
-			mem += fmt.Sprintf(", %.1f free now", inv.FreeGB)
+			mem += fmt.Sprintf(", %.1f GiB free now", inv.FreeGB)
 		}
 		Field(w, "  memory", invHeaderLabel, mem, width)
 	}
@@ -211,7 +211,7 @@ func writeInventoryRow(w io.Writer, row InventoryRow, width, modelWidth int, p p
 	}
 	size := "-"
 	if row.SizeB > 0 {
-		size = fmt.Sprintf("%.1f GB", float64(row.SizeB)/(1024*1024*1024))
+		size = fmt.Sprintf("%.1f GiB", float64(row.SizeB)/(1024*1024*1024))
 	}
 	fmt.Fprintf(w, "  %s %s %-*s %*s  %s\n",
 		pad(name, modelWidth, g.Ell), p.wrap(style, pad(state, invStateWidth, g.Ell)),
@@ -268,7 +268,7 @@ const (
 	invHeaderLabel = 12
 	invStateWidth  = 16
 	invCtxWidth    = 5
-	invSizeWidth   = 7
+	invSizeWidth   = 8
 	// Wide enough for the longest NEXT after shortening: "try a smaller quant",
 	// which is advice rather than a command and so keeps its own words.
 	invNextWidth  = 19

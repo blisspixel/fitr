@@ -177,7 +177,7 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 		row.Note = "weights exceed the memory reading; the process is running, so the budget is the suspect number"
 	case weightsExceed:
 		row.State = StateIncompatible
-		row.Note = fmt.Sprintf("weights %.1f GB exceed %s", float64(tag.Size)/GiB, memoryBudget(q.HaveGB, q.HaveSrc))
+		row.Note = fmt.Sprintf("weights %.1f GiB exceed %s", float64(tag.Size)/GiB, memoryBudget(q.HaveGB, q.HaveSrc))
 		row.Next = "try a smaller quant"
 	default:
 		row.State = StateUnproven
@@ -517,7 +517,7 @@ func memoryBudget(gb float64, src string) string {
 	if gb <= 0 {
 		return "unknown (not measured)"
 	}
-	s := fmt.Sprintf("%.1f GB", gb)
+	s := fmt.Sprintf("%.1f GiB", gb)
 	if src != "" {
 		s += " (" + src + ")"
 	}

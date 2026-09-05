@@ -54,7 +54,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.6 | Fresh role confirmation, explicit selection and validated rollback, runtime and memory preflight, and read-only MCP role tools |
 | Shipped | 0.10.7 | Bounded immutable HF file metadata resolution, dependency gaps and private receipts without weight downloads |
 | Shipped | 0.10.8 | Private source attachments, explicit receipt selection and source-aware investigation plans with unmeasured fit and quality |
-| Current | 0.10.9 | Bounded local artifact observations, explicit file mappings and source hash comparisons without runtime promotion |
+| Shipped | 0.10.9 | Bounded local artifact observations, explicit file mappings and source hash comparisons without runtime promotion |
+| Current | 0.10.10 | Official MCP SDK binary acceptance and Ollama remote-provenance checks before local experiments |
 | Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported limiter hypotheses, and multi-surface decision relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
@@ -1150,6 +1151,7 @@ These features must preserve the evidence contract.
 | 0.10.7 | Immutable public HF file metadata, separate declared hashes, explicit dependency gaps, private no-overwrite receipts and source terminal cards |
 | 0.10.8 | Private source associations, individual source-aware plans, explicit receipt selection and concurrent inbox capture protection |
 | 0.10.9 | Bounded local artifact hashes, explicit source mappings, immutable observation receipts and separate runtime/capacity/quality gaps |
+| 0.10.10 | Official MCP SDK acceptance with pinned dependencies and explicit Ollama remote-provenance rejection across local measurement paths |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

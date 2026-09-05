@@ -122,7 +122,7 @@ jobs:
       - name: binary size gate
         shell: bash
         run: |
-          # Local artifact binding brings windows/amd64 to 13,557,248 bytes.
+          # Locality checks bring windows/amd64 to 13,572,096 bytes.
           # Retain the existing ceiling; growth must be measured per release.
           max_bytes=13600000
           for binary in dist/fitr-*; do

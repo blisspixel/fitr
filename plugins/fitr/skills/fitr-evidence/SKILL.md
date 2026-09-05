@@ -3,7 +3,13 @@ name: fitr-evidence
 description: Capture candidate models in fitr and interpret local fit, workload, and decision evidence when choosing a configuration for a specific role.
 ---
 
-Requires an installed fitr CLI version 0.10.9 or later and user-selected local evidence.
+Requires an installed fitr CLI version 0.10.10 or later and user-selected local evidence.
+
+Ollama models marked as remote are excluded from local measurement. Treat
+remote execution and malformed provenance errors as stops, not capacity
+failures to solve with another quantization or an automatic provider retry.
+A localhost endpoint or absent remote markers does not establish local
+execution; preserve unresolved runtime identity until evidence establishes it.
 
 Use `fitr --help` for the installed command contract. For a model discovered in
 a post, video, model card, or selected email excerpt, capture its source and
