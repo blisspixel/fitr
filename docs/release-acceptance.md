@@ -186,6 +186,49 @@ reported `fitr 0.10.3`, and identified 0.10.3 as current through
 existing Windows PATH installation; the installed executable matched the same
 public checksum and version.
 
+### 0.10.4 release receipt
+
+Release 0.10.4 is bound to commit
+`bee470363b3036dc4b9eb50218cdc80d042e884b`. The exact commit passed
+[aggregate CI run 33951141026](https://github.com/blisspixel/fitr/actions/runs/33951141026)
+with 82.46% merged coverage and
+[native acceptance run 33951140512](https://github.com/blisspixel/fitr/actions/runs/33951140512)
+on clean Linux and macOS runners. The
+[release workflow run 33951311551](https://github.com/blisspixel/fitr/actions/runs/33951311551)
+then published [v0.10.4](https://github.com/blisspixel/fitr/releases/tag/v0.10.4).
+Local Windows merged coverage was 81.07%. Lint, reachable vulnerability checks,
+race detection, fuzz smoke tests, six bounded-size builds, screenshot drift
+and three-platform installer checks passed.
+
+Publication exposed a draft-resume bug: the release-by-tag REST lookup
+returned 404 for an existing draft. The empty draft was removed and only the
+failed publication job was rerun against the already verified candidate.
+The workflow now reads `isDraft` through `gh release view`, preserving its
+guard against overwriting a published release.
+
+All ten public assets were downloaded independently. The manifest contained
+exactly nine unique expected entries, and every file matched its SHA-256.
+The Windows amd64 binary reported `fitr 0.10.4` and matched SHA-256
+`1b5c063e246886fa182a7d46c30f8d7d376f62ccbed9949dd5b9b74ddd4b3f0f`.
+The tagged public PowerShell installer installed into an isolated directory
+with `FITR_NO_PATH=1`, kept persistent user PATH unchanged, and verified the
+same version and checksum. `update --check` reported current.
+`update --reinstall` staged the public asset, and its hidden helper completed
+replacement after exit: the staged file disappeared, the target write time
+advanced, and the replaced executable retained the public version and checksum.
+
+The scoped workload security review found model-controlled policy keys and
+unknown tool names retained as raw text in otherwise hash-only receipts.
+Regression tests now verify fixed verifier diagnostics, hashed unknown tool
+identities and denied empty tool calls. Review also fixed contradictory
+terminal outcomes, per-turn call limits and aggregate timing overflow.
+This is a scoped review, not a claim of exhaustive repository security.
+
+The portable AgentPlugins 1.0.0 manifest passed the official versioned schema,
+and its skill passed local validation. MCP, A2A and harness documentation
+records researched contracts; no live adapter conformance is claimed.
+No paid model API calls were used for this release.
+
 ### Reproducible native candidate acceptance
 
 `.github/workflows/native-acceptance.yml` is a manual release gate, not a
