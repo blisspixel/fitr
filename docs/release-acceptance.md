@@ -6,6 +6,48 @@ against real serving runtimes on clean operating-system installs.
 
 Last updated: 2026-09-05.
 
+### 0.10.10 release receipt
+
+Release 0.10.10 is bound to commit
+`92542c19ba61fa9205b203de9516f2769c09ad65`. It passed
+[main CI 33964109842](https://github.com/blisspixel/fitr/actions/runs/33964109842)
+with **84.13% aggregate coverage**, including official MCP SDK acceptance on
+Linux x64, macOS arm64 and Windows x64, and
+[native acceptance 33964109502](https://github.com/blisspixel/fitr/actions/runs/33964109502).
+The [release workflow 33964416213](https://github.com/blisspixel/fitr/actions/runs/33964416213)
+repeated the release gates and published
+[v0.10.10](https://github.com/blisspixel/fitr/releases/tag/v0.10.10).
+
+All ten independently downloaded public assets matched the nine-entry manifest.
+The Windows amd64 binary is **13,572,096 bytes**, reports `fitr 0.10.10`, and has
+SHA-256 `0df666a909e106f4d805c48d89966f75cd3e18c116d49420a96eafcf353f2dd0`.
+It remains below the unchanged 13,600,000-byte six-target ceiling. The tagged
+Windows installer preserved persistent user PATH. Public update check and
+reinstall passed, including deferred replacement with the expected hash,
+version, advanced timestamp and no staged files remaining.
+
+The downloaded binary passed the raw MCP stdio smoke and all four official
+MCP Python 2.0.0 client cases: explicit July protocol and ordinary client modes,
+each against empty and synthetic canonical evidence. Independent review matched
+the three CI receipts to their actual candidate binaries and the public receipt
+to the separately built public binary. All receipt input groups matched. This
+establishes official SDK interoperability, not named-harness compatibility or
+model quality. SDK cleanup is bounded; that fixture does not independently
+observe the child's exit status. The raw-wire smoke does observe successful exit.
+
+A private public-binary fixture passed all 27 Ollama locality cases without
+skips. Twenty-four command preflight cases rejected positive or malformed remote
+metadata with zero inference requests. Two late streaming cases rejected output
+and timing after exactly one request. Mixed inventory omitted local fit, size,
+residency and context for both remote aliases while retaining an unrelated local
+entry. Saved-evidence reuse is covered by repository regression tests. Five
+negative fixture checks also passed. All HTTP listeners belonged to the fixture;
+this is not an OS network sandbox or proof that absent markers establish locality.
+
+Local final coverage was 82.77%, lint passed for production code and the SDK
+fixture helper, and dependency vulnerability checks found none. No real model
+inference or user model deletion was needed. Paid model API spending remains $0.
+
 ### 0.10.9 release receipt
 
 Release 0.10.9 is bound to commit
