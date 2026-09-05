@@ -37,13 +37,11 @@ func newLocalEvidence(dir string) (*localEvidence, error) {
 	if err != nil {
 		return nil, err
 	}
-	resolved, err := filepath.EvalSymlinks(absolute)
-	if err == nil {
-		absolute = resolved
-	} else if !errors.Is(err, os.ErrNotExist) {
+	resolved, err := resolveEvidenceRoot(absolute)
+	if err != nil {
 		return nil, err
 	}
-	return &localEvidence{root: absolute}, nil
+	return &localEvidence{root: resolved}, nil
 }
 
 type roleSummary struct {
@@ -116,7 +114,7 @@ func (source *localEvidence) review(ctx context.Context, name string) (any, erro
 	if err := source.checkRoles(); err != nil {
 		return nil, err
 	}
-	library, err := (role.Store{Dir: filepath.Join(source.root, ".roles")}).Load(name)
+	library, err := source.loadLibrary(name)
 	if err != nil {
 		return nil, err
 	}
