@@ -99,7 +99,10 @@ floors remain independent. Compaction and restart must preserve decisions,
 constraints and completed effects under external verification. The
 [personal fitting design](docs/personal-fitting.md) separates this future
 measurement work from today's runtime-window requirement. The
-[host compatibility matrix](docs/agent-interop.md) records current protocol
+[context task foundation](docs/context-quality.md) now supplies a deterministic
+document pack, independent verifier and opt-in nontruncating request accounting;
+owned collection, signed evidence and personal selection remain to be connected.
+The [host compatibility matrix](docs/agent-interop.md) records current protocol
 gaps before any named-harness support is claimed.
 
 Tracked implementation work: [quality-first role library](https://github.com/blisspixel/fitr/issues/1),

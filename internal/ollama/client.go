@@ -52,6 +52,9 @@ type Client struct {
 	// ObserveInference checks every admitted attempt before exposing its output
 	// or permitting Chat's empty-response retry. Control-plane calls bypass it.
 	ObserveInference InferenceObservation
+	// ContextPolicy is fixed before use and applies to every inference attempt,
+	// including load probes and Chat retries. Empty preserves legacy requests.
+	ContextPolicy ContextRequestPolicy
 }
 
 func New() *Client {
@@ -126,8 +129,9 @@ type Metrics struct {
 	DoneReason            string        `json:"done_reason"`
 	// CachedTokens is how much of the prompt was served from the prefix cache
 	// rather than evaluated - the receipt that separates a warm TTFT from a
-	// cold one, which differ by 70-200x. Ollama does not report it (always 0);
-	// llama-server does. CacheKnown is whether the field is a real receipt:
+	// cold one, which differ by 70-200x. Legacy Ollama measurements leave
+	// this unknown; opt-in context accounting is kept separately. CacheKnown
+	// says whether the field is a real receipt:
 	// a zero with CacheKnown=false is "not measured", not "cache miss".
 	CachedTokens int  `json:"cached_tokens,omitempty"`
 	CacheKnown   bool `json:"cache_known,omitempty"`
@@ -139,19 +143,23 @@ type Metrics struct {
 	// on this side of the socket. The OpenAI-compatible surface has no server
 	// timings; Ollama and llama-server leave this false.
 	ClientDerived bool `json:"client_derived,omitempty"`
+	// ContextAccounting is opt-in and transient. Existing persisted metrics and
+	// benchmark replay must not infer a cache measurement from this field.
+	ContextAccounting *ContextTokenAccounting `json:"-"`
 }
 
 type genResp struct {
-	Response           string       `json:"response"`
-	RemoteModel        remoteMarker `json:"remote_model,omitempty"`
-	RemoteHost         remoteMarker `json:"remote_host,omitempty"`
-	Done               bool         `json:"done"`
-	DoneReason         string       `json:"done_reason"`
-	EvalCount          int          `json:"eval_count"`
-	EvalDuration       int64        `json:"eval_duration"`
-	PromptEvalCount    int          `json:"prompt_eval_count"`
-	PromptEvalDuration int64        `json:"prompt_eval_duration"`
-	LoadDuration       int64        `json:"load_duration"`
+	Response              string          `json:"response"`
+	RemoteModel           remoteMarker    `json:"remote_model,omitempty"`
+	RemoteHost            remoteMarker    `json:"remote_host,omitempty"`
+	Done                  bool            `json:"done"`
+	DoneReason            string          `json:"done_reason"`
+	EvalCount             *int            `json:"eval_count"`
+	EvalDuration          int64           `json:"eval_duration"`
+	PromptEvalCount       *int            `json:"prompt_eval_count"`
+	PromptEvalCachedCount json.RawMessage `json:"prompt_eval_cached_count"`
+	PromptEvalDuration    int64           `json:"prompt_eval_duration"`
+	LoadDuration          int64           `json:"load_duration"`
 }
 
 func (c *Client) post(ctx context.Context, path string, body any) (*http.Response, error) {
@@ -164,7 +172,7 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if (c.Admission != nil || c.ObserveInference != nil) && (path == "/api/generate" || path == "/api/chat") {
+	if (c.Admission != nil || c.ObserveInference != nil || c.ContextPolicy != "") && (path == "/api/generate" || path == "/api/chat") {
 		// A replayable body lets net/http retry a failed reused connection
 		// beneath inference hooks. Each new attempt must pass the configured hooks.
 		req.GetBody = nil
@@ -218,7 +226,7 @@ func validateGenFrame(g genResp) error {
 	if remoteExecution(string(g.RemoteModel), string(g.RemoteHost)) {
 		return ErrRemoteExecution
 	}
-	if g.EvalCount < 0 || g.EvalDuration < 0 || g.PromptEvalCount < 0 ||
+	if nativeCount(g.EvalCount) < 0 || g.EvalDuration < 0 || nativeCount(g.PromptEvalCount) < 0 ||
 		g.PromptEvalDuration < 0 || g.LoadDuration < 0 {
 		return errors.New("ollama generate frame contains a negative metric")
 	}
@@ -231,6 +239,9 @@ func validateGenFrame(g genResp) error {
 // chunk -- not derived from the server's own counters, because what the user
 // experiences is the wall clock.
 func (c *Client) Generate(ctx context.Context, model, prompt string, s Sampling) (string, Metrics, error) {
+	if err := c.ContextPolicy.validate(s); err != nil {
+		return "", Metrics{}, err
+	}
 	ctx, cancel, err := c.admitInference(ctx, InferenceRequest{Kind: InferenceGenerate, Model: model, MaxOutputTokens: s.NumPredict})
 	if err != nil {
 		return "", Metrics{}, err
@@ -264,6 +275,7 @@ func (c *Client) generateAdmitted(ctx context.Context, model, prompt string, s S
 	if s.Format != "" {
 		payload["format"] = s.Format
 	}
+	c.ContextPolicy.apply(payload)
 	start := time.Now()
 	resp, err := c.post(ctx, "/api/generate", payload)
 	if err != nil {
@@ -273,14 +285,19 @@ func (c *Client) generateAdmitted(ctx context.Context, model, prompt string, s S
 	if resp.StatusCode != http.StatusOK {
 		return "", Metrics{}, nativeHTTPError(resp)
 	}
-	state, err := readGenerateStream(resp.Body, start)
+	state, err := readGenerateStream(resp.Body, start, c.ContextPolicy, s.NumPredict)
 	if err != nil {
-		if IsLocalityError(err) {
+		if IsLocalityError(err) || c.ContextPolicy != "" {
 			return "", Metrics{}, err
 		}
 		return state.output.String(), Metrics{}, err
 	}
-	return state.output.String(), generateMetrics(state.final, state.ttft, time.Since(start)), nil
+	metrics := generateMetrics(state.final, state.ttft, time.Since(start))
+	metrics.ContextAccounting, err = c.ContextPolicy.accounting(state.final.PromptEvalCount, state.final.EvalCount, state.final.PromptEvalCachedCount, s.NumPredict)
+	if err != nil {
+		return "", Metrics{}, err
+	}
+	return state.output.String(), metrics, nil
 }
 
 type generateStreamState struct {
@@ -291,7 +308,7 @@ type generateStreamState struct {
 	terminal           bool
 }
 
-func readGenerateStream(r io.Reader, start time.Time) (generateStreamState, error) {
+func readGenerateStream(r io.Reader, start time.Time, policy ContextRequestPolicy, outputCap int) (generateStreamState, error) {
 	var state generateStreamState
 	limited := io.LimitReader(r, maxNativeStream+1)
 	sc := bufio.NewScanner(limited)
@@ -306,7 +323,7 @@ func readGenerateStream(r io.Reader, start time.Time) (generateStreamState, erro
 		if len(line) == 0 {
 			continue
 		}
-		if err := state.accept(line, start); err != nil {
+		if err := state.accept(line, start, policy, outputCap); err != nil {
 			return state, err
 		}
 	}
@@ -319,7 +336,7 @@ func readGenerateStream(r io.Reader, start time.Time) (generateStreamState, erro
 	return state, nil
 }
 
-func (s *generateStreamState) accept(line []byte, start time.Time) error {
+func (s *generateStreamState) accept(line []byte, start time.Time, policy ContextRequestPolicy, outputCap int) error {
 	s.frames++
 	if s.frames > maxNativeFrames {
 		return errors.New("ollama generate stream exceeds protocol limits")
@@ -331,6 +348,12 @@ func (s *generateStreamState) accept(line []byte, start time.Time) error {
 	}
 	if err != nil {
 		return fmt.Errorf("ollama generate frame: %w", err)
+	}
+	if err := policy.validateFrameKeys(line); err != nil {
+		return err
+	}
+	if _, err := policy.accounting(frame.PromptEvalCount, frame.EvalCount, frame.PromptEvalCachedCount, outputCap); err != nil {
+		return err
 	}
 	if err := validateGenFrame(frame); err != nil {
 		return err
@@ -356,17 +379,17 @@ func generateMetrics(final genResp, ttft float64, wall time.Duration) Metrics {
 	m := Metrics{
 		TTFTSeconds:  round(ttft, 3),
 		WallSeconds:  round(wall.Seconds(), 2),
-		EvalCount:    final.EvalCount,
-		PromptTokens: final.PromptEvalCount,
+		EvalCount:    nativeCount(final.EvalCount),
+		PromptTokens: nativeCount(final.PromptEvalCount),
 		LoadSeconds:  round(float64(final.LoadDuration)/1e9, 2),
 		DoneReason:   final.DoneReason,
 		Truncated:    final.DoneReason == "length",
 	}
 	if final.EvalDuration > 0 {
-		m.DecodeTPS = round(float64(final.EvalCount)/(float64(final.EvalDuration)/1e9), 2)
+		m.DecodeTPS = round(float64(nativeCount(final.EvalCount))/(float64(final.EvalDuration)/1e9), 2)
 	}
 	if final.PromptEvalDuration > 0 {
-		m.PrefillTPS = round(float64(final.PromptEvalCount)/(float64(final.PromptEvalDuration)/1e9), 2)
+		m.PrefillTPS = round(float64(nativeCount(final.PromptEvalCount))/(float64(final.PromptEvalDuration)/1e9), 2)
 	}
 	return m
 }
@@ -408,15 +431,16 @@ type Message struct {
 }
 
 type chatResp struct {
-	Message            Message      `json:"message"`
-	RemoteModel        remoteMarker `json:"remote_model,omitempty"`
-	RemoteHost         remoteMarker `json:"remote_host,omitempty"`
-	Done               bool         `json:"done"`
-	DoneReason         string       `json:"done_reason"`
-	EvalCount          int          `json:"eval_count"`
-	EvalDuration       int64        `json:"eval_duration"`
-	PromptEvalCount    int          `json:"prompt_eval_count"`
-	PromptEvalDuration int64        `json:"prompt_eval_duration"`
+	Message               Message         `json:"message"`
+	RemoteModel           remoteMarker    `json:"remote_model,omitempty"`
+	RemoteHost            remoteMarker    `json:"remote_host,omitempty"`
+	Done                  bool            `json:"done"`
+	DoneReason            string          `json:"done_reason"`
+	EvalCount             *int            `json:"eval_count"`
+	EvalDuration          int64           `json:"eval_duration"`
+	PromptEvalCount       *int            `json:"prompt_eval_count"`
+	PromptEvalCachedCount json.RawMessage `json:"prompt_eval_cached_count"`
+	PromptEvalDuration    int64           `json:"prompt_eval_duration"`
 }
 
 // Chat returns the message plus per-turn metrics. The prompt token count is
@@ -426,6 +450,9 @@ type chatResp struct {
 // Chat sends one turn. A non-terminal reply that evaluated no tokens is
 // retried once: see chatOnce for why that specific case, and only that case.
 func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools []Tool, s Sampling) (Message, Metrics, error) {
+	if err := c.ContextPolicy.validate(s); err != nil {
+		return Message{}, Metrics{}, err
+	}
 	var msg Message
 	var metrics Metrics
 	var err error
@@ -457,11 +484,18 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, tools [
 // HTTP error, and a second failure here all return unretried.
 var errEmptyNonTerminal = errors.New("ollama chat returned no generation and no terminal receipt")
 
-func decodeChatResponse(body io.Reader) (chatResp, error) {
+func decodeChatResponse(body io.Reader, policy ContextRequestPolicy) (chatResp, error) {
 	var r chatResp
-	err := decodeBoundedJSON(body, &r)
+	b, err := readBounded(body, maxNativeBody)
+	if err != nil {
+		return r, err
+	}
+	err = decodeJSONFrame(b, &r)
 	if remoteExecution(string(r.RemoteModel), string(r.RemoteHost)) {
 		return chatResp{}, ErrRemoteExecution
+	}
+	if err == nil {
+		err = policy.validateFrameKeys(b)
 	}
 	return r, err
 }
@@ -500,6 +534,7 @@ func (c *Client) chatAdmitted(ctx context.Context, model string, msgs []Message,
 	if len(tools) > 0 {
 		payload["tools"] = tools
 	}
+	c.ContextPolicy.apply(payload)
 	start := time.Now()
 	resp, err := c.post(ctx, "/api/chat", payload)
 	if err != nil {
@@ -509,11 +544,39 @@ func (c *Client) chatAdmitted(ctx context.Context, model string, msgs []Message,
 	if resp.StatusCode != http.StatusOK {
 		return Message{}, Metrics{}, nativeHTTPError(resp)
 	}
-	r, err := decodeChatResponse(resp.Body)
+	r, err := decodeChatResponse(resp.Body, c.ContextPolicy)
 	if err != nil {
 		return Message{}, Metrics{}, err
 	}
+	accounting, err := c.ContextPolicy.accounting(r.PromptEvalCount, r.EvalCount, r.PromptEvalCachedCount, s.NumPredict)
+	if err != nil {
+		return Message{}, Metrics{}, err
+	}
+	if err := validateChatReceipt(r, c.ContextPolicy, accounting); err != nil {
+		return Message{}, Metrics{}, err
+	}
+	m := Metrics{
+		WallSeconds:  round(time.Since(start).Seconds(), 2),
+		EvalCount:    nativeCount(r.EvalCount),
+		PromptTokens: nativeCount(r.PromptEvalCount),
+		DoneReason:   r.DoneReason,
+		Truncated:    r.DoneReason == "length",
+	}
+	if r.EvalDuration > 0 {
+		m.DecodeTPS = round(float64(nativeCount(r.EvalCount))/(float64(r.EvalDuration)/1e9), 2)
+	}
+	if r.PromptEvalDuration > 0 {
+		m.PrefillTPS = round(float64(nativeCount(r.PromptEvalCount))/(float64(r.PromptEvalDuration)/1e9), 2)
+	}
+	m.ContextAccounting = accounting
+	return r.Message, m, nil
+}
+
+func validateChatReceipt(r chatResp, policy ContextRequestPolicy, accounting *ContextTokenAccounting) error {
 	if !r.Done {
+		if policy != "" && (r.PromptEvalCount == nil || r.EvalCount == nil || accounting.CachedPromptTokens == nil) {
+			return ErrContextAccounting
+		}
 		// The diagnostic carries the fields that identify the cause rather
 		// than just naming the symptom: done_reason separates a load reply
 		// from a truncated generation, and the token counts separate "the
@@ -521,34 +584,21 @@ func (c *Client) chatAdmitted(ctx context.Context, model string, msgs []Message,
 		detail := fmt.Sprintf(
 			"(done_reason=%q role=%q content=%d bytes tool_calls=%d eval=%d prompt_eval=%d)",
 			r.DoneReason, r.Message.Role, len(r.Message.Content),
-			len(r.Message.ToolCalls), r.EvalCount, r.PromptEvalCount)
-		if r.EvalCount == 0 && r.PromptEvalCount == 0 {
-			return Message{}, Metrics{}, fmt.Errorf("%w %s", errEmptyNonTerminal, detail)
+			len(r.Message.ToolCalls), nativeCount(r.EvalCount), nativeCount(r.PromptEvalCount))
+		if nativeCount(r.EvalCount) == 0 && nativeCount(r.PromptEvalCount) == 0 {
+			return fmt.Errorf("%w %s", errEmptyNonTerminal, detail)
 		}
-		return Message{}, Metrics{}, fmt.Errorf(
+		return fmt.Errorf(
 			"ollama chat response is missing the terminal receipt %s", detail)
 	}
 	if r.Message.Role != "assistant" {
-		return Message{}, Metrics{}, fmt.Errorf(
+		return fmt.Errorf(
 			"ollama chat response has role %q, want assistant", r.Message.Role)
 	}
-	if r.EvalCount < 0 || r.EvalDuration < 0 || r.PromptEvalCount < 0 || r.PromptEvalDuration < 0 {
-		return Message{}, Metrics{}, errors.New("ollama chat response contains a negative metric")
+	if nativeCount(r.EvalCount) < 0 || r.EvalDuration < 0 || nativeCount(r.PromptEvalCount) < 0 || r.PromptEvalDuration < 0 {
+		return errors.New("ollama chat response contains a negative metric")
 	}
-	m := Metrics{
-		WallSeconds:  round(time.Since(start).Seconds(), 2),
-		EvalCount:    r.EvalCount,
-		PromptTokens: r.PromptEvalCount,
-		DoneReason:   r.DoneReason,
-		Truncated:    r.DoneReason == "length",
-	}
-	if r.EvalDuration > 0 {
-		m.DecodeTPS = round(float64(r.EvalCount)/(float64(r.EvalDuration)/1e9), 2)
-	}
-	if r.PromptEvalDuration > 0 {
-		m.PrefillTPS = round(float64(r.PromptEvalCount)/(float64(r.PromptEvalDuration)/1e9), 2)
-	}
-	return r.Message, m, nil
+	return nil
 }
 
 // ---------------------------------------------------------------- inspection

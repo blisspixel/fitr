@@ -57,6 +57,11 @@ type InferenceObservation func(context.Context, InferenceAttempt) error
 
 func (c *Client) finishInference(ctx context.Context, attempt InferenceAttempt, started time.Time, metrics Metrics) (Metrics, error) {
 	if c.Admission == nil && c.ObserveInference == nil {
+		if c.ContextPolicy != "" {
+			if err := ctx.Err(); err != nil {
+				return Metrics{}, err
+			}
+		}
 		return metrics, nil
 	}
 	// Capture the entire HTTP/parsing/body-close interval before validation.
@@ -64,6 +69,11 @@ func (c *Client) finishInference(ctx context.Context, attempt InferenceAttempt, 
 	metrics.InferenceElapsed = time.Since(started)
 	metrics.InferenceElapsedKnown = true
 	if c.ObserveInference == nil {
+		if c.ContextPolicy != "" {
+			if err := ctx.Err(); err != nil {
+				return Metrics{}, err
+			}
+		}
 		return metrics, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -79,6 +89,11 @@ func (c *Client) finishInference(ctx context.Context, attempt InferenceAttempt, 
 }
 
 func (c *Client) admitInference(ctx context.Context, request InferenceRequest) (context.Context, context.CancelFunc, error) {
+	if c.ContextPolicy != "" {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+	}
 	if c.Admission == nil {
 		return ctx, func() {}, nil
 	}

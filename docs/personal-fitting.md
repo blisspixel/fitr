@@ -2,8 +2,10 @@
 
 fitr is a tailor for local AI: it turns a general-purpose model into a tested
 choice for a person's work and machine. This document describes the next
-product direction. Context-quality attributes, harness task scorecards and the
-guided fitting flow below are not yet implemented.
+product direction. Context-quality role attributes, harness task scorecards
+and the guided fitting flow below are not yet available. The deterministic
+[document task pack and request accounting](context-quality.md) provide
+internal groundwork for the first context scorecard.
 
 ## From an idea to an earned choice
 
@@ -33,7 +35,7 @@ The proposed interface offers two scopes within the same fitting:
 | Scope | What it establishes |
 |---|---|
 | Fit | The current configuration's capacity, observed runtime window, supported behavioral screening and performance |
-| Extended fit | Results on a named workload through a pinned harness, with independently verified outcomes and an explicit recovery policy |
+| Extended fit | Named document and harness workload scorecards, independently verified, with an explicit recovery policy for work spanning compaction or restart |
 
 Fit keeps the behavioral checks already present today. Capacity advice alone
 does not establish that full scope. Extended fit is proposed work and does not
