@@ -43,8 +43,11 @@ JSON plans; the renderer does not make a compatibility decision.
 Role review cards now lead with the role and screening state, followed by
 each candidate's requirements, preference bounds and evidence gaps. Failed
 quality remains visible beside a qualifying candidate. Explicit JSON carries
-the full definition and receipts. The next role view will add an incumbent,
-challenger, fallback and fresh confirmation status.
+the full definition and receipts. `role status` leads with the selected model,
+current qualification and expiry, then shows the latest attempt independently.
+A failed challenger must not visually become a failed incumbent. Stale and
+unselected roles retain a clear review action. Operational fallback and
+multi-role placement views remain future work.
 Avoid a hero score that mixes model quality, speed, fit and popularity.
 
 README assets are rendered from deterministic fixtures through real display

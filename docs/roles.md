@@ -32,11 +32,12 @@ resident-allocation limit at the declared context, expressed in GiB by
 `--memory-gb`. It does not infer that several individually fitting models
 can stay resident together.
 
-Roles in 0.10.5 evaluate the existing battery evidence contract. They do not
+Roles evaluate the existing battery evidence contract. They do not
 establish broad coding competence, full agentic-workflow reliability or
 compatibility with a named external harness. Fixed policy-repair workload
-bundles remain separate evidence until stronger configuration and role
-confirmation bindings exist.
+bundles remain separate evidence. [Role confirmation](role-confirmation.md)
+can establish a fresh selection under the declared battery policy; it does
+not turn those screens into workflow competence evidence.
 
 ## Tune preferences without rewriting evidence
 
@@ -109,8 +110,28 @@ Remove a reference without deleting its source evidence:
 fitr role detach coding sha256:<full-evidence-digest>
 ```
 
-Weighted confirmation, incumbents, fallbacks and automatic adoption need a
-new sealed selection contract. Existing confirmation bundles certify one
-narrow objective and cannot be relabeled as confirmation of weights chosen
-after the run. That work is tracked with the [role library](https://github.com/blisspixel/fitr/issues/1)
-and [bounded auto mode](https://github.com/blisspixel/fitr/issues/2).
+## Confirm and retain a selection
+
+With two to four compatible full-run candidates attached, collect fresh
+evidence after sealing the current role, preferences and selected candidate:
+
+```bash
+fitr role confirm coding
+# Use the exact saved bundle path printed by the command:
+fitr role adopt coding /path/to/saved-bundle.json
+fitr role status coding
+fitr role rollback coding
+```
+
+<img src="assets/selection.svg?v=0.10.6" alt="Role status fixture with a qualified incumbent and a separate failed challenger attempt" width="900">
+
+Confirmation keeps the incumbent reference until explicit adoption. Adoption
+stores fitr's selection; it does not change a serving configuration. Rollback
+requires the previous adoption's original evidence to remain current and
+valid. Fresh runs overwrite canonical results, so previous attachments or
+selections can become stale even when their references are retained.
+
+See [role confirmation and lifecycle](role-confirmation.md) for the fixed
+protocol, runtime and memory preflight, 24-hour plan window, evidence expiry,
+failure states and rollback restrictions. Existing narrow-objective experiment
+bundles cannot be relabeled as confirmation of role weights chosen after a run.

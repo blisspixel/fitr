@@ -1,0 +1,27 @@
+[
+  {
+    "name": "stateless tool call without discovery",
+    "request": {"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"fitr_roles_list","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}},
+    "response": {"jsonrpc":"2.0","id":42,"result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/serverInfo":{"name":"fitr","version":"fixture"}},"content":[{"type":"text","text":"{\"schema\":\"fitr.mcp.roles.v1\",\"roles\":[]}"}],"structuredContent":{"schema":"fitr.mcp.roles.v1","roles":[]},"isError":false}}
+  },
+  {
+    "name": "unsupported revision advertises modern era",
+    "request": {"jsonrpc":"2.0","id":"version-probe","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-11-25","io.modelcontextprotocol/clientCapabilities":{}}}},
+    "response": {"jsonrpc":"2.0","id":"version-probe","error":{"code":-32022,"message":"Unsupported protocol version","data":{"supported":["2026-07-28"],"requested":"2025-11-25"}}}
+  },
+  {
+    "name": "missing required capabilities",
+    "request": {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}},
+    "response": {"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Required request metadata is missing or invalid"}}
+  },
+  {
+    "name": "unknown tool is a protocol error",
+    "request": {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"execute_secret_path","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}},
+    "response": {"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"Unknown tool"}}
+  },
+  {
+    "name": "role path is an actionable tool error",
+    "request": {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"fitr_role_review","arguments":{"role":"../../secret"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}},
+    "response": {"jsonrpc":"2.0","id":3,"result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/serverInfo":{"name":"fitr","version":"fixture"}},"content":[{"type":"text","text":"Provide role as 1 to 64 lowercase letters, digits or hyphens, starting with a letter or digit."}],"isError":true}}
+  }
+]

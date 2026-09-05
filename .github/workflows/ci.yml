@@ -109,9 +109,9 @@ jobs:
       - name: binary size gate
         shell: bash
         run: |
-          # Role screening and confined cleanup inventory bring windows/amd64
-          # to about 13 MB. Retain roughly 1.2% measured-growth headroom.
-          max_bytes=13140000
+          # Role confirmation/lifecycle and bounded MCP add about 267 KB to
+          # windows/amd64 (13.25 MB). Keep about 1.2% measured-growth headroom.
+          max_bytes=13420000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"
             printf '%-32s %10d bytes\n' "$binary" "$size"

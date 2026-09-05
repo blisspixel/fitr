@@ -107,12 +107,14 @@ usage:
   fitr role init <name> --quality <need> --memory-gb <limit> [--ctx N]
   fitr role define <role.json> | list | show <name> | review <name>
   fitr role attach <name> <result.json> | detach <name> <evidence-sha256>
+  fitr role confirm <name|bundle.json> | adopt <name> <bundle.json> | status <name> | rollback <name>
+  fitr mcp serve
   fitr cleanup plan <directory> [--min-age-days N] [--display MODE]
 
 flags:
   --display  auto|rich|plain|json|none   output mode (default auto)
   --backend  auto|ollama|llama-server|openai   serving runtime (default auto-detect)
-  --pull     fetch a missing model first (Ollama; HF links pull automatically)
+  --pull     fetch a missing model first (Ollama; HF repository aliases pull automatically)
   --allow-unsafe-exec  run unisolated built-in code diagnostics; never score them
   -k         repeats per noisy task (default 3; 1 quick; 5 checks-only)
              A single run is not a measurement: identical configs vary 10-20pp.
@@ -219,7 +221,7 @@ func commandHandler(name string) commandFunc {
 		return cmdCalibrate
 	case "compare":
 		return cmdCompare
-	case "decide", "discover", "role", "experiment", "cleanup":
+	case "decide", "discover", "role", "experiment", "cleanup", "mcp":
 		return planningCommandHandler(name)
 	case "screenshots": // dev-only: regenerate docs/assets from mock data
 		return cmdScreenshots
@@ -235,6 +237,8 @@ func planningCommandHandler(name string) commandFunc {
 		return cmdDiscover
 	case "role":
 		return cmdRole
+	case "mcp":
+		return cmdMCP
 	case "experiment":
 		return cmdExperiment
 	case "cleanup":
@@ -285,6 +289,10 @@ func takesValue(flagArg string) bool {
 func parseCommandFlags(fs *flag.FlagSet, args []string) (int, bool) {
 	err := fs.Parse(permute(args))
 	if err == nil {
+		if err := validateFlagModelRefs(fs); err != nil {
+			errPrint(err.Error(), "", hfModelRefHint)
+			return exitUsage, false
+		}
 		return exitOK, true
 	}
 	if errors.Is(err, flag.ErrHelp) {
@@ -316,10 +324,20 @@ func (c *countFlag) Set(value string) error {
 
 func (*countFlag) IsBoolFlag() bool { return true }
 
-// normalizeModelRef accepts pasted Hugging Face URLs and turns them into the
-// hf.co/{user}/{repo}[:quant] form Ollama pulls natively - so "point fitr at
-// an HF link" just works. Blob/resolve URLs keep the quant from the filename.
+const hfModelRefHint = "keep the exact link with `fitr discover add <source> --role <role>`; " +
+	"load that artifact and pass its served name, or explicitly choose an unpinned hf.co/owner/repo[:quant] alias"
+
+// normalizeModelRef rewrites only unpinned repository aliases. Unsupported
+// URLs remain intact so no caller can silently discard an artifact identity.
 func normalizeModelRef(model string) string {
+	normalized, err := normalizedModelRef(model)
+	if err != nil {
+		return strings.TrimSpace(model)
+	}
+	return normalized
+}
+
+func normalizedModelRef(model string) (string, error) {
 	m := strings.TrimSpace(model)
 	lower := strings.ToLower(m)
 	for _, prefix := range []string{
@@ -334,36 +352,58 @@ func normalizeModelRef(model string) string {
 		"hf.co/",
 	} {
 		if strings.HasPrefix(lower, prefix) {
-			path := strings.SplitN(m[len(prefix):], "?", 2)[0]
-			path = strings.SplitN(path, "#", 2)[0]
-			return "hf.co/" + parseHFPath(strings.TrimRight(path, "/"))
+			return parseHFPath(strings.TrimRight(m[len(prefix):], "/"))
 		}
 	}
-	return m
+	return m, nil
 }
 
-func parseHFPath(p string) string {
-	path, tag, hasTag := strings.Cut(p, ":")
+func parseHFPath(path string) (string, error) {
 	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		if hasTag {
-			return path + ":" + tag
-		}
-		return path
+	if len(parts) == 4 && parts[2] == "tree" && parts[3] == "main" {
+		parts = parts[:2]
 	}
-	user, repo := parts[0], parts[1]
-	if !hasTag && len(parts) >= 5 {
-		switch parts[2] {
-		case "blob", "resolve":
-			if q := quantFromFilename(parts[len(parts)-1]); q != "" {
-				tag, hasTag = q, true
-			}
+	if len(parts) == 2 {
+		repo, tag, hasTag := strings.Cut(parts[1], ":")
+		if validHFAliasPart(parts[0]) && validHFAliasPart(repo) && (!hasTag || validHFAliasPart(tag)) {
+			return "hf.co/" + strings.Join(parts, "/"), nil
 		}
 	}
-	if hasTag {
-		return user + "/" + repo + ":" + tag
+	return "", errors.New("unsupported Hugging Face model reference: exact file, revision, and URL selectors cannot be preserved by a repository alias")
+}
+
+func validHFAliasPart(value string) bool {
+	if value == "" || value == "." || value == ".." {
+		return false
 	}
-	return user + "/" + repo
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
+			(char < '0' || char > '9') && char != '-' && char != '_' && char != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func validateModelRefs(models ...string) error {
+	for _, model := range models {
+		if _, err := normalizedModelRef(model); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFlagModelRefs(fs *flag.FlagSet) error {
+	// Discovery captures source URLs as inert ideas, and other commands accept
+	// local paths or prose. Only model-bearing positional arguments are checked.
+	switch fs.Name() {
+	case "advise", "apply", "export", "view", "diag", "doctor", "tune", "calibrate", "decide", "top view",
+		"experiment confirm", "experiment workload", "experiment context":
+		return validateModelRefs(fs.Args()...)
+	default:
+		return nil
+	}
 }
 
 func quantFromFilename(file string) string {
@@ -488,6 +528,9 @@ type runOpts struct {
 	capacityBudgetGB        *float64
 	capacityReserveGB       *float64
 	allowUnsafeExec         bool
+	validatePrepared        func(*runExecution) error
+	validateCapacity        func(*runExecution) error
+	validateContext         func(*runExecution) error
 }
 
 // liveTelemetry is an optional extension implemented by the full-screen

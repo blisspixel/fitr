@@ -30,6 +30,10 @@ func newBackend(ctx context.Context, model, kind string, pull bool) (llm.Backend
 }
 
 func newBackendWithDisplay(ctx context.Context, model, kind string, pull bool, disp render.Display) (llm.Backend, int) {
+	if err := validateModelRefs(model); err != nil {
+		backendError(disp, err.Error(), "", hfModelRefHint)
+		return nil, exitUsage
+	}
 	if kind == "" || kind == "auto" {
 		kind = os.Getenv("FITR_BACKEND")
 	}

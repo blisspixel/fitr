@@ -69,3 +69,28 @@ func TestRoleReviewDoesNotInventLeadFromMissingIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestRoleSelectionKeepsIncumbentAndSanitizesOutput(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("FORCE_COLOR", "1")
+	t.Setenv("FITR_WIDTH", "40")
+	for _, state := range []string{"qualified", "stale", "unselected"} {
+		var output bytes.Buffer
+		WriteRoleSelection(&output, role.SelectionStatus{
+			Role: "coding\x1b[2J", State: state, Reason: "changed " + strings.Repeat("模型", 30),
+			LastAttempt: &role.LifecycleAttemptStatus{Action: "failed", At: "2026-09-05T12:00:00Z"},
+		}, "rich")
+		text := output.String()
+		if strings.Contains(text, "\x1b") || !strings.Contains(text, strings.ToUpper(state)) || !strings.Contains(text, "failed") {
+			t.Fatalf("selection state or terminal safety lost: %q", text)
+		}
+		if strings.Contains(text, "fitr role review") != (state != "qualified") {
+			t.Fatalf("wrong next action: %s", text)
+		}
+		for _, line := range strings.Split(text, "\n") {
+			if displaywidth.String(line) > 40 {
+				t.Fatalf("selection overflows: %q", line)
+			}
+		}
+	}
+}

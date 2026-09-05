@@ -419,6 +419,9 @@ func validateTopRunPreview(fs *flag.FlagSet, options topRunPreviewFlags) error {
 	if fs.NArg() != 1 {
 		return errors.New("top run needs exactly one model")
 	}
+	if err := validateModelRefs(fs.Arg(0)); err != nil {
+		return err
+	}
 	if selectedRunLevels(*options.quick, *options.full, *options.checks) > 1 {
 		return errors.New("--quick, --full, and --checks-only are mutually exclusive")
 	}

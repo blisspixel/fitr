@@ -15,7 +15,7 @@ import (
 	"github.com/blisspixel/fitr/internal/role"
 )
 
-func cmdRole(_ context.Context, args []string) int {
+func cmdRole(ctx context.Context, args []string) int {
 	if len(args) == 0 {
 		args = []string{"list"}
 	}
@@ -23,9 +23,13 @@ func cmdRole(_ context.Context, args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: fitr role init <name> --quality <need> --memory-gb <limit> [--minimum-rate 0.9] [--ctx 8192]")
 		fmt.Fprintln(os.Stderr, "       fitr role define <role.json> | list | show <name> | review <name>")
 		fmt.Fprintln(os.Stderr, "       fitr role attach <name> <result.json> | detach <name> <evidence-sha256>")
+		fmt.Fprintln(os.Stderr, "       fitr role confirm <name|bundle.json> | adopt <name> <bundle.json> | status <name> | rollback <name>")
 		return exitOK
 	}
 	action := args[0]
+	if roleLifecycleAction(action) {
+		return cmdRoleLifecycle(ctx, args)
+	}
 	switch action {
 	case "init", "define", "list", "show", "review", "attach", "detach":
 	default:
