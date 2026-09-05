@@ -114,6 +114,9 @@ tracks dependency-aware cleanup beyond the read-only inventory in 0.10.5.
 [Immutable source metadata](https://github.com/blisspixel/fitr/issues/5) and
 [source attachments](https://github.com/blisspixel/fitr/issues/6) track the first
 steps from an idea to an exact artifact investigation.
+[Serving-runtime configuration provenance](https://github.com/blisspixel/fitr/issues/10)
+tracks binding runtime configuration to the daemon that served a measurement,
+and the comparability key that currently cannot tell unobserved from unset.
 
 Optional OpenRouter validation can develop adversarial cases and grader
 calibration alongside this sequence. It remains experiment-scoped, explicitly
@@ -865,6 +868,7 @@ preflight is in [doctor](docs/doctor.md).
 | OpenAI-compatible timings are client-derived | Usage supplies token counts, but the generic protocol does not expose server timing receipts. |
 | Two device profiles | `lappy` is calibrated; `default` is explicitly uncalibrated. No hardware SKU gates are invented from names. |
 | Device detection is probe-derived | Vendor tools and OS inventories disagree about what a GPU is. The fingerprint is only as good as the probe, which is why device identity gets its own gate. |
+| Serving-runtime configuration may be unobserved | fitr reads the runtime's startup log when it can and otherwise sees only its own process environment, which is not a daemon's. A runtime started by launchd, systemd or a container is the normal case for that fallback. Unobserved settings are labeled rather than called unset, but two of them are part of the comparability key, so hosts differing only in an unobserved setting still share one. |
 | Conventional attention uses weights plus KV by default | `--load` can observe runtime allocation. `--fit` reports a descriptive allocator projection but cannot establish a context-specific tier until its final context, placement, version, and resource domains are sealed. A remainder from an observed total may include compute buffers, mappings, and runtime overhead, but is not an independently measured buffer breakdown. Hybrid recurrent models stay SKIP without a load receipt. |
 | Inventory comes from the serving runtime | There is no disk crawl or internet catalog. A llama-server exposes one model row. |
 | `--full` is a long agent loop | Executable coding evidence stays SKIP until the isolated worker exists. The default battery is the first real measurement. |
