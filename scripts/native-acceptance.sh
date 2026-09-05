@@ -199,6 +199,11 @@ saved_result_for() {
 }
 
 record_environment
+# This subprocess uses a separate empty result root and no model host. It checks
+# the installed binary's stdio profile, not acceptance by a named MCP client.
+python3 "$(dirname "${BASH_SOURCE[0]}")/mcp-acceptance.py" "${FITR_UNDER_TEST}" \
+  >"${acceptance_dir}/commands/mcp-stdio.log" 2>&1
+cat "${acceptance_dir}/commands/mcp-stdio.log"
 start_server "${FITR_ACCEPTANCE_MODEL_A}" "model-a"
 
 run_fitr inventory "0" "${FITR_UNDER_TEST}" --backend llama-server

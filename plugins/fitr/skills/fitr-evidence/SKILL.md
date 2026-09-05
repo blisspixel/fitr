@@ -3,7 +3,7 @@ name: fitr-evidence
 description: Capture candidate models in fitr and interpret local fit, workload, and decision evidence when choosing a configuration for a specific role.
 ---
 
-Requires an installed fitr CLI version 0.10.5 or later and user-selected local evidence.
+Requires an installed fitr CLI version 0.10.6 or later and user-selected local evidence.
 
 Use `fitr --help` for the installed command contract. For a model discovered in
 a post, video, model card, or selected email excerpt, capture its source and
@@ -32,6 +32,25 @@ canonical result; it does not promote source claims. An exploration lead
 still requires fresh weighted confirmation before adoption. Exit zero alone
 does not authorize a model switch or establish agentic competence.
 
+`fitr role confirm <name>` seals the role policy and collects fresh evidence.
+Follow the user's experiment authority before starting it. `role adopt` stores
+an explicit fitr selection; `role status` rechecks current evidence and expiry.
+Neither command switches a serving model. Rollback needs the previous
+adoption's original evidence to remain valid and current.
+
+If the host explicitly loads this package's MCP configuration, it launches the
+installed `fitr mcp serve` command. Check that the installed CLI provides that
+command and the client supports MCP 2026-07-28. The server does not support the
+legacy initialize handshake. Live acceptance by a particular client must be
+tested separately from package-format compatibility.
+
+The MCP tools `fitr_roles_list` and `fitr_role_review` share role names, revision
+and evidence digests, states, counts and preference bounds from the configured
+local `FITR_RESULTS` directory. They omit paths, model names, descriptions and
+raw diagnostics. Role names themselves are shared, so keep secrets out of names.
+Use the local CLI when detailed diagnostics are needed. The server cannot
+attach evidence, execute models, change preferences or authorize adoption.
+
 Use `fitr cleanup plan <directory>` for a read-only storage review. Apparent
 bytes are not recoverable space, and aged partial downloads are review
 candidates. Check dependency groups, completed-file integrity and active
@@ -39,5 +58,6 @@ downloads before proposing deletion. The command never deletes files.
 
 Recommend the smallest experiment that resolves the user's decision. Follow
 the host's existing authorization and the user's budgets before downloads,
-live experiments, remote calls, or configuration changes. This package contains
-no MCP server, A2A endpoint, hooks, or executable scripts.
+live experiments, remote calls, or configuration changes. MCP starts only when
+the host loads its configuration; the skill does not start a subprocess. This
+package supplies no A2A endpoint, hooks, bundled executable or install scripts.

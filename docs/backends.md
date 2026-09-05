@@ -40,15 +40,23 @@ an unavailable endpoint or a long custom list cannot stall the first command.
 
 ## Hugging Face GGUF links
 
-Paste a Hugging Face repo or blob URL as the model argument. fitr rewrites
-it to the `hf.co/{user}/{repo}[:quant]` form Ollama pulls natively, then
-fetches it if it is not already installed:
+Paste an unpinned Hugging Face repository URL as the model argument. fitr
+rewrites it to the `hf.co/{user}/{repo}[:quant]` alias Ollama pulls natively,
+then fetches it if it is not already installed:
 
 ```bash
 fitr run https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
-fitr run https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/blob/main/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf
 fitr run hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M
 ```
+
+Repository URLs ending in `/tree/main` are accepted as unpinned aliases.
+File URLs (`/blob/...` and `/resolve/...`), other revisions, subdirectories,
+and URL query or fragment selectors are rejected before backend access.
+Rewriting those links could silently lose an exact file, shard, or commit.
+Keep an exact link in `fitr discover add <source> --role <role>`, or load that
+artifact yourself and pass its served name. Discovery stores the link as an
+unmeasured idea; it does not yet resolve or download the artifact. Repository
+aliases are mutable and do not establish a pinned source revision.
 
 That is an Ollama feature. llama-server and OpenAI-compatible servers already
 have a model loaded; pointing them at an HF URL is a mismatch, not a download.

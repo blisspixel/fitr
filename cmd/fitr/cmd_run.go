@@ -131,7 +131,7 @@ func newRunFlagSet(supplied render.Display) (*flag.FlagSet, *runFlags) {
 	flags.seedSet = fs.String("seedset", "", "pin the generated-instance seed set; two runs sharing "+
 		"a seedset face IDENTICAL task instances, enabling a paired comparison")
 	flags.pull = fs.Bool("pull", false, "pull the model first if it is not installed "+
-		"(Ollama; supports hf.co/... and pasted Hugging Face URLs)")
+		"(Ollama; supports hf.co/... and Hugging Face repository URLs)")
 	flags.html = fs.Bool("html", false, "write a self-contained HTML artifact next to the JSON")
 	flags.numCtx = fs.Int("ctx", 0, "request context (default 8192). Apply an advise num_ctx remedy here.")
 	flags.capacityBudgetGB = fs.Float64("capacity-budget-gb", -1,
@@ -156,6 +156,10 @@ func validateRunFlags(fs *flag.FlagSet, flags *runFlags, reportError func(string
 	}
 	if fs.NArg() > 1 {
 		reportError("too many arguments", "run accepts exactly one model", "fitr run <model> [flags]")
+		return exitUsage, false
+	}
+	if err := validateModelRefs(fs.Arg(0)); err != nil {
+		reportError(err.Error(), "", hfModelRefHint)
 		return exitUsage, false
 	}
 	if *flags.numCtx < 0 {
@@ -389,9 +393,21 @@ func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,
 	if err := run.prepare(); err != nil {
 		return nil, err
 	}
+	// A sealed role experiment must reject changed definitions and identities
+	// before context verification can load a model or begin inference.
+	if opts.validatePrepared != nil {
+		if err := opts.validatePrepared(run); err != nil {
+			return nil, err
+		}
+	}
 	defer func() { _ = run.stopAll() }()
 	if err := run.verifyContextAndSeal(); err != nil {
 		return nil, err
+	}
+	if opts.validateContext != nil {
+		if err := opts.validateContext(run); err != nil {
+			return nil, err
+		}
 	}
 	work, err := os.MkdirTemp("", "evalkit_")
 	if err != nil {
@@ -607,6 +623,11 @@ func (run *runExecution) verifyContextAndSeal() error {
 	}
 	if err := run.prepareCapacityPlan(); err != nil {
 		return fmt.Errorf("seal capacity plan: %w", err)
+	}
+	if run.opts.validateCapacity != nil {
+		if err := run.opts.validateCapacity(run); err != nil {
+			return err
+		}
 	}
 	receipt, err := run.observeContext()
 	if err != nil {

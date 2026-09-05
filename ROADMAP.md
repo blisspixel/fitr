@@ -50,7 +50,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.1 | Lowercase product language, a wide master-detail Board, exact uncertainty tokens, and README product photography from the real renderer |
 | Shipped | 0.10.3 | Centralized diagnosis presentation, direct prefill-slower-phase diagnosis, runtime artifact identity, wide master-detail history, and decision-relative explanations |
 | Shipped | 0.10.4 | Private discovery inbox, portable evidence skill, sealed workflow contract, typed proof classes, timing partitions and receipt privacy fixes |
-| Current | 0.10.5 | Personal role screening with quality floors and uncertainty-aware preferences, canonical evidence attachments, and read-only cleanup planning |
+| Shipped | 0.10.5 | Personal role screening with quality floors and uncertainty-aware preferences, canonical evidence attachments, and read-only cleanup planning |
+| Current | 0.10.6 | Fresh role confirmation, explicit selection and validated rollback, runtime and memory preflight, and read-only MCP role tools |
 | Now | 0.10.x | Complete explain and choose: calibrated projection residuals, intervention-supported limiter hypotheses, and multi-surface decision relative views |
 | Then | 0.11 | Validated workload evidence: per-trial receipts, bounded workflow contracts, and local coverage |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
@@ -74,7 +75,7 @@ evidence paths.
 | 2 | complete | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | active | Generalized validated-work receipts and explicit evidence classes | 0.10.4 seals the fixed contract and reconstructs timing with typed proof classes. Multi-attempt, approval, escalation and external protocol receipts remain work before arbitrary workflows. |
-| 5 | active | Source ideas into a personal role library | 0.10.5 attaches canonical evidence and applies role floors, fixed preference anchors, uncertainty and weight sensitivity. Next seal those preferences before fresh confirmation, preserve incumbents, and resolve exact artifacts and dependencies. See [roles](docs/roles.md) and [discovery](docs/discovery.md). |
+| 5 | active | Source ideas into a personal role library | 0.10.6 seals preferences before fresh confirmation and preserves explicit selections with current-evidence checks. Next resolve immutable artifacts and dependencies, then compose bounded automation. See [roles](docs/roles.md) and [discovery](docs/discovery.md). |
 | 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. |
 
 Automatic selection must pass programmatic resource preflight and a separate
@@ -903,13 +904,23 @@ with researched protocol and harness profiles in [agent interoperability](docs/a
 
 - [x] Capture ideas from user-selected sources without executing their content.
 - [ ] Resolve source provenance and immutable artifact metadata through bounded adapters.
-- [ ] Attach role-specific measured evidence; bind model, runtime and harness changes.
-- [ ] Add user weights after hard constraints, fixed normalization, uncertainty
+- [x] Attach role-specific battery evidence; bind model and runtime changes.
+- [ ] Bind independently validated external harness evidence to role qualification.
+- [x] Add user weights after hard constraints, fixed normalization, uncertainty
       and sensitivity checks; never fabricate missing metrics.
-- [ ] Maintain an incumbent and fallback per role, with fresh confirmation and
-      an explicit adoption record.
+- [x] Maintain an incumbent reference per role, with fresh confirmation,
+      explicit adoption, evidence expiry and validated rollback.
+- [ ] Maintain operational fallbacks and apply an authorized serving change.
+- [x] Expose bounded read-only role summaries through MCP 2026-07-28 stdio.
+- [ ] Verify named harness clients and add the bounded A2A profile.
 - [ ] Build bounded opt-in automation over the same steps, with separate
       research, download, measurement, refinement and adoption authority.
+
+The next bounded build is [immutable artifact resolution](https://github.com/blisspixel/fitr/issues/5):
+explicit Hugging Face repository, revision and files; commit-pinned metadata;
+separate declared hashes and verified bytes; unresolved dependency groups;
+and no weight downloads. This supplies a reliable input to fit planning before
+automation can choose an experiment.
 
 Today fitr answers "is what I already have any good here?" The larger question
 is "what should I get?" fitr is positioned to answer it with the same local
@@ -1125,6 +1136,9 @@ These features must preserve the evidence contract.
 | 0.10.1 | Lowercase product language, wide master-detail Board, exact uncertainty tokens, and deterministic README product photography |
 | 0.10.2 | Typed capacity policy, timestamped availability, pre-observation component projections, observed safe-budget fit and headroom, and renderer-neutral capacity explanations |
 | 0.10.3 | Centralized diagnosis presentation, direct prefill-slower-phase diagnosis, runtime artifact identity, wide master-detail history, selection-aware help, and decision-relative explanations |
+| 0.10.4 | Private candidate inbox, bounded planning, portable agent skill, and live terminal activity controls |
+| 0.10.5 | Quality-first role screening, fixed preferences and uncertainty, canonical evidence attachments, and read-only cleanup planning |
+| 0.10.6 | Fresh weighted role confirmation, explicit selection and rollback, capacity and context preflight, and read-only MCP evidence tools |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

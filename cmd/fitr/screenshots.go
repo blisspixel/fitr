@@ -77,7 +77,7 @@ func cmdScreenshots(ctx context.Context, args []string) int {
 		{"inventory", shotInventory},
 		{"advise", shotAdvise}, {"run", shotRun}, {"apply", shotApply},
 		{"board", shotBoard}, {"top", shotTop}, {"doctor", shotDoctor}, {"compare", shotCompare},
-		{"discovery", shotDiscovery}, {"roles", shotRoles},
+		{"discovery", shotDiscovery}, {"roles", shotRoles}, {"selection", shotSelection},
 	}
 	for _, s := range shots {
 		text, err := captureStdout(ctx, s.fn)
@@ -134,6 +134,20 @@ func shotRoles(context.Context) (string, error) {
 			}},
 		},
 		Next: "One candidate clears the declared screening floors. Test the full workflow before granting agentic authority.",
+	}, "rich")
+	return "", nil
+}
+
+func shotSelection(context.Context) (string, error) {
+	fmt.Println("$ fitr role status daily-driver")
+	fmt.Println()
+	render.WriteRoleSelection(os.Stdout, role.SelectionStatus{
+		Role: "daily-driver", State: "qualified", Scope: "battery_screening", Attempts: 2,
+		Selection: &role.SelectionReceipt{
+			Selected:  role.ConfirmationPoint{Model: record.ModelIdentity{Resolved: "daily-model:q5"}},
+			ExpiresAt: "2026-10-05T00:00:00Z",
+		},
+		LastAttempt: &role.LifecycleAttemptStatus{Action: "failed", At: "2026-09-05T12:00:00Z"},
 	}, "rich")
 	return "", nil
 }

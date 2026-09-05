@@ -39,9 +39,9 @@ them. A digest detects accidental edits; it is not external provenance.
 
 ## The next product milestone
 
-The local role library provides the screening and preference layer in 0.10.5.
-The complete flow still needs source resolution, fresh weighted confirmation
-and explicit adoption:
+The local role library provides screening, preferences, fresh confirmation
+and explicit selection in 0.10.6. Source resolution and bounded automation are
+the next missing steps in the complete flow:
 
 ```text
 idea -> source check -> exact artifact -> fit plan -> bounded experiment
@@ -89,9 +89,10 @@ The role contract requires:
 
 The inbox and [role screening library](roles.md) ship now. Roles attach
 canonical evidence and compare eligible candidates using fixed preference
-anchors, uncertainty and weight sensitivity. Incumbents, fallbacks, fresh
-weighted confirmation, source extraction and automatic adoption remain work.
-An exploratory lead is not permission to switch a serving model.
+anchors, uncertainty and weight sensitivity. [Fresh confirmation](role-confirmation.md)
+seals that policy before new trials; explicit adoption stores an incumbent
+with evidence expiry and validated rollback. It does not switch a serving
+model. Operational fallbacks, source extraction and automatic adoption remain work.
 
 [Cleanup planning](cleanup.md) inventories existing storage without deletion.
 Replacement research must preserve dependency groups, including shared
@@ -138,7 +139,7 @@ and produces source-bound claims; it does not answer from remembered model
 names. LLMfit or another inventory/fit tool may contribute attributed external
 observations after its schema and version are checked. Those observations
 cannot replace fitr's runtime-bound local measurements. No such adapter ships
-in 0.10.5.
+in 0.10.6.
 
 ## Qwen example and verification boundary
 

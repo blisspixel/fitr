@@ -74,3 +74,32 @@ func WriteRoleReview(w io.Writer, report role.ReviewReport, mode string) {
 	fmt.Fprintln(w)
 	Field(w, "  ", 2, "Battery screening only. Preference bounds are not a joint confidence interval. No automatic adoption.", width)
 }
+
+func WriteRoleSelection(w io.Writer, status role.SelectionStatus, mode string) {
+	p, _ := inventoryStyle(Resolve(mode) == "rich")
+	width := Width()
+	fmt.Fprintf(w, "  %s\n", p.wrap(p.Head, "fitr / selected role"))
+	Field(w, "  ", 2, status.Role, width)
+	style := p.Warn
+	if status.State == "qualified" {
+		style = p.Pass
+	}
+	fmt.Fprintf(w, "  %s\n", p.wrap(style, strings.ToUpper(SingleLine(status.State))))
+	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, strings.Repeat("-", width-4)))
+	fmt.Fprintln(w)
+	if status.Selection != nil {
+		Field(w, "  model", 13, status.Selection.Selected.Model.Resolved, width)
+		Field(w, "  expires", 13, status.Selection.ExpiresAt, width)
+	}
+	if status.LastAttempt != nil {
+		Field(w, "  attempt", 13, fmt.Sprintf("%s at %s | %d started", status.LastAttempt.Action, status.LastAttempt.At, status.Attempts), width)
+	}
+	if status.Reason != "" {
+		Field(w, "  gap", 13, status.Reason, width)
+	}
+	if status.State != "qualified" {
+		Field(w, "  next", 13, "fitr role review "+status.Role, width)
+	}
+	fmt.Fprintln(w)
+	Field(w, "  ", 2, "Battery screening. Selection is stored in fitr; serving configuration is not changed.", width)
+}

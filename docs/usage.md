@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.10.5" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.10.5" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.10.5" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.10.5" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.10.6" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.10.6" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.10.6" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.10.6" alt="fitr top (demo data)" width="820">
 
 ### Disk
 
@@ -202,6 +202,9 @@ of installed RAM as an unconditional model budget.
 | `fitr role define <role.json>` / `show <name>` | version or export explicit requirements, preferences and freshness limits |
 | `fitr role list` / `review <name>` | inspect role screening, evidence gaps, preference bounds and sensitivity; see [roles](roles.md) |
 | `fitr role attach <name> <result.json>` / `detach <name> <digest>` | pin or remove a canonical evidence reference without deleting its source |
+| `fitr role confirm <name\|bundle.json>` | seal role preferences before fresh trials, or inspect a saved confirmation; see [confirmation](role-confirmation.md) |
+| `fitr role adopt <name> <bundle.json>` / `status <name>` / `rollback <name>` | explicitly retain a qualified selection, recheck it or restore valid previous evidence |
+| `fitr mcp serve` | serve bounded read-only role tools over MCP 2026-07-28 stdio; see [interop](agent-interop.md) |
 | `fitr cleanup plan <directory> [--min-age-days 7]` | bounded read-only storage inventory with aged partial-download review candidates; see [cleanup](cleanup.md) |
 | `fitr device [--display MODE]` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
 | `fitr calibrate <a> <b> [--out PATH] [--lineage PATH]` | paired item discrimination; optional same-base lineage receipt |
