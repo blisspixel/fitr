@@ -643,6 +643,7 @@ func (run *runExecution) initializeResult() error {
 		for key, value := range run.opts.ownedConfiguration {
 			fp.Config[key] = value
 		}
+		fp.ConfigSource = device.ConfigSourceOwnedLaunch
 	}
 	run.profile, err = device.SelectProfile(run.opts.profile, fp)
 	if err != nil {
@@ -881,7 +882,11 @@ func (run *runExecution) sealFingerprint(receipt device.ContextVerification) err
 	if comparableKey, err := fingerprintV2.ComparabilityKey(); err == nil {
 		run.result.DeviceKey = comparableKey
 	} else {
-		run.display.Note("effective context is unverified; this run remains visible but is excluded from ranking and comparison", "warn")
+		reason := "effective context is unverified"
+		if fingerprintV2.Device.ConfigSource == device.ConfigSourceUnobserved {
+			reason = "serving-runtime configuration is unobserved"
+		}
+		run.display.Note(reason+"; this run remains visible but is excluded from ranking and comparison", "warn")
 	}
 	if receipt.State() == device.ContextAdjusted {
 		run.display.Note(fmt.Sprintf("runtime allocated %d context tokens for the %d-token request; comparison uses the effective value",

@@ -44,7 +44,11 @@ and version, inference placement, and the config that actually moves numbers
 fingerprint and **refuses to rank across groups**. Requested context and the
 runtime-reported effective allocation are separate facts in fingerprint v2;
 an unverified effective context is visible in History but cannot enter a
-ranking. Change the driver and your old numbers are explicitly void.
+ranking. Unobserved serving-runtime configuration is the same: a new run
+cannot pool with an observed one, or with another unobserved daemon, until
+the daemon is actually read. Historical records sealed before that provenance
+existed keep their original key. Change the driver and your old numbers are
+explicitly void.
 
 ## 2. "Is it good" is unanswerable. "Does it serve need X" is answerable.
 

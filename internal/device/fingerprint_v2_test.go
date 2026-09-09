@@ -101,6 +101,50 @@ func TestFingerprintV2KeyIsStableAndSeparatesMissingLegacyDimensions(t *testing.
 	}
 }
 
+func TestComparabilityKeyRefusesUnobservedRuntimeConfig(t *testing.T) {
+	fp := validFingerprint()
+	fp.ConfigSource = ConfigSourceUnobserved
+	v2, err := NewFingerprintV2(fp, verifiedContext(8192, 8192))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v2.ComparabilityKey(); err == nil || !strings.Contains(err.Error(), "unobserved") {
+		t.Fatalf("unobserved comparability error = %v", err)
+	}
+}
+
+func TestComparabilityKeyAllowsHistoricalEmptyConfigSource(t *testing.T) {
+	v2, err := NewFingerprintV2(validFingerprint(), verifiedContext(8192, 8192))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v2.ComparabilityKey(); err != nil {
+		t.Fatalf("historical empty config source: %v", err)
+	}
+}
+
+func TestComparabilityKeyAllowsOwnedLaunchConfig(t *testing.T) {
+	fp := validFingerprint()
+	fp.ConfigSource = ConfigSourceOwnedLaunch
+	v2, err := NewFingerprintV2(fp, verifiedContext(8192, 8192))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v2.ComparabilityKey(); err != nil {
+		t.Fatalf("owned-launch config: %v", err)
+	}
+}
+
+func TestConfigSourceIsOmittedFromHistoricalJSON(t *testing.T) {
+	b, err := json.Marshal(validFingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "config_source") {
+		t.Fatalf("empty config source must stay omitted: %s", b)
+	}
+}
+
 func TestContextVerificationDoesNotPromoteProbeToEffectiveContext(t *testing.T) {
 	probe := &ContextProbe{
 		PromptTokens: 2400, CachedTokens: 300, MinimumExpectedTokens: 2000,

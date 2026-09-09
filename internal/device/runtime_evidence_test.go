@@ -137,3 +137,35 @@ func TestServerConfigObservedSeparatesUnsetFromUnobserved(t *testing.T) {
 		t.Fatal("an empty startup log was reported as observed configuration")
 	}
 }
+
+func TestObserveOllamaConfigDoesNotTreatProcessEnvAsTheDaemon(t *testing.T) {
+	root := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("LOCALAPPDATA", root)
+	} else {
+		t.Setenv("HOME", root)
+	}
+	t.Setenv("OLLAMA_FLASH_ATTENTION", "1")
+	t.Setenv("OLLAMA_KV_CACHE_TYPE", "q8_0")
+	cfg, source := observeOllamaConfig()
+	if source != ConfigSourceUnobserved {
+		t.Fatalf("source = %q, want unobserved when the startup log is absent", source)
+	}
+	if cfg["OLLAMA_FLASH_ATTENTION"] != "" || cfg["OLLAMA_KV_CACHE_TYPE"] != "" {
+		t.Fatalf("unobserved config copied process environment: %+v", cfg)
+	}
+	path := serverLogPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("env=[OLLAMA_FLASH_ATTENTION:0 OLLAMA_KV_CACHE_TYPE:f16]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, source = observeOllamaConfig()
+	if source != ConfigSourceServerLog {
+		t.Fatalf("source = %q, want server-log", source)
+	}
+	if cfg["OLLAMA_FLASH_ATTENTION"] != "0" || cfg["OLLAMA_KV_CACHE_TYPE"] != "f16" {
+		t.Fatalf("server-log config = %+v", cfg)
+	}
+}

@@ -108,7 +108,7 @@ func writeDeviceConfiguration(fp device.Fingerprint) {
 	// facts. A daemon started by launchd or systemd carries an environment
 	// this process never sees, so calling an empty value "(unset)" there
 	// claims the daemon's configuration from evidence about fitr's own.
-	observed := device.ServerConfigObserved()
+	observed := fp.RuntimeConfigObserved()
 	keys := make([]string, 0, len(fp.Config))
 	for k := range fp.Config {
 		keys = append(keys, k)
@@ -126,8 +126,8 @@ func writeDeviceConfiguration(fp device.Fingerprint) {
 	}
 	if !observed {
 		render.Field(os.Stdout, "  ! config", deviceLabelWidth,
-			"the serving runtime's startup log was not readable, so these are this process's "+
-				"variables rather than the daemon's", render.Width())
+			"the serving runtime's startup log was not readable, so these values are unobserved "+
+				"rather than the daemon's", render.Width())
 	}
 }
 

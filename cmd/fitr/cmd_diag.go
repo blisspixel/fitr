@@ -135,7 +135,7 @@ func runDoctor(ctx context.Context, c llm.Backend, model string, command doctorC
 	fmt.Printf("doctor: %s on %s (%s)\n", terminalText(model), terminalText(fp.GPU), terminalText(fp.Runtime))
 	ctx = eval.WithNumCtx(ctx, command.numCtx)
 	r, err := eval.RunDoctor(ctx, c, model, command.repeats, eval.DoctorOpts{
-		Config: fp.Config,
+		Config: fp.Config, ConfigObserved: fp.RuntimeConfigObserved(),
 		Placement: func(ctx context.Context) string {
 			return device.InferenceDeviceFor(ctx, c, model)
 		},

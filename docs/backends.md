@@ -70,7 +70,9 @@ across it.
 
 **Ollama** is the native path: server-side timings, resident memory via
 `/api/ps`, capabilities via `/api/show`, and config read from the server's
-own log (authoritative over your shell's environment).
+own log when that log is found. Without a log, those settings are unobserved
+rather than taken from this process's environment, and a new run cannot enter
+ranking until the daemon is actually read.
 
 **llama-server** is not just reach - it is measurement surface Ollama does
 not expose: per-request **cached-token counts** (the evidence needed to

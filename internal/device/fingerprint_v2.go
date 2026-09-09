@@ -221,6 +221,9 @@ func (f FingerprintV2) ComparabilityKey() (string, error) {
 	if f.Context.Probe != nil && !f.Context.Probe.MeetsMinimum() {
 		return "", errors.New("context probe did not meet its minimum served-token receipt")
 	}
+	if f.Device.ConfigSource == ConfigSourceUnobserved {
+		return "", errors.New("serving-runtime configuration is unobserved")
+	}
 	material := fingerprintKeyMaterial{
 		Schema: f.Schema,
 		Host:   f.Device.Host, OS: f.Device.OS, CPU: f.Device.CPU,

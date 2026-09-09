@@ -200,7 +200,18 @@ type Fingerprint struct {
 	VRAMGb     float64           `json:"vram_gb,omitempty"`
 	VRAMSource string            `json:"vram_source,omitempty"`
 	Config     map[string]string `json:"config"`
+	// ConfigSource says how Config was obtained. Empty is historical: records
+	// sealed before provenance existed. server-log is the serving runtime's
+	// own startup log. owned-launch is an explicitly sealed child environment.
+	// unobserved means the daemon was not read, so Config cannot be compared.
+	ConfigSource string `json:"config_source,omitempty"`
 }
+
+const (
+	ConfigSourceServerLog   = "server-log"
+	ConfigSourceOwnedLaunch = "owned-launch"
+	ConfigSourceUnobserved  = "unobserved"
+)
 
 // vendorForAccel maps a compute API onto the vendor whose name must appear on
 // the card serving it. Only APIs with a single possible vendor are listed:
@@ -316,6 +327,12 @@ func (f Fingerprint) Diff(o Fingerprint) [][3]string {
 	return out
 }
 
+// RuntimeConfigObserved reports that Config came from the serving runtime
+// itself, not from this process's environment and not from an absent reading.
+func (f Fingerprint) RuntimeConfigObserved() bool {
+	return f.ConfigSource == ConfigSourceServerLog || f.ConfigSource == ConfigSourceOwnedLaunch
+}
+
 func (f Fingerprint) Key() string {
 	c := f.Config
 	return strings.Join([]string{
@@ -348,15 +365,11 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	go func() { defer wg.Done(); vram, vsrc = cachedVRAMInfo(probeCtx) }()
 
 	cfg := map[string]string{}
+	configSource := ""
 	version := ""
 	isOllama := b != nil && b.Name() == "ollama"
 	if isOllama {
-		for _, k := range configKeys {
-			cfg[k] = os.Getenv(k)
-		}
-		// The server log is authoritative for how Ollama was actually started,
-		// which frequently differs from this process's environment.
-		mergeServerLogConfig(cfg)
+		cfg, configSource = observeOllamaConfig()
 	}
 	if b != nil {
 		version = b.Version(probeCtx)
@@ -384,6 +397,7 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 		GPU: gpu, GPUDriver: drv, GPUDriverDate: date,
 		Runtime: version, InferenceDevice: placement,
 		GPUBackend: accel, VRAMGb: vram, VRAMSource: vsrc, Config: cfg,
+		ConfigSource: configSource,
 	}
 }
 
@@ -707,6 +721,24 @@ func readLog() string {
 // unobserved setting is indistinguishable from one that is genuinely unset,
 // and the caller would state the stronger of the two.
 func ServerConfigObserved() bool { return readLog() != "" }
+
+// observeOllamaConfig reads the serving runtime's startup log when it can.
+// Process environment is only a fallback inside that log merge: without a log,
+// the daemon was not observed, and the caller's shell variables are not it.
+func observeOllamaConfig() (map[string]string, string) {
+	cfg := make(map[string]string, len(configKeys))
+	if !ServerConfigObserved() {
+		for _, k := range configKeys {
+			cfg[k] = ""
+		}
+		return cfg, ConfigSourceUnobserved
+	}
+	for _, k := range configKeys {
+		cfg[k] = os.Getenv(k)
+	}
+	mergeServerLogConfig(cfg)
+	return cfg, ConfigSourceServerLog
+}
 
 func mergeServerLogConfig(cfg map[string]string) {
 	text := readLog()

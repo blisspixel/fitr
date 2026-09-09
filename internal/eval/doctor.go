@@ -50,6 +50,9 @@ type DoctorOpts struct {
 	// Config is the resolved server config (from the server log when
 	// available, which is authoritative over this process's environment).
 	Config map[string]string
+	// ConfigObserved is false when Config was not read from the serving
+	// runtime. Empty values are then unobserved, not unset.
+	ConfigObserved bool
 	// Placement reports where the loaded model actually computes, e.g.
 	// "GPU 100%", "GPU 62%", "CPU". Called after the model is warm.
 	Placement func(ctx context.Context) string
@@ -79,7 +82,7 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	if err := doctorJSONDeterminism(ctx, c, model, runs, textDeterministic, &r); err != nil {
 		return r, err
 	}
-	doctorConfig(opts.Config, &r)
+	doctorConfig(opts.Config, opts.ConfigObserved, &r)
 	finishDoctor(&r)
 	return r, nil
 }
@@ -201,9 +204,9 @@ func doctorJSONDeterminism(ctx context.Context, c llm.Backend, model string, run
 	return nil
 }
 
-func doctorConfig(config map[string]string, r *DoctorResult) {
-	// 6. Config red flags. The values come from the server log when available,
-	// so they are what the server actually started with.
+func doctorConfig(config map[string]string, observed bool, r *DoctorResult) {
+	// 6. Config red flags. Observed values come from the server log or an
+	// owned launch. Unobserved empties are not the daemon's unset settings.
 	if config != nil {
 		var flags []string
 		if v, err := strconv.Atoi(config["OLLAMA_NUM_PARALLEL"]); err == nil && v > 1 {
@@ -215,8 +218,12 @@ func doctorConfig(config map[string]string, r *DoctorResult) {
 		if len(flags) > 0 {
 			addDoctorCheck(r, "config", "WARN", strings.Join(flags, "; "))
 		} else {
+			label := orUnset
+			if !observed {
+				label = orUnobserved
+			}
 			addDoctorCheck(r, "config", "PASS", fmt.Sprintf("flash_attention=%s kv_cache_type=%s",
-				orUnset(config["OLLAMA_FLASH_ATTENTION"]), orUnset(config["OLLAMA_KV_CACHE_TYPE"])))
+				label(config["OLLAMA_FLASH_ATTENTION"]), label(config["OLLAMA_KV_CACHE_TYPE"])))
 		}
 	}
 }
@@ -300,6 +307,13 @@ func Divergence(outputs []string) (identical bool, distinct int, firstDiff int) 
 func orUnset(s string) string {
 	if s == "" {
 		return "(unset)"
+	}
+	return s
+}
+
+func orUnobserved(s string) string {
+	if s == "" {
+		return "(unobserved)"
 	}
 	return s
 }
