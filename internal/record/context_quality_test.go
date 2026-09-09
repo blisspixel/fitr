@@ -273,3 +273,43 @@ func TestAttachedContextPlanIsIndependentOfTheCaller(t *testing.T) {
 		t.Fatalf("the caller's later edit reached sealed evidence: %v", err)
 	}
 }
+
+// The pack cannot attest seed freshness, so the run's seed set carries it:
+// fresh per run by default, identical only when the operator pinned one to pair
+// two runs. Deriving rather than generating is what preserves that meaning.
+func TestContextTaskSeedSetTracksTheRunSeedSet(t *testing.T) {
+	pinned, err := ContextTaskSeedSet("qwen3-8b-pair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := ContextTaskSeedSet("qwen3-8b-pair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinned != again {
+		t.Fatalf("a pinned run seed set produced %q then %q; paired runs would face different cells",
+			pinned, again)
+	}
+	fresh, err := ContextTaskSeedSet("2026-09-08T10:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh == pinned {
+		t.Fatal("different run seed sets produced the same pack seed set")
+	}
+	// NewPlan is the only consumer, and it accepts exactly 32 lowercase
+	// hexadecimal characters. A derivation it rejects would fail at run time.
+	policy, err := contextquality.NewPolicy(8192, []int{2048, 4096})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := contextquality.NewPlan(policy, fresh); err != nil {
+		t.Fatalf("derived seed set %q is not usable as a plan seed: %v", fresh, err)
+	}
+}
+
+func TestContextTaskSeedSetRefusesAnAbsentRunSeedSet(t *testing.T) {
+	if _, err := ContextTaskSeedSet(""); err == nil {
+		t.Fatal("an empty run seed set produced a pack seed set")
+	}
+}

@@ -57,8 +57,9 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.9 | Bounded local artifact observations, explicit file mappings and source hash comparisons without runtime promotion |
 | Shipped | 0.10.10 | Official MCP SDK binary acceptance and Ollama remote-provenance checks before local experiments |
 | Shipped | 0.10.11 | Bounded auto fitting with an explicit shortlist, owned Windows runtime, resource gates, quality-first comparison and fresh confirmation; a consistent terminal identity |
-| Current | 0.10.12 | Read-only MCP selection status for managed incumbents, bounded local path resolution and expanded official SDK acceptance |
-| Now | 0.11 | Typed usable-context quality and one pinned model-plus-harness workflow, extending validated-work receipts and personal preferences |
+| Shipped | 0.10.12 | Read-only MCP selection status for managed incumbents, bounded local path resolution and expanded official SDK acceptance |
+| Current | 0.10.13 | A collectable context-quality scorecard at one operating window, plus lock, interrupt and unobserved-configuration corrections |
+| Now | 0.11 | Remaining context-quality surfaces and role connection, plus one pinned model-plus-harness workflow |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
 | Active | Candidate discovery | Capture ideas now; next resolve artifacts and build evidence-backed model and harness choices by role |
@@ -101,9 +102,12 @@ constraints and completed effects under external verification. The
 measurement work from today's runtime-window requirement. The
 [context task foundation](docs/context-quality.md) now supplies a deterministic
 document pack, independent verifier, opt-in nontruncating request accounting,
-the execution adapter that submits one sealed plan and the signed run evidence
-that persists it; owned auto collection and personal selection remain to be
-connected.
+the execution adapter that submits one sealed plan, the signed run evidence that
+persists it, and `fitr run --context-tiers`, which collects one phase as its own
+run level and projects it through the central analysis contract. A model served
+by Ollama's MLX runner is refused, because that runner silently reduces the
+output reserve the qualification rests on. Owned auto collection, personal
+selection and the remaining result surfaces are still to be connected.
 The [host compatibility matrix](docs/agent-interop.md) records current protocol
 gaps before any named-harness support is claimed.
 

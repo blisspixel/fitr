@@ -124,9 +124,13 @@ jobs:
         run: |
           # The context task pack is reachable from record evidence validation,
           # so its generator and verifier are linked rather than eliminated.
-          # That is 127 KiB across every target. Measured 15,239,680 bytes on
-          # windows/amd64; all six targets retain this measured cap.
-          max_bytes=15290000
+          # Connecting the collection path adds the run level, the analysis
+          # projection and the terminal section on top of that: 20,992 bytes,
+          # measured against the previous commit rather than estimated.
+          # windows/amd64 is the largest at 15,260,672 bytes and sets the cap,
+          # keeping the same headroom the previous measured cap used. The other
+          # five targets are between 1.1 and 2.5 MiB below it.
+          max_bytes=15311000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"
             printf '%-32s %10d bytes\n' "$binary" "$size"

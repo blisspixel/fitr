@@ -378,7 +378,7 @@ type topRunPreview struct {
 type topRunPreviewFlags struct {
 	quick, full, checks, html, unsafeExec *bool
 	k, numCtx                             *int
-	profile, seedset                      *string
+	profile, seedset, contextTiers        *string
 }
 
 func previewTopRun(args []string) (topRunPreview, error) {
@@ -391,7 +391,7 @@ func previewTopRun(args []string) (topRunPreview, error) {
 	if err := validateTopRunPreview(fs, options); err != nil {
 		return topRunPreview{}, err
 	}
-	level := selectedRunLevel(*options.quick, *options.full, *options.checks)
+	level := selectedRunLevel(*options.quick, *options.full, *options.checks, *options.contextTiers != "")
 	return topRunPreview{
 		model: presentationModelLabel(normalizeModelRef(fs.Arg(0))), profile: *options.profile, level: level,
 		repeats: runRepeats(level, *options.k), numCtx: eval.ResolvedCtx(*options.numCtx),
@@ -404,7 +404,7 @@ func registerTopRunPreviewFlags(fs *flag.FlagSet) topRunPreviewFlags {
 		checks: fs.Bool("checks-only", false, ""), k: fs.Int("k", 0, ""),
 		profile: fs.String("profile", "", ""), seedset: fs.String("seedset", "", ""),
 		html: fs.Bool("html", false, ""), unsafeExec: fs.Bool("allow-unsafe-exec", false, ""),
-		numCtx: fs.Int("ctx", 0, ""),
+		numCtx: fs.Int("ctx", 0, ""), contextTiers: fs.String("context-tiers", "", ""),
 	}
 	_ = fs.String("display", "auto", "")
 	_ = fs.String("backend", "auto", "")
@@ -422,8 +422,8 @@ func validateTopRunPreview(fs *flag.FlagSet, options topRunPreviewFlags) error {
 	if err := validateModelRefs(fs.Arg(0)); err != nil {
 		return err
 	}
-	if selectedRunLevels(*options.quick, *options.full, *options.checks) > 1 {
-		return errors.New("--quick, --full, and --checks-only are mutually exclusive")
+	if selectedRunLevels(*options.quick, *options.full, *options.checks, *options.contextTiers != "") > 1 {
+		return errors.New("--quick, --full, --checks-only, and --context-tiers are mutually exclusive")
 	}
 	if *options.checks && *options.seedset == "" {
 		return errors.New("--checks-only requires --seedset")
@@ -434,7 +434,7 @@ func validateTopRunPreview(fs *flag.FlagSet, options topRunPreviewFlags) error {
 	if *options.checks && *options.unsafeExec {
 		return errors.New("--checks-only cannot use --allow-unsafe-exec")
 	}
-	level := selectedRunLevel(*options.quick, *options.full, *options.checks)
+	level := selectedRunLevel(*options.quick, *options.full, *options.checks, *options.contextTiers != "")
 	repeats := runRepeats(level, *options.k)
 	if repeats < 1 {
 		return errors.New("-k must be at least 1")

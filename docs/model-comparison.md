@@ -75,8 +75,9 @@ that actually served a comparison. [Provider routing](https://openrouter.ai/docs
 A declared context window is a capacity limit. Input and output share it, so
 tool instructions and output reserve reduce the available task payload.
 [Context fields](https://openrouter.ai/docs/guides/overview/models)
-The shipped context requirement checks the runtime window; usable-context
-quality remains a separate proposed measurement.
+The shipped context requirement checks the runtime window. `fitr run --context-tiers`
+collects a document-task scorecard at one window; it is not yet a role
+attribute, a preference weight or a confirmation input.
 
 Test fixed payload tiers and required distant dependencies, then expose the
 largest tested tier that passes every required family. Untested lengths remain

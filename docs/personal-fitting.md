@@ -3,9 +3,10 @@
 fitr is a tailor for local AI: it turns a general-purpose model into a tested
 choice for a person's work and machine. This document describes the next
 product direction. Context-quality role attributes, harness task scorecards
-and the guided fitting flow below are not yet available. The deterministic
-[document task pack and request accounting](context-quality.md) provide
-internal groundwork for the first context scorecard.
+and the guided fitting flow below are not yet available. `fitr run --context-tiers`
+collects the first document scorecard as its own run; see
+[context task evidence](context-quality.md) for what that measurement does and
+does not establish.
 
 ## From an idea to an earned choice
 

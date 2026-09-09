@@ -1,11 +1,18 @@
 # Context task evidence
 
 The next Extended fit scorecard tests whether a model uses a long document
-correctly at a fixed operating window. The deterministic task pack, the opt-in
-Ollama request accounting, the execution adapter that submits one sealed plan
-and the signed run evidence that persists it are implemented as internal
-foundations. Role preferences and auto confirmation are not connected yet. No
-command currently earns this scorecard.
+correctly at a fixed operating window.
+
+`fitr run <model> --context-tiers <bytes,bytes[,...]> [--ctx N]` collects one
+phase. It is its own run level: the ordinary battery does not run, because the
+pack needs a client that sends the declared overflow controls for its whole
+lifetime and ordinary requests keep their existing defaults. There is no default
+tier set. The declared sizes are sealed into the policy digest, so the operator
+states what was tested rather than inheriting an untested product choice.
+
+The result is an ordinary signed run record whose only planned work is the
+phase. Role preferences, auto collection and fresh confirmation are not
+connected yet, so nothing consumes this scorecard to qualify a model.
 
 ## What the document pack measures
 
@@ -45,12 +52,47 @@ agent workflow qualification. All-pass means at least the largest declared
 tier tested. Untested sizes and task families remain unknown. The internal
 report explicitly leaves runtime unbound and native token accounting unknown.
 
+Four further limits follow from how the pack is built, and each is a property of
+this instrument rather than of a measured model:
+
+- **Three positions are a gate, not a curve.** Facts are placed near the
+  beginning, middle and end. Published position studies use far finer sampling
+  to resolve where degradation actually begins, and the middle of a document is
+  not uniform. Nine cells per tier can establish that a tier failed; they cannot
+  locate a narrow dead zone or support a claim about position sensitivity.
+- **The verified prefix assumes larger is harder.** Requiring every lower tier
+  to pass treats tier size as monotonically more difficult. That is a reasonable
+  default and not a guaranteed property, so a lower tier failing while a higher
+  one passes stays visible in the per-tier counts rather than being folded into
+  a single verdict.
+- **Bytes are the construction unit, not a window fraction.** Exact ASCII bytes
+  keep the payload identical across models, which token-sized packs cannot do.
+  They do not make the same payload occupy the same share of two models' windows
+  once tokenized, so a passing tier is a claim about bytes. The native prompt
+  token count is recorded beside it and is the only per-model token fact here.
+- **Instruction retention has the thinnest external grounding.** Indirect
+  retrieval and distant dependencies follow well-established task families.
+  Standing-instruction retention over a long document is a real but sparsely
+  studied category, so treat its results as the least corroborated of the three.
+
 ## Runtime controls and token accounting
 
 The opt-in client policy sends explicit `truncate:false` and `shift:false`
 throughout a client lifetime, including load probes and bounded chat retries.
 Ordinary requests retain their existing defaults. Client controls alone do
 not prove that an arbitrary runtime honors them.
+
+Ollama resolves context shifting once, when it launches the runner for a model,
+rather than per request. The policy is therefore adopted before the load probe,
+not only on the graded requests.
+
+A model whose runtime artifact format is `safetensors` is served by Ollama's MLX
+runner, which reduces a requested output reserve to whatever remains beside the
+accepted prompt and returns no field reporting that it did. The reserve gate
+below cannot be established there at all, so such a model is refused before its
+plan is sealed rather than measured into evidence whose central check was never
+testable. The format is read from the runtime's own model details; an absent
+format means GGUF, so absence is not treated as MLX.
 
 Native terminal observations retain presence of total prompt, cached prompt
 and generated-token counts. Missing or null counts remain unknown; absent
@@ -117,11 +159,25 @@ the phase existed keeps its exact bytes and its signature.
 
 ## Remaining connected acceptance
 
+The phase renders in the CLI and in JSON through the central analysis
+projection. HTML export and the TUI result view do not yet render it, so
+`--html` is refused rather than writing a scorecard that omits the only
+planned work.
+
 Before this scorecard can influence a personal role, fitr must collect it
-inside the owned runtime and existing budgeted fitting, preserve old signed
-evidence, replay every observation, and obtain fresh confirmation. Native
-acceptance must show that an oversized prompt is refused without shrinking
-the document, window or reserve. Missing accounting must block qualification.
+inside the owned runtime and existing budgeted fitting, obtain fresh
+confirmation, and expose the phase in HTML and the TUI. Missing
+accounting must block qualification, which the reserve gate already enforces.
+
+Native acceptance must show that an oversized prompt is refused without
+shrinking the document, window or reserve. Two runtime details shape that test.
+The refusal is raised by llama-server, not by Ollama's own pre-flight, because
+`truncate:false` bypasses the Go-side length check entirely; the acceptance
+assertion should therefore match the runtime's overflow error specifically
+rather than any HTTP 400. And which component would have enforced the limit
+depends on whether the model resolves to a legacy Go template or a Jinja one,
+so the test needs at least one model of each kind before the guarantee can be
+called verified.
 
 Pi-backed workspace, compaction and restart evidence remains a separate
 Extended fit scorecard. See [personal fitting](personal-fitting.md) and

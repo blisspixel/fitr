@@ -427,6 +427,41 @@ type ArtifactIdentity struct {
 	SizeBytes     int64  `json:"size_bytes,omitempty"`
 }
 
+// ContextTaskTier is one declared payload size and how its cells resolved.
+// Counts are cell counts within this tier, never a rate or an interval.
+type ContextTaskTier struct {
+	PayloadUTF8Bytes int    `json:"payload_utf8_bytes"`
+	Outcome          string `json:"outcome"`
+	Planned          int    `json:"planned"`
+	Pass             int    `json:"pass"`
+	Fail             int    `json:"fail"`
+	Unavailable      int    `json:"unavailable"`
+}
+
+// ContextTasks projects one finite document-task phase.
+//
+// Every field is copied from the report the record re-derived from its own
+// observations; nothing here is recomputed, and a renderer must not turn these
+// counts into a rate. VerifiedPrefixBytes is the largest declared tier
+// whose required cells and every lower tier passed, and it is absent whenever
+// any cell was unavailable. The phase is a finite task-set result at one
+// operating window, not a context capacity or a statistical interval.
+type ContextTasks struct {
+	Status               ObservationStatus `json:"status"`
+	OperatingWindow      int               `json:"operating_window_tokens"`
+	OutputReserve        int               `json:"output_reserve_tokens"`
+	PlanSHA256           string            `json:"plan_sha256"`
+	Outcome              string            `json:"outcome"`
+	Complete             bool              `json:"complete"`
+	Tiers                []ContextTaskTier `json:"tiers"`
+	Planned              int               `json:"planned"`
+	Pass                 int               `json:"pass"`
+	Fail                 int               `json:"fail"`
+	Unavailable          int               `json:"unavailable"`
+	VerifiedPrefixBytes  *int              `json:"verified_prefix_utf8_bytes,omitempty"`
+	AtLeastLargestTested bool              `json:"at_least_largest_tested"`
+}
+
 // Report is a derived, non-persistent analysis of one validated schema-6 run.
 // Capacity may carry a sealed-policy FIT/EXCEEDED observation. The report still
 // has no limiter diagnosis, no global score, and no quality rank.
@@ -438,7 +473,10 @@ type Report struct {
 	Context     Context          `json:"context"`
 	Performance Performance      `json:"performance"`
 	Capacity    Capacity         `json:"capacity"`
-	Gaps        []EvidenceGap    `json:"gaps,omitempty"`
-	Diagnoses   []Diagnosis      `json:"diagnoses,omitempty"`
-	NextActions []Action         `json:"next_actions"`
+	// ContextTasks is absent for every run that planned no context phase, which
+	// is every run written before the phase existed.
+	ContextTasks *ContextTasks `json:"context_tasks,omitempty"`
+	Gaps         []EvidenceGap `json:"gaps,omitempty"`
+	Diagnoses    []Diagnosis   `json:"diagnoses,omitempty"`
+	NextActions  []Action      `json:"next_actions"`
 }

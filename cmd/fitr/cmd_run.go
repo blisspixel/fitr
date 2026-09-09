@@ -9,11 +9,13 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/blisspixel/fitr/internal/advise"
 	"github.com/blisspixel/fitr/internal/buildinfo"
+	"github.com/blisspixel/fitr/internal/contextquality"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/llm"
@@ -45,6 +47,9 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 	if code != exitOK {
 		return code
 	}
+	if code := adoptContextRequestPolicy(c, command, supplied); code != exitOK {
+		return code
+	}
 	disp := supplied
 	if disp == nil {
 		disp = render.New(command.mode)
@@ -56,6 +61,30 @@ func cmdRunWithDisplay(ctx context.Context, args []string, supplied render.Displ
 		return reportRunFailure(ctx, supplied, disp, command.model, err)
 	}
 	return finishRunCommand(ctx, c, supplied, disp, command, res)
+}
+
+// adoptContextRequestPolicy configures the overflow controls the pack declares
+// before any inference happens.
+//
+// Ollama resolves context shifting once, when it launches the runner for a
+// model, so the policy has to be in place before the load probe rather than
+// only on the graded requests. It is adopted only for the context level: an
+// ordinary run keeps the existing request defaults, and the resulting evidence
+// keeps comparing to every run measured before this flag existed.
+func adoptContextRequestPolicy(backend llm.Backend, command runCommand, supplied render.Display) int {
+	if command.level != levelContext {
+		return exitOK
+	}
+	client, ok := backend.(*ollama.Client)
+	if !ok {
+		backendError(supplied, "--context-tiers requires the Ollama backend",
+			fmt.Sprintf("resolved runtime is %q, which cannot send the declared truncate and shift controls",
+				backend.Name()),
+			"start Ollama and re-run, or drop --context-tiers")
+		return exitUsage
+	}
+	client.ContextPolicy = ollama.PreserveContextV1
+	return exitOK
 }
 
 type runCommand struct {
@@ -83,7 +112,7 @@ func parseRunCommand(args []string, supplied render.Display) (runCommand, int, b
 	if code, ok := validateRunFlags(fs, flags, reportError); !ok {
 		return runCommand{}, code, false
 	}
-	level := selectedRunLevel(*flags.quick, *flags.full, *flags.checksOnly)
+	level := selectedRunLevel(*flags.quick, *flags.full, *flags.checksOnly, *flags.contextTiers != "")
 	reps := runRepeats(level, *flags.repeats)
 	if reps < 1 {
 		reportError("invalid repeat count", "-k must be at least 1", "")
@@ -99,6 +128,7 @@ func parseRunCommand(args []string, supplied render.Display) (runCommand, int, b
 
 type runFlags struct {
 	quick, full, checksOnly *bool
+	contextTiers            *string
 	repeats                 *int
 	profileName             *string
 	mode                    *string
@@ -111,6 +141,9 @@ type runFlags struct {
 	allowUnsafeExec         *bool
 	verbose                 *bool
 	quiet                   countFlag
+	// parsedContextTiers is filled by validateRunFlags so a malformed tier list
+	// is a usage error beside the other flag diagnostics, not a run failure.
+	parsedContextTiers []int
 }
 
 func newRunFlagSet(supplied render.Display) (*flag.FlagSet, *runFlags) {
@@ -124,6 +157,9 @@ func newRunFlagSet(supplied render.Display) (*flag.FlagSet, *runFlags) {
 	flags.quick = fs.Bool("quick", false, "speed, memory, and plumbing; executable tasks default to SKIP")
 	flags.full = fs.Bool("full", false, "adds long-horizon tasks; executable tasks default to SKIP")
 	flags.checksOnly = fs.Bool("checks-only", false, "generated checks only for paired hardware calibration")
+	flags.contextTiers = fs.String("context-tiers", "", "two to four increasing payload sizes in bytes "+
+		"(2048 to 65536), measuring how well a long document is used at --ctx. There is no default: the "+
+		"tiers are sealed into the evidence, so the operator states what was tested")
 	flags.repeats = fs.Int("k", 0, "repeats per noisy task")
 	flags.profileName = fs.String("profile", "", "device profile (default: auto-match)")
 	flags.mode = fs.String("display", "auto", "auto|rich|plain|json|none")
@@ -169,9 +205,13 @@ func validateRunFlags(fs *flag.FlagSet, flags *runFlags, reportError func(string
 	if code, ok := validateCapacityFlags(flags, reportError); !ok {
 		return code, false
 	}
-	if selectedRunLevels(*flags.quick, *flags.full, *flags.checksOnly) > 1 {
-		reportError("choose one run level", "--quick, --full, and --checks-only are mutually exclusive", "")
+	if selectedRunLevels(*flags.quick, *flags.full, *flags.checksOnly, *flags.contextTiers != "") > 1 {
+		reportError("choose one run level",
+			"--quick, --full, --checks-only, and --context-tiers are mutually exclusive", "")
 		return exitUsage, false
+	}
+	if code, ok := validateContextTierFlags(flags, reportError); !ok {
+		return code, false
 	}
 	if *flags.checksOnly && *flags.seedSet == "" {
 		reportError("--checks-only requires --seedset", "calibration pairs must face identical generated instances", "")
@@ -189,6 +229,46 @@ func validateRunFlags(fs *flag.FlagSet, flags *runFlags, reportError func(string
 	return exitOK, true
 }
 
+// validateContextTierFlags rejects a tier list the pack could not seal, and the
+// option combinations the context level cannot honor. The pack needs a client
+// that sends the declared overflow controls, which only the native Ollama path
+// does, and it grades a document rather than executing anything.
+func validateContextTierFlags(flags *runFlags, reportError func(string, string, string)) (int, bool) {
+	if *flags.contextTiers == "" {
+		return exitOK, true
+	}
+	tiers, err := parseContextTiers(*flags.contextTiers)
+	if err != nil {
+		reportError("invalid context tiers", err.Error(),
+			"--context-tiers 2048,8192,32768 (two to four increasing sizes, 2 KiB to 64 KiB)")
+		return exitUsage, false
+	}
+	if _, err := contextquality.NewPolicy(eval.ResolvedCtx(*flags.numCtx), tiers); err != nil {
+		reportError("invalid context tiers", err.Error(),
+			"--context-tiers 2048,8192,32768 (two to four increasing sizes, 2 KiB to 64 KiB)")
+		return exitUsage, false
+	}
+	if *flags.backend != "auto" && *flags.backend != "ollama" {
+		reportError("--context-tiers requires the Ollama backend",
+			"only the native Ollama path sends the declared truncate and shift controls",
+			"drop --backend, or pass --backend ollama")
+		return exitUsage, false
+	}
+	if *flags.allowUnsafeExec {
+		reportError("--context-tiers cannot enable executable diagnostics",
+			"the document pack grades returned JSON and executes nothing", "remove --allow-unsafe-exec")
+		return exitUsage, false
+	}
+	if *flags.html {
+		reportError("--context-tiers cannot write a scorecard HTML",
+			"the document-task phase is not yet rendered in HTML",
+			"use `fitr view` or `--display json`")
+		return exitUsage, false
+	}
+	flags.parsedContextTiers = tiers
+	return exitOK, true
+}
+
 func buildRunCommand(model string, flags *runFlags, level string, reps int) runCommand {
 	return runCommand{
 		model: normalizeModelRef(model), backend: *flags.backend, mode: *flags.mode,
@@ -197,6 +277,7 @@ func buildRunCommand(model string, flags *runFlags, level string, reps int) runC
 			level: level, profile: *flags.profileName, seedSet: *flags.seedSet,
 			reps: reps, checksReps: generatedCheckRepeats(level, *flags.repeats, reps),
 			numCtx: *flags.numCtx, allowUnsafeExec: *flags.allowUnsafeExec,
+			contextTiers:      flags.parsedContextTiers,
 			capacityBudgetGB:  optionalPositiveFloat(*flags.capacityBudgetGB),
 			capacityReserveGB: optionalNonnegativeFloat(*flags.capacityReserveGB),
 		},
@@ -235,9 +316,15 @@ func optionalNonnegativeFloat(value float64) *float64 {
 	return &value
 }
 
-func selectedRunLevels(quick, full, checks bool) int {
+// levelContext measures only the context task pack. It is its own level rather
+// than an addition to the battery because the pack requires a client that sends
+// the declared overflow controls for its whole lifetime, and ordinary requests
+// must keep their existing defaults.
+const levelContext = "context"
+
+func selectedRunLevels(quick, full, checks, contextTasks bool) int {
 	selected := 0
-	for _, enabled := range []bool{quick, full, checks} {
+	for _, enabled := range []bool{quick, full, checks, contextTasks} {
 		if enabled {
 			selected++
 		}
@@ -245,7 +332,7 @@ func selectedRunLevels(quick, full, checks bool) int {
 	return selected
 }
 
-func selectedRunLevel(quick, full, checks bool) string {
+func selectedRunLevel(quick, full, checks, contextTasks bool) string {
 	switch {
 	case quick:
 		return "quick"
@@ -253,9 +340,30 @@ func selectedRunLevel(quick, full, checks bool) string {
 		return "full"
 	case checks:
 		return "checks"
+	case contextTasks:
+		return levelContext
 	default:
 		return "default"
 	}
+}
+
+// parseContextTiers reads the declared payload sizes. The bounds and the strict
+// increase are re-checked by contextquality.Policy; this reports them as a
+// usage error with the offending text rather than as a run failure.
+func parseContextTiers(value string) ([]int, error) {
+	fields := strings.Split(value, ",")
+	if len(fields) < 2 || len(fields) > 4 {
+		return nil, errors.New("two to four tiers are required")
+	}
+	tiers := make([]int, 0, len(fields))
+	for _, field := range fields {
+		size, err := strconv.Atoi(strings.TrimSpace(field))
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a byte count", strings.TrimSpace(field))
+		}
+		tiers = append(tiers, size)
+	}
+	return tiers, nil
 }
 
 func runRepeats(level string, requested int) int {
@@ -444,6 +552,9 @@ type runExecution struct {
 	unsafeExecutor *eval.ExecutorReceipt
 	result         *Result
 	completed      []string
+	// contextPlan is the exact plan sealed into the task plan before the
+	// manifest. The measurement submits this one, never a regenerated copy.
+	contextPlan *contextquality.Plan
 }
 
 func (run *runExecution) prepare() error {
@@ -601,6 +712,11 @@ func (run *runExecution) initializeSeedSet() {
 
 func (run *runExecution) sealTaskPlans() error {
 	var err error
+	if len(run.opts.contextTiers) > 0 {
+		if err := run.sealContextTaskPlan(); err != nil {
+			return fmt.Errorf("seal context task plan: %w", err)
+		}
+	}
 	if run.result.TaskPlan.CheckTrialsLimit > 0 {
 		run.result.TaskPlan.CheckPlanSHA256, err = record.FixedCheckPlanSHA256(
 			run.spec.Checks, run.opts.checksReps, run.result.SeedSet)
@@ -615,6 +731,40 @@ func (run *runExecution) sealTaskPlans() error {
 			return fmt.Errorf("seal refusal plan: %w", err)
 		}
 	}
+	return nil
+}
+
+// sealContextTaskPlan builds the pack against the resolved operating window and
+// seals its digest and cell count before the manifest exists. The plan is kept
+// on the execution so the measurement submits exactly what was sealed rather
+// than regenerating a second plan that only looks the same.
+func (run *runExecution) sealContextTaskPlan() error {
+	// The pack's qualification rests on the entire declared output reserve
+	// having fit beside the accepted prompt. Ollama's MLX runner silently
+	// reduces a requested reserve to whatever remains and returns no field
+	// saying so, so that claim cannot be established there at all. Refusing
+	// before the plan is sealed keeps the run from producing evidence whose
+	// central check was never actually testable.
+	if run.resolved.Info.ServedByMLX() {
+		return fmt.Errorf("%s is served by the MLX runner, which silently reduces the output reserve "+
+			"and reports no field confirming it; the context pack cannot establish that its reserve fit", run.model)
+	}
+	policy, err := contextquality.NewPolicy(run.result.NumCtx, run.opts.contextTiers)
+	if err != nil {
+		return err
+	}
+	seedSet, err := record.ContextTaskSeedSet(run.result.SeedSet)
+	if err != nil {
+		return err
+	}
+	plan, err := contextquality.NewPlan(policy, seedSet)
+	if err != nil {
+		return err
+	}
+	if err := run.result.PlanContextQuality(plan); err != nil {
+		return err
+	}
+	run.contextPlan = &plan
 	return nil
 }
 
@@ -811,6 +961,9 @@ func (run *runExecution) measureBattery(work string) error {
 	if err := run.stopAll(); err != nil {
 		return fmt.Errorf("establish clean runtime state: %w", err)
 	}
+	if run.opts.level == levelContext {
+		return run.measureContextQuality()
+	}
 	if err := run.measureStandardPhases(work); err != nil {
 		return err
 	}
@@ -826,6 +979,37 @@ func (run *runExecution) measureBattery(work string) error {
 		return err
 	}
 	return run.measureAgentic(work, toolReady)
+}
+
+// measureContextQuality submits the sealed pack and attaches what it observed.
+//
+// A phase that ends early is not a run failure. The adapter already recorded a
+// disposition for every cell, an incomplete phase cannot establish a verified
+// prefix, and the remaining cells keep their own diagnostics -- so the evidence
+// is worth more saved than discarded. Only a plan that could not be submitted
+// or analyzed at all abandons the run, because that leaves nothing to attach.
+func (run *runExecution) measureContextQuality() error {
+	if run.contextPlan == nil {
+		return errors.New("context task plan was not sealed before inference")
+	}
+	backend, ok := run.backend.(eval.ContextBackend)
+	if !ok {
+		return errors.New("context tasks require a backend that reports its context request policy")
+	}
+	plan := *run.contextPlan
+	detail := fmt.Sprintf("%d cells @%s, reserve %d",
+		len(plan.Cells), formatTokenContext(plan.Policy.OperatingWindowTokens), plan.Policy.OutputReserveTokens)
+	return run.step(levelContext, detail, func() error {
+		phase, err := eval.RunContextTasks(run.ctx, backend, run.model, plan)
+		if err != nil {
+			return err
+		}
+		if phase.Ended != nil {
+			run.display.Note("context phase ended early: "+phase.Ended.Error()+
+				"; the remaining cells are recorded as not attempted and the phase cannot qualify", "warn")
+		}
+		return run.result.AttachContextQuality(plan, phase.Observations)
+	})
 }
 
 func (run *runExecution) measureStandardPhases(work string) error {

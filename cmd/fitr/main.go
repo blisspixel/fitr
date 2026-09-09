@@ -77,6 +77,7 @@ usage:
   fitr <model>                      named advise (same as fitr advise <model>)
   fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]
   fitr run <model> [--quick|--full|--checks-only] [-k N] [--ctx N] [--profile P] [--display MODE] [--html]
+  fitr run <model> --context-tiers <bytes,bytes[,...]> [--ctx N]
   fitr apply [model] [--ctx N]
   fitr tune [model-a model-b]
   fitr export <model> [--out PATH] [--retonr]
@@ -160,6 +161,7 @@ examples:
   fitr experiment quant q8-result.json q4-result.json --spec coding.json --lineage conversion.json
   fitr experiment confirm qwen3:8b-q8_0 qwen3:8b-q4_K_M --spec coding-confirm.json
   fitr experiment workload qwen3-coder:30b -n 3
+  fitr run qwen3:8b --ctx 16384 --context-tiers 2048,8192,32768
 `
 
 func usage() { fmt.Fprint(os.Stderr, "fitr "+version+usageText) }
@@ -289,6 +291,7 @@ func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
 	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec",
+		"context-tiers",
 		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim", "repo", "revision", "file", "source",
 		"quality", "minimum-rate", "memory-gb", "max-age-days", "min-age-days", "mapping", "max-bytes", "timeout",
 		"models", "runtime", "mode", "adoption", "candidate", "max-wall", "confirmation-wall", "max-requests", "max-requested-output-tokens", "max-points":
@@ -538,16 +541,19 @@ type runOpts struct {
 	level, profile, seedSet string
 	reps, checksReps        int
 	numCtx, memoryCtx       int
-	experiment              *record.ExperimentBinding
-	capacityBudgetGB        *float64
-	capacityReserveGB       *float64
-	allowUnsafeExec         bool
-	runID                   string
-	ownedConfiguration      map[string]string
-	validatePrepared        func(*runExecution) error
-	validateCapacity        func(*runExecution) error
-	validateContext         func(*runExecution) error
-	validateLoaded          func(*runExecution, device.ContextVerification) error
+	// contextTiers are the declared payload sizes for the context task pack.
+	// Non-empty exactly when level is levelContext.
+	contextTiers       []int
+	experiment         *record.ExperimentBinding
+	capacityBudgetGB   *float64
+	capacityReserveGB  *float64
+	allowUnsafeExec    bool
+	runID              string
+	ownedConfiguration map[string]string
+	validatePrepared   func(*runExecution) error
+	validateCapacity   func(*runExecution) error
+	validateContext    func(*runExecution) error
+	validateLoaded     func(*runExecution, device.ContextVerification) error
 }
 
 // liveTelemetry is an optional extension implemented by the full-screen
@@ -564,6 +570,11 @@ type runIdentityTelemetry interface{ RunID() string }
 
 func runTaskPlan(level string, repeats, checkRepeats, checks, refusalPrompts int) record.TaskPlan {
 	plan := record.TaskPlan{}
+	if level == levelContext {
+		// The context phase is the whole plan. Its cell count and digest are
+		// sealed separately, once the operating window has been resolved.
+		return plan
+	}
 	if level != "checks" {
 		plan.SpeedSamples = repeats
 		plan.Memory = true

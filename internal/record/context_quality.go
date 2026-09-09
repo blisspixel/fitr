@@ -1,12 +1,30 @@
 package record
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
 
 	"github.com/blisspixel/fitr/internal/contextquality"
 )
+
+// ContextTaskSeedSet derives the pack's 128-bit seed set from a run's seed set.
+//
+// contextquality cannot attest freshness, so the caller owns that property. A
+// run's seed set already carries it: fresh per run by default, and pinned only
+// when the operator asked two runs to face identical instances. Deriving rather
+// than generating keeps that meaning intact -- runs sharing a seed set get the
+// same cells, and the derivation is one-way, so a plan digest cannot be walked
+// back to the run's seed set.
+func ContextTaskSeedSet(runSeedSet string) (string, error) {
+	if runSeedSet == "" {
+		return "", errors.New("context task seed set requires a run seed set")
+	}
+	sum := sha256.Sum256([]byte("fitr.context-quality.seedset.v1\x00" + runSeedSet))
+	return hex.EncodeToString(sum[:16]), nil
+}
 
 // ContextQuality is one finite document-task phase attached to a run.
 //

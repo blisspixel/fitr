@@ -19,6 +19,7 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -509,6 +510,7 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	d.resultVerdicts(w, sc, width)
 	d.resultPerformance(w, m, width)
 	d.resultCapacity(w, m, width)
+	d.resultContextTasks(w, m.Analysis, width)
 	d.resultAnalysis(w, m, sc.Model, width)
 	d.resultEvidenceNotes(w, m, width)
 	fmt.Fprintln(w, rule)
@@ -683,6 +685,54 @@ func (d *textDisplay) resultPrimaryPerformance(w io.Writer, m Meta, width int) {
 		}
 	}
 }
+
+// resultContextTasks prints the document-task phase as cell counts per declared
+// tier. Counts are printed as counts: this is a finite task set at one window,
+// so a percentage would suggest a rate the evidence does not carry. The verified
+// prefix is stated only when the analysis supplies one, and its absence is
+// explained rather than shown as a zero.
+func (d *textDisplay) resultContextTasks(w io.Writer, report *analysis.Report, width int) {
+	if report == nil || report.ContextTasks == nil {
+		return
+	}
+	tasks := report.ContextTasks
+	fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "context tasks"))
+	fmt.Fprintf(w, "  window   %d tokens, reserve %d\n", tasks.OperatingWindow, tasks.OutputReserve)
+	for _, tier := range tasks.Tiers {
+		detail := fmt.Sprintf("%d/%d cells", tier.Pass, tier.Planned)
+		if tier.Unavailable > 0 {
+			detail += fmt.Sprintf(", %d unavailable", tier.Unavailable)
+		}
+		fmt.Fprintf(w, "  %-8s %-12s %s\n", formatPayloadBytes(tier.PayloadUTF8Bytes),
+			SingleLine(tier.Outcome), detail)
+	}
+	d.contextTaskPrefix(w, tasks, width)
+	if tasks.Status == analysis.StatusDescriptiveOnly {
+		d.footer(w, "descriptive only: this record cannot claim a verified prefix for the current artifact",
+			width, 2, 4, d.pal.Warn)
+	}
+}
+
+func (d *textDisplay) contextTaskPrefix(w io.Writer, tasks *analysis.ContextTasks, width int) {
+	if tasks.VerifiedPrefixBytes != nil {
+		note := "verified prefix " + formatPayloadBytes(*tasks.VerifiedPrefixBytes)
+		if tasks.AtLeastLargestTested {
+			note += "; the largest declared tier passed, so larger payloads are untested"
+		}
+		d.footer(w, note, width, 2, 4, d.pal.Head)
+		return
+	}
+	reason := "no verified prefix: the smallest declared tier did not pass"
+	if tasks.Unavailable > 0 {
+		reason = "no verified prefix: a cell was unavailable, so the prefix is suppressed for the whole phase"
+	}
+	d.footer(w, reason, width, 2, 4, d.pal.Warn)
+}
+
+// formatPayloadBytes keeps the declared byte size exact. Payload tiers are
+// declared in bytes and sealed in bytes, so rounding one to KiB in the output
+// would print a size that is not the one the policy carries.
+func formatPayloadBytes(size int) string { return strconv.Itoa(size) + "B" }
 
 func primaryTTFTLabel(report *analysis.Report) string {
 	if report != nil {

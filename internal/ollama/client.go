@@ -663,8 +663,26 @@ type ModelInfo struct {
 		ParameterSize     string `json:"parameter_size"`
 		QuantizationLevel string `json:"quantization_level"`
 		Family            string `json:"family"`
+		// Format is the runtime's own artifact format, which selects the runner
+		// that will serve the model. See ServedByMLX.
+		Format string `json:"format,omitempty"`
 	} `json:"details"`
 }
+
+// safetensorsModelFormat is the artifact format Ollama routes to its MLX
+// runner instead of llama-server. Ollama's own test is a single equality
+// against this literal, and it treats an absent format as GGUF, so absence
+// must not be read as MLX.
+const safetensorsModelFormat = "safetensors"
+
+// ServedByMLX reports that this entry will be served by the MLX runner.
+//
+// The distinction matters wherever a request option must be honored rather
+// than merely sent. The MLX runner clamps a requested output reserve to
+// whatever remains beside the accepted prompt and reports no field saying it
+// did, so a caller that needs a declared reserve to have been respected cannot
+// establish it there. It is a different runner, not a worse model.
+func (m ModelInfo) ServedByMLX() bool { return m.Details.Format == safetensorsModelFormat }
 
 // IsRemote reports an explicit remote marker, not inferred locality from a
 // name, endpoint, file size, or the absence of a marker.

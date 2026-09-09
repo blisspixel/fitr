@@ -92,10 +92,53 @@ func fromValidatedRecordWithDisplayOnly(result *record.Record, displayOnly displ
 		Performance: performanceFrom(result, unclaimable),
 		Capacity:    capacityFrom(result, unclaimable),
 	}
+	report.ContextTasks = contextTasksFrom(result, unclaimable)
 	report.Gaps = gapsFrom(result, report, displayOnly)
 	report.Diagnoses = diagnosesFrom(result, unclaimable)
 	report.NextActions = nextActionsFrom(result, unclaimable)
 	return report
+}
+
+// contextTasksFrom projects an attached document-task phase.
+//
+// The record has already re-derived this report from its own observations and
+// refused the evidence if the two disagreed, so this copies rather than
+// recomputes. An unclaimable record keeps the phase descriptive: the counts
+// stay visible, but a verified prefix is a claim about this exact artifact and
+// runtime, which is precisely what an integrity or identity issue removes.
+func contextTasksFrom(result *record.Record, unclaimable bool) *ContextTasks {
+	if result.ContextQuality == nil {
+		return nil
+	}
+	evidence := result.ContextQuality
+	status := StatusAvailable
+	if unclaimable {
+		status = StatusDescriptiveOnly
+	}
+	projection := &ContextTasks{
+		Status:               status,
+		OperatingWindow:      evidence.Plan.Policy.OperatingWindowTokens,
+		OutputReserve:        evidence.Plan.Policy.OutputReserveTokens,
+		PlanSHA256:           evidence.Report.PlanSHA256,
+		Outcome:              string(evidence.Report.Outcome),
+		Complete:             evidence.Report.Complete,
+		Planned:              evidence.Report.Counts.Planned,
+		Pass:                 evidence.Report.Counts.Pass,
+		Fail:                 evidence.Report.Counts.Fail,
+		Unavailable:          evidence.Report.Counts.Unavailable,
+		AtLeastLargestTested: evidence.Report.AtLeastLargestTested,
+	}
+	if !unclaimable {
+		projection.VerifiedPrefixBytes = evidence.Report.VerifiedPrefixUTF8Bytes
+	}
+	for _, tier := range evidence.Report.Tiers {
+		projection.Tiers = append(projection.Tiers, ContextTaskTier{
+			PayloadUTF8Bytes: tier.PayloadUTF8Bytes, Outcome: string(tier.Outcome),
+			Planned: tier.Counts.Planned, Pass: tier.Counts.Pass,
+			Fail: tier.Counts.Fail, Unavailable: tier.Counts.Unavailable,
+		})
+	}
+	return projection
 }
 
 func artifactIdentityFrom(result *record.Record) ArtifactIdentity {

@@ -123,7 +123,7 @@ fitr role status coding
 fitr role rollback coding
 ```
 
-<img src="assets/selection.svg?v=0.10.12" alt="Role status fixture with a qualified incumbent and a separate failed challenger attempt" width="900">
+<img src="assets/selection.svg?v=0.10.13" alt="Role status fixture with a qualified incumbent and a separate failed challenger attempt" width="900">
 
 An explicitly connected MCP host can use `fitr_role_status` for a bounded,
 redacted observation of this incumbent, including selections from auto-managed

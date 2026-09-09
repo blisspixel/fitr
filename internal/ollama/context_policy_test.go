@@ -311,3 +311,32 @@ func TestContextStreamCannotReturnPartialOutputAfterInvalidReceipt(t *testing.T)
 		}
 	}
 }
+
+// The policy is adopted for the whole client lifetime, so every request a
+// context-level run dispatches has to satisfy it, not only the graded cells.
+// The load probe is the one that would otherwise be discovered against a live
+// runtime: it asks for a single token, and a policy that required more would
+// abort the run before any cell was submitted.
+func TestEveryContextLevelSamplingSatisfiesTheRequestPolicy(t *testing.T) {
+	const window = 8192
+	for name, sampling := range map[string]Sampling{
+		"context probe": Deterministic(1, window),
+		"task cell":     Deterministic(128, window),
+	} {
+		if err := PreserveContextV1.validate(sampling); err != nil {
+			t.Errorf("%s sampling is refused by the adopted policy: %v", name, err)
+		}
+	}
+}
+
+func TestContextPolicyRefusesSamplingItCannotBound(t *testing.T) {
+	for name, sampling := range map[string]Sampling{
+		"no output reserve":        Deterministic(0, 8192),
+		"no window":                Deterministic(128, 0),
+		"reserve fills the window": Deterministic(8192, 8192),
+	} {
+		if err := PreserveContextV1.validate(sampling); err == nil {
+			t.Errorf("%s sampling was accepted by the policy", name)
+		}
+	}
+}

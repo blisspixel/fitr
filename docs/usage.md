@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.10.12" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.10.12" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.10.12" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.10.12" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.10.13" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.10.13" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.10.13" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.10.13" alt="fitr top (demo data)" width="820">
 
 ### Bounded fitting
 
@@ -192,6 +192,7 @@ of installed RAM as an unconditional model budget.
 |---|---|
 | `fitr` | installed inventory: measured / unproven / incompatible / stale, fit windows, and the one thing to do next on each row |
 | `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N] [--capacity-budget-gb N\|--capacity-reserve-gb N]` | measure a model; optionally seal an explicit safe-capacity policy before loading; checks-only runs the generated battery for calibration |
+| `fitr run <model> --context-tiers <bytes,bytes[,...]> [--ctx N]` | collect one document-task phase at a fixed window instead of the ordinary battery; Ollama only; see [context quality](context-quality.md) |
 | `fitr [model]` / `fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]` | no model: inventory. With a model: does it fit, and if not, which flag to try |
 | `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
@@ -238,6 +239,7 @@ of installed RAM as an unconditional model budget.
 | *(default)* | + all 22 generated checks across 16 families, refusal, safe tool withdrawal | many minutes; first real measurement |
 | `--full` | + long-horizon agent task, SKIP while execution is disabled | tens of minutes; coding still unproven |
 | `--checks-only` | generated checks only; requires `--seedset`, defaults to 5 repeats | model-dependent |
+| `--context-tiers` | document pack only: two to four payload sizes, nine cells each; no default battery | operator-declared |
 
 A default run tells *broken* from *working*, not 71 from 74. `--full` adds up
 to 40 agent turns; it is not a coding grade until the isolated worker exists.
@@ -262,6 +264,15 @@ Ctrl-C is safe (exit 130).
   lineage. Unsigned pairs with a valid receipt are still not decision-grade.
 - `--backend auto|ollama|llama-server|openai` picks the serving runtime;
   see [backends.md](backends.md). Extra listen URLs: `$FITR_DISCOVER_URLS`.
+- `--context-tiers bytes,bytes[,...]` (run) collects a document-task phase
+  instead of the ordinary battery. Pass two to four strictly increasing payload
+  sizes between 2048 and 65536 bytes. There is no default set: the sizes are
+  sealed into the evidence. Mutually exclusive with `--quick`, `--full` and
+  `--checks-only`. Requires Ollama. `--html` is refused because the phase is
+  not yet rendered in HTML. This is not `fitr experiment context`, which maps
+  capacity and performance across windows and cannot certify a winner. See
+  [document context tasks](#document-context-tasks) and
+  [context quality](context-quality.md).
 - `--ctx N` sets the request context (default 8192). This is how you *measure*
   an `advise` remedy: `fitr run m --ctx 4096`. A non-default ctx is
   recorded beside the runtime-reported effective context. `board` and
@@ -624,6 +635,41 @@ selected. The confirmation experiment will supply fresh lineage.
 
 The full schema and evidence semantics are in
 [Decision specifications](decisions.md).
+
+## Document context tasks
+
+```bash
+fitr run qwen3:8b --ctx 16384 --context-tiers 2048,8192,32768
+```
+
+This is its own run level. The ordinary battery does not run, because the pack
+needs a client that sends the declared overflow controls for its whole
+lifetime. There is no default tier set. The declared sizes are sealed into the
+policy digest, so the operator states what was tested.
+
+Each tier contains nine cells: indirect retrieval, distant dependencies and
+instruction retention, with the principal fact placed near the beginning,
+middle and end. Payload sizes are exact ASCII UTF-8 bytes. An independent
+parser derives the expected result from the visible document. A verified
+prefix is the largest declared tier whose required cells and every lower tier
+passed; a missing or unavailable cell suppresses that prefix for the whole
+phase.
+
+The result is an ordinary signed run record. Role preferences, auto collection
+and fresh confirmation do not consume it yet. HTML export and the TUI result
+view do not render the phase, so `--html` is refused. JSON includes the
+central analysis projection.
+
+A model served by Ollama's MLX runner is refused before the plan is sealed:
+that runner silently reduces the output reserve the qualification rests on.
+Native acceptance for an oversized-prompt refusal still needs a real runtime.
+
+This is not [the context experiment](#context-experiment). That command maps
+capacity and performance across requested windows and cannot certify a winner.
+The document pack asks whether a model uses a long prompt correctly at one
+fixed window.
+
+The owning document is [context quality](context-quality.md).
 
 ## Context experiment
 
