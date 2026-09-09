@@ -252,30 +252,23 @@ jobs:
           for asset in "${assets[@]}"; do
             test -f "$asset"
           done
-      - name: publish verified release
+      # GITHUB_TOKEN creates and publishes as the Actions automation account,
+      # which then appears as the release author. The owner creates the draft
+      # and publishes it; this job only uploads verified assets into that draft.
+      - name: upload verified assets to the owner draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          release_flags=()
-          if [[ "${GITHUB_REF_NAME#v}" == *-* ]]; then
-            release_flags+=(--prerelease --latest=false)
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "create a draft GitHub release for ${GITHUB_REF_NAME} as the repo owner before tagging" >&2
+            exit 1
           fi
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            draft="$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq .isDraft)"
-            test "$draft" = "true"
-            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
-          else
-            gh release create "${GITHUB_REF_NAME}" dist/* \
-              --verify-tag \
-              --draft \
-              --title "fitr ${GITHUB_REF_NAME}" \
-              --generate-notes \
-              "${release_flags[@]}"
-          fi
+          draft="$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq .isDraft)"
+          test "$draft" = "true"
+          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
           published="${RUNNER_TEMP}/published-release"
           mkdir "$published"
           gh release download "${GITHUB_REF_NAME}" --dir "$published"
           test "$(find "$published" -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 10
           (cd "$published" && sha256sum --check SHA256SUMS)
-          gh release edit "${GITHUB_REF_NAME}" --draft=false
