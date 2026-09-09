@@ -207,25 +207,26 @@ func doctorJSONDeterminism(ctx context.Context, c llm.Backend, model string, run
 func doctorConfig(config map[string]string, observed bool, r *DoctorResult) {
 	// 6. Config red flags. Observed values come from the server log or an
 	// owned launch. Unobserved empties are not the daemon's unset settings.
-	if config != nil {
-		var flags []string
-		if v, err := strconv.Atoi(config["OLLAMA_NUM_PARALLEL"]); err == nil && v > 1 {
-			flags = append(flags, fmt.Sprintf("OLLAMA_NUM_PARALLEL=%d divides the context between slots and adds batching variance", v))
-		}
-		if v, err := strconv.Atoi(config["OLLAMA_MAX_LOADED_MODELS"]); err == nil && v > 1 {
-			flags = append(flags, fmt.Sprintf("OLLAMA_MAX_LOADED_MODELS=%d allows a second resident model to contaminate timings", v))
-		}
-		if len(flags) > 0 {
-			addDoctorCheck(r, "config", "WARN", strings.Join(flags, "; "))
-		} else {
-			label := orUnset
-			if !observed {
-				label = orUnobserved
-			}
-			addDoctorCheck(r, "config", "PASS", fmt.Sprintf("flash_attention=%s kv_cache_type=%s",
-				label(config["OLLAMA_FLASH_ATTENTION"]), label(config["OLLAMA_KV_CACHE_TYPE"])))
-		}
+	if config == nil {
+		return
 	}
+	var flags []string
+	if v, err := strconv.Atoi(config["OLLAMA_NUM_PARALLEL"]); err == nil && v > 1 {
+		flags = append(flags, fmt.Sprintf("OLLAMA_NUM_PARALLEL=%d divides the context between slots and adds batching variance", v))
+	}
+	if v, err := strconv.Atoi(config["OLLAMA_MAX_LOADED_MODELS"]); err == nil && v > 1 {
+		flags = append(flags, fmt.Sprintf("OLLAMA_MAX_LOADED_MODELS=%d allows a second resident model to contaminate timings", v))
+	}
+	if len(flags) > 0 {
+		addDoctorCheck(r, "config", "WARN", strings.Join(flags, "; "))
+		return
+	}
+	label := orUnset
+	if !observed {
+		label = orUnobserved
+	}
+	addDoctorCheck(r, "config", "PASS", fmt.Sprintf("flash_attention=%s kv_cache_type=%s",
+		label(config["OLLAMA_FLASH_ATTENTION"]), label(config["OLLAMA_KV_CACHE_TYPE"])))
 }
 
 func finishDoctor(r *DoctorResult) {
