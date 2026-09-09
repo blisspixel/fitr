@@ -934,6 +934,12 @@ func prepareMockTextMetrics(r *Result) {
 
 func prepareMockDeviceReceipt(r *Result) error {
 	effective := r.ContextSize()
+	if r.Device.ConfigSource == device.ConfigSourceUnobserved {
+		// Ambient Detect on CI has no daemon log. These records are sealed
+		// measurements, so they carry observed provenance rather than the
+		// host's unobserved fallback.
+		r.Device.ConfigSource = device.ConfigSourceServerLog
+	}
 	fingerprintV2, err := device.NewFingerprintV2(r.Device, device.ContextVerification{
 		RequestedTokens: effective, EffectiveTokens: &effective,
 		EffectiveSource: device.ContextSourceRuntimeReport,
