@@ -7,6 +7,7 @@ import (
 
 	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/contextquality"
+	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/record"
@@ -133,6 +134,66 @@ func TestSealContextTaskPlanRefusesAnMLXServedModel(t *testing.T) {
 		t.Fatal("a refused model still sealed a context plan")
 	}
 }
+
+// The reserve gate does its arithmetic against the sealed operating window.
+// If the runtime resolved a smaller one, the prompt still fits the sealed
+// figure while generation exhausts the real window, and the runtime reports
+// the same terminal reason it reports for an ordinary output cap. The phase
+// must refuse rather than record that capacity event as a measured failure.
+func TestContextPhaseRefusesAWindowTheRuntimeDidNotResolve(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		effective *int
+		want      string
+	}{
+		{name: "adjusted down", effective: intPointer(8192), want: "re-run with --ctx 8192"},
+		{name: "never reported", effective: nil, want: "unverified"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			run := &runExecution{
+				model:  "model",
+				opts:   runOpts{contextTiers: []int{2048, 8192}},
+				result: &Result{NumCtx: 16384, SeedSet: "2026-09-08T10:00:00Z"},
+			}
+			if err := run.sealContextTaskPlan(); err != nil {
+				t.Fatalf("sealContextTaskPlan: %v", err)
+			}
+			run.result.DeviceV2 = &device.FingerprintV2{Context: device.ContextVerification{
+				RequestedTokens: 16384, EffectiveTokens: test.effective,
+				EffectiveSource: device.ContextSourceRuntimeReport,
+			}}
+			err := run.contextWindowWasResolvedAsPlanned(run.contextPlan.Policy.OperatingWindowTokens)
+			if err == nil {
+				t.Fatal("the phase accepted a window the runtime did not resolve")
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("diagnostic %q does not carry %q", err, test.want)
+			}
+		})
+	}
+}
+
+// The matching positive case: an exactly resolved window is the only state
+// that lets the phase dispatch, so the guard cannot be satisfied by absence.
+func TestContextPhaseAcceptsAnExactlyResolvedWindow(t *testing.T) {
+	run := &runExecution{
+		model:  "model",
+		opts:   runOpts{contextTiers: []int{2048, 8192}},
+		result: &Result{NumCtx: 16384, SeedSet: "2026-09-08T10:00:00Z"},
+	}
+	if err := run.sealContextTaskPlan(); err != nil {
+		t.Fatalf("sealContextTaskPlan: %v", err)
+	}
+	run.result.DeviceV2 = &device.FingerprintV2{Context: device.ContextVerification{
+		RequestedTokens: 16384, EffectiveTokens: intPointer(16384),
+		EffectiveSource: device.ContextSourceRuntimeReport,
+	}}
+	if err := run.contextWindowWasResolvedAsPlanned(16384); err != nil {
+		t.Fatalf("a verified window was refused: %v", err)
+	}
+}
+
+func intPointer(n int) *int { return &n }
 
 func TestServedByMLXReadsTheRuntimeArtifactFormat(t *testing.T) {
 	for _, tc := range []struct {

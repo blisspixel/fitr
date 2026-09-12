@@ -1002,6 +1002,9 @@ func (run *runExecution) measureContextQuality() error {
 		return errors.New("context tasks require a backend that reports its context request policy")
 	}
 	plan := *run.contextPlan
+	if err := run.contextWindowWasResolvedAsPlanned(plan.Policy.OperatingWindowTokens); err != nil {
+		return err
+	}
 	detail := fmt.Sprintf("%d cells @%s, reserve %d",
 		len(plan.Cells), formatTokenContext(plan.Policy.OperatingWindowTokens), plan.Policy.OutputReserveTokens)
 	return run.step(levelContext, detail, func() error {
@@ -1015,6 +1018,38 @@ func (run *runExecution) measureContextQuality() error {
 		}
 		return run.result.AttachContextQuality(plan, phase.Observations)
 	})
+}
+
+// contextWindowWasResolvedAsPlanned refuses the phase unless the runtime
+// resolved the exact window the plan was sealed against.
+//
+// The pack's qualification rests on the entire declared output reserve having
+// fit beside the accepted prompt, and that arithmetic is performed against the
+// sealed operating window. A runtime that resolved a smaller window makes the
+// arithmetic true of a window that does not exist: the prompt still fits the
+// sealed figure, generation then exhausts the real window, and the runtime
+// reports the same terminal reason it reports for an ordinary output cap. The
+// cell would be recorded as an output limit, which is a measured failure,
+// when the cause was capacity.
+//
+// Refusing here is the same judgment the MLX runner already gets before
+// sealing, applied to the case that can only be known after verification: do
+// not collect evidence whose central check was never testable.
+func (run *runExecution) contextWindowWasResolvedAsPlanned(window int) error {
+	if run.result.DeviceV2 == nil {
+		return errors.New("context tasks require a verified effective context; the device fingerprint was not sealed")
+	}
+	verification := run.result.DeviceV2.Context
+	if !verification.EffectiveKnown() {
+		return fmt.Errorf("the runtime did not report an effective context, so the %d-token operating window "+
+			"the pack was sealed against is unverified; the reserve gate cannot be established", window)
+	}
+	if effective := *verification.EffectiveTokens; effective != window {
+		return fmt.Errorf("the runtime resolved %d context tokens for the %d-token operating window the pack "+
+			"was sealed against; re-run with --ctx %d so the reserve is measured against the window that exists",
+			effective, window, effective)
+	}
+	return nil
 }
 
 func (run *runExecution) measureStandardPhases(work string) error {

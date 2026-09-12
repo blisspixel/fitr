@@ -132,6 +132,18 @@ A terminal success qualifies only when the entire declared reserve fits beside
 the accepted prompt tokens. A short answer that fits only because the model
 stopped early fails the reserve gate rather than passing on its content.
 
+That gate does its arithmetic against the operating window the plan was sealed
+with, which is the requested context. The phase therefore refuses to dispatch
+unless the runtime resolved exactly that window. A runtime that resolved a
+smaller one would make the arithmetic true of a window that does not exist: the
+prompt still fits the sealed figure, generation then exhausts the real window,
+and Ollama reports the same terminal reason it reports for an ordinary output
+cap, because llama.cpp's stop type covers both. The cell would be recorded as a
+declared output limit, which is a measured failure, when the cause was
+capacity. An adjusted or unreported window names the resolved value and asks
+for a re-run at it, rather than measuring into evidence whose central check
+rests on a window the runtime never granted.
+
 A refused reservation, a cancelled context, a runtime that cannot be shown
 local, or an invalid request policy ends the phase; the remaining cells are
 recorded as not attempted rather than left silently missing. A per-cell
