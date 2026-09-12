@@ -177,7 +177,7 @@ func (a Arch) fullAttentionLayers() int {
 // not supply the shape, because a hybrid whose recurrent cost is unknown has
 // no complete cache projection.
 func (a Arch) recurrentStateBytes() (float64, bool) {
-	linear := a.realBlocks() - a.fullAttentionLayers()
+	linear := a.linearLayers()
 	if linear <= 0 || a.SSMInnerSize <= 0 || a.SSMStateSize <= 0 || a.SSMConvKernel <= 1 {
 		return 0, false
 	}
@@ -225,14 +225,41 @@ func (a Arch) UnsizableReason() (note, hint string) {
 		"pass a GGUF whose layer, KV head and head-dimension metadata is readable"
 }
 
+// linearLayers is how many layers hold recurrent state instead of a KV cache.
+//
+// A per-layer head_count_kv array states this directly: a layer with zero KV
+// heads does not attend. That is exact, so it is preferred over dividing the
+// layer count by the interval, which only describes the repeating pattern.
+func (a Arch) linearLayers() int {
+	if len(a.KVHeadsPerLayer) > 0 {
+		linear := 0
+		for _, heads := range a.KVHeadsPerLayer {
+			if heads == 0 {
+				linear++
+			}
+		}
+		return linear
+	}
+	return a.realBlocks() - a.fullAttentionLayers()
+}
+
 // intervalHybridProjectable reports a hybrid whose complete cache the artifact
 // determines: the layers that scale with context, and the fixed recurrent
 // state held by the rest.
+//
+// A per-layer array is accepted rather than refused. It was refused when the
+// only way to count attending layers was the interval, so an array meant an
+// unknown scalar. It is now the better evidence of the two: the entries say
+// which layers attend and with how many heads, where the interval only
+// describes the repeating pattern. Current artifacts publish both.
 func (a Arch) intervalHybridProjectable() bool {
-	if a.FullAttentionInterval <= 0 || a.fullAttentionLayers() <= 0 {
+	if a.FullAttentionInterval <= 0 {
 		return false
 	}
-	if a.PerLayerKVHeads || a.KVHeads <= 0 || !a.kvClassifiable() {
+	if !a.kvClassifiable() || a.totalKVHeads() <= 0 {
+		return false
+	}
+	if len(a.KVHeadsPerLayer) == 0 && (a.KVHeads <= 0 || a.fullAttentionLayers() <= 0) {
 		return false
 	}
 	_, ok := a.recurrentStateBytes()
@@ -495,6 +522,69 @@ type Report struct {
 	HaveSource     string    `json:"have_source,omitempty"`
 	FreeGB         float64   `json:"free_gb,omitempty"`
 	Fit            *FitTable `json:"context_fit,omitempty"`
+	// Shape is the architecture this verdict was computed from. A fit verdict
+	// is arithmetic over these values, so a reader who cannot see them cannot
+	// check the arithmetic or tell which metadata source supplied it. Every
+	// other claim here cites its evidence; this one was citing nothing.
+	Shape *ArchShape `json:"architecture_shape,omitempty"`
+}
+
+// ArchShape is the parsed architecture, as read. Absent fields are absent from
+// the metadata rather than zero, so each is omitted rather than reported as 0.
+type ArchShape struct {
+	Name                  string `json:"name,omitempty"`
+	Blocks                int    `json:"block_count,omitempty"`
+	RealBlocks            int    `json:"attention_blocks,omitempty"`
+	Heads                 int    `json:"head_count,omitempty"`
+	KVHeads               int    `json:"head_count_kv,omitempty"`
+	KVHeadsPerLayer       []int  `json:"head_count_kv_per_layer,omitempty"`
+	KeyLength             int    `json:"key_length,omitempty"`
+	ValLength             int    `json:"value_length,omitempty"`
+	MaxCtx                int    `json:"context_length,omitempty"`
+	Experts               int    `json:"expert_count,omitempty"`
+	ExpertUsed            int    `json:"expert_used_count,omitempty"`
+	FullAttentionInterval int    `json:"full_attention_interval,omitempty"`
+	FullAttentionLayers   int    `json:"full_attention_layers,omitempty"`
+	RecurrentLayers       int    `json:"recurrent_layers,omitempty"`
+	NextNPredictLayers    int    `json:"nextn_predict_layers,omitempty"`
+	SlidingWindow         int    `json:"sliding_window,omitempty"`
+	SlidingWindowPattern  int    `json:"sliding_window_pattern,omitempty"`
+	KeyLengthSWA          int    `json:"key_length_swa,omitempty"`
+	ValLengthSWA          int    `json:"value_length_swa,omitempty"`
+	SSMInnerSize          int    `json:"ssm_inner_size,omitempty"`
+	SSMStateSize          int    `json:"ssm_state_size,omitempty"`
+	SSMConvKernel         int    `json:"ssm_conv_kernel,omitempty"`
+	Hybrid                bool   `json:"hybrid,omitempty"`
+	KVSizable             bool   `json:"kv_sizable"`
+	KVBytesPerToken       int64  `json:"kv_bytes_per_token,omitempty"`
+	FixedCacheBytes       int64  `json:"fixed_cache_bytes,omitempty"`
+	UnsizableReason       string `json:"unsizable_reason,omitempty"`
+}
+
+// Shape reports the architecture as parsed, including the derived figures a
+// reader would otherwise have to recompute to check a verdict.
+func (a Arch) Shape() *ArchShape {
+	s := &ArchShape{
+		Name: a.Name, Blocks: a.Blocks, RealBlocks: a.realBlocks(),
+		Heads: a.Heads, KVHeads: a.KVHeads, KVHeadsPerLayer: a.KVHeadsPerLayer,
+		KeyLength: a.KeyLength, ValLength: a.ValLength, MaxCtx: a.MaxCtx,
+		Experts: a.Experts, ExpertUsed: a.ExpertUsed,
+		FullAttentionInterval: a.FullAttentionInterval,
+		FullAttentionLayers:   a.fullAttentionLayers(),
+		RecurrentLayers:       a.RecurrentLayers, NextNPredictLayers: a.NextNPredictLayers,
+		SlidingWindow: a.SlidingWindow, SlidingWindowPattern: a.SlidingWindowPattern,
+		KeyLengthSWA: a.KeyLengthSWA, ValLengthSWA: a.ValLengthSWA,
+		SSMInnerSize: a.SSMInnerSize, SSMStateSize: a.SSMStateSize,
+		SSMConvKernel: a.SSMConvKernel, Hybrid: a.Hybrid,
+		KVSizable: a.KVReady(),
+	}
+	if s.KVSizable {
+		s.KVBytesPerToken = int64(a.kvBytesPerToken(2))
+		s.FixedCacheBytes = int64(a.cacheFixedBytes())
+		return s
+	}
+	s.UnsizableReason, _ = a.UnsizableReason()
+	return s
 }
 
 func (r Report) ExitCode() int {
@@ -684,6 +774,7 @@ func newCoreReport(in Input) Report {
 		ArtifactDigest: in.ArtifactDigest,
 		Architecture:   in.Arch.ShapeClass(),
 		KVStrategy:     in.Arch.KVStrategy(),
+		Shape:          in.Arch.Shape(),
 		Source:         in.Source,
 		HaveSource:     in.HaveSrc,
 		MaxCtx:         in.Arch.MaxCtx,

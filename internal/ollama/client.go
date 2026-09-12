@@ -750,8 +750,12 @@ type ModelInfo struct {
 	ReportedDigest string   `json:"reported_digest,omitempty"`
 	Capabilities   []string `json:"capabilities"`
 	// Path is a local GGUF path when the runtime exposes one (llama-server
-	// /props model_path). Empty on Ollama tags.
+	// /props model_path). Ollama has no such field, so Show recovers it from
+	// the generated modelfile's FROM line.
 	Path string `json:"path,omitempty"`
+	// Modelfile is Ollama's generated recipe for the tag. It is runtime-supplied
+	// text and is read only to recover the artifact path.
+	Modelfile string `json:"modelfile,omitempty"`
 	// Info is GGUF metadata from Ollama /api/show (architecture, expert
 	// counts, context length). Absent fields stay missing; callers must not
 	// invent them.
@@ -864,7 +868,45 @@ func (c *Client) Show(ctx context.Context, model string) (ModelInfo, error) {
 		err = fmt.Errorf("ollama model %q has a negative size", model)
 	}
 	mi.Name = model
+	if err == nil && mi.Path == "" {
+		mi.Path = blobPathFromModelfile(mi.Modelfile)
+	}
 	return mi, err
+}
+
+// blobPathFromModelfile recovers the artifact backing an Ollama tag.
+//
+// /api/show has no path field, but model_info is a projection of the GGUF and
+// omits keys the file carries: current hybrid artifacts come back with a null
+// head_count_kv, which is the difference between sizing a cache and refusing
+// to. The generated modelfile names the blob in its FROM line, and reading the
+// file directly is strictly better evidence than a projection of it.
+//
+// The modelfile is runtime-supplied text, so only an existing regular file is
+// returned, and the caller that opens it decides whether it is really a GGUF.
+func blobPathFromModelfile(modelfile string) string {
+	for line := range strings.SplitSeq(modelfile, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		rest, ok := strings.CutPrefix(line, "FROM ")
+		if !ok {
+			continue
+		}
+		candidate := strings.Trim(strings.TrimSpace(rest), `"`)
+		if candidate == "" {
+			continue
+		}
+		// Only an existing regular file is offered. Whether it really is a
+		// GGUF is settled by the caller that opens it, which keeps this
+		// adapter free of the fit layer.
+		if st, err := os.Stat(candidate); err != nil || st.IsDir() || !st.Mode().IsRegular() {
+			continue
+		}
+		return candidate
+	}
+	return ""
 }
 
 type RunningModel struct {
