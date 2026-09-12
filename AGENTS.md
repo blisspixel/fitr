@@ -59,7 +59,7 @@ itself.
 | Device identity | `internal/device` | Any field added to the fingerprint changes what compares to what. Fingerprint errors corrupt comparison silently, which is the worst failure class here. |
 | Untrusted JSON | `internal/strictjson` | Duplicate-key rejection runs before any typed decode. |
 | Files and exclusion | `internal/atomicfile`, `internal/boundedio`, `internal/lock` | One way to write, one way to bound a read, one way to lock. |
-| Long-context document pack | `internal/contextquality` (pure plan, generate, verify, analyze), `internal/eval/contexttask.go` (submission), `internal/record/context_quality.go` (sealing), `fitr run --context-tiers` (collection) | CLI, JSON and HTML project the sealed phase from one derivation of its wording. TUI, role preferences and auto collection remain unconnected. See `docs/context-quality.md`. |
+| Long-context document pack | `internal/contextquality` (pure plan, generate, verify, analyze), `internal/eval/contexttask.go` (submission), `internal/record/context_quality.go` (sealing), `fitr run --context-tiers` (collection) | CLI, JSON, HTML and the TUI project the sealed phase; its wording is derived once in `internal/analysis`. Role preferences and auto collection remain unconnected. See `docs/context-quality.md`. |
 
 ## Verify
 

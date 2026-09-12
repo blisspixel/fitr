@@ -187,7 +187,7 @@ func TestTerminalAndHTMLAgreeOnThePrefixSentence(t *testing.T) {
 		report := contextTaskReport(prefix, analysis.StatusAvailable, []analysis.ContextTaskTier{
 			{PayloadUTF8Bytes: 2048, Outcome: "fail", Planned: 9, Pass: 1, Fail: 8},
 		})
-		note, _ := contextTaskPrefixNote(report.ContextTasks)
+		note, _ := analysis.ContextTaskPrefixNote(report.ContextTasks)
 		var out strings.Builder
 		if err := WriteHTML(&out, Artifact{
 			Model: "m", Scorecard: score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}},

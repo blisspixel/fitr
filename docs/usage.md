@@ -655,9 +655,10 @@ passed; a missing or unavailable cell suppresses that prefix for the whole
 phase.
 
 The result is an ordinary signed run record. Role preferences, auto collection
-and fresh confirmation do not consume it yet. The CLI, JSON and the HTML
-export render the phase from the central analysis projection; the TUI result
-view does not yet.
+and fresh confirmation do not consume it yet. The CLI, JSON, the HTML export
+and the terminal monitor's result view all render the phase from the central
+analysis projection, including the monitor's compact view, because for this
+run level the phase is the only planned work.
 
 A model served by Ollama's MLX runner is refused before the plan is sealed:
 that runner silently reduces the output reserve the qualification rests on.

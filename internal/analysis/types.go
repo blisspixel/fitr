@@ -4,6 +4,11 @@
 // record and must never be written back into that record as evidence.
 package analysis
 
+import (
+	"fmt"
+	"strconv"
+)
+
 const (
 	ReportSchema = "fitr.analysis.run.v1"
 	PolicySchema = "fitr.analysis.policy.direct-evidence.v1"
@@ -305,6 +310,44 @@ func TTFTLabel(observation PerformanceObservation) string {
 }
 
 // AcquisitionLabel is stable human wording for an observation source.
+// PayloadBytesLabel keeps a declared tier size exact. Payload tiers are
+// declared in bytes and sealed in bytes, so rounding one to KiB would print a
+// size the policy does not carry.
+func PayloadBytesLabel(size int) string { return strconv.Itoa(size) + "B" }
+
+// ContextTierDetail is one tier's cell counts. Counts stay counts: the phase
+// is a finite task set at one operating window, so a percentage would suggest
+// a rate the evidence does not carry.
+func ContextTierDetail(tier ContextTaskTier) string {
+	detail := fmt.Sprintf("%d/%d cells", tier.Pass, tier.Planned)
+	if tier.Unavailable > 0 {
+		detail += fmt.Sprintf(", %d unavailable", tier.Unavailable)
+	}
+	return detail
+}
+
+// ContextTaskPrefixNote is the sentence the observations support about the
+// verified prefix, and whether that sentence explains an absence rather than
+// reporting a result. Every surface takes the wording from here so the
+// terminal, the export and the monitor cannot describe one phase differently,
+// and so none of them derives the claim itself.
+func ContextTaskPrefixNote(tasks *ContextTasks) (note string, suppressed bool) {
+	if tasks == nil {
+		return "", false
+	}
+	if tasks.VerifiedPrefixBytes != nil {
+		note = "verified prefix " + PayloadBytesLabel(*tasks.VerifiedPrefixBytes)
+		if tasks.AtLeastLargestTested {
+			note += "; the largest declared tier passed, so larger payloads are untested"
+		}
+		return note, false
+	}
+	if tasks.Unavailable > 0 {
+		return "no verified prefix: a cell was unavailable, so the prefix is suppressed for the whole phase", true
+	}
+	return "no verified prefix: the smallest declared tier did not pass", true
+}
+
 func AcquisitionLabel(acquisition Acquisition) string {
 	switch acquisition {
 	case AcquisitionRuntimeReported:

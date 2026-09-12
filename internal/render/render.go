@@ -19,7 +19,6 @@ import (
 	"math"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -699,8 +698,8 @@ func (d *textDisplay) resultContextTasks(w io.Writer, report *analysis.Report, w
 	fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "context tasks"))
 	fmt.Fprintf(w, "  window   %d tokens, reserve %d\n", tasks.OperatingWindow, tasks.OutputReserve)
 	for _, tier := range tasks.Tiers {
-		fmt.Fprintf(w, "  %-8s %-12s %s\n", formatPayloadBytes(tier.PayloadUTF8Bytes),
-			SingleLine(tier.Outcome), contextTierDetail(tier))
+		fmt.Fprintf(w, "  %-8s %-12s %s\n", analysis.PayloadBytesLabel(tier.PayloadUTF8Bytes),
+			SingleLine(tier.Outcome), analysis.ContextTierDetail(tier))
 	}
 	d.contextTaskPrefix(w, tasks, width)
 	if tasks.Status == analysis.StatusDescriptiveOnly {
@@ -710,47 +709,13 @@ func (d *textDisplay) resultContextTasks(w io.Writer, report *analysis.Report, w
 }
 
 func (d *textDisplay) contextTaskPrefix(w io.Writer, tasks *analysis.ContextTasks, width int) {
-	note, suppressed := contextTaskPrefixNote(tasks)
+	note, suppressed := analysis.ContextTaskPrefixNote(tasks)
 	colour := d.pal.Head
 	if suppressed {
 		colour = d.pal.Warn
 	}
 	d.footer(w, note, width, 2, 4, colour)
 }
-
-// contextTierDetail is one tier's cell counts. Counts are printed as counts:
-// the phase is a finite task set at one window, so a percentage would suggest
-// a rate the evidence does not carry.
-func contextTierDetail(tier analysis.ContextTaskTier) string {
-	detail := fmt.Sprintf("%d/%d cells", tier.Pass, tier.Planned)
-	if tier.Unavailable > 0 {
-		detail += fmt.Sprintf(", %d unavailable", tier.Unavailable)
-	}
-	return detail
-}
-
-// contextTaskPrefixNote is the sentence the analysis supports about the
-// verified prefix, and whether that sentence explains an absence rather than
-// reporting a result. Every surface takes the wording from here so a renderer
-// cannot describe the same phase differently from the one beside it.
-func contextTaskPrefixNote(tasks *analysis.ContextTasks) (note string, suppressed bool) {
-	if tasks.VerifiedPrefixBytes != nil {
-		note = "verified prefix " + formatPayloadBytes(*tasks.VerifiedPrefixBytes)
-		if tasks.AtLeastLargestTested {
-			note += "; the largest declared tier passed, so larger payloads are untested"
-		}
-		return note, false
-	}
-	if tasks.Unavailable > 0 {
-		return "no verified prefix: a cell was unavailable, so the prefix is suppressed for the whole phase", true
-	}
-	return "no verified prefix: the smallest declared tier did not pass", true
-}
-
-// formatPayloadBytes keeps the declared byte size exact. Payload tiers are
-// declared in bytes and sealed in bytes, so rounding one to KiB in the output
-// would print a size that is not the one the policy carries.
-func formatPayloadBytes(size int) string { return strconv.Itoa(size) + "B" }
 
 func primaryTTFTLabel(report *analysis.Report) string {
 	if report != nil {

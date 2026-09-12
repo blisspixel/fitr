@@ -407,7 +407,7 @@ func htmlContextTasksFrom(tasks *analysis.ContextTasks) *htmlContextTasks {
 	if tasks == nil {
 		return nil
 	}
-	note, suppressed := contextTaskPrefixNote(tasks)
+	note, suppressed := analysis.ContextTaskPrefixNote(tasks)
 	out := &htmlContextTasks{
 		Window: fmt.Sprintf("%d tokens, reserve %d", tasks.OperatingWindow, tasks.OutputReserve),
 		Prefix: note, PrefixSuppressed: suppressed,
@@ -415,9 +415,9 @@ func htmlContextTasksFrom(tasks *analysis.ContextTasks) *htmlContextTasks {
 	}
 	for _, tier := range tasks.Tiers {
 		out.Tiers = append(out.Tiers, htmlContextTier{
-			Payload: formatPayloadBytes(tier.PayloadUTF8Bytes),
+			Payload: analysis.PayloadBytesLabel(tier.PayloadUTF8Bytes),
 			Outcome: SingleLine(tier.Outcome),
-			Detail:  contextTierDetail(tier),
+			Detail:  analysis.ContextTierDetail(tier),
 		})
 	}
 	return out

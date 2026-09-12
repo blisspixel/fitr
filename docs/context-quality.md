@@ -185,15 +185,18 @@ the phase existed keeps its exact bytes and its signature.
 
 ## Remaining connected acceptance
 
-The phase renders in the CLI, in JSON and in the HTML export through the
-central analysis projection, and every surface takes its tier counts and its
-verified-prefix sentence from one derivation so they cannot describe the same
-phase differently. The TUI result view does not yet render it.
+The phase renders in the CLI, in JSON, in the HTML export and in the terminal
+monitor's result view, all through the central analysis projection. The tier
+counts and the verified-prefix sentence come from one derivation in that
+projection, so no surface composes its own wording and none can describe the
+same phase differently. The monitor renders the phase in its compact view as
+well, because for a context-level run the phase is the only planned work and a
+summary without it would describe a run in which nothing was measured.
 
 Before this scorecard can influence a personal role, fitr must collect it
-inside the owned runtime and existing budgeted fitting, obtain fresh
-confirmation, and expose the phase in the TUI. Missing accounting must block
-qualification, which the reserve gate already enforces.
+inside the owned runtime and existing budgeted fitting and obtain fresh
+confirmation. Missing accounting must block qualification, which the reserve
+gate already enforces.
 
 Native acceptance must show that an oversized prompt is refused without
 shrinking the document, window or reserve. Two runtime details shape that test.

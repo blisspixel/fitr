@@ -415,6 +415,53 @@ func renderResultPerformance(w *lineWriter, run Run, glyphs Glyphs, compact bool
 		renderAnalysisMetric(w, "runtime load", run.Analysis.Performance.RuntimeLoadSeconds, glyphs)
 	}
 	renderResultCapacity(w, run, compact)
+	renderResultContextTasks(w, run, compact)
+}
+
+// renderResultContextTasks projects the document-task phase. It renders in the
+// compact view as well as the full one: for a context-level run the phase is
+// the only planned work, so a compact summary that left it out would describe
+// a run in which nothing was measured.
+//
+// Counts stay counts, and the verified-prefix sentence comes from the analysis
+// rather than being composed here, so the monitor cannot describe a phase
+// differently from the terminal or the export.
+func renderResultContextTasks(w *lineWriter, run Run, compact bool) {
+	if run.Analysis == nil || run.Analysis.ContextTasks == nil {
+		return
+	}
+	tasks := run.Analysis.ContextTasks
+	w.line(Span{Text: "context tasks", Role: RoleHeader})
+	w.line(Span{Text: "window     ", Role: RoleMuted}, Span{
+		Text: fmt.Sprintf("%d tokens, reserve %d", tasks.OperatingWindow, tasks.OutputReserve),
+		Role: RoleDefault,
+	})
+	if compact {
+		w.line(Span{Text: "tiers      ", Role: RoleMuted}, Span{
+			Text: fmt.Sprintf("%d declared; %d/%d cells passed", len(tasks.Tiers), tasks.Pass, tasks.Planned),
+			Role: RoleDefault,
+		})
+	} else {
+		for _, tier := range tasks.Tiers {
+			w.line(
+				Span{Text: fmt.Sprintf("%-10s ", analysis.PayloadBytesLabel(tier.PayloadUTF8Bytes)), Role: RoleMuted},
+				Span{Text: fmt.Sprintf("%-12s ", tier.Outcome), Role: RoleDefault},
+				Span{Text: analysis.ContextTierDetail(tier), Role: RoleMuted},
+			)
+		}
+	}
+	note, suppressed := analysis.ContextTaskPrefixNote(tasks)
+	role := RoleDefault
+	if suppressed {
+		role = RoleWarning
+	}
+	w.line(Span{Text: "prefix     ", Role: RoleMuted}, Span{Text: note, Role: role})
+	if tasks.Status == analysis.StatusDescriptiveOnly {
+		w.line(Span{Text: "note       ", Role: RoleMuted}, Span{
+			Text: "descriptive only; this record cannot claim a verified prefix for the current artifact",
+			Role: RoleWarning,
+		})
+	}
 }
 
 func renderResultCapacity(w *lineWriter, run Run, compact bool) {
