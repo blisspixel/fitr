@@ -294,6 +294,40 @@ func TestContextTransportFaultIsRecordedWithoutEndingThePhase(t *testing.T) {
 	}
 }
 
+// The runtime refusing an oversized prompt is the behavior the pack exists to
+// elicit. Classified as transport it suppressed the verified prefix for the
+// whole phase, so a model that behaved correctly lost the evidence its smaller
+// tiers had already earned.
+func TestRuntimeContextRefusalFailsItsOwnTierAndKeepsTheLowerPrefix(t *testing.T) {
+	plan := contextPlan(t, 2048, 4096)
+	perTier := len(plan.Cells) / 2
+	overflow := fmt.Errorf("ollama 400: %s: %w",
+		`{"error":{"type":"exceed_context_size_error","n_ctx":4096,"n_prompt_tokens":9000}}`,
+		&ollama.ContextOverflow{NCtx: 4096, PromptTokens: 9000, FromRuntime: "the serving runtime"})
+	run, fake := runContextFake(t, plan, func(index int) (string, ollama.Metrics, error) {
+		if index >= perTier {
+			return "", ollama.Metrics{}, overflow
+		}
+		return answered()
+	})
+	if len(fake.calls) != len(plan.Cells) || run.Ended != nil {
+		t.Fatalf("a capacity refusal stopped the phase: calls=%d ended=%v", len(fake.calls), run.Ended)
+	}
+	if run.Report.Counts.Unavailable != 0 {
+		t.Fatalf("the runtime's own refusal was recorded as unavailable: %+v", run.Report.Counts)
+	}
+	if got := countReasons(run)[string(contextquality.ContextLimit)]; got != perTier {
+		t.Fatalf("refused cells were not recorded as a context limit: %v", countReasons(run))
+	}
+	// The decisive consequence: every cell reached a terminal outcome, so the
+	// phase is complete and a verified prefix remains derivable. Classified as
+	// transport, these cells were unavailable, and one unavailable cell
+	// suppresses the prefix for the whole phase however well lower tiers did.
+	if !run.Report.Complete {
+		t.Fatal("a phase whose every cell reached a terminal outcome is complete")
+	}
+}
+
 // A client that would not send the declared overflow controls dispatches
 // nothing at all. The same holds for an unusable plan or model.
 func TestContextRunRefusesBeforeAnyRequest(t *testing.T) {

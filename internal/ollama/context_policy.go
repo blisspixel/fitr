@@ -18,6 +18,9 @@ var (
 	ErrContextRequestPolicy = errors.New("invalid context request policy")
 	ErrContextAccounting    = errors.New("context token accounting unavailable or invalid")
 	ErrContextReserve       = errors.New("full output reserve does not fit the operating window")
+	// ErrContextOverflow is the runtime's own refusal of an oversized prompt.
+	// It is a measured capacity outcome, not a transport fault.
+	ErrContextOverflow = errors.New("the serving runtime refused a prompt larger than its resolved context")
 )
 
 // ContextTokenAccounting retains presence from one terminal native response.

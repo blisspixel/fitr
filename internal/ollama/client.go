@@ -39,6 +39,10 @@ const (
 	maxGeneratedOutput  = 8 << 20
 	maxServerLogTail    = 1 << 20
 	controlPlaneTimeout = 15 * time.Second
+	// contextOverflowErrorType is llama.cpp's own name for a prompt larger
+	// than the resolved per-slot context, asserted by its server test
+	// test_context_size_exceeded and checked against master on 2026-09-11.
+	contextOverflowErrorType = "exceed_context_size_error"
 )
 
 var serverLibraryPattern = regexp.MustCompile(`library=([A-Za-z0-9_]+)`)
@@ -219,7 +223,100 @@ func nativeHTTPError(resp *http.Response) error {
 	if err != nil {
 		return fmt.Errorf("ollama %d: %w", resp.StatusCode, err)
 	}
-	return fmt.Errorf("ollama %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	text := strings.TrimSpace(string(b))
+	if overflow, ok := parseContextOverflow(resp.StatusCode, text); ok {
+		return fmt.Errorf("ollama %d: %s: %w", resp.StatusCode, text, overflow)
+	}
+	return fmt.Errorf("ollama %d: %s", resp.StatusCode, text)
+}
+
+// decodesStrictly reports whether data is exactly the given shape. A failure
+// here is a classification answer rather than an error to propagate: the body
+// is simply not the document being looked for.
+func decodesStrictly(data []byte, into any) bool {
+	return strictjson.Unmarshal(data, into) == nil
+}
+
+// ContextOverflow is the serving runtime's own refusal of a prompt larger than
+// the window it resolved. It is a measured capacity outcome rather than a
+// transport fault: the request reached the runtime, and the runtime enforced a
+// limit it also reported.
+//
+// NCtx is llama.cpp's per-slot context, which is the server's total divided by
+// its slot count, so it is the window one request may use rather than the
+// figure the server was started with. Its upstream contract is asserted by
+// llama.cpp's own server test for exceed_context_size_error, checked against
+// master on 2026-09-11.
+type ContextOverflow struct {
+	NCtx         int
+	PromptTokens int
+	FromRuntime  string
+}
+
+func (c *ContextOverflow) Error() string {
+	return fmt.Sprintf("%s refused a %d-token prompt against a %d-token per-slot context",
+		c.FromRuntime, c.PromptTokens, c.NCtx)
+}
+
+func (c *ContextOverflow) Is(target error) bool { return target == ErrContextOverflow }
+
+// AsContextOverflow reports the runtime's refusal and its reported window when
+// the error carries one.
+func AsContextOverflow(err error) (*ContextOverflow, bool) {
+	var overflow *ContextOverflow
+	if errors.As(err, &overflow) {
+		return overflow, true
+	}
+	return nil, false
+}
+
+// parseContextOverflow reads llama.cpp's typed overflow refusal.
+//
+// Ollama does not interpret this error. It reads the runner's body verbatim
+// into api.StatusError and may append its own out-of-memory line, so the
+// runner's JSON arrives nested inside Ollama's error string rather than as a
+// field of it. Both layers are decoded strictly and anything that does not
+// match exactly is left to the caller as an ordinary transport error, so a
+// changed upstream shape degrades to today's behavior instead of inventing a
+// window.
+func parseContextOverflow(status int, body string) (*ContextOverflow, bool) {
+	if status != http.StatusBadRequest {
+		return nil, false
+	}
+	var envelope struct {
+		Error string `json:"error"`
+	}
+	nested := body
+	if decodesStrictly([]byte(body), &envelope) && envelope.Error != "" {
+		nested = strings.TrimSpace(envelope.Error)
+	}
+	// statusErrorMessage may append a runner status line after the JSON.
+	if cut := strings.IndexByte(nested, '\n'); cut >= 0 {
+		nested = strings.TrimSpace(nested[:cut])
+	}
+	var runner struct {
+		Error struct {
+			Type         string `json:"type"`
+			NCtx         *int   `json:"n_ctx"`
+			PromptTokens *int   `json:"n_prompt_tokens"`
+		} `json:"error"`
+	}
+	if !decodesStrictly([]byte(nested), &runner) {
+		return nil, false
+	}
+	if runner.Error.Type != contextOverflowErrorType {
+		return nil, false
+	}
+	// The window and the prompt size are the whole value of this receipt. A
+	// refusal that does not carry believable ones is not turned into a number.
+	if runner.Error.NCtx == nil || runner.Error.PromptTokens == nil ||
+		*runner.Error.NCtx < 1 || *runner.Error.PromptTokens < 1 {
+		return nil, false
+	}
+	return &ContextOverflow{
+		NCtx: *runner.Error.NCtx, PromptTokens: *runner.Error.PromptTokens,
+		FromRuntime: "the serving runtime",
+	}, true
 }
 
 func validateGenFrame(g genResp) error {

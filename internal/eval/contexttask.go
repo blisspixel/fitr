@@ -93,11 +93,20 @@ func dispatchContextCells(ctx context.Context, c ContextBackend, model string, p
 func classifyContextCell(cell contextquality.Cell, policy contextquality.Policy,
 	text string, metrics ollama.Metrics, err error,
 ) (contextquality.Observation, bool) {
+	observation := contextquality.Observation{CellID: cell.ID, PayloadSHA256: cell.PayloadSHA256, PromptSHA256: cell.PromptSHA256}
 	if err != nil {
+		// The runtime refusing an oversized prompt is the behavior this pack
+		// exists to elicit, not a fault. Recording it as unavailable transport
+		// suppressed the verified prefix for the whole phase; recorded as the
+		// capacity outcome it is, it fails its own tier and every lower tier
+		// keeps the prefix it earned.
+		if _, overflow := ollama.AsContextOverflow(err); overflow {
+			observation.Disposition = contextquality.ContextLimit
+			return observation, false
+		}
 		reason, ended := contextFaultReason(err)
 		return unavailableCell(cell, reason), ended
 	}
-	observation := contextquality.Observation{CellID: cell.ID, PayloadSHA256: cell.PayloadSHA256, PromptSHA256: cell.PromptSHA256}
 	// A terminal success still has to prove the entire declared reserve fit
 	// beside the accepted prompt. An answer that only fits because the model
 	// stopped early has not met the operating policy it was measured under.

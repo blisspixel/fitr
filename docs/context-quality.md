@@ -151,6 +151,20 @@ transport fault or unknown accounting is recorded and the phase continues,
 because an incomplete phase already cannot qualify and the remaining cells
 still carry their own diagnostics. None of these become model-quality zeroes.
 
+The runtime refusing an oversized prompt is none of those. It is the behavior
+the pack is built to elicit, and it is recognized specifically rather than as
+any HTTP 400: llama.cpp answers with `exceed_context_size_error` carrying the
+prompt size and the per-slot context it enforced, and Ollama copies that body
+verbatim into its own error string, so both layers are decoded strictly and
+anything that does not match exactly stays an ordinary transport fault. A
+recognized refusal is a context limit, which fails its own cell. Read as
+transport it was unavailable instead, and one unavailable cell suppresses the
+verified prefix for the whole phase, so a model that refused correctly lost
+the evidence its smaller tiers had already earned.
+
+The reported window is the runtime's per-slot context, which is the server's
+total divided by its slot count rather than the figure it was started with.
+
 ## Persisting a phase
 
 A run seals the plan's digest and cell count into its task plan before the
@@ -184,9 +198,10 @@ accounting must block qualification, which the reserve gate already enforces.
 Native acceptance must show that an oversized prompt is refused without
 shrinking the document, window or reserve. Two runtime details shape that test.
 The refusal is raised by llama-server, not by Ollama's own pre-flight, because
-`truncate:false` bypasses the Go-side length check entirely; the acceptance
-assertion should therefore match the runtime's overflow error specifically
-rather than any HTTP 400. And which component would have enforced the limit
+`truncate:false` bypasses the Go-side length check entirely; the classifier
+above matches that overflow error specifically rather than any HTTP 400, and
+acceptance should assert the resulting context-limit disposition rather than a
+status code. And which component would have enforced the limit
 depends on whether the model resolves to a legacy Go template or a Jinja one,
 so the test needs at least one model of each kind before the guarantee can be
 called verified.
