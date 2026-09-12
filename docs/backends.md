@@ -74,6 +74,25 @@ own log when that log is found. Without a log, those settings are unobserved
 rather than taken from this process's environment, and a new run cannot enter
 ranking until the daemon is actually read.
 
+A measurement always begins on a runner fitr unloaded first. That rule exists
+because scored inference is single-flight and a co-resident model contaminates
+timing, and it turns out to carry a second guarantee. A long-lived Ollama
+runner that has hosted a second model can keep emitting corrupted output after
+that model is gone, with nothing in `/api/ps` saying so, and the corruption
+persists until the runner restarts
+([ollama#18208](https://github.com/ollama/ollama/issues/18208), open, observed
+2026-09-03). Inheriting such a runner would record that corruption as a
+model-quality failure, which is the worst mistake this product can make.
+Unloading every resident model before the battery, and verifying none remain,
+is what prevents it.
+
+`/api/ps` byte figures are the runner's own allocation accounting, not an
+independent residency reading, and fitr reports them as exactly that. They can
+understate badly in cases the runtime does not account for, such as a draft
+model ([ollama#17951](https://github.com/ollama/ollama/issues/17951), fixed).
+Per-process accelerator memory is unavailable on Windows WDDM, so there is no
+second source to corroborate them there.
+
 **llama-server** is not just reach - it is measurement surface Ollama does
 not expose: per-request **cached-token counts** (the evidence needed to
 separate loaded/uncached prompt processing from a prefix-cache hit), and a
