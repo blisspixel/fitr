@@ -381,14 +381,112 @@ func TestProjectKVBytesRefusesIncompleteOrUnsupportedInputs(t *testing.T) {
 	}
 }
 
+// Per-layer head_count_kv is what current sliding-window and hybrid artifacts
+// publish. Reading element 0 as the whole model's KV head count produced a
+// projection tens of times the truth, and KVReady still passed, so advise
+// printed an incompatible verdict for a model that fits comfortably.
+func TestPerLayerKVHeadsAreUnmeasuredRatherThanTheFirstLayer(t *testing.T) {
+	perLayer := make([]any, 48)
+	for i := range perLayer {
+		perLayer[i] = uint64(8)
+	}
+	perLayer[5] = uint64(1)
+	kvs := map[string]any{
+		"general.architecture":            "gemma4",
+		"gemma4.block_count":              uint64(48),
+		"gemma4.attention.head_count":     uint64(16),
+		"gemma4.attention.head_count_kv":  perLayer,
+		"gemma4.attention.key_length":     uint64(256),
+		"gemma4.attention.value_length":   uint64(256),
+		"gemma4.attention.sliding_window": uint64(1024),
+	}
+	arch := ArchFromKVs(kvs)
+	if arch.KVHeads != 0 || !arch.PerLayerKVHeads {
+		t.Fatalf("per-layer head_count_kv must not become a scalar: %+v", arch)
+	}
+	if arch.KVReady() {
+		t.Fatal("KVReady must be false when the artifact has no single KV head count")
+	}
+	if arch.ShapeClass() == "dense" {
+		t.Fatal("a per-layer KV layout must not be labeled dense")
+	}
+	report := Evaluate(Input{
+		Model: "gemma", WeightsB: 7 * GiB, HaveGB: 24, HaveSrc: "nvidia-smi",
+		Ctx: 131072, Arch: arch,
+	})
+	if report.Tier != Skip {
+		t.Fatalf("tier = %s (%s), want skip rather than a projected verdict", report.Tier, report.Why)
+	}
+}
+
+// The zero-fallback exists for pre-GQA metadata that omits head_count_kv. A
+// per-layer array whose first entries are zero -- layers that do not attend --
+// must not reach it, or the model is charged the full head count on every
+// layer: the largest cache its shape could ever need.
+func TestLeadingZeroInAPerLayerArrayDoesNotBecomeTheFullHeadCount(t *testing.T) {
+	perLayer := make([]any, 42)
+	for i := range perLayer {
+		perLayer[i] = uint64(0)
+	}
+	perLayer[9], perLayer[19], perLayer[29], perLayer[39] = uint64(8), uint64(8), uint64(8), uint64(8)
+	kvs := map[string]any{
+		"general.architecture":               "nemotron_h",
+		"nemotron_h.block_count":             uint64(42),
+		"nemotron_h.attention.head_count":    uint64(40),
+		"nemotron_h.attention.head_count_kv": perLayer,
+		"nemotron_h.attention.key_length":    uint64(128),
+		"nemotron_h.attention.value_length":  uint64(128),
+	}
+	arch := ArchFromKVs(kvs)
+	if arch.KVHeads == 40 {
+		t.Fatal("a per-layer array must not fall back to the full head count")
+	}
+	if arch.KVReady() {
+		t.Fatalf("KVReady must be false: %+v", arch)
+	}
+}
+
+// inherentHybridArchitecture is a deliberately short name list. A hybrid model
+// that declares its recurrent layers must be recognized from that declaration,
+// so new families do not depend on the list being grown for each one.
+func TestRecurrentLayersKeyMarksAnUnlistedHybrid(t *testing.T) {
+	kvs := map[string]any{
+		"general.architecture":                  "nemotron_h",
+		"nemotron_h.block_count":                uint64(42),
+		"nemotron_h.attention.head_count":       uint64(40),
+		"nemotron_h.attention.head_count_kv":    uint64(8),
+		"nemotron_h.attention.key_length":       uint64(128),
+		"nemotron_h.attention.value_length":     uint64(128),
+		"nemotron_h.attention.recurrent_layers": uint64(38),
+	}
+	if inherentHybridArchitecture("nemotron_h") {
+		t.Fatal("this test is meaningless if the architecture is already on the name list")
+	}
+	arch := ArchFromKVs(kvs)
+	if arch.RecurrentLayers != 38 || !arch.Hybrid {
+		t.Fatalf("recurrent_layers must mark the model hybrid: %+v", arch)
+	}
+	report := Evaluate(Input{
+		Model: "nemotron", WeightsB: 3 * GiB, HaveGB: 24, HaveSrc: "nvidia-smi",
+		Ctx: 1 << 20, Arch: arch,
+	})
+	if report.Tier != Skip {
+		t.Fatalf("tier = %s (%s), want skip for a hybrid without a load receipt", report.Tier, report.Why)
+	}
+}
+
 func TestHybridArchitectureRequiresMeasuredAllocation(t *testing.T) {
 	kvs := map[string]any{
-		"general.architecture":                   "qwen35",
-		"qwen35.block_count":                     uint64(64),
-		"qwen35.attention.head_count_kv":         uint64(4),
-		"qwen35.attention.key_length":            uint64(128),
-		"qwen35.full_attention_interval":         uint64(4),
-		"qwen35.attention.recurrent_layer_count": uint64(48),
+		"general.architecture":           "qwen35",
+		"qwen35.block_count":             uint64(64),
+		"qwen35.attention.head_count_kv": uint64(4),
+		"qwen35.attention.key_length":    uint64(128),
+		"qwen35.full_attention_interval": uint64(4),
+		// The key llama.cpp writes is attention.recurrent_layers. fitr read
+		// attention.recurrent_layer_count, which nothing emits, and this test
+		// asserted the same invented name -- so the branch could never fire in
+		// production and CI could never notice.
+		"qwen35.attention.recurrent_layers": uint64(48),
 	}
 	arch := ArchFromKVs(kvs)
 	if !arch.Hybrid || arch.FullAttentionInterval != 4 || arch.RecurrentLayers != 48 {

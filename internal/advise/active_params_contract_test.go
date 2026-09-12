@@ -50,6 +50,10 @@ func TestMetadataIntegerConversionAcceptsKnownGGUFScalarShapesOnly(t *testing.T)
 		{value: float32(7), want: 7},
 		{value: []any{}, want: 0},
 		{value: []any{"8"}, want: 8},
+		// A per-layer array has no model-wide scalar. Returning its first
+		// element reported one layer's dimension for all of them.
+		{value: []any{uint64(8), uint64(8), uint64(1)}, want: 0},
+		{value: []any{uint64(0), uint64(0), uint64(40)}, want: 0},
 		{value: "9", want: 9},
 		{value: "not-an-integer", want: 0},
 		{value: true, want: 0},

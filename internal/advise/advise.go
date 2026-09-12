@@ -109,6 +109,10 @@ type Arch struct {
 	Hybrid                bool
 	FullAttentionInterval int
 	RecurrentLayers       int
+	// PerLayerKVHeads records that head_count_kv arrived as a per-layer array.
+	// The artifact then has no single KV head count, so KVReady stays false and
+	// the conventional weights-plus-KV projection is not offered for it.
+	PerLayerKVHeads bool
 }
 
 // KVReady is whether the KV cache can be sized without guessing head dim
@@ -1105,8 +1109,14 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	a.Blocks = archDim(first(kvs, p+"block_count"))
 	a.Embed = archDim(first(kvs, p+"embedding_length"))
 	a.Heads = archDim(first(kvs, p+"attention.head_count"))
-	a.KVHeads = archDim(first(kvs, p+"attention.head_count_kv"))
-	if a.KVHeads == 0 {
+	kvHeads := first(kvs, p+"attention.head_count_kv")
+	a.KVHeads = archDim(kvHeads)
+	a.PerLayerKVHeads = perLayerDimension(kvHeads)
+	if a.KVHeads == 0 && !a.PerLayerKVHeads {
+		// An absent key is pre-GQA metadata, where every head carries its own
+		// KV. A key that is present but per-layer is a different fact: the
+		// model has no single KV head count, so substituting the full head
+		// count would report the largest cache the shape could ever need.
 		a.KVHeads = a.Heads
 	}
 	a.KeyLength = archDim(first(kvs, p+"attention.key_length"))
@@ -1116,7 +1126,7 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	a.ExpertUsed = archDim(first(kvs, p+"expert_used_count"))
 	a.FFN = archDim(first(kvs, p+"expert_feed_forward_length", p+"feed_forward_length"))
 	a.FullAttentionInterval = archDim(first(kvs, p+"full_attention_interval"))
-	a.RecurrentLayers = archDim(first(kvs, p+"attention.recurrent_layer_count", "attention.recurrent_layer_count"))
+	a.RecurrentLayers = archDim(first(kvs, p+"attention.recurrent_layers", "attention.recurrent_layers"))
 	a.Hybrid = a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 || inherentHybridArchitecture(arch)
 	return a
 }
@@ -1202,6 +1212,14 @@ const maxArchDim = 1 << 20
 // archDim reads a dimension and treats an implausible one as unmeasured.
 // Zero already means "not known" everywhere downstream, which routes the
 // verdict to SKIP -- the correct answer for metadata that cannot be believed.
+// perLayerDimension reports a GGUF value that carries one entry per layer.
+// Such a key is present and readable but is not a model-wide scalar, which is
+// a different state from the key being absent.
+func perLayerDimension(v any) bool {
+	n, ok := v.([]any)
+	return ok && len(n) > 1
+}
+
 func archDim(v any) int {
 	n := asInt(v)
 	if n < 0 || n > maxArchDim {
@@ -1246,7 +1264,12 @@ func asInt64(v any) int64 {
 	case float32:
 		return int64(n)
 	case []any:
-		if len(n) == 0 {
+		// A one-element array is an unambiguous scalar. A longer one is a
+		// per-layer array, and its first element is not the value for every
+		// layer: collapsing it silently reports one layer's dimension as the
+		// whole model's. Unmeasured is the honest answer, and it routes to
+		// SKIP rather than to a fabricated projection.
+		if len(n) != 1 {
 			return 0
 		}
 		return asInt64(n[0])
