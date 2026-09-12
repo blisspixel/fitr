@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/stats"
@@ -56,6 +57,11 @@ type DoctorOpts struct {
 	// Placement reports where the loaded model actually computes, e.g.
 	// "GPU 100%", "GPU 62%", "CPU". Called after the model is warm.
 	Placement func(ctx context.Context) string
+	// Contention is what else held the accelerator when the check ran. It is
+	// supplied rather than probed here so this package stays pure logic: a
+	// check that read the real host would make the result depend on whatever
+	// happened to be open on the machine running the tests.
+	Contention func(ctx context.Context) device.GPUContention
 }
 
 const doctorTextPrompt = "List the eight planets of the solar system in order from the Sun, one per line. No commentary."
@@ -83,8 +89,90 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 		return r, err
 	}
 	doctorConfig(opts.Config, opts.ConfigObserved, &r)
+	doctorGPUContention(ctx, opts, &r)
 	finishDoctor(&r)
 	return r, nil
+}
+
+// doctorGPUContention reports what else holds the accelerator before anyone
+// spends minutes measuring against it.
+//
+// Memory another process is holding is memory this measurement does not get,
+// and the difference does not announce itself: the run simply places fewer
+// layers, or the allocation lands somewhere else, and the numbers come out
+// describing a machine the operator did not think they were testing. Naming
+// the processes turns that into a decision the operator can make in a few
+// seconds.
+//
+// fitr does not close them. It may mutate or remove only what it created, and
+// terminating an editor with unsaved work or somebody's training job would be
+// a worse outcome than a contended measurement. The report ends at a next
+// action, the way every other negative verdict here does.
+func doctorGPUContention(ctx context.Context, opts DoctorOpts, r *DoctorResult) {
+	if opts.Contention == nil {
+		return
+	}
+	contention := opts.Contention(ctx)
+	if !contention.Observed {
+		addDoctorCheck(r, "gpu_contention", "SKIP",
+			"no vendor tool reported accelerator memory; other work on the GPU is unmeasured")
+		return
+	}
+	free := fmt.Sprintf("%.1f GiB free of %.1f GiB",
+		float64(contention.FreeMiB)/1024, float64(contention.TotalMiB)/1024)
+	if !contention.Busy() {
+		addDoctorCheck(r, "gpu_contention", "PASS", free+"; nothing substantial is holding the GPU")
+		return
+	}
+	detail := fmt.Sprintf("%s, so %.1f GiB is held by other work", free,
+		float64(contention.UsedMiB)/1024)
+	if names := contentionNames(contention); names != "" {
+		detail += "; on the GPU now: " + names
+	}
+	if !contention.PerProcess {
+		detail += "; this platform does not report per-process accelerator memory, " +
+			"so the share each one holds is unknown"
+	}
+	detail += ". Close what you can spare and re-run, or measure as-is and read the " +
+		"result as this machine under load"
+	addDoctorCheck(r, "gpu_contention", "WARN", detail)
+}
+
+// contentionNames lists what a reader could act on. The serving runtime is
+// excluded: it is the subject of the measurement, and suggesting it be closed
+// would be advice that breaks the thing being measured. Processes the driver
+// would not name are counted rather than printed, because a marker standing in
+// for a name reads as a program that does not exist.
+func contentionNames(contention device.GPUContention) string {
+	var parts []string
+	unnamed, runtimes := 0, 0
+	for _, consumer := range contention.Top(12) {
+		switch {
+		case consumer.ServingRuntime():
+			runtimes++
+			continue
+		case !consumer.Named():
+			unnamed++
+			continue
+		}
+		if consumer.UsedKnown {
+			parts = append(parts, fmt.Sprintf("%s (%d, %.1f GiB)",
+				consumer.Name, consumer.PID, float64(consumer.UsedMiB)/1024))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s (%d)", consumer.Name, consumer.PID))
+	}
+	if len(parts) > 5 {
+		remaining := len(parts) - 5
+		parts = append(parts[:5], fmt.Sprintf("and %d more", remaining))
+	}
+	if runtimes > 0 {
+		parts = append(parts, "the serving runtime itself, which this measurement needs")
+	}
+	if unnamed > 0 {
+		parts = append(parts, fmt.Sprintf("%d process(es) this session cannot identify", unnamed))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func addDoctorCheck(r *DoctorResult, id, state, detail string) {

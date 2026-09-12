@@ -144,6 +144,14 @@ func useDiagnosticRuntime(t *testing.T, runtime *diagnosticRuntime) {
 	t.Setenv("OLLAMA_MAX_LOADED_MODELS", "1")
 	t.Setenv("OLLAMA_FLASH_ATTENTION", "")
 	t.Setenv("OLLAMA_KV_CACHE_TYPE", "")
+	// A command test must not depend on what is open on the machine running
+	// it. An idle accelerator is the fixture; the contention wording has its
+	// own tests.
+	previous := gpuContention
+	gpuContention = func(context.Context) device.GPUContention {
+		return device.GPUContention{Observed: true, TotalMiB: 24576, UsedMiB: 0, FreeMiB: 24576}
+	}
+	t.Cleanup(func() { gpuContention = previous })
 }
 
 func captureCommandOutput(t *testing.T, fn func() int) (stdout, stderr string, code int) {

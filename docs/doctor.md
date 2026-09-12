@@ -28,6 +28,25 @@ minute:
 - **Config red flags** from the server's own log (authoritative over your
   shell's environment): parallel slots divide the context, a second loaded
   model contaminates timings.
+- **What else holds the accelerator.** Memory another process is holding is
+  memory this measurement does not get, and the difference does not announce
+  itself: the run places fewer layers, or the allocation lands elsewhere, and
+  the numbers come out describing a machine you did not think you were
+  testing. The check names the processes on the GPU so closing a browser is a
+  decision you can make in a few seconds.
+
+  fitr does not close them. It may mutate or remove only what it created, and
+  terminating an editor with unsaved work or somebody's training job would be
+  a worse outcome than a contended measurement, so the check ends at a next
+  action like every other negative verdict here. The serving runtime is left
+  off the list, because it is the subject of the measurement rather than
+  competition for it.
+
+  Windows does not report per-process accelerator memory at all, so there the
+  check names the processes and says plainly that the share each one holds is
+  unknown rather than dividing the total among them. Where no vendor tool
+  answers, other work on the GPU is unmeasured, which is not the same as an
+  idle GPU.
 
 Exit code 3 when a check fails outright; warnings exit 0 - the box is
 measurable, with caveats worth knowing before trusting numbers.

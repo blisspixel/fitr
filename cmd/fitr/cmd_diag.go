@@ -70,6 +70,12 @@ func cmdDiag(ctx context.Context, args []string) int {
 // cmdDoctor answers: can this box be measured fairly AT ALL? Every benchmark
 // silently assumes yes; nothing else checks. ~60 seconds, worth running before
 // believing any number - including ours.
+// gpuContention reads what else holds the accelerator. It is a variable so
+// command tests stay independent of whatever happens to be running on the
+// machine executing them: a check that read the real driver would make a unit
+// test pass or fail on whether a browser was open.
+var gpuContention = device.GPUContentionNow
+
 func cmdDoctor(ctx context.Context, args []string) int {
 	command, code, ok := parseDoctorCommand(args)
 	if !ok {
@@ -139,6 +145,7 @@ func runDoctor(ctx context.Context, c llm.Backend, model string, command doctorC
 		Placement: func(ctx context.Context) string {
 			return device.InferenceDeviceFor(ctx, c, model)
 		},
+		Contention: gpuContention,
 	})
 	if err != nil {
 		if ctx.Err() != nil {

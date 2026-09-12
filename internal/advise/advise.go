@@ -139,6 +139,16 @@ type Arch struct {
 	SSMConvKernel int
 }
 
+// modernKVLayout reports an architecture that declares grouped, windowed or
+// interval attention. Such an artifact is never pre-GQA, so an absent KV head
+// count is a gap in whichever source was read rather than a statement that
+// every head carries its own cache.
+func (a Arch) modernKVLayout() bool {
+	return a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 ||
+		a.slidingWindowPresent() || a.SSMInnerSize > 0 ||
+		inherentHybridArchitecture(a.Name)
+}
+
 // realBlocks is the decoder layers that actually attend or recur, excluding a
 // multi-token-prediction head that block_count includes.
 func (a Arch) realBlocks() int {
@@ -1299,11 +1309,17 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	if a.PerLayerKVHeads {
 		a.KVHeadsPerLayer = perLayerDimensions(kvHeads, a.Blocks)
 	}
-	if a.KVHeads == 0 && !a.PerLayerKVHeads {
-		// An absent key is pre-GQA metadata, where every head carries its own
-		// KV. A key that is present but per-layer is a different fact: the
-		// model has no single KV head count, so substituting the full head
-		// count would report the largest cache the shape could ever need.
+	if a.KVHeads == 0 && !a.PerLayerKVHeads && !a.modernKVLayout() {
+		// On a pre-GQA artifact an absent key really does mean every head
+		// carries its own KV, so the head count is the right substitute.
+		//
+		// It is the wrong substitute when the source simply did not report the
+		// key. Ollama's /api/show returns a null head_count_kv for current
+		// hybrid artifacts whose file carries the real value, and taking the
+		// full head count there charged 24 heads where the model uses 4: a six
+		// times over-projection that told the operator to cut their context.
+		// An architecture that declares a modern KV layout is not pre-GQA, so
+		// an absent count is unmeasured rather than equal to the head count.
 		a.KVHeads = a.Heads
 	}
 	a.KeyLength = archDim(first(kvs, p+"attention.key_length"))
