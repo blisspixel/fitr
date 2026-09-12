@@ -280,9 +280,13 @@ so Board does not compare across those presentation-contract changes.
   version, or host-memory domain. It therefore remains descriptive and cannot
   establish a context row or fit verdict. Hybrid recurrent architectures
   require a load receipt, and split GGUFs require every shard. An artifact
-  whose `head_count_kv` is a per-layer array has no model-wide KV head count;
-  reading one layer's entry as the model's would size every layer from it, so
-  the count stays unmeasured and the projection is not offered. Unmeasured
+  whose `head_count_kv` is a per-layer array is projected by summing the
+  layers, so a layer that does not attend costs nothing; the array is used only
+  when it carries exactly one believable entry per block. An artifact declaring
+  a sliding window is not projected at all, because which layers slide is
+  decided by llama.cpp's per-architecture `dense_first` argument rather than by
+  any GGUF key, and at pattern 1 the same metadata means either every layer is
+  dense or every layer slides. Unmeasured
   capacity, incomplete weights, or architecture is SKIP, not a name-to-GB
   guess.
 - **Cache state can be unknown.** TTFT and prefill are still observed, but an

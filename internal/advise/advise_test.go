@@ -404,8 +404,20 @@ func TestPerLayerKVHeadsAreUnmeasuredRatherThanTheFirstLayer(t *testing.T) {
 	if arch.KVHeads != 0 || !arch.PerLayerKVHeads {
 		t.Fatalf("per-layer head_count_kv must not become a scalar: %+v", arch)
 	}
+	// The per-layer heads are readable here, so the refusal has to come from
+	// the sliding window rather than from a missing count. Which layers slide
+	// is not in the artifact, so the cache length per layer is unknown.
+	if len(arch.KVHeadsPerLayer) != 48 {
+		t.Fatalf("per-layer heads = %v, want one entry per block", arch.KVHeadsPerLayer)
+	}
+	if arch.kvClassifiable() {
+		t.Fatal("an artifact declaring a sliding window must not be treated as uniform full attention")
+	}
 	if arch.KVReady() {
-		t.Fatal("KVReady must be false when the artifact has no single KV head count")
+		t.Fatal("KVReady must be false while layer cache lengths are unknown")
+	}
+	if _, ok := ProjectKVBytes(arch, 131072, 2); ok {
+		t.Fatal("a sliding-window artifact must not be projected as full attention")
 	}
 	if arch.ShapeClass() == "dense" {
 		t.Fatal("a per-layer KV layout must not be labeled dense")
@@ -441,8 +453,21 @@ func TestLeadingZeroInAPerLayerArrayDoesNotBecomeTheFullHeadCount(t *testing.T) 
 	if arch.KVHeads == 40 {
 		t.Fatal("a per-layer array must not fall back to the full head count")
 	}
-	if arch.KVReady() {
-		t.Fatalf("KVReady must be false: %+v", arch)
+	// Only four of the 42 layers attend, so the cache is sized from 32 KV
+	// heads, not from 42 layers of 40. The naive figure is 52 times larger.
+	if got, want := arch.totalKVHeads(), 4*8; got != want {
+		t.Fatalf("total KV heads = %d, want %d summed across layers", got, want)
+	}
+	projected, ok := ProjectKVBytes(arch, 8192, 2)
+	if !ok {
+		t.Fatal("a per-layer array with no sliding window is exactly projectable")
+	}
+	if want := int64(32 * (128 + 128) * 2 * 8192); projected != want {
+		t.Fatalf("KV projection = %d, want %d", projected, want)
+	}
+	naive := int64(42 * 40 * (128 + 128) * 2 * 8192)
+	if projected >= naive {
+		t.Fatalf("projection %d did not improve on the full-head-count figure %d", projected, naive)
 	}
 }
 

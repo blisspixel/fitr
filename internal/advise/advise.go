@@ -110,9 +110,50 @@ type Arch struct {
 	FullAttentionInterval int
 	RecurrentLayers       int
 	// PerLayerKVHeads records that head_count_kv arrived as a per-layer array.
-	// The artifact then has no single KV head count, so KVReady stays false and
-	// the conventional weights-plus-KV projection is not offered for it.
+	// The artifact then has no single KV head count, so any projection has to
+	// sum the layers rather than multiply one figure by the layer count.
 	PerLayerKVHeads bool
+	// KVHeadsPerLayer is that array, kept only when it is internally consistent
+	// with block_count. A layer entry of zero is a layer that does not attend
+	// and contributes no cache.
+	KVHeadsPerLayer []int
+	// SlidingWindow and the SWA lengths are read so their presence can be
+	// detected, not so a cache can be sized from them. Which layers slide is
+	// decided by llama.cpp's per-architecture dense_first argument to
+	// set_swa_pattern, which no GGUF key carries: at pattern 1 the same
+	// metadata means every layer is dense or every layer slides, depending
+	// only on that argument. See kvClassifiable.
+	SlidingWindow        int
+	SlidingWindowPattern int
+	KeyLengthSWA         int
+	ValLengthSWA         int
+}
+
+// slidingWindowPresent reports an artifact whose cache length is not uniform
+// across layers.
+func (a Arch) slidingWindowPresent() bool {
+	return a.SlidingWindow > 0 || a.SlidingWindowPattern > 0 ||
+		a.KeyLengthSWA > 0 || a.ValLengthSWA > 0
+}
+
+// kvClassifiable reports whether every layer's cache length is known to be the
+// full context. Sliding-window layers hold a bounded cache instead, and the
+// artifact does not say which layers those are, so a projection would be
+// either an overstatement or an invention.
+func (a Arch) kvClassifiable() bool { return !a.slidingWindowPresent() }
+
+// totalKVHeads is the KV head count summed across layers. It is the one place
+// the per-layer and uniform cases converge, so the projection does not grow a
+// second formula.
+func (a Arch) totalKVHeads() int {
+	if len(a.KVHeadsPerLayer) > 0 {
+		total := 0
+		for _, heads := range a.KVHeadsPerLayer {
+			total += heads
+		}
+		return total
+	}
+	return a.Blocks * a.KVHeads
 }
 
 // KVReady is whether the KV cache can be sized without guessing head dim
@@ -120,7 +161,8 @@ type Arch struct {
 // correct for Llama and wrong for Qwen3 (128, not 64) - that fallback is
 // disclosed, not hidden.
 func (a Arch) KVReady() bool {
-	return a.Blocks > 0 && a.KVHeads > 0 && a.headDimK() > 0 && a.headDimV() > 0
+	return a.Blocks > 0 && a.totalKVHeads() > 0 && a.kvClassifiable() &&
+		a.headDimK() > 0 && a.headDimV() > 0
 }
 
 func (a Arch) headDimK() int {
@@ -147,9 +189,11 @@ func (a Arch) kvBytesPerToken(elem float64) float64 {
 	// Accumulate in float64. The same product in int arithmetic wraps to a
 	// negative on absurd dimensions, and a negative cost per token turns the
 	// fit comparison inside out.
-	embdK := float64(a.KVHeads) * float64(a.headDimK())
-	embdV := float64(a.KVHeads) * float64(a.headDimV())
-	per := float64(a.Blocks) * (embdK + embdV) * elem
+	// Summing heads across layers rather than multiplying one layer's count by
+	// block_count keeps the uniform and per-layer cases on one formula. They
+	// agree exactly when every layer carries the same count.
+	heads := float64(a.totalKVHeads())
+	per := heads * float64(a.headDimK()+a.headDimV()) * elem
 	if math.IsNaN(per) || math.IsInf(per, 0) || per <= 0 {
 		return 0
 	}
@@ -1112,6 +1156,9 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	kvHeads := first(kvs, p+"attention.head_count_kv")
 	a.KVHeads = archDim(kvHeads)
 	a.PerLayerKVHeads = perLayerDimension(kvHeads)
+	if a.PerLayerKVHeads {
+		a.KVHeadsPerLayer = perLayerDimensions(kvHeads, a.Blocks)
+	}
 	if a.KVHeads == 0 && !a.PerLayerKVHeads {
 		// An absent key is pre-GQA metadata, where every head carries its own
 		// KV. A key that is present but per-layer is a different fact: the
@@ -1125,6 +1172,10 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	a.Experts = archDim(first(kvs, p+"expert_count"))
 	a.ExpertUsed = archDim(first(kvs, p+"expert_used_count"))
 	a.FFN = archDim(first(kvs, p+"expert_feed_forward_length", p+"feed_forward_length"))
+	a.SlidingWindow = archDim(first(kvs, p+"attention.sliding_window"))
+	a.SlidingWindowPattern = archDim(first(kvs, p+"attention.sliding_window_pattern"))
+	a.KeyLengthSWA = archDim(first(kvs, p+"attention.key_length_swa"))
+	a.ValLengthSWA = archDim(first(kvs, p+"attention.value_length_swa"))
 	a.FullAttentionInterval = archDim(first(kvs, p+"full_attention_interval"))
 	// Keys.Attention.RECURRENT_LAYERS in llama.cpp gguf-py/gguf/constants.py,
 	// checked against master on 2026-09-11. An earlier spelling of this name
@@ -1221,6 +1272,26 @@ const maxArchDim = 1 << 20
 func perLayerDimension(v any) bool {
 	n, ok := v.([]any)
 	return ok && len(n) > 1
+}
+
+// perLayerDimensions reads a per-layer array as layer dimensions. It returns
+// nil unless the array has exactly one entry per block and every entry is
+// believable, because a length that disagrees with block_count means the two
+// keys describe different models and neither can be trusted to size a cache.
+func perLayerDimensions(v any, blocks int) []int {
+	entries, ok := v.([]any)
+	if !ok || blocks <= 0 || len(entries) != blocks {
+		return nil
+	}
+	dimensions := make([]int, 0, len(entries))
+	for _, entry := range entries {
+		n := asInt64(entry)
+		if n < 0 || n > maxArchDim {
+			return nil
+		}
+		dimensions = append(dimensions, int(n))
+	}
+	return dimensions
 }
 
 func archDim(v any) int {
