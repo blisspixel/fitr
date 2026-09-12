@@ -268,8 +268,7 @@ Ctrl-C is safe (exit 130).
   instead of the ordinary battery. Pass two to four strictly increasing payload
   sizes between 2048 and 65536 bytes. There is no default set: the sizes are
   sealed into the evidence. Mutually exclusive with `--quick`, `--full` and
-  `--checks-only`. Requires Ollama. `--html` is refused because the phase is
-  not yet rendered in HTML. This is not `fitr experiment context`, which maps
+  `--checks-only`. Requires Ollama. This is not `fitr experiment context`, which maps
   capacity and performance across windows and cannot certify a winner. See
   [document context tasks](#document-context-tasks) and
   [context quality](context-quality.md).
@@ -656,9 +655,9 @@ passed; a missing or unavailable cell suppresses that prefix for the whole
 phase.
 
 The result is an ordinary signed run record. Role preferences, auto collection
-and fresh confirmation do not consume it yet. HTML export and the TUI result
-view do not render the phase, so `--html` is refused. JSON includes the
-central analysis projection.
+and fresh confirmation do not consume it yet. The CLI, JSON and the HTML
+export render the phase from the central analysis projection; the TUI result
+view does not yet.
 
 A model served by Ollama's MLX runner is refused before the plan is sealed:
 that runner silently reduces the output reserve the qualification rests on.

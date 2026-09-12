@@ -259,12 +259,6 @@ func validateContextTierFlags(flags *runFlags, reportError func(string, string, 
 			"the document pack grades returned JSON and executes nothing", "remove --allow-unsafe-exec")
 		return exitUsage, false
 	}
-	if *flags.html {
-		reportError("--context-tiers cannot write a scorecard HTML",
-			"the document-task phase is not yet rendered in HTML",
-			"use `fitr view` or `--display json`")
-		return exitUsage, false
-	}
 	flags.parsedContextTiers = tiers
 	return exitOK, true
 }

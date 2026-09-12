@@ -128,3 +128,78 @@ func TestResultOmitsTheSectionWithoutAPhase(t *testing.T) {
 		t.Fatalf("a run with no phase rendered an empty context task section:\n%s", text)
 	}
 }
+
+// The export refused to write at all while it could not carry this phase,
+// because a scorecard omitting the run's only planned work is worse than no
+// scorecard. It must now carry the same facts the terminal prints.
+func TestHTMLCarriesTheContextTaskPhase(t *testing.T) {
+	prefix := 2048
+	report := contextTaskReport(&prefix, analysis.StatusAvailable, []analysis.ContextTaskTier{
+		{PayloadUTF8Bytes: 2048, Outcome: "pass", Planned: 9, Pass: 9},
+		{PayloadUTF8Bytes: 8192, Outcome: "fail", Planned: 9, Pass: 4, Fail: 5},
+	})
+	var out strings.Builder
+	if err := WriteHTML(&out, Artifact{
+		Model: "m", Scorecard: score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}},
+		Meta: Meta{Analysis: report},
+	}); err != nil {
+		t.Fatalf("WriteHTML: %v", err)
+	}
+	html := out.String()
+	for _, want := range []string{
+		"Context tasks",
+		"16384 tokens, reserve 128",
+		"2048B", "8192B",
+		"9/9 cells", "4/9 cells",
+		"verified prefix 2048B",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("export is missing %q", want)
+		}
+	}
+}
+
+// A suppressed prefix must read as a suppression in the export too. Printing
+// nothing there would let a reader take the absence for a zero.
+func TestHTMLExplainsASuppressedPrefix(t *testing.T) {
+	report := contextTaskReport(nil, analysis.StatusAvailable, []analysis.ContextTaskTier{
+		{PayloadUTF8Bytes: 2048, Outcome: "unavailable", Planned: 9, Pass: 8, Unavailable: 1},
+	})
+	var out strings.Builder
+	if err := WriteHTML(&out, Artifact{
+		Model: "m", Scorecard: score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}},
+		Meta: Meta{Analysis: report},
+	}); err != nil {
+		t.Fatalf("WriteHTML: %v", err)
+	}
+	if !strings.Contains(out.String(), "suppressed for the whole phase") {
+		t.Fatal("the export did not explain why there is no verified prefix")
+	}
+	if !strings.Contains(out.String(), "1 unavailable") {
+		t.Fatal("the export dropped the unavailable cell count")
+	}
+}
+
+// Both surfaces take their wording from one derivation, so a phase cannot be
+// described one way in the terminal and another in the export.
+func TestTerminalAndHTMLAgreeOnThePrefixSentence(t *testing.T) {
+	for _, prefix := range []*int{nil, new(int)} {
+		report := contextTaskReport(prefix, analysis.StatusAvailable, []analysis.ContextTaskTier{
+			{PayloadUTF8Bytes: 2048, Outcome: "fail", Planned: 9, Pass: 1, Fail: 8},
+		})
+		note, _ := contextTaskPrefixNote(report.ContextTasks)
+		var out strings.Builder
+		if err := WriteHTML(&out, Artifact{
+			Model: "m", Scorecard: score.Scorecard{Model: "m", Needs: map[string]score.Verdict{}},
+			Meta: Meta{Analysis: report},
+		}); err != nil {
+			t.Fatalf("WriteHTML: %v", err)
+		}
+		if !strings.Contains(out.String(), note) {
+			t.Fatalf("export does not carry the terminal's sentence %q", note)
+		}
+		if !strings.Contains(renderContextTaskResult(t, report), note) {
+			t.Fatalf("terminal does not carry its own sentence %q", note)
+		}
+	}
+}

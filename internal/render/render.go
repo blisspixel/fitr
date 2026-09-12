@@ -699,12 +699,8 @@ func (d *textDisplay) resultContextTasks(w io.Writer, report *analysis.Report, w
 	fmt.Fprintf(w, "\n%s\n", d.pal.wrap(d.pal.Head, "context tasks"))
 	fmt.Fprintf(w, "  window   %d tokens, reserve %d\n", tasks.OperatingWindow, tasks.OutputReserve)
 	for _, tier := range tasks.Tiers {
-		detail := fmt.Sprintf("%d/%d cells", tier.Pass, tier.Planned)
-		if tier.Unavailable > 0 {
-			detail += fmt.Sprintf(", %d unavailable", tier.Unavailable)
-		}
 		fmt.Fprintf(w, "  %-8s %-12s %s\n", formatPayloadBytes(tier.PayloadUTF8Bytes),
-			SingleLine(tier.Outcome), detail)
+			SingleLine(tier.Outcome), contextTierDetail(tier))
 	}
 	d.contextTaskPrefix(w, tasks, width)
 	if tasks.Status == analysis.StatusDescriptiveOnly {
@@ -714,19 +710,41 @@ func (d *textDisplay) resultContextTasks(w io.Writer, report *analysis.Report, w
 }
 
 func (d *textDisplay) contextTaskPrefix(w io.Writer, tasks *analysis.ContextTasks, width int) {
+	note, suppressed := contextTaskPrefixNote(tasks)
+	colour := d.pal.Head
+	if suppressed {
+		colour = d.pal.Warn
+	}
+	d.footer(w, note, width, 2, 4, colour)
+}
+
+// contextTierDetail is one tier's cell counts. Counts are printed as counts:
+// the phase is a finite task set at one window, so a percentage would suggest
+// a rate the evidence does not carry.
+func contextTierDetail(tier analysis.ContextTaskTier) string {
+	detail := fmt.Sprintf("%d/%d cells", tier.Pass, tier.Planned)
+	if tier.Unavailable > 0 {
+		detail += fmt.Sprintf(", %d unavailable", tier.Unavailable)
+	}
+	return detail
+}
+
+// contextTaskPrefixNote is the sentence the analysis supports about the
+// verified prefix, and whether that sentence explains an absence rather than
+// reporting a result. Every surface takes the wording from here so a renderer
+// cannot describe the same phase differently from the one beside it.
+func contextTaskPrefixNote(tasks *analysis.ContextTasks) (note string, suppressed bool) {
 	if tasks.VerifiedPrefixBytes != nil {
-		note := "verified prefix " + formatPayloadBytes(*tasks.VerifiedPrefixBytes)
+		note = "verified prefix " + formatPayloadBytes(*tasks.VerifiedPrefixBytes)
 		if tasks.AtLeastLargestTested {
 			note += "; the largest declared tier passed, so larger payloads are untested"
 		}
-		d.footer(w, note, width, 2, 4, d.pal.Head)
-		return
+		return note, false
 	}
-	reason := "no verified prefix: the smallest declared tier did not pass"
 	if tasks.Unavailable > 0 {
-		reason = "no verified prefix: a cell was unavailable, so the prefix is suppressed for the whole phase"
+		return "no verified prefix: a cell was unavailable, so the prefix is suppressed for the whole phase", true
 	}
-	d.footer(w, reason, width, 2, 4, d.pal.Warn)
+	return "no verified prefix: the smallest declared tier did not pass", true
 }
 
 // formatPayloadBytes keeps the declared byte size exact. Payload tiers are

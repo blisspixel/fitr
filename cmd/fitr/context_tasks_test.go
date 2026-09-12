@@ -50,8 +50,6 @@ func TestContextTiersAreRejectedWithoutRunningAnything(t *testing.T) {
 			"model", "--context-tiers", "2048,8192", "--backend", "llama-server"}},
 		{"executable diagnostics", []string{
 			"model", "--context-tiers", "2048,8192", "--allow-unsafe-exec"}},
-		{"html scorecard", []string{
-			"model", "--context-tiers", "2048,8192", "--html"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, code, ok := parseRunCommand(tc.args, nil)
@@ -59,6 +57,19 @@ func TestContextTiersAreRejectedWithoutRunningAnything(t *testing.T) {
 				t.Fatalf("parseRunCommand = ok %v, code %d, want a usage refusal", ok, code)
 			}
 		})
+	}
+}
+
+// The export was refused while the phase was the run's only planned work and
+// HTML did not render it, because a scorecard omitting that work would have
+// been worse than none. HTML now carries the phase, so the refusal is gone.
+func TestContextTiersAcceptTheHTMLScorecard(t *testing.T) {
+	command, code, ok := parseRunCommand([]string{"model", "--context-tiers", "2048,8192", "--html"}, nil)
+	if !ok || code != exitOK {
+		t.Fatalf("parseRunCommand = ok %v, code %d, want the export accepted", ok, code)
+	}
+	if command.level != levelContext {
+		t.Fatalf("level = %q, want the context level", command.level)
 	}
 }
 

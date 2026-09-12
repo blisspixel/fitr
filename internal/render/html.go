@@ -130,6 +130,25 @@ type htmlNeed struct {
 
 type htmlKV struct{ K, V string }
 
+// htmlContextTasks mirrors what the terminal prints for a document-task phase.
+// Counts stay counts: the phase is a finite task set at one operating window,
+// so a percentage would suggest a rate the evidence does not carry. Prefix is
+// the sentence the analysis supports, including the sentence explaining why
+// there is no prefix, so the export never shows a suppressed prefix as zero.
+type htmlContextTasks struct {
+	Window           string
+	Tiers            []htmlContextTier
+	Prefix           string
+	PrefixSuppressed bool
+	Descriptive      bool
+}
+
+type htmlContextTier struct {
+	Payload string
+	Outcome string
+	Detail  string
+}
+
 type htmlData struct {
 	CSS                 template.CSS
 	Title               string
@@ -163,6 +182,7 @@ type htmlData struct {
 	LoadedCacheHitTTFT  string
 	Resident            string
 	CapacityFacts       []htmlKV
+	ContextTasks        *htmlContextTasks
 	Accelerator         string
 	NonAccelerator      string
 	PlacementNote       string
@@ -287,6 +307,16 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 {{if .PlacementNote}}<p class="sub">{{.PlacementNote}}</p>{{end}}
 {{end}}
 
+{{with .ContextTasks}}
+<h2>Context tasks</h2>
+<table>
+<tr><th class="k">window</th><td>{{.Window}}</td></tr>
+{{range .Tiers}}<tr><th class="k">{{.Payload}}</th><td>{{.Outcome}} - {{.Detail}}</td></tr>{{end}}
+</table>
+{{if .PrefixSuppressed}}<p class="warn">{{.Prefix}}</p>{{else}}<p class="sub">{{.Prefix}}</p>{{end}}
+{{if .Descriptive}}<p class="warn">Descriptive only: this record cannot claim a verified prefix for the current artifact.</p>{{end}}
+{{end}}
+
 {{if .RepeatsWarn}}
 <p class="warn">Single-sample run - one trial cannot establish a stable rate; re-run with -k 3 before comparing a close result.</p>
 {{end}}
@@ -353,6 +383,7 @@ func htmlDataFrom(a Artifact) htmlData {
 			}
 		}
 		d.CapacityFacts = htmlCapacityFacts(a.Meta.Analysis.Capacity)
+		d.ContextTasks = htmlContextTasksFrom(a.Meta.Analysis.ContextTasks)
 	}
 	d.Decode, d.Prefill, d.TTFT = htmlPerformance(a.Meta, g)
 	d.Resident = htmlCapacity(a.Meta)
@@ -366,6 +397,30 @@ func htmlDataFrom(a Artifact) htmlData {
 		}
 	}
 	return d
+}
+
+// htmlContextTasksFrom projects the document-task phase for export. The
+// wording comes from the same helpers the terminal uses, so the two surfaces
+// cannot describe one phase differently. Nothing here is recomputed: the
+// counts are the ones the record re-derived from its own observations.
+func htmlContextTasksFrom(tasks *analysis.ContextTasks) *htmlContextTasks {
+	if tasks == nil {
+		return nil
+	}
+	note, suppressed := contextTaskPrefixNote(tasks)
+	out := &htmlContextTasks{
+		Window: fmt.Sprintf("%d tokens, reserve %d", tasks.OperatingWindow, tasks.OutputReserve),
+		Prefix: note, PrefixSuppressed: suppressed,
+		Descriptive: tasks.Status == analysis.StatusDescriptiveOnly,
+	}
+	for _, tier := range tasks.Tiers {
+		out.Tiers = append(out.Tiers, htmlContextTier{
+			Payload: formatPayloadBytes(tier.PayloadUTF8Bytes),
+			Outcome: SingleLine(tier.Outcome),
+			Detail:  contextTierDetail(tier),
+		})
+	}
+	return out
 }
 
 func htmlCapacityFacts(capacity analysis.Capacity) []htmlKV {
