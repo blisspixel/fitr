@@ -1027,3 +1027,62 @@ func TestSharedNVIDIAResidentNeedsReportedRequestedContext(t *testing.T) {
 		t.Fatalf("contextless shared resident = %+v, want unproven", r)
 	}
 }
+
+// A refusal has to name the cause the reader can act on. Every case here was
+// previously reported as missing metadata, which sent the reader looking for a
+// better file when the file was already complete.
+func TestUnsizableArchitectureNamesItsActualCause(t *testing.T) {
+	perLayer := make([]any, 30)
+	for i := range perLayer {
+		perLayer[i] = uint64(8)
+	}
+	for _, test := range []struct {
+		name string
+		kvs  map[string]any
+		want string
+	}{
+		{
+			name: "sliding window",
+			kvs: map[string]any{
+				"general.architecture": "gemma4", "gemma4.block_count": uint64(30),
+				"gemma4.attention.head_count": uint64(16), "gemma4.attention.head_count_kv": perLayer,
+				"gemma4.attention.key_length": uint64(512), "gemma4.attention.value_length": uint64(512),
+				"gemma4.attention.sliding_window": uint64(1024),
+			},
+			want: "sliding-window",
+		},
+		{
+			name: "hybrid without its recurrent shape",
+			kvs: map[string]any{
+				"general.architecture": "qwen35", "qwen35.block_count": uint64(64),
+				"qwen35.attention.head_count": uint64(24), "qwen35.attention.head_count_kv": uint64(4),
+				"qwen35.attention.key_length": uint64(256), "qwen35.attention.value_length": uint64(256),
+				"qwen35.full_attention_interval": uint64(4),
+			},
+			want: "recurrent state shape",
+		},
+		{
+			name: "genuinely absent metadata",
+			kvs:  map[string]any{"general.architecture": "llama"},
+			want: "missing or not believable",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			arch := ArchFromKVs(test.kvs)
+			if arch.KVReady() {
+				t.Fatalf("this case is only meaningful when the cache is unsizable: %+v", arch)
+			}
+			note, hint := arch.UnsizableReason()
+			if !strings.Contains(note, test.want) {
+				t.Fatalf("note = %q, want it to name %q", note, test.want)
+			}
+			if hint == "" {
+				t.Fatal("a refusal must carry a next action")
+			}
+			// The hint must not send the reader back for a file they supplied.
+			if strings.Contains(note, "sliding-window") && strings.Contains(hint, "pass a GGUF") {
+				t.Fatalf("hint %q asks for a better file where the file is already complete", hint)
+			}
+		})
+	}
+}

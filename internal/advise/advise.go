@@ -181,6 +181,40 @@ func (a Arch) recurrentStateBytes() (float64, bool) {
 	return total, true
 }
 
+// UnsizableReason explains why this architecture cannot be sized, and what
+// would settle it. It is only meaningful when KVReady is false.
+//
+// "Metadata is missing" was the only explanation for every cause, which was
+// wrong for the artifacts that carry rich metadata and are refused for what
+// that metadata says rather than for what it lacks. A reader given the wrong
+// reason goes looking for the wrong fix.
+func (a Arch) UnsizableReason() (note, hint string) {
+	switch {
+	case a.Blocks <= 0 || a.headDimK() <= 0 || a.headDimV() <= 0:
+		return "architecture metadata is missing or not believable",
+			"pass a GGUF whose layer count, KV heads and head dimensions are readable"
+	case a.slidingWindowPresent():
+		// The cache length is not uniform across layers and the artifact does
+		// not say which layers slide. That is a property of the format, not a
+		// gap in this file, so there is nothing to supply.
+		return "this artifact declares a sliding-window attention layout, and which layers " +
+				"use the bounded window is decided by the runtime rather than carried by the file",
+			"observe the real allocation instead: fitr advise <model> --load"
+	case a.Hybrid && !a.intervalHybridProjectable():
+		return "this hybrid architecture does not carry the recurrent state shape its " +
+				"non-attention layers allocate",
+			"observe the real allocation instead: fitr advise <model> --load"
+	case a.PerLayerKVHeads && len(a.KVHeadsPerLayer) == 0:
+		return "the per-layer KV head counts do not agree with the declared layer count",
+			"pass a GGUF whose head_count_kv array has one entry per block"
+	case a.totalKVHeads() <= 0:
+		return "the artifact declares no KV heads to size a cache from",
+			"pass a GGUF whose attention.head_count_kv is readable"
+	}
+	return "architecture metadata is missing or not believable",
+		"pass a GGUF whose layer, KV head and head-dimension metadata is readable"
+}
+
 // intervalHybridProjectable reports a hybrid whose complete cache the artifact
 // determines: the layers that scale with context, and the fixed recurrent
 // state held by the rest.
@@ -911,11 +945,12 @@ func prepareWeightsAndKV(in Input, haveB float64, r Report) (weightsAndKVEstimat
 	}
 
 	if !in.Arch.KVReady() {
+		note, hint := in.Arch.UnsizableReason()
 		r.Tier = Skip
 		r.Why = fmt.Sprintf("weights fit (%s GB of %s GB) but the KV cache was not sized",
 			trim1(r.WeightsGB), trim1(r.HaveGB))
-		r.Hint = "pass a .gguf path so architecture metadata (layers, KV heads, head dim) is readable"
-		r.Gaps = append(r.Gaps, "no GGUF architecture metadata")
+		r.Hint = hint
+		r.Gaps = append(r.Gaps, note)
 		return weightsAndKVEstimate{report: r}, false
 	}
 	if in.Arch.KeyLength == 0 {
@@ -943,10 +978,11 @@ func evaluateKVContext(in Input, haveB float64, prepared weightsAndKVEstimate) R
 	// path divided and compared without checking. An unsizable cache is a
 	// SKIP, never a fit verdict computed from a number that cannot be real.
 	if perTok <= 0 {
+		note, hint := in.Arch.UnsizableReason()
 		r.Tier = Skip
 		r.Why = "the KV cache could not be sized from this architecture"
-		r.Hint = "pass a .gguf path with readable layer, KV head, and head-dim metadata"
-		r.Gaps = append(r.Gaps, "architecture metadata is missing or not believable")
+		r.Hint = hint
+		r.Gaps = append(r.Gaps, note)
 		return r
 	}
 	// A hybrid's recurrent state is part of the cache and does not scale with

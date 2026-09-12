@@ -49,6 +49,31 @@ var splitGGUFName = regexp.MustCompile(`(?i)^(.*)-([0-9]{5})-of-([0-9]{5})(\.ggu
 
 // OpenGGUF reads only the metadata header of a GGUF file. The tensor payload
 // is not loaded; size is the on-disk length (the weights).
+// HasGGUFMagic reports whether a path names a readable regular file that
+// begins with the GGUF magic.
+//
+// Callers use it to decide whether an argument is a local artifact rather than
+// a model name, and the file's own first bytes are the only honest way to ask.
+// A filename is not evidence: Ollama stores every model as a content-addressed
+// blob with no extension at all, so a suffix test rejects the most common
+// local GGUF on a machine that has any.
+func HasGGUFMagic(path string) bool {
+	st, err := os.Stat(path)
+	if err != nil || st.IsDir() || !st.Mode().IsRegular() {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var magic [len(ggufMagic)]byte
+	if _, err := io.ReadFull(f, magic[:]); err != nil {
+		return false
+	}
+	return string(magic[:]) == ggufMagic
+}
+
 func OpenGGUF(path string) (kvs map[string]any, size int64, err error) {
 	st, err := os.Stat(path)
 	if err != nil {

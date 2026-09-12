@@ -465,12 +465,22 @@ func isQuantTag(s string) bool {
 
 func isHFRef(model string) bool { return strings.HasPrefix(model, "hf.co/") }
 
+// isLocalGGUF reports whether an argument names a local artifact rather than a
+// model the runtime serves. The extension is a fast path, not the test: an
+// Ollama blob is content-addressed with no extension, so a suffix check
+// rejected the most common local GGUF on the machine and sent the caller to a
+// "not installed, pull it first" diagnostic naming a file it had just read.
 func isLocalGGUF(p string) bool {
-	if !strings.HasSuffix(strings.ToLower(p), ".gguf") {
+	if p == "" || strings.ContainsAny(p, ":") && !strings.Contains(p, string(os.PathSeparator)) &&
+		!strings.Contains(p, "/") {
+		// A bare model reference such as qwen3:8b is never a path.
 		return false
 	}
-	st, err := os.Stat(p)
-	return err == nil && !st.IsDir()
+	if strings.HasSuffix(strings.ToLower(p), ".gguf") {
+		st, err := os.Stat(p)
+		return err == nil && !st.IsDir()
+	}
+	return advise.HasGGUFMagic(p)
 }
 
 // ---------------------------------------------------------------- advise
