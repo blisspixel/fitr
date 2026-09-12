@@ -21,7 +21,6 @@ package score
 import (
 	"bytes"
 	"compress/gzip"
-	"crypto/md5"
 	"fmt"
 	"regexp"
 	"slices"
@@ -286,9 +285,13 @@ func dupRatio(items []string) float64 {
 	if len(items) == 0 {
 		return 0
 	}
-	counts := map[[16]byte]int{}
+	// Key on the normalized text itself rather than a digest of it. Two
+	// different paragraphs that collided would be counted as duplicates, and
+	// this ratio is a degeneracy signal that reaches a verdict, so an exact
+	// key is worth more here than a shorter one.
+	counts := map[string]int{}
 	for _, it := range items {
-		counts[md5.Sum([]byte(strings.ToLower(spaceRe.ReplaceAllString(it, " "))))]++
+		counts[strings.ToLower(spaceRe.ReplaceAllString(it, " "))]++
 	}
 	dups := 0
 	for _, c := range counts {

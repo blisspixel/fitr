@@ -99,6 +99,11 @@ func confirmationAllocationFrom(result *record.Record) (ConfirmationCapacity, er
 		if allocation.AcceleratorBytes != 0 {
 			return ConfirmationCapacity{}, errors.New("host-only placement has accelerator allocation")
 		}
+	case capacity.DomainUnified:
+		// One pool, so the resident bytes already are the domain bytes and
+		// there is no separate host remainder to derive. The defaults above
+		// are correct here; this case exists so that is a stated decision
+		// rather than something a reader has to infer from an absence.
 	}
 	return value, value.validateAttribution()
 }

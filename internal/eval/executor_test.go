@@ -178,7 +178,7 @@ func TestVerifierRejectsInterpreterChangedAfterPreflight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Write([]byte("changed")); err != nil {
+	if _, err := f.WriteString("changed"); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.Close(); err != nil {

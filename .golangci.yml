@@ -13,6 +13,29 @@
 #   errname - Failure and FileWarning are domain nouns used across the evidence
 #     contract; renaming them to XxxError would churn the API to satisfy a
 #     naming convention.
+#   nilnil - the optional-budget readers return (nil, nil) for "the operator did
+#     not supply this", which is the answer the caller wants. A sentinel error
+#     would make every caller handle a condition that is not a failure, and
+#     absent-is-legitimate is a rule this project holds everywhere else.
+#   canonicalheader - the two findings read headers through http.Header.Get,
+#     which canonicalizes its argument, so both spellings already resolve to the
+#     same key. It is a naming preference here, not a correctness gate.
+#   dupword - fires on usage text and a test token where the repetition is the
+#     content, not a typo.
+#   exhaustive - most switches here accumulate rather than decide: an event type
+#     that adds no duration, or a requirement state that does not change the
+#     aggregate, contributes nothing by construction. Enabling it would add
+#     empty cases that state the obvious. Where a fall-through decides values
+#     rather than skipping them, the case is written out deliberately; see the
+#     unified-memory branch in internal/role/confirmation_capacity.go.
+#   gosec - evaluated against the whole tree rather than assumed. Its findings
+#     here are the 0700 modes this project sets on purpose, compared against a
+#     file threshold; the device and runtime probes it is supposed to run; the
+#     Windows syscall bindings that need unsafe; deterministic seeding, which is
+#     a reproducibility requirement rather than a weak random; and operator-named
+#     paths reaching the file API, which is the feature. The one real finding, a
+#     digest used as a map key, was fixed in the code instead. A gate that needs
+#     five standing exclusions to pass is not a gate.
 version: "2"
 
 run:
@@ -37,14 +60,22 @@ linters:
     - bodyclose # unclosed HTTP bodies in the backend clients
     - durationcheck # duration multiplied by a duration
     - errorlint # %v where %w is needed; == where errors.Is is needed
+    - fatcontext # a context created or nested inside a loop
+    - forcetypeassert # an unchecked assertion panics instead of reporting
+    - gocheckcompilerdirectives # a //go: directive that the compiler ignores
     - makezero # append to a non-zero-length slice
     - nilerr # returns nil after checking err != nil
+    - nilnesserr # returns a nil error where a non-nil one was checked
     - noctx # HTTP request built without a context
     - reassign # package-level variable reassigned
 
     # Idiom.
+    - exptostd # a golang.org/x helper the standard library now provides
     - gocritic
+    - goprintffuncname # a printf-style helper whose name hides that it is one
     - intrange
+    - iotamixing # explicit values mixed into an iota block
+    - mirror # a []byte conversion where a string-native call exists
     - nakedret
     - perfsprint
     - predeclared # shadowing len, cap, new
@@ -62,6 +93,7 @@ linters:
     - gocyclo # keep every control-flow unit within the project threshold
     - funlen # keep functions and tests small enough to audit locally
     - gocognit # bound cognitive complexity, including test harnesses
+    - misspell # a misspelling in a diagnostic is a diagnostic nobody can grep
     - nestif # keep nested decision paths explicit and reviewable
     - nolintlint
 
@@ -111,6 +143,8 @@ linters:
       - std-error-handling
       - common-false-positives
     rules:
-      # Tests legitimately duplicate setup and ignore errors on teardown.
+      # Tests legitimately duplicate setup and ignore errors on teardown, and a
+      # failed assertion in a test is a reported failure rather than a silent
+      # wrong value, which is the case forcetypeassert exists to prevent.
       - path: '_test\.go'
-        linters: [errcheck, unparam, gocritic, noctx]
+        linters: [errcheck, unparam, gocritic, noctx, forcetypeassert]
