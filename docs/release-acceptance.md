@@ -331,7 +331,7 @@ are published here.
 | Release binary smoke | The built Linux binary must pass global and subcommand help, then reject a malformed command with exit 2 and a useful hint. |
 | Installer smoke | Windows, macOS, and Linux runners install locally served candidate artifacts, bind the native asset to its exact checksum entry, and validate its version command. |
 | Updater | Unit and command-contract tests cover the six platform assets, canonical stable tags, duplicate or missing assets and checksums, bounded downloads and version output, hash mismatch cleanup, staged version identity, pre-replacement digest guards, JSON disclosure, and unsupported targets. A Windows subprocess test proves deferred replacement after the updating process exits. Public replacement is verified and recorded after release publication. |
-| Release quality | Formatting, vet, unit tests, race detection, cross-compilation, reproducible Linux build comparison, static ELF verification, size limits, vulnerability scanning, fuzz smoke tests, and installer syntax checks must all pass. |
+| Release quality | Formatting, vet, unit tests, race detection, cross-compilation, deterministic Linux rebuild comparison, static ELF verification, size limits, vulnerability scanning, fuzz smoke tests, and installer syntax checks must all pass. |
 
 ### 0.9.10 release receipt
 

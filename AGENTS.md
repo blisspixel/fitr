@@ -93,7 +93,7 @@ treating it as a regression.
 `.github/workflows/ci.yml` is the authority on the full gate set and on every
 tool version. It additionally runs the race detector, ten fuzz smoke targets, a
 1600-line cap on non-test `.go` files, a measured binary size cap in `dist`, a
-reproducible-build comparison, installer smokes on three operating systems, and
+deterministic-rebuild comparison, installer smokes on three operating systems, and
 `govulncheck`. Take Go and linter versions from `go.mod` and that workflow, not
 from memory: `go.mod` states the minimum supported language version, and CI
 builds on the current release while re-running the suite on the minimum.

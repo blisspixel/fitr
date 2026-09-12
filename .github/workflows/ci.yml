@@ -83,7 +83,12 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: '1.27.0' }
       - run: make dist
-      - name: reproducible Linux binary
+      # Deterministic, not reproducible. This rebuilds the same target in the
+      # same job, on the same runner, from the same checkout and toolchain, so
+      # it catches a build that varies run to run. It does not establish that an
+      # independent party can recreate these bytes: -buildvcs is left on, so a
+      # build from a source tarball with no .git carries different stamping.
+      - name: deterministic Linux rebuild
         shell: bash
         run: |
           CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${RUNNER_TEMP}/fitr-linux-amd64" ./cmd/fitr
