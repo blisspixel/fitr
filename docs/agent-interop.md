@@ -176,17 +176,18 @@ feature; existing Go protocol fixtures cover those narrower server contracts.
 Run from the repository using Go and CPython 3.14.7. On Linux x64/macOS arm64:
 
 ```bash
-python3.14 -m venv .tmp/mcp-sdk-venv
-.tmp/mcp-sdk-venv/bin/python -I -m pip install --require-hashes -r scripts/mcp-sdk-requirements.txt
-.tmp/mcp-sdk-venv/bin/python -I -m pip check
-go build -o .tmp/fitr-sdk ./cmd/fitr
-.tmp/mcp-sdk-venv/bin/python -I -B -m unittest discover -s scripts -p test_mcp_sdk_acceptance.py
-.tmp/mcp-sdk-venv/bin/python -I scripts/mcp_sdk_acceptance.py .tmp/fitr-sdk --out .tmp/mcp-sdk-receipt.json
+python3.14 -m venv .agents/mcp-sdk-venv
+.agents/mcp-sdk-venv/bin/python -I -m pip install --require-hashes -r scripts/mcp-sdk-requirements.txt
+.agents/mcp-sdk-venv/bin/python -I -m pip check
+go build -o .agents/fitr-sdk ./cmd/fitr
+.agents/mcp-sdk-venv/bin/python -I -B -m unittest discover -s scripts -p test_mcp_sdk_acceptance.py
+.agents/mcp-sdk-venv/bin/python -I scripts/mcp_sdk_acceptance.py .agents/fitr-sdk --out .agents/mcp-sdk-receipt.json
 ```
 
-On Windows, use `python -m venv .tmp/mcp-sdk-venv`, the interpreter
-`.tmp/mcp-sdk-venv/Scripts/python.exe`, and binary `.tmp/fitr-sdk.exe` with the
-same arguments. Keep `-I`; the test requires an isolated venv interpreter.
+On Windows, use `python -m venv .agents/mcp-sdk-venv`, the interpreter
+`.agents/mcp-sdk-venv/Scripts/python.exe`, and binary `.agents/fitr-sdk.exe`
+with the same arguments. Keep `-I`; the test requires an isolated venv
+interpreter.
 Use a new receipt path on each run. Dependency installation needs PyPI; the
 acceptance cases use local stdio only. Update the lock deliberately from
 official [PyPI release metadata](https://pypi.org/pypi/mcp/2.0.0/json), retain

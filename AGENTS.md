@@ -19,6 +19,10 @@ These are enforced in code and tests. Do not weaken them for convenience:
 
 - Unavailable, cancelled, unknown-accounting, contaminated and refused are
   distinct dispositions. None of them is a model-quality zero.
+- A value that is present but not the shape its field expects is unmeasured,
+  not coerced into one. Reading the first entry of a per-layer `head_count_kv`
+  array as the model's scalar passed every bounds check, passed `KVReady`, and
+  put a fit verdict tens of times off on current artifacts.
 - Evidence compares only within one device fingerprint, runtime, artifact
   digest, effective context and placement. Do not add a cross-configuration
   ranking or a global score.
@@ -51,6 +55,7 @@ itself.
 | Presentation | `internal/render` (CLI, HTML), `internal/top` (TUI) | Renderers consume analysis. A renderer never recomputes a verdict, and every surface composes to the resolved width. |
 | Battery, tasks, graders, execution adapters | `internal/eval` | Task definitions are canonical in `spec/` with an embedded copy under `internal/eval/tasks`. `make spec-sync` repairs drift; `TestEmbeddedSpecMatchesCanonical` fails the build without it. |
 | Scoring policy | `internal/score` | Versioned. A sealed older scorecard must still validate exactly under its original policy. |
+| Fit arithmetic and GGUF metadata | `internal/advise` | The fit verdict the README leads with, plus the largest untrusted binary surface fitr has. KV and parameter arithmetic is overflow-checked and an implausible dimension is unmeasured, never a smaller number. `FuzzReadMetadata` is a CI gate over both the whole-file and bounded-prefix entry points. |
 | Device identity | `internal/device` | Any field added to the fingerprint changes what compares to what. Fingerprint errors corrupt comparison silently, which is the worst failure class here. |
 | Untrusted JSON | `internal/strictjson` | Duplicate-key rejection runs before any typed decode. |
 | Files and exclusion | `internal/atomicfile`, `internal/boundedio`, `internal/lock` | One way to write, one way to bound a read, one way to lock. |
@@ -71,7 +76,7 @@ go run ./cmd/fitr screenshots docs/assets && git diff --exit-code -- docs/assets
 ```
 
 Formatting: check the tracked tree only. `gofmt -l .` also walks the gitignored
-`.tmp/`, which holds stale copies of the whole repository.
+scratch directory, which holds stale copies of the whole repository.
 
 ```bash
 git ls-files '*.go' | xargs gofmt -l
@@ -103,6 +108,12 @@ FITR_LIVE=<model> go test ./cmd/fitr -run TestLive
 Native rows are recorded in `docs/release-acceptance.md`. Do not describe a
 measurement path as working on unit tests alone.
 
+A regression test is not finished until it has been seen to fail. Reintroduce
+the defect, watch the new test catch it, then restore the fix. A test written
+after a fix tends to pass for the wrong reason, and one that never failed is
+evidence of nothing. Where several defects share a symptom, revert them one at
+a time so each test is known to catch its own.
+
 ## Do not weaken a gate to pass
 
 `.golangci.yml` is a hard gate with no path exclusions for production code, and
@@ -113,6 +124,20 @@ assertion, an excluded file or a test edited to accept wrong behavior is not a
 fix. If a gate is genuinely wrong, change it deliberately in its own commit with
 the reason recorded: the comments in `.golangci.yml`, `Makefile` and the CI
 size gate are the standard for how that is written down.
+
+## Constants you do not own
+
+fitr decodes GGUF, speaks MCP, and reads Ollama and llama.cpp response fields.
+Those names belong to someone else's release. A test that repeats fitr's
+spelling of one proves only that the code and the test agree: fitr read
+`attention.recurrent_layer_count` for months, llama.cpp writes
+`attention.recurrent_layers`, and the branch behind it could never fire while
+the suite stayed green.
+
+Check a borrowed name against the upstream source that defines it, and say in
+a comment which version you checked. Prefer a fixture taken from a real
+published artifact or a recorded wire exchange over a hand-built map, because
+only the former can disagree with you.
 
 ## Adding a measurement
 
@@ -141,9 +166,18 @@ model; `docs/release-acceptance.md` owns acceptance receipts; one `docs/<topic>.
 owns each subsystem. Do not add a second document for a topic that already has
 an owner, and do not let the roadmap make planned behavior read as shipped.
 
-`.tmp/` is gitignored scratch: analysis, archived worktrees, generated fixtures.
-Never commit it, never put credentials in it, and remember it contains whole
-copies of the tree, so repository-wide greps will find stale matches there.
+A finding that outlives the session belongs in the issue tracker, not in a
+summary. If you find a defect while doing something else, file it with enough
+detail to act on months later, then carry on with the task you were given.
+
+`.agents/` is gitignored scratch: analysis, archived worktrees, generated
+fixtures, acceptance venvs, indexes and receipts. Never commit it, never put
+credentials in it, and remember it contains whole copies of the tree, so
+repository-wide greps will find stale matches there. Anything worth keeping
+gets promoted into a tracked document, an issue, a test or code; nothing is
+expected to survive there. `.tmp/` was the previous name and stays ignored, so
+an older working tree keeps its contents rather than presenting them as new
+untracked files.
 
 ## Writing
 

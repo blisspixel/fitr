@@ -6,6 +6,7 @@ evalkit.exe
 fitr.exe
 *.test
 coverage*.out
+.agents/
 .tmp/
 __pycache__/
 *.py[cod]

@@ -1126,6 +1126,9 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	a.ExpertUsed = archDim(first(kvs, p+"expert_used_count"))
 	a.FFN = archDim(first(kvs, p+"expert_feed_forward_length", p+"feed_forward_length"))
 	a.FullAttentionInterval = archDim(first(kvs, p+"full_attention_interval"))
+	// Keys.Attention.RECURRENT_LAYERS in llama.cpp gguf-py/gguf/constants.py,
+	// checked against master on 2026-09-11. An earlier spelling of this name
+	// was emitted by nothing, so the hybrid branch behind it never fired.
 	a.RecurrentLayers = archDim(first(kvs, p+"attention.recurrent_layers", "attention.recurrent_layers"))
 	a.Hybrid = a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 || inherentHybridArchitecture(arch)
 	return a
