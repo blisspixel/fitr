@@ -169,3 +169,41 @@ func TestObserveOllamaConfigDoesNotTreatProcessEnvAsTheDaemon(t *testing.T) {
 		t.Fatalf("server-log config = %+v", cfg)
 	}
 }
+
+// A readable log is the daemon's own account of itself. Keys it does not
+// mention are not reported, and this process's shell is not a substitute: a
+// Homebrew install pins flash attention and the KV cache dtype in its service
+// definition, where no shell fitr can read has ever seen them. Publishing a
+// shell value under server-log provenance put a setting the daemon never had
+// into the comparability key, which silently pools incomparable evidence.
+func TestServerLogConfigNeverFallsBackToThisProcessEnvironment(t *testing.T) {
+	root := t.TempDir()
+	var path string
+	if runtime.GOOS == "windows" {
+		t.Setenv("LOCALAPPDATA", root)
+		path = filepath.Join(root, "Ollama", "server.log")
+	} else {
+		t.Setenv("HOME", root)
+		path = filepath.Join(root, ".ollama", "logs", "server.log")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The log reports one key and is silent about the other.
+	log := "env=[OLLAMA_CONTEXT_LENGTH:8192]\n"
+	if err := os.WriteFile(path, []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OLLAMA_KV_CACHE_TYPE", "q8_0")
+
+	cfg, source := observeOllamaConfig()
+	if source != ConfigSourceServerLog {
+		t.Fatalf("source = %q, want server-log for a readable log", source)
+	}
+	if cfg["OLLAMA_CONTEXT_LENGTH"] != "8192" {
+		t.Fatalf("the log's own value was lost: %+v", cfg)
+	}
+	if cfg["OLLAMA_KV_CACHE_TYPE"] != "" {
+		t.Fatalf("a shell value was published as the daemon's: %q", cfg["OLLAMA_KV_CACHE_TYPE"])
+	}
+}

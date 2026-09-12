@@ -733,8 +733,14 @@ func observeOllamaConfig() (map[string]string, string) {
 		}
 		return cfg, ConfigSourceUnobserved
 	}
+	// Only what the log itself reports. Seeding from this process's
+	// environment and then labelling the whole map server-log meant any key
+	// the log omitted was published as the daemon's setting while carrying the
+	// operator's shell value. Those differ in practice: a Homebrew install
+	// pins flash attention and the KV cache dtype in its service definition,
+	// where no shell fitr can read has ever seen them.
 	for _, k := range configKeys {
-		cfg[k] = os.Getenv(k)
+		cfg[k] = ""
 	}
 	mergeServerLogConfig(cfg)
 	return cfg, ConfigSourceServerLog

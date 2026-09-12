@@ -1059,11 +1059,25 @@ criteria in [discovery](docs/discovery.md); the inbox alone is not auto mode.
       breakage. It must never call one model globally smarter. Complete paired,
       family-aware evidence may support only a scoped directional claim about
       the declared need and families it actually separates.
-- [ ] **Spend background time on statistical power.** Wall-clock is the one
-      resource a scheduled job has and an interactive user does not. Repeats
-      that nobody would wait for are affordable overnight, and trials are what
-      convert an unrankable pair into a real answer. Depth, not breadth, is
-      what the background buys.
+- [ ] **Spend background time on statistical power, in pre-registered batches.**
+      Wall-clock is the one resource a scheduled job has and an interactive user
+      does not. Repeats nobody would wait for are affordable overnight, and
+      trials are what convert an unrankable pair into a real answer. Depth, not
+      breadth, is what the background buys.
+      The frozen sequential design in [statistics](docs/statistics.md) does not
+      cover this and must not be stretched to: it is a one-sample gate-crossing
+      test, and that document states that paired compare and calibration remain
+      fixed-plan only. A scheduler that kept collecting until a pair separated
+      would be optionally stopping on paired evidence, which the fixed-sample
+      interval and the family sign test are not valid under.
+      The scheduler therefore chooses the batch size before the batch runs, from
+      the previous result and the budget, never from the batch in progress. The
+      stopping rule stays data-independent, so the existing fixed-sample methods
+      apply unchanged and no new statistical contract is needed. Preflight can
+      also refuse a batch outright: the minimum achievable paired p-value is
+      bounded by the discordant-pair count, so a budget too small to separate
+      the pair is a refusal before any inference rather than an inconclusive
+      result after it.
 - [ ] **Never contaminate, never intrude.** Scored inference is single-flight,
       so a background run must not start while the GPU is busy. The courtesy
       constraint and the evidence-validity constraint are the same constraint.
