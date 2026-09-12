@@ -82,7 +82,7 @@ evidence paths.
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | active | Generalized validated-work receipts and explicit evidence classes | 0.10.4 seals the fixed contract and reconstructs timing with typed proof classes. Multi-attempt, approval, escalation and external protocol receipts remain work before arbitrary workflows. |
 | 5 | active | Source ideas into a personal role library and bounded fitting | Source receipts, private ideas and local hashes retain separate claims. The first connected auto cycle now collects and confirms an explicit installed shortlist under owned-runtime and resource checks. Search-driven shortlisting and scheduled refinement remain work. See [auto mode](docs/auto-mode.md), [artifact binding](docs/artifact-binding.md) and [roles](docs/roles.md). |
-| 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. |
+| 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. Build serving first: it is the instrument the other two report through. See [experiment families](#model-set-soak-and-serving-experiments). |
 
 Automatic selection must pass programmatic resource preflight and a separate
 role quality floor. Speed cannot compensate for failed task outcomes. A
@@ -1116,24 +1116,104 @@ at server start, `OLLAMA_KV_CACHE_TYPE` and `OLLAMA_FLASH_ATTENTION`, and
 declining to orchestrate a restart turns a five-second operation into a manual
 chore. On the machine fitr is built for, the operator owns the server.
 
-The distinction is consent and blast radius, not purity:
+The distinction is consent and blast radius, not purity. Four facts about how
+Ollama is actually installed reorder the work below, and each is a constraint
+rather than a preference:
 
-- [ ] **`fitr tune` restarts the server, once the user says so.** Set the
-      knob, restart, measure, restore the prior value. Confirmed, never
-      silent, never a default.
-- [ ] **Say what a restart costs before asking.** In-flight requests from
-      other clients die, and a server that does not come back is fitr breaking
-      the machine it was asked to measure. That is a reason to ask once, not a
-      reason to refuse forever.
-- [ ] **Detect the shared case.** A system-level service or other active
-      clients warrant a warning; a user-owned desktop process does not.
-      `--no-mutate` keeps today's print-only behaviour for CI and shared hosts.
-- [ ] **Prefer a fitr-owned instance where it is cheap.** A scratch server on
-      its own port sweeps without disturbing anything, under the same rule
-      that governs pulled models: fitr may mutate what fitr created.
-- [ ] Fingerprinting is already correct here. Cache dtype is part of the
-      device key, so a sweep across dtypes separates its own evidence without
-      new machinery. This was never the obstacle.
+**Killing the server does not stop it.** Every supported install is
+supervised. The desktop app respawns its child after a second, the systemd
+unit uses `Restart=always`, and the Homebrew service sets `keep_alive`. A tune
+that signals a process and relaunches it measures a server it did not
+configure, because the supervisor wins the race.
+
+**The knobs may be pinned where no shell can see them.** The Homebrew service
+definition sets both `OLLAMA_FLASH_ATTENTION` and `OLLAMA_KV_CACHE_TYPE`, and
+neither pinned value is the documented default. Reading a knob from this
+process's environment, or assuming an unset knob means the default, is wrong
+on those machines. Restoring a prior value read that way would be worse than
+wrong: it would write a setting the daemon never had.
+
+**In-flight requests are severed, not drained.** The shutdown path closes the
+server rather than draining it. The disclosure this milestone requires is a
+statement of fact, not a hedge.
+
+**The desktop app kills stray servers by image name, not by port.** A scratch
+instance is a valid target for that sweep, so an owned instance must not be
+mistakable for one.
+
+The consequence is that the owned-instance path needs no new mutation
+authority at all, while the in-place restart needs a consent subsystem that
+does not exist yet. So the order inverts: five shippable steps that mutate
+nothing come before any restart code.
+
+- [ ] **Separate listener inspection from listener ownership.** The owned
+      check asserts a loopback row held by the expected process and must stay
+      that strict. Reading which process holds a port on an attached daemon is
+      a different question with the opposite failure mode, and it needs both
+      address families. Tracked as
+      [issue 14](https://github.com/blisspixel/fitr/issues/14).
+- [ ] **Per-key configuration provenance.** Record how each knob was observed,
+      not how the map as a whole was. A value read from the daemon's log, a
+      value sealed from a child fitr launched, and a value nobody has observed
+      are three states, and only the first two may be restored later.
+- [ ] **A read-only ownership report.** Say whether the serving process is a
+      user session process or a supervised service, which supervisor holds it,
+      and whether its socket is loopback-only. Print it; change nothing.
+- [ ] **`--no-mutate`.** Establish the flag and its print-only contract before
+      anything can mutate, so the escape hatch predates the hazard.
+- [ ] **`fitr tune --scratch`.** Sweep knobs on a fitr-owned instance. Cache
+      dtype is already in the device key, so the sweep separates its own
+      evidence with no new machinery, and the owned Windows launcher already
+      seals these two knobs into its launch digest. This is close to a loop
+      over an existing field. Extend the launcher beyond Windows before
+      claiming the command is available.
+- [ ] **Only then, `fitr tune` against the user's own server.** Confirmed,
+      never silent, never a default, and refused outright against a supervised
+      service until the supervisor itself is driven rather than the process.
+      Say what a restart costs before asking, restore the prior value only when
+      its provenance permits, and verify the server came back before reporting
+      success.
+
+## Model-set, soak, and serving experiments
+
+Three families, each with its own schema and comparison domain, none of them
+entering the single-model Board. Serving comes first because it builds the
+concurrency instrument the other two report through.
+
+**Serving.** Total and per-request throughput, accepted outcomes per exposure
+wall time, and TTFT distributions at a declared concurrency. Two things must be
+recorded that a naive harness omits. Offered load is not achieved load, so
+client-side queueing is reported beside the server's own timing rather than
+folded into it. And a declared concurrency is a request, not an observation:
+llama-server exposes its slot state and can prove the level took effect, while
+the Ollama route currently cannot, so the level stays declared-only there.
+Warm-up is explicit and excluded. A percentile is a claim about a
+distribution's tail, so it is reported only with the sample size that supports
+it, under the existing rule against implying a rate from a finite set.
+
+**Model sets.** The refusal stands: isolated measurements are never summed into
+a co-residency claim. What changes is that one runtime can now discharge it.
+llama-server's router builds its whole model list under a single lock, so that
+response is one observation of several models at one instant. Ollama's is not:
+membership is snapshotted under a lock that is then released, and each row's
+byte figures are read afterwards from the live runner. That is exactly the
+racing pair fitr refuses, arriving inside one HTTP response, so the sum is
+still not a receipt. A sleeping or offloaded model is spill, not residency, and
+must be recorded as such rather than counted as loaded.
+
+Byte figures from either runtime are the runner's own allocation accounting
+rather than an independent residency reading, and per-process accelerator
+memory is unavailable on Windows WDDM, so on the platform fitr is most often
+run there is no second source to corroborate them.
+
+**Soak.** Performance drift and accepted work over time. The finding that
+shapes this: a sustained run has been observed where tool-call emission
+collapsed while throughput stayed healthy, so a soak that watches only speed
+would have reported a clean run. Drift is therefore a trajectory of ordered
+windows, never a single scalar, and a soak may report validated-outcome drift
+only when an independently verified bounded workload is part of the experiment.
+That makes soak depend on the generalized workload receipts in build-order item
+4, which is why it is last.
 
 ## Later: loop extensions
 
