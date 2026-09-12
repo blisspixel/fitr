@@ -896,7 +896,65 @@ boundary required by the 1.0 workload experiment.
 - [ ] Harden the cross-platform isolated worker beyond the minimum bounded
       verifier boundary. Executable coding tasks remain SKIP until confinement
       has the same testable guarantees on all six release targets.
-- [ ] Add signed releases, SBOMs, and attestations.
+
+      The requirement that the guarantee be the same on all six is what rules
+      out the obvious answers. macOS has no kernel memory bound without root.
+      Windows has no authoritative deny-read and no egress control without
+      either administrator rights or a hand-rolled process launch. Unprivileged
+      user namespaces are disabled by default on current Ubuntu, which removes
+      the rootless Linux options, and `/dev/kvm` is group-restricted, which
+      removes the microVM tiers. Each of those is a platform where the
+      guarantee would have to be weaker, stated separately, or asserted without
+      proof.
+
+      A WebAssembly worker is uniform instead of nearly uniform, and that is
+      the whole argument for it. Under the wasip1 target there is no
+      socket-creation call and no process-spawn facility, so no-network and
+      no-subprocess are structural rather than a policy written three times and
+      maintained three times. The host is cgo-free and cross-compiles to all six
+      targets. Two hazards must be designed against from the start rather than
+      discovered: a guest-created relative symlink can escape a mounted host
+      directory, so the worker mounts an in-memory filesystem and never a host
+      path; and a notarized macOS build lacking the JIT entitlement falls back
+      to an interpreter roughly two orders of magnitude slower, which would
+      quietly corrupt the timing this product exists to measure.
+
+      Confinement is claimed only where it is proven, by paired probes: a
+      negative that must be denied and a positive that must still work, so a
+      sandbox that denies everything cannot pass by breaking the task. The
+      result is a receipt like any other evidence here, and an unproven
+      guarantee leaves the task SKIP.
+
+      Prior art is thinner than its reputation and does not lower this bar.
+      A widely cited coding benchmark runs model patches with elevated
+      container privileges while documenting only reproducibility; another
+      harness's own documentation calls its no-network path untested; a third
+      removed its advertised execution opt-in while the README continued to
+      describe it. Matching the field would mean claiming more than fitr can
+      show.
+
+- [ ] Sign what the release publishes, and say what each step proves.
+      Today's checksum manifest is unsigned and served from the same place as
+      the artifacts, so it establishes transfer integrity and not authenticity:
+      anything able to publish a release can publish a consistent pair. The
+      install guide already says so, and the steps below each buy one specific
+      thing.
+      Print the verified digest and a command a user can run independently,
+      which costs nothing and removes the need to trust fitr's own report of
+      its own verification. Emit an SBOM from the build information the
+      standard library already embeds, adding no module. Attest the manifest in
+      CI, which raises the build-provenance level without any runtime cost or
+      client dependency. Extend the deterministic rebuild from one target to
+      all six on a clean runner and publish a recipe a third party can follow,
+      which is what converts determinism into reproducibility. Then sign the
+      manifest with an algorithm the standard library verifies, which is the
+      only step that adds authenticity without adding a dependency, a network
+      call, or a trusted third party, and which must not ship before its key
+      custody is written down.
+      A full signing library is rejected deliberately: the leading one pulls
+      dozens of modules against this binary's handful and would not fit the
+      measured size gate. Verifying model signatures is a separate question and
+      is not in this milestone.
 - [ ] Define calibrated profile provenance and community calibration tooling.
 - [ ] Add externally anchored share provenance and a trust-root workflow for
       decision-grade community evidence.
