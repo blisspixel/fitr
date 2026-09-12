@@ -278,8 +278,14 @@ so Board does not compare across those presentation-contract changes.
   `--fit` reports a `llama-fit-params` device-memory projection, but the
   current adapter does not capture the fitter's adjusted context, placement,
   version, or host-memory domain. It therefore remains descriptive and cannot
-  establish a context row or fit verdict. Hybrid recurrent architectures
-  require a load receipt, and split GGUFs require every shard. An artifact
+  establish a context row or fit verdict. A hybrid architecture is projected
+  only when the artifact determines both halves of its cache: the layers that
+  scale with context, which for an interval hybrid is one in every
+  `full_attention_interval`, and the fixed recurrent state held by the rest.
+  Only the count of attending layers is needed, never which they are, and that
+  count is the same under either of llama.cpp's pattern conventions. A hybrid
+  missing its `ssm` shape still requires a load receipt. Split GGUFs require
+  every shard. An artifact
   whose `head_count_kv` is a per-layer array is projected by summing the
   layers, so a layer that does not attend costs nothing; the array is used only
   when it carries exactly one believable entry per block. An artifact declaring

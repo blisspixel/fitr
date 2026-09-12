@@ -98,7 +98,9 @@ func conventionalFit(in Input, t *FitTable) *FitTable {
 }
 
 func makeFitPoint(in Input, ctx int, weightsB, perTok, haveB float64) FitPoint {
-	kvB := perTok * float64(ctx)
+	// The fixed recurrent state of an interval hybrid is part of the cache at
+	// every point, so the curve starts above zero rather than at the origin.
+	kvB := perTok*float64(ctx) + in.Arch.cacheFixedBytes()
 	p := FitPoint{
 		Ctx: ctx, WeightsGB: round1(weightsB / GiB), KVGB: round1(kvB / GiB),
 		Requested: in.Ctx > 0 && ctx == in.Ctx, AllocationEvidence: allocationProjection,

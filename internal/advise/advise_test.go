@@ -500,6 +500,87 @@ func TestRecurrentLayersKeyMarksAnUnlistedHybrid(t *testing.T) {
 	}
 }
 
+// The header below is the published Qwen3.8-27B UD-Q4_K_XL GGUF, whose
+// layer layout is confirmed by the model's own config.json: linear attention
+// three layers out of every four, so 16 of its 64 real layers attend. A
+// blanket hybrid refusal made advise silent about one of the most widely run
+// local models when its arithmetic is fully determined here.
+func qwen38KVs() map[string]any {
+	return map[string]any{
+		"general.architecture":           "qwen35",
+		"qwen35.block_count":             uint64(65), // 64 real plus one MTP head
+		"qwen35.context_length":          uint64(262144),
+		"qwen35.embedding_length":        uint64(5120),
+		"qwen35.attention.head_count":    uint64(24),
+		"qwen35.attention.head_count_kv": uint64(4),
+		"qwen35.attention.key_length":    uint64(256),
+		"qwen35.attention.value_length":  uint64(256),
+		"qwen35.full_attention_interval": uint64(4),
+		"qwen35.nextn_predict_layers":    uint64(1),
+		"qwen35.ssm.conv_kernel":         uint64(4),
+		"qwen35.ssm.state_size":          uint64(128),
+		"qwen35.ssm.inner_size":          uint64(6144),
+	}
+}
+
+func TestIntervalHybridChargesOnlyItsFullAttentionLayers(t *testing.T) {
+	arch := ArchFromKVs(qwen38KVs())
+	if !arch.Hybrid {
+		t.Fatal("an interval hybrid is still hybrid")
+	}
+	if got := arch.realBlocks(); got != 64 {
+		t.Fatalf("real blocks = %d, want block_count less the MTP head", got)
+	}
+	if got := arch.fullAttentionLayers(); got != 16 {
+		t.Fatalf("full-attention layers = %d, want 64/4", got)
+	}
+	if !arch.KVReady() {
+		t.Fatalf("a fully determined interval hybrid is sizable: %+v", arch)
+	}
+	// 16 attending layers x 4 KV heads x (256+256) x 2 bytes = 64 KiB/token.
+	if got := arch.kvBytesPerToken(2); got != 65536 {
+		t.Fatalf("KV bytes per token = %v, want 65536", got)
+	}
+	// Charging all 64 layers would have reported four times the cache.
+	projected, ok := ProjectKVBytes(arch, 32768, 2)
+	if !ok {
+		t.Fatal("a fully determined interval hybrid projects")
+	}
+	fixed, ok := arch.recurrentStateBytes()
+	if !ok {
+		t.Fatal("the recurrent state is determined by these keys")
+	}
+	if want := int64(65536*32768) + int64(fixed); projected != want {
+		t.Fatalf("projection = %d, want %d including the recurrent state", projected, want)
+	}
+	// The recurrent half does not grow with context; the scaling half does.
+	larger, _ := ProjectKVBytes(arch, 65536, 2)
+	if larger-projected != 65536*32768 {
+		t.Fatalf("the fixed state scaled with context: %d then %d", projected, larger)
+	}
+}
+
+// The recurrent state is a real allocation, so a hybrid whose shape the
+// artifact does not carry stays unsizable rather than being projected from its
+// attention layers alone.
+func TestIntervalHybridWithoutItsRecurrentShapeStaysUnsizable(t *testing.T) {
+	for _, missing := range []string{
+		"qwen35.ssm.inner_size", "qwen35.ssm.state_size", "qwen35.ssm.conv_kernel",
+	} {
+		t.Run(missing, func(t *testing.T) {
+			kvs := qwen38KVs()
+			delete(kvs, missing)
+			arch := ArchFromKVs(kvs)
+			if arch.KVReady() {
+				t.Fatalf("sized a hybrid with no %s", missing)
+			}
+			if _, ok := ProjectKVBytes(arch, 32768, 2); ok {
+				t.Fatalf("projected a hybrid with no %s", missing)
+			}
+		})
+	}
+}
+
 func TestHybridArchitectureRequiresMeasuredAllocation(t *testing.T) {
 	kvs := map[string]any{
 		"general.architecture":           "qwen35",

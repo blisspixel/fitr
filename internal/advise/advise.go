@@ -127,6 +127,72 @@ type Arch struct {
 	SlidingWindowPattern int
 	KeyLengthSWA         int
 	ValLengthSWA         int
+	// NextNPredictLayers is a multi-token-prediction head counted inside
+	// block_count. It is not an attention layer, so the cache arithmetic works
+	// from the remainder.
+	NextNPredictLayers int
+	// The recurrent state of a hybrid's linear-attention layers. It is
+	// context-independent, so it is a fixed addition to the cache rather than
+	// a per-token cost.
+	SSMInnerSize  int
+	SSMStateSize  int
+	SSMConvKernel int
+}
+
+// realBlocks is the decoder layers that actually attend or recur, excluding a
+// multi-token-prediction head that block_count includes.
+func (a Arch) realBlocks() int {
+	if a.NextNPredictLayers > 0 && a.NextNPredictLayers < a.Blocks {
+		return a.Blocks - a.NextNPredictLayers
+	}
+	return a.Blocks
+}
+
+// fullAttentionLayers is how many layers hold a context-scaling KV cache in an
+// interval hybrid. Only the count is needed, never which layers they are:
+// llama.cpp's pattern places exactly one full-attention layer in every
+// full_attention_interval layers whichever way its dense_first argument falls,
+// so the count is the same under both conventions. That is what makes this
+// computable where a sliding-window layout is not.
+func (a Arch) fullAttentionLayers() int {
+	if a.FullAttentionInterval <= 0 {
+		return 0
+	}
+	return a.realBlocks() / a.FullAttentionInterval
+}
+
+// recurrentStateBytes is the fixed allocation held by the linear-attention
+// layers: one state tensor and one short convolution window each, in fp32. It
+// does not grow with the requested context. ok is false when the artifact does
+// not supply the shape, because a hybrid whose recurrent cost is unknown has
+// no complete cache projection.
+func (a Arch) recurrentStateBytes() (float64, bool) {
+	linear := a.realBlocks() - a.fullAttentionLayers()
+	if linear <= 0 || a.SSMInnerSize <= 0 || a.SSMStateSize <= 0 || a.SSMConvKernel <= 1 {
+		return 0, false
+	}
+	const fp32 = 4
+	state := float64(a.SSMInnerSize) * float64(a.SSMStateSize) * fp32
+	conv := float64(a.SSMInnerSize) * float64(a.SSMConvKernel-1) * fp32
+	total := float64(linear) * (state + conv)
+	if math.IsNaN(total) || math.IsInf(total, 0) || total <= 0 {
+		return 0, false
+	}
+	return total, true
+}
+
+// intervalHybridProjectable reports a hybrid whose complete cache the artifact
+// determines: the layers that scale with context, and the fixed recurrent
+// state held by the rest.
+func (a Arch) intervalHybridProjectable() bool {
+	if a.FullAttentionInterval <= 0 || a.fullAttentionLayers() <= 0 {
+		return false
+	}
+	if a.PerLayerKVHeads || a.KVHeads <= 0 || !a.kvClassifiable() {
+		return false
+	}
+	_, ok := a.recurrentStateBytes()
+	return ok
 }
 
 // slidingWindowPresent reports an artifact whose cache length is not uniform
@@ -153,7 +219,13 @@ func (a Arch) totalKVHeads() int {
 		}
 		return total
 	}
-	return a.Blocks * a.KVHeads
+	// In an interval hybrid only the full-attention layers hold a cache that
+	// grows with context. Charging every layer would report several times the
+	// cache the model actually allocates.
+	if a.FullAttentionInterval > 0 {
+		return a.fullAttentionLayers() * a.KVHeads
+	}
+	return a.realBlocks() * a.KVHeads
 }
 
 // KVReady is whether the KV cache can be sized without guessing head dim
@@ -161,6 +233,9 @@ func (a Arch) totalKVHeads() int {
 // correct for Llama and wrong for Qwen3 (128, not 64) - that fallback is
 // disclosed, not hidden.
 func (a Arch) KVReady() bool {
+	if a.Hybrid && !a.intervalHybridProjectable() {
+		return false
+	}
 	return a.Blocks > 0 && a.totalKVHeads() > 0 && a.kvClassifiable() &&
 		a.headDimK() > 0 && a.headDimV() > 0
 }
@@ -200,16 +275,33 @@ func (a Arch) kvBytesPerToken(elem float64) float64 {
 	return per
 }
 
-// ProjectKVBytes returns the exact conventional KV-cache projection for one
-// declared context and element size. Hybrid recurrent state is deliberately
-// unavailable because conventional attention arithmetic is not its complete
-// allocation model.
+// cacheFixedBytes is the part of the cache that does not grow with the
+// requested context. It is zero for conventional attention and the recurrent
+// state for an interval hybrid. Every caller that sizes a cache adds it, so a
+// projection is the complete allocation rather than only its scaling half.
+func (a Arch) cacheFixedBytes() float64 {
+	if a.FullAttentionInterval <= 0 {
+		return 0
+	}
+	fixed, ok := a.recurrentStateBytes()
+	if !ok {
+		return 0
+	}
+	return fixed
+}
+
+// ProjectKVBytes returns the cache projection for one declared context and
+// element size: the context-scaling KV plus any fixed recurrent state.
+//
+// A hybrid is projected only when the artifact determines both halves. Where it
+// does not, the conventional arithmetic is not this model's allocation model
+// and the projection stays unavailable.
 func ProjectKVBytes(arch Arch, contextTokens int, elementBytes float64) (int64, bool) {
-	if arch.Hybrid || contextTokens <= 0 {
+	if contextTokens <= 0 || (arch.Hybrid && !arch.intervalHybridProjectable()) {
 		return 0, false
 	}
 	perToken := arch.kvBytesPerToken(elementBytes)
-	projected := perToken * float64(contextTokens)
+	projected := perToken*float64(contextTokens) + arch.cacheFixedBytes()
 	if projected <= 0 || math.IsNaN(projected) || math.IsInf(projected, 0) || projected > math.MaxInt64 {
 		return 0, false
 	}
@@ -438,13 +530,16 @@ func kvCacheRemedy(in Input, elem float64, ctx, fitCtx int, haveB float64) strin
 	if perTok <= 0 {
 		return ""
 	}
-	room := haveB - float64(in.WeightsB)
+	// The recurrent state is fp32 and a cache dtype does not shrink it, so it
+	// comes off the room a smaller KV element could buy back.
+	fixedB := in.Arch.cacheFixedBytes()
+	room := haveB - float64(in.WeightsB) - fixedB
 	if room <= 0 {
 		return ""
 	}
 	// Does the window the user actually asked for fit once the cache shrinks?
 	if float64(ctx)*perTok <= room {
-		fits := (float64(in.WeightsB) + float64(ctx)*perTok) / GiB
+		fits := (float64(in.WeightsB) + float64(ctx)*perTok + fixedB) / GiB
 		return fmt.Sprintf("%s=q8_0 keeps %d ctx -> fits in %s GB; changes the fingerprint, so re-measure",
 			flag, ctx, trim1(round1(fits)))
 	}
@@ -452,7 +547,7 @@ func kvCacheRemedy(in Input, elem float64, ctx, fitCtx int, haveB float64) strin
 	if q8Ctx < 512 || q8Ctx <= fitCtx {
 		return ""
 	}
-	fits := (float64(in.WeightsB) + float64(q8Ctx)*perTok) / GiB
+	fits := (float64(in.WeightsB) + float64(q8Ctx)*perTok + fixedB) / GiB
 	return fmt.Sprintf("%s=q8_0 raises the window to %d -> fits in %s GB; changes the fingerprint, so re-measure",
 		flag, q8Ctx, trim1(round1(fits)))
 }
@@ -523,7 +618,12 @@ func evaluateCore(in Input) Report {
 	if automaticSharedMemoryCapacity(in) {
 		return evaluateAutomaticSharedMemoryCapacity(in, haveB, r)
 	}
-	if in.Arch.Hybrid {
+	// A hybrid whose artifact determines both halves of its cache -- the layers
+	// that scale with context, and the fixed recurrent state held by the rest
+	// -- is projected like any other estimate. The refusal below is for the
+	// hybrids whose allocation the metadata genuinely does not describe, which
+	// is what it was always meant to cover.
+	if in.Arch.Hybrid && !in.Arch.intervalHybridProjectable() {
 		r.Tier = Skip
 		r.Why = "hybrid recurrent architecture cannot be safely projected from weights plus a conventional KV cache"
 		r.Hint = "use --load at the requested context with Ollama"
@@ -849,7 +949,11 @@ func evaluateKVContext(in Input, haveB float64, prepared weightsAndKVEstimate) R
 		r.Gaps = append(r.Gaps, "architecture metadata is missing or not believable")
 		return r
 	}
-	kvB := perTok * float64(ctx)
+	// A hybrid's recurrent state is part of the cache and does not scale with
+	// context, so it is added once here and subtracted from the room available
+	// to the scaling half below.
+	fixedB := in.Arch.cacheFixedBytes()
+	kvB := perTok*float64(ctx) + fixedB
 	r.KVGB = round1(kvB / GiB)
 	needB := float64(in.WeightsB) + kvB
 	r.NeedGB = round1(needB / GiB)
@@ -864,7 +968,7 @@ func evaluateKVContext(in Input, haveB float64, prepared weightsAndKVEstimate) R
 
 	// Largest context that still fits, aligned down to 256. Below 512 is not
 	// a useful chat window - treat as incompatible even though weights fit.
-	maxTok := (haveB - float64(in.WeightsB)) / perTok
+	maxTok := (haveB - float64(in.WeightsB) - fixedB) / perTok
 	fitCtx := ctxTokens(maxTok)
 	if fitCtx > ctx {
 		fitCtx = ctx
@@ -877,7 +981,7 @@ func evaluateKVContext(in Input, haveB float64, prepared weightsAndKVEstimate) R
 		r.KVRemedy = kvCacheRemedy(in, elem, ctx, fitCtx, haveB)
 		return r
 	}
-	fitB := float64(in.WeightsB) + perTok*float64(fitCtx)
+	fitB := float64(in.WeightsB) + perTok*float64(fitCtx) + fixedB
 	r.Tier = LowMemory
 	r.Flag = flag
 	r.FlagValue = fitCtx
@@ -1172,6 +1276,10 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	a.Experts = archDim(first(kvs, p+"expert_count"))
 	a.ExpertUsed = archDim(first(kvs, p+"expert_used_count"))
 	a.FFN = archDim(first(kvs, p+"expert_feed_forward_length", p+"feed_forward_length"))
+	a.NextNPredictLayers = archDim(first(kvs, p+"nextn_predict_layers"))
+	a.SSMInnerSize = archDim(first(kvs, p+"ssm.inner_size"))
+	a.SSMStateSize = archDim(first(kvs, p+"ssm.state_size"))
+	a.SSMConvKernel = archDim(first(kvs, p+"ssm.conv_kernel"))
 	a.SlidingWindow = archDim(first(kvs, p+"attention.sliding_window"))
 	a.SlidingWindowPattern = archDim(first(kvs, p+"attention.sliding_window_pattern"))
 	a.KeyLengthSWA = archDim(first(kvs, p+"attention.key_length_swa"))
