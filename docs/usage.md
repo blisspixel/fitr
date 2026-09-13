@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.10.13" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.10.13" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.10.13" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.10.13" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.10.14" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.10.14" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.10.14" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.10.14" alt="fitr top (demo data)" width="820">
 
 ### Bounded fitting
 

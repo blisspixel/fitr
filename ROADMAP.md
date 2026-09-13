@@ -58,7 +58,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.10 | Official MCP SDK binary acceptance and Ollama remote-provenance checks before local experiments |
 | Shipped | 0.10.11 | Bounded auto fitting with an explicit shortlist, owned Windows runtime, resource gates, quality-first comparison and fresh confirmation; a consistent terminal identity |
 | Shipped | 0.10.12 | Read-only MCP selection status for managed incumbents, bounded local path resolution and expanded official SDK acceptance |
-| Current | 0.10.13 | A collectable context-quality scorecard, source publisher and policy screening, bounded component projections, plus lock, interrupt and evidence corrections |
+| Shipped | 0.10.13 | A collectable context-quality scorecard, plus lock, interrupt and evidence corrections |
+| Current | 0.10.14 | Context-quality HTML and TUI surfaces, ordered source screening, complete-header component projections, runtime provenance and current MCP package validation |
 | Now | 0.11 | Remaining context-quality surfaces and role connection, plus one pinned model-plus-harness workflow |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
