@@ -458,11 +458,15 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	a.Blocks = archDim(first(kvs, p+"block_count"))
 	a.Embed = archDim(first(kvs, p+"embedding_length"))
 	a.Heads = archDim(first(kvs, p+"attention.head_count"))
+	// Read before the KV heads: the per-layer array covers attention layers,
+	// while block_count may also count a prediction head, so the accepted
+	// lengths depend on this.
+	a.NextNPredictLayers = archDim(first(kvs, p+"nextn_predict_layers"))
 	kvHeads := first(kvs, p+"attention.head_count_kv")
 	a.KVHeads = archDim(kvHeads)
 	a.PerLayerKVHeads = perLayerDimension(kvHeads)
 	if a.PerLayerKVHeads {
-		a.KVHeadsPerLayer = perLayerDimensions(kvHeads, a.Blocks)
+		a.KVHeadsPerLayer = perLayerDimensions(kvHeads, a.Blocks, a.realBlocks())
 	}
 	if a.KVHeads == 0 && !a.PerLayerKVHeads && !a.modernKVLayout() {
 		// On a pre-GQA artifact an absent key really does mean every head
@@ -483,7 +487,6 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	a.Experts = archDim(first(kvs, p+"expert_count"))
 	a.ExpertUsed = archDim(first(kvs, p+"expert_used_count"))
 	a.FFN = archDim(first(kvs, p+"expert_feed_forward_length", p+"feed_forward_length"))
-	a.NextNPredictLayers = archDim(first(kvs, p+"nextn_predict_layers"))
 	a.SSMInnerSize = archDim(first(kvs, p+"ssm.inner_size"))
 	a.SSMStateSize = archDim(first(kvs, p+"ssm.state_size"))
 	a.SSMConvKernel = archDim(first(kvs, p+"ssm.conv_kernel"))
@@ -584,9 +587,17 @@ func perLayerDimension(v any) bool {
 // nil unless the array has exactly one entry per block and every entry is
 // believable, because a length that disagrees with block_count means the two
 // keys describe different models and neither can be trusted to size a cache.
-func perLayerDimensions(v any, blocks int) []int {
+func perLayerDimensions(v any, blocks, attentionBlocks int) []int {
 	entries, ok := v.([]any)
-	if !ok || blocks <= 0 || len(entries) != blocks {
+	if !ok || blocks <= 0 {
+		return nil
+	}
+	// One entry per block is the ordinary case. An artifact that counts a
+	// multi-token-prediction head inside block_count describes one fewer
+	// attention layer than it declares blocks, and its array covers the
+	// attention layers. Any other length means the two keys describe
+	// different models and neither can size a cache.
+	if len(entries) != blocks && len(entries) != attentionBlocks {
 		return nil
 	}
 	dimensions := make([]int, 0, len(entries))
