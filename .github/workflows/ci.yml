@@ -114,19 +114,15 @@ jobs:
       - name: binary size gate
         shell: bash
         run: |
-          # Raised deliberately, measured rather than estimated. Four additions
-          # since the previous cap are reachable from ordinary commands and so
-          # are linked rather than eliminated: reading an artifact's opening
-          # bytes over a bounded ranged request, projecting a fit from that
-          # without downloading weights, reporting the parsed architecture a
-          # verdict was computed from, and naming what separates two board
-          # blocks whose headers are identical. Together 18,944 bytes, measured
-          # by building windows/amd64 at the previous cap's commit and again at
-          # this one.
-          # windows/amd64 is the largest at 15,324,672 bytes and sets the cap,
-          # keeping the same 50,328 bytes of headroom the previous measured cap
-          # used. The other five targets are between 1.1 and 2.7 MiB below it.
-          max_bytes=15375000
+          # Measured with CI's Go 1.27.0, CGO_ENABLED=0 and release flags on
+          # all six targets. Source policy screening, complete-header and
+          # shard validation, corrected cache arithmetic, and current MCP
+          # metadata checks add 77,824 bytes to windows/amd64 compared with
+          # 496e586: 15,341,056 -> 15,418,880. No new Go dependency was added.
+          # Windows amd64 remains largest. This cap leaves 36,120 bytes of
+          # headroom, close to the preceding cap's 33,944 on that baseline.
+          # Keep the gate measured; this is not an allowance for unknown growth.
+          max_bytes=15455000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"
             printf '%-32s %10d bytes\n' "$binary" "$size"
