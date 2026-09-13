@@ -59,7 +59,7 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.11 | Bounded auto fitting with an explicit shortlist, owned Windows runtime, resource gates, quality-first comparison and fresh confirmation; a consistent terminal identity |
 | Shipped | 0.10.12 | Read-only MCP selection status for managed incumbents, bounded local path resolution and expanded official SDK acceptance |
 | Shipped | 0.10.13 | A collectable context-quality scorecard, plus lock, interrupt and evidence corrections |
-| Current | 0.10.14 | Context-quality HTML and TUI surfaces, ordered source screening, complete-header component projections, runtime provenance and current MCP package validation |
+| Shipped | 0.10.14 | Context-quality HTML and TUI surfaces, ordered source screening, complete-header component projections, runtime provenance and current MCP package validation |
 | Now | 0.11 | Remaining context-quality surfaces and role connection, plus one pinned model-plus-harness workflow |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -1001,7 +1001,7 @@ with researched protocol and harness profiles in [agent interoperability](docs/a
 - [x] Resolve explicit public HF file metadata at an immutable commit through a bounded adapter.
 - [x] Link resolution receipts to inbox ideas and report dependency, runtime and quality gaps.
 - [x] Screen publisher, declared license, accepted architecture and projected components in order under explicit operator policy.
-- [ ] Persist bounded header observations and rederive source projections on reopen; current `--out` saves metadata only.
+- [ ] [Persist bounded header observations and screening policy](https://github.com/blisspixel/fitr/issues/25), then rederive source projections on reopen; current `--out` saves metadata only.
 - [ ] Define versioned runtime support profiles and establish complete dependency and component plans before download ownership.
 - [ ] Project [explicit boolean recurrent-layer patterns](https://github.com/blisspixel/fitr/issues/21) only when complete artifact metadata determines both cache components; unsupported patterns remain unresolved.
 - [ ] Extract source claims without converting them into evidence.
@@ -1027,14 +1027,19 @@ inside the operator's bounded header read. The default 32 KiB was insufficient
 for the official Qwen3-0.6B artifact in live acceptance, which correctly remained
 unresolved rather than treating missing layout fields as conventional attention.
 
-The next increments are concrete: persist header observations and policy in a
-validated source projection; define architecture support for a pinned runtime
-build; then bind required, optional, disabled and unresolved companions into a
-dependency and component plan. Current screening establishes neither runtime
-support nor legal permission, and a component ceiling excludes overhead and
-companion allocation. Download ownership and source-driven experiments follow
-those boundaries. The current output is not a new 0.11 release or a role
-qualification receipt.
+Build the next source increments in this order:
+
+| Next increment | Why it comes next | Exit evidence |
+|---|---|---|
+| Persist screening observations and policy ([#25](https://github.com/blisspixel/fitr/issues/25)) | Today's screen exists only in command output; later planning needs an inspectable source result. | Offline reopen derives the same gates from validated observations and exact policy, without implicit network access or changes to old receipt digests. |
+| Define support profiles for pinned runtime builds | An architecture allowlist records operator intent; it does not establish backend support. | Versioned profiles bind upstream contracts to the exact runtime build; unsupported and unknown cases stay unresolved, and capability declarations remain separate from behavioral evidence. |
+| Bind dependency and component plans | The current weight/cache ceiling excludes runtime overhead and companion allocation. | Required, optional, disabled and unresolved components are explicit before an owned download or source-driven local experiment can be planned. |
+
+Current screening establishes neither runtime support nor legal permission.
+Download ownership and source-driven experiments follow these boundaries.
+The shipped 0.10.14 screen is not a 0.11 completion claim or a role
+qualification receipt. Its exact public-binary checks are recorded in
+[release acceptance](docs/release-acceptance.md#01014-release-receipt).
 
 Today fitr answers "is what I already have any good here?" The larger question
 is "what should I get?" fitr is positioned to answer it with the same local
@@ -1461,6 +1466,10 @@ These features must preserve the evidence contract.
 | 0.10.8 | Private source associations, individual source-aware plans, explicit receipt selection and concurrent inbox capture protection |
 | 0.10.9 | Bounded local artifact hashes, explicit source mappings, immutable observation receipts and separate runtime/capacity/quality gaps |
 | 0.10.10 | Official MCP SDK acceptance with pinned dependencies and explicit Ollama remote-provenance rejection across local measurement paths |
+| 0.10.11 | Bounded auto fitting for an installed shortlist, an owned Windows runtime, resource gates and fresh confirmation; a consistent terminal identity |
+| 0.10.12 | Read-only MCP selection status for managed incumbents, bounded local path resolution and expanded official SDK acceptance |
+| 0.10.13 | Collectable context-quality scorecards and lock, interrupt and evidence corrections |
+| 0.10.14 | Ordered source screening, complete-header component projections, GGUF metadata corrections, context-quality HTML/TUI surfaces, precise comparison gaps and current MCP/package acceptance |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

@@ -160,8 +160,16 @@ SHA-256 was `ed445b7fd2a0096ddd6d70ca6008d6f7a6330bb09f80eb7feb994703bce03c09`.
 The separate raw-wire smoke observed exit 0. The candidate bytes, portable
 plugin's complete five-entry working-directory tree, and every temporary
 evidence tree remained unchanged. SDK cleanup took 0.012 to 0.026 seconds.
-This records a local candidate, not a published release or named-host result;
-CI must still validate its own binaries on all three supported platforms.
+This records a local candidate, not a published release or named-host result.
+
+The [0.10.14 release receipt](release-acceptance.md#01014-release-receipt)
+records the subsequent eight-case SDK 2.2.0 suite on all three main CI platforms
+and separately on the downloaded Windows release binary, with the actual
+portable package and frozen schemas. Each receipt matches its own executable
+and source inputs. Main and tag builds embed different Go module versions for
+the same commit, so their binary hashes are not interchangeable. The public
+Windows binary also passed the raw-wire smoke; named-host acceptance remains
+separate.
 
 The [0.10.12 release receipt](release-acceptance.md#01012-release-receipt)
 records the expanded eight-case suite on all three CI platforms and the public

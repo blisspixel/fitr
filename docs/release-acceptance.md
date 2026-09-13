@@ -6,6 +6,67 @@ against real serving runtimes on clean operating-system installs.
 
 Last updated: 2026-09-13.
 
+### 0.10.14 release receipt
+
+Release [0.10.14](https://github.com/blisspixel/fitr/releases/tag/v0.10.14)
+is bound to commit `b92b4c8159632f964f1c5b81fe5f33b164ae4054` and was
+published on September 13. It passed
+[main CI 34764697325](https://github.com/blisspixel/fitr/actions/runs/34764697325)
+with **82.44% aggregate coverage**, race, lint, twelve fuzz smoke targets,
+minimum-Go compatibility, six binary builds and all three SDK and installer
+platform jobs. The
+[release workflow 34765001821](https://github.com/blisspixel/fitr/actions/runs/34765001821)
+repeated its source, CI/native, race, coverage, vulnerability, lint, build and
+installer gates before uploading assets to the owner-created draft.
+
+All ten independently downloaded public assets matched the nine-entry manifest
+and the tagged release workflow artifact byte for byte. The Windows amd64
+executable reports `fitr 0.10.14`, embeds the tagged revision with
+`vcs.modified=false`, and is **15,423,488 bytes**, below the shared
+15,455,000-byte CI/release ceiling. Public Windows SHA-256:
+`1332c46c52b5911d71da0f172ec9440e9f5e0364686bdc559887fb5555690c46`.
+Manifest SHA-256:
+`65c554e84f5462f1a1fb7fd4eb3f7be183b32f6920c7fa350f74f5bc30849b14`.
+
+The downloaded Windows release binary passed the raw MCP smoke and all eight
+official SDK **2.2.0** cases, using the portable package's arguments,
+environment and working directory. Independent verification matched the SDK
+receipt to the subsequently downloaded public binary and every source input
+identity, including the plugin, lock and frozen schemas. Receipt SHA-256:
+`8c6588eaca755fc0672aa8e0cd3d746d0390e301cc0ba5ac447f8c517fd59682`.
+The three main CI receipts separately match their own binaries and inputs.
+Main and tag builds embed different Go module versions for the same revision;
+their hashes and binary-bound receipts are not interchangeable. These checks
+establish the implemented MCP profile and Agent Plugins package contract,
+not named-host compatibility or model qualification.
+
+[Native acceptance 34764697814](https://github.com/blisspixel/fitr/actions/runs/34764697814)
+passed the installed-binary command sequence on Linux x64 and macOS arm64
+against checksum-pinned llama-server b10700 and two GGUF artifacts. Each
+platform retained two model result records and both server property
+observations. Its candidate manifest matches main CI exactly. Board and Compare
+correctly refuse the artifact-unbound observations; the records retain the
+observed local hash and runtime-reported 8192-token context while compute
+provenance is absent.
+The diagnostic correction preserves those refusal gates and names missing
+compute/configuration evidence separately from missing context.
+
+The public Windows binary also repeated both live source checks documented
+below against Qwen commit `23749fefcc72300e3a2ad315e1317431b06b590a`.
+With first-party lineage, `apache-2.0`, `qwen3`, context 8192 and a 4 GiB
+component ceiling, the default 32 KiB prefix left architecture unresolved and
+fit not checked (exit 4). An explicit 8 MiB allowance cleared all four gates
+(exit 0), projecting 639,446,688 declared weight bytes plus 939,524,096 f16
+cache bytes. Both HTTP 206 responses matched the pinned complete file size.
+The complete-prefix observation ran from `2026-09-13T15:27:05.3448226Z` to
+`2026-09-13T15:27:06.9272706Z`; its prefix SHA-256 matches the recorded live
+acceptance below. Source receipt digest:
+`be774c324c1328bf803d6d132c054d4ab08891830d1b09c617ac90bf9a4c499d`.
+This check performed no inference. Runtime support, resident allocation,
+dependency closure, license permission and role quality remain unmeasured.
+`--out` still saves metadata only; persisted screening is
+[the next bounded task](https://github.com/blisspixel/fitr/issues/25).
+
 ### Source screening acceptance, 2026-09-13 working tree
 
 The working tree's source CLI was checked against the official
