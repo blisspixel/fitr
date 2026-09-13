@@ -114,15 +114,19 @@ jobs:
       - name: binary size gate
         shell: bash
         run: |
-          # The context task pack is reachable from record evidence validation,
-          # so its generator and verifier are linked rather than eliminated.
-          # Connecting the collection path adds the run level, the analysis
-          # projection and the terminal section on top of that: 20,992 bytes,
-          # measured against the previous commit rather than estimated.
-          # windows/amd64 is the largest at 15,260,672 bytes and sets the cap,
-          # keeping the same headroom the previous measured cap used. The other
-          # five targets are between 1.1 and 2.5 MiB below it.
-          max_bytes=15311000
+          # Raised deliberately, measured rather than estimated. Four additions
+          # since the previous cap are reachable from ordinary commands and so
+          # are linked rather than eliminated: reading an artifact's opening
+          # bytes over a bounded ranged request, projecting a fit from that
+          # without downloading weights, reporting the parsed architecture a
+          # verdict was computed from, and naming what separates two board
+          # blocks whose headers are identical. Together 18,944 bytes, measured
+          # by building windows/amd64 at the previous cap's commit and again at
+          # this one.
+          # windows/amd64 is the largest at 15,324,672 bytes and sets the cap,
+          # keeping the same 50,328 bytes of headroom the previous measured cap
+          # used. The other five targets are between 1.1 and 2.7 MiB below it.
+          max_bytes=15375000
           for binary in dist/fitr-*; do
             size="$(stat -c %s "$binary")"
             printf '%-32s %10d bytes\n' "$binary" "$size"
