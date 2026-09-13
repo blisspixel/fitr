@@ -60,7 +60,9 @@ type Input struct {
 	KVSrc   string // "f16 (assumed)" / "OLLAMA_KV_CACHE_TYPE=q8_0"
 	Backend string // ollama | llama-server | openai | ""
 	Arch    Arch
-	Source  string // "GGUF metadata", "Ollama /api/show"
+	// AuthorSampling is what the artifact declares about sampler settings.
+	AuthorSampling *AuthorSampling
+	Source         string // "GGUF metadata", "Ollama /api/show"
 	// ResidentB is the server's own allocation (Ollama /api/ps size). Zero
 	// means not observed. A running process is a measurement; file size is
 	// not substituted for it.
@@ -527,6 +529,10 @@ type Report struct {
 	// check the arithmetic or tell which metadata source supplied it. Every
 	// other claim here cites its evidence; this one was citing nothing.
 	Shape *ArchShape `json:"architecture_shape,omitempty"`
+	// AuthorSampling is the sampler configuration the artifact declares, when
+	// it declares one. Absent means the file says nothing, which is the common
+	// case and is reported as such rather than filled with a runtime default.
+	AuthorSampling *AuthorSampling `json:"author_sampling,omitempty"`
 }
 
 // ArchShape is the parsed architecture, as read. Absent fields are absent from
@@ -775,6 +781,7 @@ func newCoreReport(in Input) Report {
 		Architecture:   in.Arch.ShapeClass(),
 		KVStrategy:     in.Arch.KVStrategy(),
 		Shape:          in.Arch.Shape(),
+		AuthorSampling: in.AuthorSampling,
 		Source:         in.Source,
 		HaveSource:     in.HaveSrc,
 		MaxCtx:         in.Arch.MaxCtx,
@@ -1208,6 +1215,12 @@ func Write(w io.Writer, r Report) {
 	}
 	for _, g := range r.Gaps {
 		render.Field(w, "  note", adviseLabelWidth, g, width)
+	}
+	if sampling := r.AuthorSampling.Summary(); sampling != "" {
+		// Printed only when the artifact actually declares settings, which is
+		// uncommon. Saying "declares none" on every ordinary model would be
+		// noise; the JSON carries the absence for anyone who needs it.
+		render.Field(w, "  sampling", adviseLabelWidth, sampling, width)
 	}
 	if r.Source != "" {
 		render.Field(w, "  source", adviseLabelWidth, r.Source, width)

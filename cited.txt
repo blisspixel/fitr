@@ -1,0 +1,25 @@
+https://doi.org/10.1038/s43017-023-00431-y | Causal inference for time series
+https://doi.org/10.1016/j.physrep.2023.10.005 | Discovering causal relations and equations from data
+https://doi.org/10.1214/18-aos1784 | Bootstrapping and sample splitting for high-dimensional, assumption-le
+https://doi.org/10.1007/s00439-021-02387-9 | Interpretable machine learning for genomics
+https://doi.org/10.1007/s11229-022-03485-5 | Conceptual challenges for interpretable machine learning
+https://doi.org/10.1146/annurev-statistics-100421-044639 | Post-Selection Inference
+https://doi.org/10.1007/s10994-021-06030-6 | Testing conditional independence in supervised learning algorithms
+https://doi.org/10.1016/j.dcn.2022.101072 | A tutorial on the use of temporal principal component analysis in deve
+https://doi.org/10.1093/biomet/asac070 | Splitting strategies for post-selection inference
+https://doi.org/10.1080/01621459.2023.2270748 | Data Fission: Splitting a Single Data Point
+https://doi.org/10.1146/annurev-statistics-040120-022239 | High-Dimensional Data Bootstrap
+https://doi.org/10.1214/24-sts937 | Feature Importance: A Closer Look at Shapley Values and LOCO
+https://doi.org/10.3390/e26090794 | Is Seeing Believing? A Practitioner’s Perspective on High-Dimensional 
+https://doi.org/10.1093/jrsssb/qkae094 | Robust model averaging prediction of longitudinal response with ultrah
+https://doi.org/10.1214/22-aos2181 | Exact minimax risk for linear least squares, and the lower tail of sam
+https://doi.org/10.1214/22-ss135 | Post-model-selection inference in linear regression models: An integra
+https://doi.org/10.3150/23-bej1613 | Dimension-agnostic inference using cross U-statistics
+https://doi.org/10.1109/tcasai.2024.3520905 | EvGNN: An Event-Driven Graph Neural Network Accelerator for Edge Visio
+https://doi.org/10.1007/s11634-022-00509-3 | Mixed-effect models with trees
+https://doi.org/10.1080/01621459.2023.2177165 | A Two-Sample Conditional Distribution Test Using Conformal Prediction 
+https://doi.org/10.1186/s40168-023-01608-9 | A microbial causal mediation analytic tool for health disparity and ap
+https://doi.org/10.1080/03610926.2024.2303979 | One component partial least squares, high dimensional regression, data
+https://doi.org/10.1093/biomet/asae010 | Selective conformal inference with false coverage-statement rate contr
+https://doi.org/10.1214/24-aos2447 | The projected covariance measure for assumption-lean variable signific
+https://doi.org/10.3390/electronics15020312 | Machine Learning-Based Blood Pressure Prediction Using Cardiovascular 

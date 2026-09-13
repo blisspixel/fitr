@@ -168,6 +168,7 @@ func readLocalAdviseSource(path string, in *advise.Input) (string, int) {
 	}
 	in.Model = path
 	in.Arch = advise.ArchFromKVs(kvs)
+	in.AuthorSampling = advise.AuthorSamplingFromKVs(kvs)
 	in.WeightsB = size
 	in.Source = "GGUF metadata"
 	if q := quantFromFilename(path); isQuantTag(q) {
