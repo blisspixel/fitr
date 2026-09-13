@@ -3,9 +3,13 @@
 //
 // Conventions borrowed from tools that got them right:
 //   - progress to stderr, results to stdout, so output is pipeable (promptfoo)
-//   - errors are error/note/hint, plain text on stderr even under --json;
-//     nobody wraps diagnostics in JSON. The exit code is the machine channel
-//     (rustc, gh, uv)
+//   - errors are error/note/hint on stderr, and the exit code is the machine
+//     channel (rustc, gh, uv). That held while every caller was a person.
+//     A caller that passed --display json asked for a machine-readable
+//     surface and then had to match prose with a regular expression to learn
+//     why there was no document, so that one mode now answers in the same
+//     shape it was asked in, the way rustc's own --error-format=json does.
+//     Every other mode is unchanged, and the exit code remains the class.
 //   - -q silences chrome, -v hides the progress display so it cannot interleave
 //     with diagnostics (uv)
 package main
@@ -58,7 +62,22 @@ const (
 	exitInterrupt  = 130
 )
 
+// ErrorSchema names the machine-readable failure document. Every fitr JSON
+// document carries a schema so a reader can tell what it is holding from the
+// payload alone, and a failure is no different.
+const ErrorSchema = "fitr.error.v1"
+
+type machineError struct {
+	Schema string `json:"schema"`
+	Error  string `json:"error"`
+	Note   string `json:"note,omitempty"`
+	Hint   string `json:"hint,omitempty"`
+}
+
 func errPrint(msg, note, hint string) {
+	if machineErrors && encodeMachineError(msg, note, hint) {
+		return
+	}
 	fmt.Fprintf(os.Stderr, "error: %s\n", render.SingleLine(msg))
 	if note != "" {
 		fmt.Fprintf(os.Stderr, " note: %s\n", render.SingleLine(note))
@@ -66,6 +85,18 @@ func errPrint(msg, note, hint string) {
 	if hint != "" {
 		fmt.Fprintf(os.Stderr, " hint: %s\n", render.SingleLine(hint))
 	}
+}
+
+// encodeMachineError writes the failure as one JSON document on stderr, where
+// every other diagnostic already goes, so a caller reading stdout for a result
+// never has to separate a verdict from an explanation of why there is none.
+// It reports false if encoding fails, so the prose path still runs and a
+// failure is never silent.
+func encodeMachineError(msg, note, hint string) bool {
+	return json.NewEncoder(os.Stderr).Encode(machineError{
+		Schema: ErrorSchema, Error: render.SingleLine(msg),
+		Note: render.SingleLine(note), Hint: render.SingleLine(hint),
+	}) == nil
 }
 
 func terminalText(value string) string { return render.SingleLine(value) }
@@ -303,8 +334,24 @@ func takesValue(flagArg string) bool {
 // parseCommandFlags keeps subcommand help on the success path. The standard
 // flag package writes the requested help before returning flag.ErrHelp; that
 // is not a bad invocation and must not become exit 2.
+// machineErrors is set once a command's flags are known. An agent driving fitr
+// as a tool asked for a machine-readable surface and got prose on stderr for
+// every failure while stdout carried the schema-tagged document it asked for.
+// The exit code already separates the classes; this makes the explanation
+// parseable rather than something to match with a regular expression.
+var machineErrors bool
+
+// noteDisplayMode records whether this invocation asked for machine-readable
+// output, so a failure can answer in the same shape as a success.
+func noteDisplayMode(fs *flag.FlagSet) {
+	if display := fs.Lookup("display"); display != nil {
+		machineErrors = render.Resolve(display.Value.String()) == "json"
+	}
+}
+
 func parseCommandFlags(fs *flag.FlagSet, args []string) (int, bool) {
 	err := fs.Parse(permute(args))
+	noteDisplayMode(fs)
 	if err == nil {
 		if err := validateFlagModelRefs(fs); err != nil {
 			errPrint(err.Error(), "", hfModelRefHint)

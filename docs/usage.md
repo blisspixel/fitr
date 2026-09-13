@@ -391,8 +391,20 @@ copying it would copy something else; it gets its own line and the terminal
 decides what happens next.
 
 Progress goes to **stderr**, results to **stdout**, so `fitr run m > out.txt`
-is clean. Errors are plain text on stderr even under `--display json`; the
-exit code is the machine channel.
+is clean. Errors go to stderr in every mode, and the exit code is always the
+class: 0 ok, 1 error, 2 usage, 3 a measured need failed, 4 required evidence
+unresolved, 130 interrupted.
+
+Under `--display json` the failure itself is one JSON document on stderr,
+carrying `schema: "fitr.error.v1"` with the same error, note and hint the
+terminal would have printed. An absent note or hint is omitted rather than
+empty, so nothing to add cannot be read as added nothing. Every other mode
+prints the prose a person reads.
+
+That split exists because a caller passing `--display json` has asked for a
+machine-readable surface and should not have to match prose with a regular
+expression to learn why there is no document. The exit code still carries the
+class; the document carries the explanation.
 
 `fitr top` is deliberately opt-in and requires an interactive input and output
 terminal. It never emits terminal controls when redirected or when
