@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -220,9 +221,8 @@ func cmdBoard(ctx context.Context, args []string) int {
 		return exitError
 	}
 	curDevice := device.Detect(ctx, probeBackend(ctx))
-	groups, order, excludedContext := groupBoardResults(results, command.current, curDevice)
-	board, visible, excluded := buildBoard(groups, order, curDevice)
-	excluded.context = excludedContext
+	groups, order, excluded := groupBoardResults(results, command.current, curDevice)
+	board, visible := buildBoard(groups, order, curDevice, &excluded)
 	writeBoardExclusions(excluded)
 	if len(board.Groups) == 0 {
 		return emptyBoardResult(excluded)
@@ -262,20 +262,26 @@ func parseBoardCommand(args []string) (boardCommand, int, bool) {
 }
 
 func groupBoardResults(results []*Result, current bool, curDevice device.Fingerprint) (
-	map[string][]*Result, []string, int) {
+	map[string][]*Result, []string, boardExclusions) {
 	// Group by fingerprint. Rows measured under different hardware/config are
 	// NOT comparable and must never be ranked against each other. A |ctx=N
 	// suffix is a config split, not a different box - labeled as such below.
 	groups := map[string][]*Result{}
 	var order []string
-	excludedContext := 0
+	excluded := boardExclusions{}
 	for _, r := range results {
-		key, keyErr := r.ComparableDeviceKey()
-		if keyErr != nil {
-			excludedContext++
+		if current && !samePhysicalMachine(r.Device, curDevice) {
 			continue
 		}
-		if current && !samePhysicalMachine(r.Device, curDevice) {
+		// Match compare's evidence precedence. A locally observed file is not
+		// runtime-bound evidence even when its context is verified; grouping
+		// first used to hide that refusal behind any unavailable device key.
+		if excludeInvalidBoardEvidence(r, &excluded) {
+			continue
+		}
+		key, keyErr := r.ComparableDeviceKey()
+		if keyErr != nil {
+			excluded.addComparisonError(keyErr)
 			continue
 		}
 		if _, ok := groups[key]; !ok {
@@ -284,24 +290,26 @@ func groupBoardResults(results []*Result, current bool, curDevice device.Fingerp
 		groups[key] = append(groups[key], r)
 	}
 	sort.Strings(order)
-	return groups, order, excludedContext
+	return groups, order, excluded
 }
 
 type boardExclusions struct {
 	contaminated int
 	unverified   int
 	context      int
+	config       int
+	compute      int
+	fingerprint  int
 	performance  int
 	unscored     int
 }
 
-func buildBoard(groups map[string][]*Result, order []string, curDevice device.Fingerprint) (
-	render.Board, map[string][]*Result, boardExclusions) {
+func buildBoard(groups map[string][]*Result, order []string, curDevice device.Fingerprint,
+	excluded *boardExclusions) (render.Board, map[string][]*Result) {
 	board := render.Board{}
-	excluded := boardExclusions{}
 	visible := map[string][]*Result{}
 	for _, key := range order {
-		rows := claimableBoardRows(groups[key], &excluded)
+		rows := claimableBoardRows(groups[key], excluded)
 		if len(rows) == 0 {
 			continue
 		}
@@ -311,25 +319,29 @@ func buildBoard(groups map[string][]*Result, order []string, curDevice device.Fi
 		})
 		visible[key] = rows
 		for _, result := range rows {
-			group.Rows = append(group.Rows, makeBoardRow(result, &excluded))
+			group.Rows = append(group.Rows, makeBoardRow(result, excluded))
 		}
 		board.Results += len(rows)
 		board.Groups = append(board.Groups, group)
 	}
-	return board, visible, excluded
+	return board, visible
+}
+
+func excludeInvalidBoardEvidence(result *Result, excluded *boardExclusions) bool {
+	if len(result.Contamination) > 0 {
+		excluded.contaminated++
+		return true
+	}
+	if result.EvidenceIntegrityIssue() != "" {
+		excluded.unverified++
+		return true
+	}
+	return false
 }
 
 func claimableBoardRows(rows []*Result, excluded *boardExclusions) []*Result {
 	clean := make([]*Result, 0, len(rows))
 	for _, result := range rows {
-		if len(result.Contamination) > 0 {
-			excluded.contaminated++
-			continue
-		}
-		if result.EvidenceIntegrityIssue() != "" {
-			excluded.unverified++
-			continue
-		}
 		if !hasSupportedBoardDecode(result) {
 			excluded.performance++
 			continue
@@ -397,21 +409,11 @@ func makeBoardRow(result *Result, excluded *boardExclusions) render.BoardRow {
 }
 
 func writeBoardExclusions(excluded boardExclusions) {
-	if excluded.contaminated > 0 {
-		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d contaminated result(s) from board ranking and claims\n",
-			excluded.contaminated)
-	}
-	if excluded.unverified > 0 {
-		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without a valid evidence contract from board ranking and claims\n",
-			excluded.unverified)
-	}
-	if excluded.context > 0 {
-		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without verified effective context from board ranking and claims\n",
-			excluded.context)
-	}
-	if excluded.performance > 0 {
-		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d result(s) without supported decode evidence from board ranking and claims\n",
-			excluded.performance)
+	for _, category := range excluded.categories() {
+		if category.count > 0 {
+			fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d %s from board ranking and claims\n",
+				category.count, category.label)
+		}
 	}
 	if excluded.unscored > 0 {
 		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: %d board row(s) have no reproducible qualification because their scoring profile is unavailable\n",
@@ -420,22 +422,22 @@ func writeBoardExclusions(excluded boardExclusions) {
 }
 
 func emptyBoardResult(excluded boardExclusions) int {
-	if excluded.contaminated == 0 && excluded.unverified == 0 && excluded.context == 0 && excluded.performance == 0 {
+	var reasons []string
+	for _, category := range excluded.categories() {
+		if category.count > 0 {
+			reasons = append(reasons, category.detail)
+		}
+	}
+	if len(reasons) == 0 {
 		errPrint("no results for this machine", "", "run fitr run <model>")
 		return exitError
 	}
 	detail := "all matching results lacked claimable evidence"
-	if excluded.contaminated > 0 && excluded.unverified == 0 && excluded.context == 0 && excluded.performance == 0 {
-		detail = "all matching results were contaminated"
-	} else if excluded.unverified > 0 && excluded.contaminated == 0 && excluded.context == 0 && excluded.performance == 0 {
-		detail = "all matching results lacked a valid evidence contract"
-	} else if excluded.context > 0 && excluded.contaminated == 0 && excluded.unverified == 0 && excluded.performance == 0 {
-		detail = "all matching results lacked verified effective context"
-	} else if excluded.performance > 0 && excluded.contaminated == 0 && excluded.unverified == 0 && excluded.context == 0 {
-		detail = "all matching results lacked supported decode evidence"
+	if len(reasons) == 1 {
+		detail = "all matching results " + reasons[0]
 	}
 	errPrint("no conclusive results for this machine", detail,
-		"re-run with the current fitr version after unloading all models")
+		"resolve the reported evidence gaps before re-running")
 	return exitError
 }
 
@@ -452,17 +454,67 @@ func writeBoardJSON(board render.Board, visible map[string][]*Result, current st
 		payload["groups"] = visible
 		payload["schema"] = "fitr.board.full.v1"
 	}
-	if excluded.contaminated > 0 {
-		payload["inconclusive_excluded"] = excluded.contaminated
-	}
-	if excluded.unverified > 0 {
-		payload["unverified_excluded"] = excluded.unverified
-	}
-	if excluded.context > 0 {
-		payload["context_unverified_excluded"] = excluded.context
+	for _, category := range excluded.categories() {
+		if category.count > 0 && category.key != "" {
+			payload[category.key] = category.count
+		}
 	}
 	b, _ := json.Marshal(payload)
 	fmt.Println(string(b))
+}
+
+type boardExclusionCategory struct {
+	count  int
+	label  string
+	detail string
+	key    string
+}
+
+func (excluded boardExclusions) categories() []boardExclusionCategory {
+	return []boardExclusionCategory{
+		{excluded.contaminated, "contaminated result(s)", "were contaminated", "inconclusive_excluded"},
+		{excluded.unverified, "result(s) without a valid evidence contract", "lacked a valid evidence contract", "unverified_excluded"},
+		{excluded.context, "result(s) without verified effective context", "lacked verified effective context", "context_unverified_excluded"},
+		{excluded.config, "result(s) without observed serving-runtime configuration", "lacked observed serving-runtime configuration", "config_unverified_excluded"},
+		{excluded.compute, "result(s) without an observed serving-runtime compute backend", "lacked an observed serving-runtime compute backend", "compute_unverified_excluded"},
+		{excluded.fingerprint, "result(s) without a valid comparison fingerprint", "lacked a valid comparison fingerprint", "fingerprint_unverified_excluded"},
+		{excluded.performance, "result(s) without supported decode evidence", "lacked supported decode evidence", ""},
+	}
+}
+
+type comparisonGap uint8
+
+const (
+	comparisonFingerprint comparisonGap = iota
+	comparisonContext
+	comparisonConfig
+	comparisonCompute
+)
+
+func comparisonGapFor(err error) comparisonGap {
+	switch {
+	case errors.Is(err, device.ErrUnverifiedContext), errors.Is(err, device.ErrContextProbeMinimum):
+		return comparisonContext
+	case errors.Is(err, device.ErrUnobservedConfig):
+		return comparisonConfig
+	case errors.Is(err, device.ErrUnobservedAccelerator):
+		return comparisonCompute
+	default:
+		return comparisonFingerprint
+	}
+}
+
+func (excluded *boardExclusions) addComparisonError(err error) {
+	switch comparisonGapFor(err) {
+	case comparisonContext:
+		excluded.context++
+	case comparisonConfig:
+		excluded.config++
+	case comparisonCompute:
+		excluded.compute++
+	case comparisonFingerprint:
+		excluded.fingerprint++
+	}
 }
 
 // ---------------------------------------------------------------- compare
@@ -561,7 +613,7 @@ func validateComparisonKeys(a, b *Result) int {
 	aKey, aKeyErr := a.ComparableDeviceKey()
 	bKey, bKeyErr := b.ComparableDeviceKey()
 	if aKeyErr != nil || bKeyErr != nil {
-		return rejectUnverifiedContext(a, b, aKeyErr, bKeyErr)
+		return rejectUnverifiedComparisonKey(a, b, aKeyErr, bKeyErr)
 	}
 	if aKey == bKey {
 		return exitOK
@@ -580,9 +632,10 @@ func validateComparisonKeys(a, b *Result) int {
 	return exitError
 }
 
-func rejectUnverifiedContext(a, b *Result, aErr, bErr error) int {
+func rejectUnverifiedComparisonKey(a, b *Result, aErr, bErr error) int {
 	fmt.Printf("  %s  vs  %s\n\n", terminalText(a.Model), terminalText(b.Model))
-	fmt.Println("  INCONCLUSIVE  verified effective context is required for comparison")
+	requirement, remedy := comparisonGapMessage(aErr, bErr)
+	fmt.Printf("  INCONCLUSIVE  %s is required for comparison\n", requirement)
 	for i, keyErr := range []error{aErr, bErr} {
 		if keyErr == nil {
 			continue
@@ -590,8 +643,28 @@ func rejectUnverifiedContext(a, b *Result, aErr, bErr error) int {
 		result := []*Result{a, b}[i]
 		fmt.Printf("  %-12s %s\n", terminalText(result.Model)+":", terminalText(keyErr.Error()))
 	}
-	fmt.Println("  remedy       re-run both models on a runtime that reports its allocated context")
+	fmt.Printf("  remedy       %s\n", remedy)
 	return exitError
+}
+
+func comparisonGapMessage(aErr, bErr error) (string, string) {
+	if aErr != nil && bErr != nil && comparisonGapFor(aErr) != comparisonGapFor(bErr) {
+		return "verified comparison evidence", "resolve each reported evidence gap before re-running both models"
+	}
+	err := aErr
+	if err == nil {
+		err = bErr
+	}
+	switch comparisonGapFor(err) {
+	case comparisonContext:
+		return "verified effective context", "re-run both models on a runtime that reports its allocated context"
+	case comparisonConfig:
+		return "observed serving-runtime configuration", "re-run both models after fitr can observe the serving runtime's configuration"
+	case comparisonCompute:
+		return "an observed serving-runtime compute backend", "re-run both models after the serving runtime reports its compute backend"
+	default:
+		return "a valid comparison fingerprint", "re-run both models with the current fitr version after resolving the fingerprint errors"
+	}
 }
 
 func rejectDifferentComparisonContext(a, b *Result) int {

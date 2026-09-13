@@ -144,12 +144,13 @@ run_fitr() {
 validate_saved_run() {
   result_path="$1"
   expected_model="$2"
+  expected_digest="$(hash_file "$3" | awk '{print $1}')"
   log="${acceptance_dir}/commands/validate-$(basename "${result_path}" .json).log"
-  python3 - "${result_path}" "${expected_model}" "${ctx}" >"${log}" 2>&1 <<'PY'
+  python3 - "${result_path}" "${expected_model}" "${ctx}" "${expected_digest}" >"${log}" 2>&1 <<'PY'
 import json
 import sys
 
-path, expected_model, expected_ctx = sys.argv[1], sys.argv[2], int(sys.argv[3])
+path, expected_model, expected_ctx, expected_digest = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 with open(path, "r", encoding="utf-8") as handle:
     run = json.load(handle)
 
@@ -158,11 +159,18 @@ assert run["model"] == expected_model, run.get("model")
 manifest = run["manifest"]
 assert manifest["model"]["backend"] == "llama-server", manifest["model"]
 assert manifest["model"]["binding"] == "observed_only", manifest["model"]
+assert manifest["model"]["kind"] == "local_file_sha256", manifest["model"]
+assert manifest["model"]["value"] == "sha256:" + expected_digest, manifest["model"]
 assert manifest["provenance"]["backend_protocol"] == "fitr.backend.llama-server-native.v1"
 context = run["device_fingerprint_v2"]["context"]
 assert context["requested_tokens"] == expected_ctx, context
 assert context["effective_tokens"] == expected_ctx, context
 assert context["effective_source"] == "runtime_report", context
+# llama.cpp b10700 /props reports the window but no compute backend. Knowing
+# the launch used CPU is not a runtime observation made by this fitr process.
+device = run["device_fingerprint_v2"]["device"]
+assert device.get("accel_source") == "unobserved", device
+assert not device.get("gpu_backend"), device
 memory = run["memory"]
 assert memory["outcome"] == "skipped", memory
 assert "does not report resident allocation bytes" in memory["unavailable_reason"], memory
@@ -211,7 +219,7 @@ run_fitr advise-a "0,3" "${FITR_UNDER_TEST}" advise "${model_a_name}" \
   --backend llama-server --ctx "${ctx}" --vram-gb 8 --display plain
 run_fitr run-a "0,3" "${FITR_UNDER_TEST}" run "${model_a_name}" \
   --backend llama-server --ctx "${ctx}" --quick -k 1 --display plain
-validate_saved_run "$(saved_result_for "${model_a_name}")" "${model_a_name}"
+validate_saved_run "$(saved_result_for "${model_a_name}")" "${model_a_name}" "${FITR_ACCEPTANCE_MODEL_A}"
 run_fitr apply-a "0,3" "${FITR_UNDER_TEST}" apply "${model_a_name}" \
   --backend llama-server
 run_fitr doctor-a "0,3" "${FITR_UNDER_TEST}" doctor "${model_a_name}" \
@@ -236,7 +244,7 @@ stop_server
 start_server "${FITR_ACCEPTANCE_MODEL_B}" "model-b"
 run_fitr run-b "0,3" "${FITR_UNDER_TEST}" run "${model_b_name}" \
   --backend llama-server --ctx "${ctx}" --quick -k 1 --display plain
-validate_saved_run "$(saved_result_for "${model_b_name}")" "${model_b_name}"
+validate_saved_run "$(saved_result_for "${model_b_name}")" "${model_b_name}" "${FITR_ACCEPTANCE_MODEL_B}"
 run_fitr view-b "0,3" "${FITR_UNDER_TEST}" view "${model_b_name}"
 stop_server
 
