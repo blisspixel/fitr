@@ -82,6 +82,14 @@ scratch directory, which holds stale copies of the whole repository.
 git ls-files '*.go' | xargs gofmt -l
 ```
 
+File length is a gate too, and it fails on the file rather than on the change,
+so it can go red on a commit that never touched Go. Check it with the rest
+rather than discovering it in CI:
+
+```bash
+git ls-files '*.go' | grep -v '_test\.go$' | xargs wc -l | awk '$1 > 1600'
+```
+
 Two things that look like failures and are not. `golangci-lint` type-checks with
 the Go toolchain it was itself built with, so a copy built by an older Go panics
 with "file requires newer Go version" on this tree; reinstall it at the version
