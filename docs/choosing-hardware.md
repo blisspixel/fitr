@@ -12,6 +12,26 @@ large-memory device can fit a model that generates slowly. A smaller model can
 generate quickly and still fail the tool or structured-output behavior that
 made it worth running. fitr does not combine those facts into a hardware score.
 
+## Where fitr's attention goes
+
+The machines this tool is built around have an accelerator: a discrete GPU, or
+a unified-memory system where the accelerator and the host share one pool, such
+as Apple Silicon and the NVIDIA shared-memory SoCs. That is where the capacity
+arithmetic is hard, where placement can silently change what a number means,
+and where a wrong answer costs the most.
+
+CPU inference is supported and measured honestly. Placement is reported, a
+CPU-only allocation is a real observation rather than a failure, and a
+CPU-served run is comparable to other CPU-served runs on the same machine. It
+is not the case this product optimizes for. Treat it as the answer when no
+accelerator is available rather than the configuration to tune toward, and read
+a CPU result as what that machine can do rather than as what the model can do.
+
+The practical consequence is a priority, not a restriction. Gaps that affect
+accelerator and unified-memory machines matter more here than gaps that affect
+CPU-only ones: a probe that works on one vendor's accelerator and not another's
+is a larger hole than a missing CPU refinement.
+
 ## What fitr can and cannot decide today
 
 fitr can measure the machine in front of it and attach the result to the exact
