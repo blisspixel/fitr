@@ -13,6 +13,16 @@ import (
 
 const FingerprintSchemaV2 = "fitr.device.fingerprint.v2"
 
+// Comparison exclusions retain their cause so callers do not label every
+// unavailable key as a missing context receipt. Unknown validation errors
+// remain distinct from these known evidence gaps.
+var (
+	ErrUnverifiedContext     = errors.New("effective context is unverified")
+	ErrContextProbeMinimum   = errors.New("context probe did not meet its minimum served-token receipt")
+	ErrUnobservedConfig      = errors.New("serving-runtime configuration is unobserved")
+	ErrUnobservedAccelerator = errors.New("the serving runtime's compute backend is unobserved")
+)
+
 type ContextEvidenceSource string
 
 const (
@@ -216,20 +226,20 @@ func (f FingerprintV2) ComparabilityKey() (string, error) {
 		return "", err
 	}
 	if f.Context.EffectiveTokens == nil {
-		return "", errors.New("effective context is unverified")
+		return "", ErrUnverifiedContext
 	}
 	if f.Context.Probe != nil && !f.Context.Probe.MeetsMinimum() {
-		return "", errors.New("context probe did not meet its minimum served-token receipt")
+		return "", ErrContextProbeMinimum
 	}
 	if f.Device.ConfigSource == ConfigSourceUnobserved {
-		return "", errors.New("serving-runtime configuration is unobserved")
+		return "", ErrUnobservedConfig
 	}
 	// The accelerator is in the key material below. An unobserved one is an
 	// absent reading rather than a CPU-only runtime, and letting the two share
 	// an empty string pools evidence from machines that compute differently,
 	// or splits one machine's evidence when a log rotates underneath it.
 	if !f.Device.AcceleratorObserved() {
-		return "", errors.New("the serving runtime's compute backend is unobserved")
+		return "", ErrUnobservedAccelerator
 	}
 	material := fingerprintKeyMaterial{
 		Schema: f.Schema,

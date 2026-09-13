@@ -129,6 +129,14 @@ llama-server is not a receipt for the bytes already loaded: fitr records the
 observed file hash for inspection but excludes the result from artifact-ranked
 claims unless the runtime supplies a binding receipt.
 
+An observed context also does not establish runtime configuration or compute
+provenance. Their comparison gates retain separate reasons. For example,
+llama-server [b10700 properties](https://github.com/ggml-org/llama.cpp/blob/bebc9350ecc42a31ad119da1513998386671cf5b/tools/server/server-context.cpp#L4124-L4196)
+can report an 8192-token window while leaving the compute
+backend unobserved; fitr must not describe that window as missing. Artifact
+integrity and contamination are checked before grouping otherwise claimable
+results by their comparison key.
+
 The generic OpenAI API does not standardize artifact identity. For a measured
 run, set `FITR_OPENAI_MODEL_SHA256` to the independently obtained expected
 SHA-256. The selected `/v1/models` entry must assert the same digest, using
