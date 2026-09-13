@@ -940,6 +940,15 @@ func prepareMockDeviceReceipt(r *Result) error {
 		// host's unobserved fallback.
 		r.Device.ConfigSource = device.ConfigSourceServerLog
 	}
+	if !r.Device.AcceleratorObserved() {
+		// Same reason, same source: the accelerator is read from that daemon
+		// log too. A sealed measurement observed one by definition, so the
+		// fixture says which rather than inheriting the host's absence.
+		r.Device.AccelSource = device.AccelSourceRuntime
+		if r.Device.GPUBackend == "" {
+			r.Device.GPUBackend = "cuda"
+		}
+	}
 	fingerprintV2, err := device.NewFingerprintV2(r.Device, device.ContextVerification{
 		RequestedTokens: effective, EffectiveTokens: &effective,
 		EffectiveSource: device.ContextSourceRuntimeReport,
