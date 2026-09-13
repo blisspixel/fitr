@@ -24,3 +24,10 @@ are available from their pinned source repositories:
 `github.com/lucasb-eyer/go-colorful` is Copyright 2013 Lucas Beyer. tcell and
 gdamore encoding retain the notices and copyright statements in their pinned
 source distributions.
+
+The test-only protocol schema fixtures under `scripts/testdata` are copied
+from the Model Context Protocol specification and Agent Plugins specification.
+Exact upstream revisions and hashes are in `scripts/testdata/interop-sources.json`.
+The MCP upstream license, including its Apache-2.0/MIT transition notice, is
+retained beside its fixture. The Agent Plugins schemas use the same Apache License 2.0 supplied in
+this repository's `LICENSE`. These fixtures are not linked into the binary.

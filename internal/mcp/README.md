@@ -3,6 +3,8 @@
 `fitr mcp serve` speaks MCP **2026-07-28** over newline-delimited stdio. The
 host chooses the installed executable and local `FITR_RESULTS` directory before
 launch. No request can supply a path, endpoint, command, model or credential.
+The portable package selects `${PLUGIN_DATA}/results` with an explicit
+environment overlay; native MCP configurations can select another local store.
 There are no network clients, model executions, file writes or mutation tools.
 UNC, device, alternate-stream and parent-traversal paths are rejected before
 filesystem resolution. Local aliases are resolved with bounded component and
@@ -19,6 +21,12 @@ required metadata returns `-32602`. Every success includes `resultType` set to
 `complete`. These follow the current [versioning contract](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning),
 [request metadata](https://modelcontextprotocol.io/specification/2026-07-28/basic#meta)
 and [discovery schema](https://modelcontextprotocol.io/specification/2026-07-28/server/discover).
+
+The September 13, 2026 check used specification commit
+`cc2a84f5ca5404b2949683f7d7876f623344294f`. Known nested capability declarations
+must have object values; extension names require a valid namespace prefix.
+These fields grant no additional server capability. A legacy `initialize`
+diagnostic names `2026-07-28` so a legacy-only client can explain its mismatch.
 
 Example request, as one line:
 
@@ -103,6 +111,13 @@ configuration. Agent Plugins **1.0.0** standardizes skills and MCP configuration
 packaging does not prove wire compatibility or sandbox a subprocess. See the
 [package specification](https://agent-plugins.org/specification) and
 [closed configuration schema](https://agent-plugins.org/schemas/1.0.0/mcp.schema.json).
+
+The package supplies `FITR_RESULTS: "${PLUGIN_DATA}/results"` in `env` because
+section 9.1 does not permit depending on an unspecified ambient environment.
+The current official SDK `mcp==2.2.0` acceptance applies that configuration and
+validates the package plus actual wire envelopes against frozen upstream
+schemas. It records schema, package and binary hashes. All schema resolution
+is local; the additional validator is test-only and is not linked into fitr.
 
 A2A remains a future evaluation adapter, not a server feature. The next bounded
 contract should pin an Agent Card interface, `protocolBinding`, URL and wire

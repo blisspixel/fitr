@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"regexp"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/blisspixel/fitr/internal/strictjson"
 )
 
 const ProtocolVersion = "2026-07-28"
+const legacyVersionDiagnostic = "Legacy initialize is not supported; this server supports MCP " + ProtocolVersion
 
 const (
 	versionKey      = "io.modelcontextprotocol/protocolVersion"
@@ -130,6 +132,9 @@ func validateMetadata(req request) *response {
 	if !ok || !capabilitiesOK || json.Unmarshal(meta[versionKey], &requested) != nil ||
 		bytes.Equal(meta[versionKey], []byte("null")) || len(requested) > 128 || !validMetaFields(meta) {
 		r := failure(req.id, -32602, "Required request metadata is missing or invalid")
+		if req.method == "initialize" {
+			r.Error.Message = legacyVersionDiagnostic
+		}
 		return &r
 	}
 	if requested != ProtocolVersion {
@@ -174,12 +179,25 @@ func validCapabilityShapes(raw json.RawMessage) bool {
 			if !ok {
 				return false
 			}
-			if key == "extensions" || key == "experimental" {
-				for _, entry := range settings {
-					if _, ok := decodeObject(entry); !ok {
-						return false
-					}
-				}
+			if !validCapabilitySettings(key, settings) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validCapabilitySettings(kind string, settings object) bool {
+	for name, value := range settings {
+		if kind == "extensions" && (!strings.Contains(name, "/") || !metaKeyPattern.MatchString(name)) {
+			return false
+		}
+		objectRequired := kind == "extensions" || kind == "experimental" ||
+			(kind == "sampling" && (name == "context" || name == "tools")) ||
+			(kind == "elicitation" && (name == "form" || name == "url"))
+		if objectRequired {
+			if _, ok := decodeObject(value); !ok {
+				return false
 			}
 		}
 	}

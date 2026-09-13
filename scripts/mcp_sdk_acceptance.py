@@ -10,6 +10,7 @@ import argparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
+from functools import lru_cache
 import importlib.metadata
 import json
 import os
@@ -22,6 +23,8 @@ import tempfile
 import time
 
 import anyio
+from jsonschema import Draft202012Validator
+from referencing import Registry
 from mcp import Client, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.shared.exceptions import MCPError
@@ -33,6 +36,8 @@ LOCK = ROOT / "scripts/mcp-sdk-requirements.txt"
 FIXTURE = ROOT / "internal/record/testdata/schema5-signed-v0.9.8.json"
 HELPER = ROOT / "scripts/mcp-sdk-fixture.go"
 SELECTION_HELPER = ROOT / "scripts/mcp-selection-fixture.go"
+CONTRACTS = ROOT / "scripts/testdata"
+PLUGIN = ROOT / "plugins/fitr"
 PROTOCOL = "2026-07-28"
 MODES = (PROTOCOL, "auto")
 TOOL_NAMES = ["fitr_role_review", "fitr_role_status", "fitr_roles_list"]
@@ -49,6 +54,77 @@ class AcceptanceError(RuntimeError):
 def require(condition, message):
     if not condition:
         raise AcceptanceError(message)
+
+
+@lru_cache(maxsize=16)
+def contract_validator(filename, definition=None):
+    schema = json.loads((CONTRACTS / filename).read_text(encoding="utf-8"))
+    if definition:
+        schema = {**schema, "$ref": f"#/$defs/{definition}"}
+    Draft202012Validator.check_schema(schema)
+    # Frozen schemas only reference their own definitions. An empty registry
+    # refuses external references instead of fetching them during acceptance.
+    return Draft202012Validator(schema, registry=Registry())
+
+
+def validate_contract(value, filename, definition=None):
+    require(contract_validator(filename, definition).is_valid(value),
+            "acceptance input or wire message violates its frozen upstream schema")
+
+
+def validate_contract_sources():
+    provenance = json.loads((CONTRACTS / "interop-sources.json").read_text(encoding="utf-8"))
+    sources = provenance["sources"]
+    require({entry["file"] for entry in sources} == {"mcp-2026-07-28.schema.json",
+            "agent-plugins-1.0.0-plugin.schema.json", "agent-plugins-1.0.0-mcp.schema.json"},
+            "frozen upstream schema inventory changed")
+    for entry in sources:
+        require(digest_file(CONTRACTS / entry["file"]) == "sha256:" + entry["sha256"],
+                "upstream schema fixture differs from its recorded source hash")
+
+
+def portable_server(plugin=PLUGIN):
+    manifest = json.loads((plugin / "plugin.json").read_text(encoding="utf-8"))
+    configuration = json.loads((plugin / "mcp.json").read_text(encoding="utf-8"))
+    validate_contract(manifest, "agent-plugins-1.0.0-plugin.schema.json")
+    validate_contract(configuration, "agent-plugins-1.0.0-mcp.schema.json")
+    require(manifest["name"] == "fitr" and set(configuration["mcpServers"]) == {"fitr-evidence"},
+            "portable package identity or server surface changed")
+    server = configuration["mcpServers"]["fitr-evidence"]
+    require(server["type"] == "stdio" and server["command"] == "fitr" and server["args"] == ["mcp", "serve"],
+            "portable package must launch the installed read-only stdio command")
+    # Agent Plugins 1.0.0 section 9.1 forbids depending on ambient variables.
+    # The host must supply PLUGIN_DATA; its explicit overlay selects evidence.
+    require(server.get("env") == {"FITR_RESULTS": "${PLUGIN_DATA}/results"},
+            "portable package must explicitly select its client-managed evidence root")
+    # This package uses exactly two plain YAML fields. Their limits and fixed
+    # directory naming follow agentskills.io/specification, checked 2026-09-13.
+    skill = plugin / "skills/fitr-evidence/SKILL.md"
+    sections = skill.read_text(encoding="utf-8").split("---", 2)
+    require(len(sections) == 3 and sections[0] == "", "portable skill has no YAML frontmatter")
+    lines = sections[1].strip().splitlines()
+    require(len(lines) == 2 and lines[0] == "name: fitr-evidence" and lines[1].startswith("description: "),
+            "portable skill's fixed name/description frontmatter changed")
+    description = lines[1].removeprefix("description: ")
+    require(1 <= len(description) <= 1024 and "\t" not in description and sections[2].strip(),
+            "portable skill description or instructions are missing or invalid")
+    return server
+
+
+def plugin_parameters(binary, temporary, results):
+    server = portable_server()
+    environment = child_environment(temporary, results)
+    roots = {"PLUGIN_ROOT": str(PLUGIN.resolve()), "PLUGIN_DATA": str(temporary)}
+    def expand(value):
+        # A single substitution pass keeps placeholder-like path text literal.
+        return re.sub(r"\$\{(PLUGIN_ROOT|PLUGIN_DATA)\}", lambda match: roots[match.group(1)], value)
+    environment.update({name: expand(value) for name, value in server.get("env", {}).items()})
+    environment.update(roots)
+    require(Path(environment["FITR_RESULTS"]) == results, "plugin selected another fixture root")
+    # The harness resolves the package's bare fitr token to this exact candidate
+    # binary. Arguments, environment overlay and default cwd come from the package.
+    return StdioServerParameters(command=str(binary), args=[expand(value) for value in server["args"]],
+                                 env=environment, cwd=PLUGIN.resolve())
 
 
 def canonical(value):
@@ -359,6 +435,17 @@ def validate_transcript(transcript, private_values, mode):
         meta = request["params"]["_meta"]
         require(meta["io.modelcontextprotocol/protocolVersion"] == PROTOCOL, "request version metadata missing")
         require(isinstance(meta["io.modelcontextprotocol/clientCapabilities"], dict), "client capabilities missing")
+    definitions = {"server/discover": ("DiscoverRequest", "DiscoverResultResponse"),
+                   "tools/list": ("ListToolsRequest", "ListToolsResultResponse"),
+                   "tools/call": ("CallToolRequest", "CallToolResultResponse")}
+    correlated = {(type(item["id"]).__name__, item["id"]): item["method"] for item in requests}
+    for request in requests:
+        require(request["method"] in definitions, "SDK emitted a request outside this profile")
+        validate_contract(request, "mcp-2026-07-28.schema.json", definitions[request["method"]][0])
+    for reply in replies:
+        method = correlated[(type(reply["id"]).__name__, reply["id"])]
+        definition = "JSONRPCErrorResponse" if "error" in reply else definitions[method][1]
+        validate_contract(reply, "mcp-2026-07-28.schema.json", definition)
     validate_redaction(replies, private_values)
     for reply in replies:
         if "result" in reply:
@@ -406,8 +493,7 @@ async def run_case(binary, version, mode, fixture):
             expected = None
         before = snapshot(temporary)
         transcript = []
-        parameters = StdioServerParameters(command=str(binary), args=["mcp", "serve"],
-                                           env=child_environment(temporary, results), cwd=temporary)
+        parameters = plugin_parameters(binary, temporary, results)
         # stderr is outside the monitored fixture tree and never published.
         with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr:
             started = time.monotonic()
@@ -454,7 +540,7 @@ def installed_dependencies():
         actual = importlib.metadata.version(name)
         require(actual == wanted, f"installed dependency differs from lock: {name}")
         result[name] = actual
-    require(result.get("mcp") == "2.0.0", "official MCP SDK pin missing")
+    require(result.get("mcp") == "2.2.0", "official MCP SDK pin missing")
     return result
 
 
@@ -464,6 +550,7 @@ def deny_network(event, _arguments):
 
 
 async def accept(binary):
+    validate_contract_sources()
     identities = input_identities(binary)
     dependencies = installed_dependencies()
     version = run_local([str(binary), "version"]).strip().removeprefix("fitr ")
@@ -483,6 +570,7 @@ async def accept(binary):
             **identities,
             "python": platform.python_version(), "os": platform.system(), "architecture": platform.machine(),
             "dependencies": dependencies, "cases": cases,
+            "plugin_configuration_applied": True, "upstream_schemas_validated": True,
             "limits": {"case_seconds": 20, "sdk_cleanup_seconds": 5, "transcript_bytes": MAX_TRANSCRIPT_BYTES},
             "named_harness_acceptance": False, "model_calls": 0,
             "network_boundary": "Python socket connections denied; fitr stdio-only profile, not an OS sandbox"}
@@ -493,7 +581,10 @@ def input_identities(binary):
             "script_sha256": digest_file(Path(__file__)), "fixture_sha256": digest_file(FIXTURE),
             "fixture_helper_sha256": digest_file(HELPER), "selection_fixture_helper_sha256": digest_file(SELECTION_HELPER),
             "plugin_files_sha256": {path.relative_to(ROOT / "plugins/fitr").as_posix(): digest_file(path)
-                                     for path in sorted((ROOT / "plugins/fitr").rglob("*")) if path.is_file()}}
+                                     for path in sorted((ROOT / "plugins/fitr").rglob("*")) if path.is_file()},
+            "upstream_schema_files_sha256": {path.name: digest_file(path)
+                                              for path in sorted(CONTRACTS.glob("*.schema.json"))},
+            "upstream_schema_sources_sha256": digest_file(CONTRACTS / "interop-sources.json")}
 
 
 def main():
@@ -508,7 +599,7 @@ def main():
     with args.out.open("x", encoding="utf-8") as stream:
         json.dump(receipt, stream, indent=2)
         stream.write("\n")
-    print(f"Official MCP SDK 2.0.0 acceptance passed: fitr {receipt['fitr_version']}; {len(receipt['cases'])} cases; no named harness claim.")
+    print(f"Official MCP SDK {receipt['dependencies']['mcp']} acceptance passed: fitr {receipt['fitr_version']}; {len(receipt['cases'])} cases; no named harness claim.")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import copy
 from datetime import datetime, timedelta, timezone
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -46,6 +47,47 @@ class PrivacyTests(unittest.TestCase):
     def test_fixed_diagnostic_and_sanitized_summary_pass(self):
         smoke.validate_redaction({"content": [{"text": smoke.UNAVAILABLE}], "role": "coding"}, ["private-path"])
         smoke.validate_redaction("{not JSON", ["private-path"])
+
+
+class PortablePackageTests(unittest.TestCase):
+    def test_package_supplies_evidence_root_under_standard_environment(self):
+        server = smoke.portable_server()
+        self.assertEqual(server["env"], {"FITR_RESULTS": "${PLUGIN_DATA}/results"})
+
+    def test_upstream_schemas_reject_unknown_config_and_bad_manifest(self):
+        for value, schema in [
+            ({"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", "name": "Bad Name"},
+             "agent-plugins-1.0.0-plugin.schema.json"),
+            ({"$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json", "mcpServers": {
+                "bad": {"type": "stdio", "command": "fitr", "url": "https://example.invalid"}}},
+             "agent-plugins-1.0.0-mcp.schema.json"),
+        ]:
+            with self.subTest(schema=schema), self.assertRaises(smoke.AcceptanceError):
+                smoke.validate_contract(value, schema)
+
+    def test_frozen_schema_hashes_detect_mutation(self):
+        smoke.validate_contract_sources()
+        with tempfile.TemporaryDirectory() as raw:
+            copied = Path(raw)
+            for source in smoke.CONTRACTS.iterdir():
+                if source.is_file():
+                    shutil.copyfile(source, copied / source.name)
+            with patch.object(smoke, "CONTRACTS", copied):
+                smoke.validate_contract_sources()
+                (copied / "mcp-2026-07-28.schema.json").write_text("{}", encoding="utf-8")
+                with self.assertRaises(smoke.AcceptanceError):
+                    smoke.validate_contract_sources()
+
+    def test_package_environment_overrides_ambient_evidence(self):
+        with tempfile.TemporaryDirectory(prefix="fitr-${PLUGIN_ROOT}-") as raw:
+            root = Path(raw).resolve()
+            with patch.dict(smoke.os.environ, {"FITR_RESULTS": "ambient-secret"}):
+                parameters = smoke.plugin_parameters(Path("candidate"), root, root / "results")
+            self.assertEqual(parameters.env["FITR_RESULTS"], str(root) + "/results")
+            self.assertEqual(parameters.env["PLUGIN_DATA"], str(root))
+            self.assertEqual(parameters.env["PLUGIN_ROOT"], str(smoke.PLUGIN.resolve()))
+            self.assertEqual(Path(parameters.cwd), smoke.PLUGIN.resolve())
+            self.assertIn("${PLUGIN_ROOT}", parameters.env["FITR_RESULTS"])
 
 
 class EvidenceTests(unittest.TestCase):
@@ -205,10 +247,19 @@ def transcript():
     return [{"direction": "client", "message": {"jsonrpc": "2.0", "id": 1, "method": "server/discover",
              "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": smoke.PROTOCOL,
                                   "io.modelcontextprotocol/clientCapabilities": {}}}}},
-            {"direction": "server", "message": {"jsonrpc": "2.0", "id": 1, "result": {"resultType": "complete"}}}]
+            {"direction": "server", "message": {"jsonrpc": "2.0", "id": 1, "result": {
+                "resultType": "complete", "supportedVersions": [smoke.PROTOCOL], "capabilities": {"tools": {}},
+                "ttlMs": 60000, "cacheScope": "public"}}}]
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_frozen_upstream_schema_rejects_incomplete_discovery(self):
+        for field in ("supportedVersions", "capabilities", "ttlMs", "cacheScope"):
+            rows = transcript()
+            del rows[1]["message"]["result"][field]
+            with self.subTest(field=field), self.assertRaises(smoke.AcceptanceError):
+                smoke.validate_transcript(rows, [], smoke.PROTOCOL)
+
     def test_real_discovery_metadata_correlation_and_completion(self):
         smoke.validate_transcript(transcript(), [], smoke.PROTOCOL)
         for problem in ("synthetic", "legacy", "id_type", "metadata", "incomplete", "duplicate"):
@@ -284,14 +335,14 @@ class IsolationTests(unittest.TestCase):
             with self.subTest(event=event), self.assertRaises(smoke.AcceptanceError):
                 smoke.deny_network(event, ())
         smoke.deny_network("open", ())
-        self.assertEqual(smoke.installed_dependencies()["mcp"], "2.0.0")
+        self.assertEqual(smoke.installed_dependencies()["mcp"], "2.2.0")
         with patch.object(smoke.importlib.metadata, "version", return_value="different"), self.assertRaises(smoke.AcceptanceError):
             smoke.installed_dependencies()
 
     def test_changed_inputs_cannot_publish_passed_receipt(self):
         version = (smoke.ROOT / "internal/buildinfo/version.txt").read_text().strip()
         with patch.object(smoke, "input_identities", side_effect=[{"binary": "before"}, {"binary": "after"}]), \
-             patch.object(smoke, "installed_dependencies", return_value={"mcp": "2.0.0"}), \
+             patch.object(smoke, "installed_dependencies", return_value={"mcp": "2.2.0"}), \
              patch.object(smoke, "run_local", return_value="fitr " + version), \
              patch.object(smoke.sys, "addaudithook"), patch.object(smoke, "run_case", new=AsyncMock(return_value={})), \
              self.assertRaisesRegex(smoke.AcceptanceError, "inputs changed"):

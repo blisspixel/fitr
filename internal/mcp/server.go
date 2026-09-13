@@ -213,6 +213,9 @@ func (s *server) protocol(req request) response {
 		}
 		return s.complete(req.id, map[string]any{"tools": catalog(), "ttlMs": 60000, "cacheScope": "public"})
 	default:
+		if req.method == "initialize" {
+			return failure(req.id, -32601, legacyVersionDiagnostic)
+		}
 		return failure(req.id, -32601, "Method not supported by this read-only profile")
 	}
 }
