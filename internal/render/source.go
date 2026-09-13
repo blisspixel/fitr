@@ -19,6 +19,19 @@ func WriteSourceResolution(w io.Writer, resolution source.Resolution, mode strin
 	if resolution.ResolvedCommit != "" {
 		Field(w, "  commit", 13, resolution.ResolvedCommit, width)
 	}
+	// Who made this and from what. It is the one candidate signal that is not
+	// a popularity measure, and popularity ranks a repository by how long it
+	// has existed, which is backwards for the releases someone is asking about.
+	if summary := resolution.Publisher.Summary(); summary != "" {
+		Field(w, "  publisher", 13, summary, width)
+	}
+	if resolution.Publisher != nil && resolution.Publisher.License != "" {
+		Field(w, "  license", 13, resolution.Publisher.License, width)
+	}
+	if resolution.Publisher != nil && resolution.Publisher.Gated != "" {
+		Field(w, "  gated", 13, resolution.Publisher.Gated+
+			"; metadata may resolve while the files refuse", width)
+	}
 	for _, file := range resolution.Files {
 		fmt.Fprintln(w)
 		Field(w, "  file", 13, file.Path, width)

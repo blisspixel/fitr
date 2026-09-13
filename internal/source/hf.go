@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -86,6 +87,9 @@ func (resolver *Resolver) ResolveHF(ctx context.Context, request HFRequest) (Res
 		return resolver.finish(result, "dependency_limit")
 	}
 	result.ResolvedRepo, result.ResolvedCommit = second.ID, second.SHA
+	// Read from the confirmed second response, the one whose commit and
+	// repository identity were both checked, rather than the first.
+	result.Publisher = publisherFrom(second)
 	for path := range second.files {
 		result.InventoryPaths = append(result.InventoryPaths, path)
 	}
@@ -227,7 +231,19 @@ type hfMetadata struct {
 	ID       string      `json:"id"`
 	SHA      string      `json:"sha"`
 	Siblings []hfSibling `json:"siblings"`
-	files    map[string]FileMetadata
+	// Lineage fields, decoded from the same response the file metadata comes
+	// from so they cost no additional request. base_model appears as a string
+	// or a list, and gated as a boolean or a name, so both stay raw until a
+	// decoder that accepts each shape reads them.
+	Author    string          `json:"author"`
+	CreatedAt string          `json:"createdAt"`
+	Tags      []string        `json:"tags"`
+	Gated     json.RawMessage `json:"gated"`
+	CardData  struct {
+		BaseModel json.RawMessage `json:"base_model"`
+		License   string          `json:"license"`
+	} `json:"cardData"`
+	files map[string]FileMetadata
 }
 
 type hfSibling struct {

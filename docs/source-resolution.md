@@ -16,6 +16,27 @@ fitr source show resolution.json --display json
 fitr source resolve hf --repo owner/model --revision main   --file model-Q4_K_M.gguf --out resolution.json --fit --ctx 32768
 ```
 
+## Who published it, and from what
+
+The receipt records the repository's author, the base model it declares, and
+whether those are the same party. That last value is arithmetic rather than a
+judgement, and it is deliberately not a quality claim: a third-party conversion
+is frequently the only one that exists, and is not thereby worse.
+
+It is recorded because the obvious way to choose among candidates is the wrong
+one. Download counts rank a repository by how long it has existed and how well
+it is known, which is exactly backwards for the new releases someone is asking
+about, and in practice they place third-party requantizations above the model
+author's own conversion. Lineage answers the same question without that bias.
+
+An absent base model is evidence of nothing and never reads as first-party
+authorship. The declared license and gating state are recorded beside it; a
+gated repository can answer metadata while refusing the files, so gating is a
+fact about what comes next rather than a failure.
+
+All of it comes from the response the resolver already fetched for the file
+metadata, so it costs no additional request and no additional trust.
+
 ## Project a fit without downloading the weights
 
 The declared size gives the weights and the artifact's opening bytes give the

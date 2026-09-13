@@ -144,6 +144,10 @@ type Resolution struct {
 	Dependencies     []DependencyFinding `json:"dependencies"`
 	Gaps             []string            `json:"gaps"`
 	Queries          []QueryObservation  `json:"queries"`
+	// Publisher is who produced this artifact and from what. It is omitted
+	// when the provider said nothing, so receipts written before it existed
+	// keep their exact bytes and their digest.
+	Publisher *Publisher `json:"publisher,omitempty"`
 }
 
 func selectedState(files []FileMetadata) (string, []string) {

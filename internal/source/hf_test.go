@@ -299,7 +299,10 @@ func TestProductionTransportPolicy(t *testing.T) {
 
 func TestResolveHFAcceptsAdditiveMetadata(t *testing.T) {
 	body := sourceBody(t, sourceSibling("model.gguf"))
-	other := strings.Replace(body, `"siblings":`, `"downloads":99,"cardData":{"arbitrary":"inert"},"siblings":`, 1)
+	// Both injected names must be ones the resolver does not model, or this
+	// stops testing tolerance and starts testing duplicate-key rejection.
+	// cardData used to qualify and no longer does: lineage reads it now.
+	other := strings.Replace(body, `"siblings":`, `"downloads":99,"likes":7,"siblings":`, 1)
 	resolver, _ := sourceResolver(t, body, other)
 	result, err := resolver.ResolveHF(t.Context(), sourceRequest())
 	if err != nil || result.State != "resolved" || result.Queries[0].ResponseSHA256 == result.Queries[1].ResponseSHA256 {
