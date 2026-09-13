@@ -1273,6 +1273,65 @@ only when an independently verified bounded workload is part of the experiment.
 That makes soak depend on the generalized workload receipts in build-order item
 4, which is why it is last.
 
+## Finding a configuration, and knowing when not to claim one
+
+The knobs interact and the search space is large, so the appeal of an automatic
+optimizer is obvious. The constraint that shapes it is not the search method.
+It is that most of the differences people want to tune for are smaller than
+this instrument can resolve at the repeat counts anyone will wait for.
+
+At the 1.6 percent coefficient of variation measured on one device, three
+repeats give a 95 percent interval of about four percent on the mean, so two
+configurations do not separate until they differ by roughly eight. At five
+percent variation, three repeats give about twelve. Confirmation already
+requires separated intervals and already refuses a winner when they overlap,
+which is the correct behavior, but it currently discovers that after spending
+the time rather than before.
+
+So the first thing to build is not a search. It is a preflight that computes
+whether the declared budget could resolve the difference being asked about, and
+refuses with the repeat count that would be needed. A run that cannot answer
+the question is better refused in a second than concluded in an hour, and this
+is the same discipline that already refuses a ranking when configuration is
+unobserved.
+
+The second thing is validity, because the published tooling is weaker here than
+its confidence suggests. One widely used benchmark reports a dispersion figure
+computed in a way that overstates it substantially. Stock warmup biases prompt
+processing measurably. Running all repeats of one candidate together confounds
+thermal drift with the candidate, and that bias does not shrink with more
+repeats, so ordering must be randomized rather than merely repeated. The
+context experiment already seals a point order; that order should be randomized
+within the sealed plan rather than fixed. Prompt caching is on by default in
+both engines, which makes a zero cached-token count a cheap mechanical seal on
+a timing being what it claims.
+
+Only then a search, and a modest one. Methods that need on the order of a
+hundred evaluations do not fit a desktop budget where each evaluation costs
+minutes, and short-run proxies are not valid here because the start-time knobs
+change what the run is. Racing a small candidate set on a shared seed, blocked
+and randomized, discarding candidates as they fall out, fits the budget that
+exists. Whatever survives goes through the existing fresh confirmation rather
+than being reported from the data that selected it.
+
+- [ ] Confirmation preflight: refuse a comparison the budget cannot resolve,
+      naming the repeat count that would resolve it.
+- [ ] Randomize the sealed point order and seal the randomization, so drift is
+      spread across candidates instead of loading one.
+- [ ] Treat a nonzero cached-token count as a failed validity seal for any
+      timing that claims to be uncached.
+- [ ] A typed contract for start-time-only knobs, so changing one is known to
+      require a restart and a fresh measurement rather than being compared
+      across a boundary it invalidates.
+- [ ] A recommended-configuration artifact with per-value provenance: which
+      values were measured here, which were declared by the artifact, and which
+      are a runtime default nobody chose. Nothing in the ecosystem currently
+      distinguishes those three, which is why the output is worth producing.
+
+Named tiers rather than a continuous slider, and no global score. A
+configuration that is faster and worse is not better, and the frontier is the
+honest output when the floors do not separate the candidates.
+
 ## Quantization health
 
 A model quantized too far keeps producing fluent text. That is not an accident
