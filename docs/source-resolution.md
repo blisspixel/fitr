@@ -2,15 +2,41 @@
 
 Source resolution records public Hugging Face file metadata before any weight
 download. It answers which commit and files were observed, their declared sizes
-and hashes, and which dependencies still need investigation. It does not decide
-whether a model fits or qualifies for a role.
+and hashes, and which dependencies still need investigation. On its own it does
+not decide whether a model fits or qualifies for a role.
+
+`--fit` answers the fit half, before the bandwidth is spent.
 
 ```bash
 fitr source resolve hf --repo owner/model --revision main \
   --file model-Q4_K_M.gguf --out resolution.json
 fitr source show resolution.json
 fitr source show resolution.json --display json
+
+fitr source resolve hf --repo owner/model --revision main   --file model-Q4_K_M.gguf --out resolution.json --fit --ctx 32768
 ```
+
+## Project a fit without downloading the weights
+
+The declared size gives the weights and the artifact's opening bytes give the
+architecture, so the ordinary weights-plus-cache arithmetic applies to a model
+that is not on the machine. `--fit` reads the first 32 KiB of each resolved file
+and projects against the current device, including the shorter window or
+quantized cache that would make an oversized request fit.
+
+That read has its own network boundary, wider than metadata resolution's, and
+the output says so. The bytes of a large artifact are not on the host that
+serves its metadata: the provider answers the canonical URL with a redirect to a
+signed, expiring location on a content network it chooses, so refusing every
+redirect refuses the bytes. The read follows exactly one redirect, to an
+absolute HTTPS location, requests a bounded range, sends no credentials, and
+records the host that actually served it. The projection cites that host.
+
+What it establishes is bounded. The size is the provider's declaration rather
+than bytes fitr hashed, the header is a prefix rather than a verified file, and
+nothing here is a runtime observation. A projected fit is a reason to pull a
+candidate, never a measurement of one, and a model whose opening bytes are not a
+readable header is reported as such rather than guessed at.
 
 Use an existing physical output directory and a new filename. A source receipt
 is immutable: the command will not overwrite an existing file. All commands

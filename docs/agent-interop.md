@@ -343,8 +343,19 @@ exposes commit, ETag, size and download location. fitr's
 filenames, declared byte counts and content hashes, query observation times and
 unresolved dependencies. A Git object ID is not relabeled as a SHA-256 of model bytes.
 
-It uses explicit repository/revision/file inputs, at most two fixed-host
-anonymous metadata requests and no redirects. Unavailable hashes, denied
+It uses explicit repository/revision/file inputs and at most two fixed-host
+anonymous metadata requests, following no redirects.
+
+`--fit` is a separate, explicitly requested read and has a different boundary.
+The bytes of a large artifact are not on the host that serves its metadata: the
+provider answers the canonical URL with a redirect to a signed, expiring
+location on a content network it chooses, so refusing every redirect refuses
+the bytes. That read follows exactly one redirect, to an absolute HTTPS
+location, takes a bounded byte range of the opening 32 KiB, sends no
+credentials, and records the host that actually served the response. A
+projection built from those bytes cites that host rather than implying the
+canonical one served them, because it has a different provenance than a
+projection built from a file on disk. Unavailable hashes, denied
 metadata and ambiguous shard/encoder dependencies remain gaps. No model-card
 instructions, custom code, weight downloads or returned download URLs are used.
 

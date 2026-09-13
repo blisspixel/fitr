@@ -54,6 +54,8 @@ func resolveSource(ctx context.Context, args []string, resolve func(context.Cont
 	revision := fs.String("revision", "", "explicit branch, tag or full commit")
 	output := fs.String("out", "", "new private receipt in an existing directory")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
+	fit := fs.Bool("fit", false, "read each resolved GGUF's opening bytes and project its fit on this machine")
+	ctxSize := fs.Int("ctx", 0, "requested context for --fit (default: the artifact's own maximum)")
 	var files sourceFiles
 	fs.Var(&files, "file", "exact relative filename; repeat for each selected file")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -84,6 +86,12 @@ func resolveSource(ctx context.Context, args []string, resolve func(context.Cont
 	}
 	fmt.Fprintf(os.Stderr, "  receipt  %s\n", terminalText(*output))
 	code := writeSourceResolution(resolution, *mode)
+	if *fit {
+		// A separate, explicitly requested read. Metadata resolution stays on
+		// its fixed host; this one follows the provider to wherever it stores
+		// the bytes, and the output records which host that was.
+		projectResolvedFit(ctx, resolution, *ctxSize, *mode)
+	}
 	if ctx.Err() != nil && code != exitError {
 		return exitInterrupt
 	}
