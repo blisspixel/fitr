@@ -36,14 +36,56 @@ type Board struct {
 }
 
 type BoardGroup struct {
-	GPU          string     `json:"gpu"`
-	Driver       string     `json:"gpu_driver,omitempty"`
-	KV           string     `json:"kv_cache_type,omitempty"`
-	Note         string     `json:"note,omitempty"`
-	NumCtx       int        `json:"num_ctx,omitempty"`
-	EffectiveCtx int        `json:"effective_ctx,omitempty"`
-	ContextState string     `json:"context_state,omitempty"`
-	Rows         []BoardRow `json:"rows"`
+	GPU          string `json:"gpu"`
+	Driver       string `json:"gpu_driver,omitempty"`
+	KV           string `json:"kv_cache_type,omitempty"`
+	Note         string `json:"note,omitempty"`
+	NumCtx       int    `json:"num_ctx,omitempty"`
+	EffectiveCtx int    `json:"effective_ctx,omitempty"`
+	ContextState string `json:"context_state,omitempty"`
+	// Runtime and ModelStore are part of the comparability key but not of the
+	// header, so two blocks can differ only in these and render identically.
+	// They are carried so a collision can say what separated the blocks.
+	Runtime    string     `json:"runtime,omitempty"`
+	ModelStore string     `json:"model_store,omitempty"`
+	Rows       []BoardRow `json:"rows"`
+}
+
+// boardDistinctions explains what separates blocks whose headers are identical.
+//
+// A board refusing to rank across configurations is only useful if a reader
+// can tell which configuration each block is. Two runs on the same card,
+// driver, cache dtype and context render the same header while belonging to
+// different blocks, because the serving runtime version or the model store
+// differs, and neither appears in the header. The reader then sees the same
+// heading twice and concludes the board is duplicating rows.
+//
+// Nothing is added when headers are already distinct, so an ordinary board is
+// unchanged.
+func boardDistinctions(groups []BoardGroup) []string {
+	headers := make(map[string]int, len(groups))
+	for _, group := range groups {
+		headers[boardHeaderText(group, glyphs{Dot: " | "})]++
+	}
+	notes := make([]string, len(groups))
+	for i, group := range groups {
+		if headers[boardHeaderText(group, glyphs{Dot: " | "})] < 2 {
+			continue
+		}
+		var parts []string
+		if runtime := SingleLine(group.Runtime); runtime != "" {
+			parts = append(parts, "runtime "+runtime)
+		}
+		if store := SingleLine(group.ModelStore); store != "" {
+			parts = append(parts, "model store "+store)
+		}
+		if len(parts) == 0 {
+			notes[i] = "separated by sealed configuration this header does not show"
+			continue
+		}
+		notes[i] = "separated by " + strings.Join(parts, ", ")
+	}
+	return notes
 }
 
 type BoardRow struct {
@@ -74,11 +116,12 @@ func WriteBoard(w io.Writer, board Board, mode string) {
 	title := fmt.Sprintf("fitr board  %d result(s)  %d device/config block(s)", board.Results, len(board.Groups))
 	fmt.Fprintln(w, p.wrap(p.Head, title))
 	fmt.Fprintln(w, p.wrap(p.Muted, strings.Repeat("-", boardWidth)))
+	distinctions := boardDistinctions(board.Groups)
 	for i, group := range board.Groups {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		writeBoardGroup(w, group, p, g, unicode)
+		writeBoardGroup(w, group, p, g, unicode, distinctions[i])
 	}
 	if len(board.Groups) > 1 {
 		fmt.Fprintln(w)
@@ -96,8 +139,8 @@ func boardStyle(rich bool) (palette, glyphs, bool) {
 	return pickPalette(!noColor()), pickGlyphs(), unicodeOK()
 }
 
-func writeBoardGroup(w io.Writer, group BoardGroup, p palette, g glyphs, unicode bool) {
-	writeBoardGroupHeader(w, group, p, g)
+func writeBoardGroup(w io.Writer, group BoardGroup, p palette, g glyphs, unicode bool, distinction string) {
+	writeBoardGroupHeader(w, group, p, g, distinction)
 	maxDecode := boardMaxDecode(group.Rows)
 	fmt.Fprintf(w, "%s\n", fmt.Sprintf(boardHeaderFmt,
 		boardModelWidth, "model", "decode", "tok/s", "sd", "runs", "prefill", "GB", "k"))
@@ -108,16 +151,23 @@ func writeBoardGroup(w io.Writer, group BoardGroup, p palette, g glyphs, unicode
 	fmt.Fprintln(w, p.wrap(p.Muted, "  runs is repeat shape oldest to newest; flat means repeats did not move"))
 }
 
-func writeBoardGroupHeader(w io.Writer, group BoardGroup, p palette, g glyphs) {
+// boardHeaderText is the one composition of a block's heading. The collision
+// check and the renderer must read the same string or a block could be
+// annotated for a clash the reader cannot see.
+func boardHeaderText(group BoardGroup, g glyphs) string {
 	kv := group.KV
 	if kv == "" {
 		kv = "default"
 	}
-	// The GPU name comes from the machine, so this line has no bound of its
-	// own. Wrap it rather than trusting the hardware to be politely named.
-	header := fmt.Sprintf("%s%sdriver %s%sKV %s%s%s",
+	return fmt.Sprintf("%s%sdriver %s%sKV %s%s%s",
 		SingleLine(group.GPU), g.Dot, SingleLine(group.Driver), g.Dot,
 		SingleLine(kv), g.Dot, SingleLine(boardContext(group)))
+}
+
+func writeBoardGroupHeader(w io.Writer, group BoardGroup, p palette, g glyphs, distinction string) {
+	// The GPU name comes from the machine, so this line has no bound of its
+	// own. Wrap it rather than trusting the hardware to be politely named.
+	header := boardHeaderText(group, g)
 	for i, line := range wrap(header, boardWidth-2) {
 		if i > 0 {
 			line = "  " + line
@@ -129,6 +179,9 @@ func writeBoardGroupHeader(w io.Writer, group BoardGroup, p palette, g glyphs) {
 		noteStyle = p.Warn
 	}
 	fmt.Fprintf(w, "  %s\n", p.wrap(noteStyle, SingleLine(group.Note)))
+	if distinction != "" {
+		fmt.Fprintf(w, "  %s\n", p.wrap(p.Warn, SingleLine(distinction)))
+	}
 }
 
 func boardContext(group BoardGroup) string {

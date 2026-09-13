@@ -346,6 +346,11 @@ func makeBoardGroup(rows []*Result, curDevice device.Fingerprint) render.BoardGr
 		GPU: latest.Device.GPU, Driver: latest.Device.GPUDriver,
 		KV: latest.Device.Config["OLLAMA_KV_CACHE_TYPE"], NumCtx: nctx,
 		Note: boardGroupNote(latest, curDevice, nctx),
+		// Both are in the comparability key and neither is in the header, so a
+		// block that differs only in these would otherwise render identically
+		// to its neighbour.
+		Runtime:    latest.Device.Runtime,
+		ModelStore: latest.Device.Config["OLLAMA_MODELS"],
 	}
 	if latest.DeviceV2 != nil {
 		group.ContextState = string(latest.DeviceV2.Context.State())
