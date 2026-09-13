@@ -1273,6 +1273,56 @@ only when an independently verified bounded workload is part of the experiment.
 That makes soak depend on the generalized workload receipts in build-order item
 4, which is why it is last.
 
+## Quantization health
+
+A model quantized too far keeps producing fluent text. That is not an accident
+of particular builds: the language-model head preferentially preserves
+high-ranked tokens, so surface fluency is structurally the last property to
+break, and a reader who judges by reading the output will judge wrong. The
+decision margin behind each token collapses long before the prose does.
+
+This is the sharpest case of the product's own thesis, and the evidence that a
+serving API can support is narrower than it first appears.
+
+**What the wire cannot give.** Perplexity and true KL divergence both need
+teacher-forced scoring over the full vocabulary. No local serving API offers
+either: top-k alternatives are capped, and there is no scoring endpoint. They
+stay refused rather than approximated, and fitr will not shell out to a
+separate binary to obtain them, because a single static binary is a product
+property rather than a packaging convenience.
+
+**What the wire does give, verified on this machine.** Ollama returns per-token
+logprobs with ranked alternatives, forwarded from its embedded runner, and
+llama-server exposes the same. A single-token forced-prefix probe at a fixed
+seed therefore yields an exact ranked distribution at a chosen position. That
+supports three honest measures: the margin between the first and second
+choice, the rate at which two configurations choose the same token at the same
+position, and a divergence over the returned alternatives, named as the
+truncated quantity it is rather than as KL.
+
+**What it must compare against.** A margin distribution alone says nothing.
+The comparison is a sibling artifact of the same base at higher precision,
+under the required-equal factors the configuration frontier already checks,
+and every such comparison needs a self-against-self run first to establish the
+noise floor that separates a real difference from the same model twice.
+
+**Why execution stays the floor.** An audit of published artifacts found
+several that were silently defective, scoring zero across every task while
+their output statistics sat inside the healthy range. Surface heuristics could
+not have caught them; running the tasks did. Any health signal added here
+supplements the behavioral battery and does not replace it.
+
+- [ ] Paired quant comparison using the evidence already available: behavioral
+      families, degeneration statistics, structured-output and tool-channel
+      failure rates, with the cache dtype treated as part of the configuration
+      rather than an afterthought, and a mandatory self-against-self baseline.
+- [ ] A ranked-alternatives probe, once the sealed-plan shape above exists.
+      Margin, same-choice rate and truncated divergence, each reported as a
+      finite observation at declared positions rather than as a model-wide
+      score.
+- [ ] Refuse perplexity and KL divergence explicitly in the documentation, so
+      their absence reads as a boundary rather than an omission.
+
 ## Later: loop extensions
 
 These features must preserve the evidence contract.
