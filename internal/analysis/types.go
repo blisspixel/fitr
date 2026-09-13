@@ -74,12 +74,17 @@ const (
 	ClaimExactContextAcceleratorBytes SupportClaim = "exact_context_accelerator_bytes"
 	ClaimExactContextPlacement        SupportClaim = "exact_context_allocation_placement"
 	ClaimStablePerformance            SupportClaim = "stable_performance"
-	ClaimSealedCapacityPolicy         SupportClaim = "sealed_capacity_policy"
-	ClaimProjectedCapacityComponents  SupportClaim = "projected_capacity_components"
-	ClaimSafeBudgetFit                SupportClaim = "safe_budget_fit"
-	ClaimSafeBudgetExceeded           SupportClaim = "safe_budget_exceeded"
-	ClaimCapacityHeadroom             SupportClaim = "capacity_headroom"
-	ClaimFit                          SupportClaim = "fit"
+	// ClaimSeparableBehavior is the claim that a behavioral rate is narrow
+	// enough to compare. A need measured once has a rate consistent with
+	// almost any true rate, which is a different thing from a need that was
+	// measured repeatedly and held.
+	ClaimSeparableBehavior           SupportClaim = "separable_behavior_rate"
+	ClaimSealedCapacityPolicy        SupportClaim = "sealed_capacity_policy"
+	ClaimProjectedCapacityComponents SupportClaim = "projected_capacity_components"
+	ClaimSafeBudgetFit               SupportClaim = "safe_budget_fit"
+	ClaimSafeBudgetExceeded          SupportClaim = "safe_budget_exceeded"
+	ClaimCapacityHeadroom            SupportClaim = "capacity_headroom"
+	ClaimFit                         SupportClaim = "fit"
 )
 
 // PerformanceObservation is a point estimate and its observed sample shape.
@@ -232,6 +237,7 @@ const (
 	GapRuntimeLoadUnavailable         GapCode = "performance.runtime_load_unavailable"
 	GapLoadedCacheHitTTFTUnavailable  GapCode = "performance.loaded_cache_hit_ttft_unavailable"
 	GapPerformanceSampleCountLow      GapCode = "performance.sample_count_low"
+	GapCheckRepeatsLow                GapCode = "behavior.check_repeats_low"
 	GapResidentNotPlanned             GapCode = "capacity.resident_not_planned"
 	GapResidentUnavailable            GapCode = "capacity.resident_unavailable"
 	GapResidentContextUnverified      GapCode = "capacity.resident_context_unverified"
@@ -274,6 +280,8 @@ func GapLabel(code GapCode) string {
 		return "loaded cache-hit TTFT"
 	case GapPerformanceSampleCountLow:
 		return "repeat strength"
+	case GapCheckRepeatsLow:
+		return "behavior repeat strength"
 	case GapResidentNotPlanned, GapResidentUnavailable, GapResidentContextUnverified, GapResidentContextAdjusted:
 		return "resident allocation"
 	case GapPlacementUnavailable:

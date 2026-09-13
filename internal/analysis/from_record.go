@@ -554,6 +554,19 @@ func gapsFrom(result *record.Record, report Report, displayOnly displayOnlyReaso
 		gaps = append(gaps, gap(GapPerformanceSampleCountLow, "performance",
 			"fewer than three observations cannot establish stable performance", ClaimStablePerformance))
 	}
+	// Performance has said this about itself since 0.9.x; behavior never did,
+	// although it is the half a reader trusts more. A generated need measured
+	// once reports a rate over a denominator of one, and a rate of one over one
+	// is consistent with almost any true rate. The verdict against its declared
+	// gate is still correct; what was missing is that the evidence under it is
+	// a single observation.
+	if once := singleTrialBehavior(result.TaskPlan); len(once) > 0 {
+		gaps = append(gaps, gap(GapCheckRepeatsLow, "behavior",
+			strings.Join(once, ", ")+" ran once, so those verdicts rest on a single observation each; "+
+				"a rate of one over one is consistent with almost any true rate, and repeats are what "+
+				"narrow it before two models are compared",
+			ClaimSeparableBehavior))
+	}
 	gaps = appendCapacityGaps(gaps, result)
 	if report.Capacity.Resident != nil && report.Capacity.Placement == nil {
 		gaps = append(gaps, gap(GapPlacementUnavailable, "capacity",
@@ -642,6 +655,28 @@ func appendCacheStatusGaps(gaps []EvidenceGap, status cacheStatus, unknownCode, 
 			label+" observed cached prompt tokens and remains descriptive only", claim))
 	}
 	return gaps
+}
+
+// singleTrialBehavior names the behavioral plans that were measured exactly
+// once. Zero is a different state and already reads as SKIP: it means the plan
+// was not run at all, which the scorecard says plainly. One is the state that
+// looked like evidence and was not distinguished from many.
+func singleTrialBehavior(plan record.TaskPlan) []string {
+	var once []string
+	for _, candidate := range []struct {
+		name    string
+		planned int
+	}{
+		{"generated checks", plan.CheckTrialsLimit},
+		{"tool trials", plan.ToolTrials},
+		{"refusal trials", plan.RefusalTrials},
+		{"coding trials", plan.CodeTrials},
+	} {
+		if candidate.planned == 1 {
+			once = append(once, candidate.name)
+		}
+	}
+	return once
 }
 
 func lowPerformanceSampleCount(performance Performance) bool {

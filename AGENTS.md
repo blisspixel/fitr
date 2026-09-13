@@ -99,7 +99,12 @@ with "file requires newer Go version" on this tree; reinstall it at the version
 CI pins, using the current toolchain. And Windows Defender intermittently blocks
 the `internal/updater` test binary, because that package replaces executables;
 it fails identically on a clean checkout, so confirm against `main` before
-treating it as a regression.
+treating it as a regression. The same interference reaches any test that stands
+up a local HTTP server, so `cmd/fitr` can fail a handful of unrelated tests in
+one run and pass them all in the next. The tell is a failure that took almost
+exactly one second, which is a dial timeout rather than an assertion; re-run the
+package before believing it, and never edit a test on the strength of a single
+red run on Windows.
 
 `.github/workflows/ci.yml` is the authority on the full gate set and on every
 tool version. It additionally runs the race detector, ten fuzz smoke targets, a
