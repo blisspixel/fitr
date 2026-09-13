@@ -4,7 +4,10 @@
     "fitr-evidence": {
       "type": "stdio",
       "command": "fitr",
-      "args": ["mcp", "serve"]
+      "args": ["mcp", "serve"],
+      "env": {
+        "FITR_RESULTS": "${PLUGIN_DATA}/results"
+      }
     }
   }
 }

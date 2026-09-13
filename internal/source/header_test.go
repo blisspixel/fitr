@@ -16,6 +16,7 @@ func TestPrefixFollowsOneRedirectAndRecordsTheHostThatServed(t *testing.T) {
 		if r.Header.Get("Range") == "" {
 			t.Error("prefix read did not ask for a byte range")
 		}
+		w.Header().Set("Content-Range", "bytes 0-14/15")
 		w.WriteHeader(http.StatusPartialContent)
 		w.Write([]byte("GGUF\x03\x00\x00\x00payload"))
 	}))
@@ -26,7 +27,7 @@ func TestPrefixFollowsOneRedirectAndRecordsTheHostThatServed(t *testing.T) {
 	defer origin.Close()
 
 	resolver := NewResolver(redirectTransport{origin: origin.URL})
-	body, observation := resolver.FetchArtifactPrefix(context.Background(), "o/r", "commit", "model.gguf")
+	body, observation := resolver.FetchArtifactPrefix(context.Background(), "o/r", sourceCommit, "model.gguf")
 	if observation.Outcome != "resolved" {
 		t.Fatalf("outcome = %q (%+v)", observation.Outcome, observation)
 	}
@@ -52,7 +53,7 @@ func TestPrefixRefusesARedirectChain(t *testing.T) {
 	}))
 	defer server.Close()
 	resolver := NewResolver(redirectTransport{origin: server.URL})
-	body, observation := resolver.FetchArtifactPrefix(context.Background(), "o/r", "commit", "model.gguf")
+	body, observation := resolver.FetchArtifactPrefix(context.Background(), "o/r", sourceCommit, "model.gguf")
 	if body != nil || observation.Outcome != "redirect_limit" {
 		t.Fatalf("a redirect chain was followed: %+v", observation)
 	}
@@ -66,7 +67,7 @@ func TestPrefixRefusesAnInsecureRedirect(t *testing.T) {
 	}))
 	defer server.Close()
 	resolver := NewResolver(redirectTransport{origin: server.URL})
-	body, observation := resolver.FetchArtifactPrefix(context.Background(), "o/r", "commit", "model.gguf")
+	body, observation := resolver.FetchArtifactPrefix(context.Background(), "o/r", sourceCommit, "model.gguf")
 	if body != nil || observation.Outcome != "redirect_rejected" {
 		t.Fatalf("an insecure redirect was followed: %+v", observation)
 	}

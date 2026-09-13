@@ -148,6 +148,7 @@ func sourceUnavailableFixture(t *testing.T, fixture Resolution, outcome string, 
 	result := sourceClone(t, fixture)
 	result.State = "unavailable"
 	result.ResolvedRepo, result.ResolvedCommit = "", ""
+	result.Publisher = nil
 	result.Files, result.InventoryPaths, result.Dependencies = nil, nil, nil
 	result.Queries = result.Queries[:1]
 	result.Queries[0].Outcome, result.Queries[0].HTTPStatus = outcome, status

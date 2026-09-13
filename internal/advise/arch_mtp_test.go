@@ -26,6 +26,7 @@ func TestPerLayerArrayMayExcludeThePredictionHead(t *testing.T) {
 		"qwen35.ssm.conv_kernel":         uint64(4),
 		"qwen35.ssm.state_size":          uint64(128),
 		"qwen35.ssm.inner_size":          uint64(6144),
+		"qwen35.ssm.group_count":         uint64(16),
 	}
 	arch := ArchFromKVs(kvs)
 	if len(arch.KVHeadsPerLayer) != 64 {

@@ -283,8 +283,12 @@ so Board does not compare across those presentation-contract changes.
   scale with context, which for an interval hybrid is one in every
   `full_attention_interval`, and the fixed recurrent state held by the rest.
   Only the count of attending layers is needed, never which they are, and that
-  count is the same under either of llama.cpp's pattern conventions. A hybrid
-  missing its `ssm` shape still requires a load receipt. Split GGUFs require
+  count is the same under either of llama.cpp's pattern conventions only when
+  the interval divides the layer count. Otherwise an explicit per-layer
+  declaration is required. A hybrid
+  missing its `ssm` shape, including the declared recurrent group count, still
+  requires a load receipt. Malformed numeric dimensions and unsupported boolean
+  recurrent-layer patterns remain unmeasured. Split GGUFs require
   every shard. An artifact
   whose `head_count_kv` is a per-layer array is projected by summing the
   layers, so a layer that does not attend costs nothing; the array is used only
@@ -327,6 +331,24 @@ so Board does not compare across those presentation-contract changes.
   arbitrary runtime configuration. JSON under `~/.fitr` stays local.
 
 ## Advise (design rule 7)
+
+Source screening is a pre-measurement boundary. Publisher lineage is derived
+from all valid declared base models and must agree with the pinned repository
+owner. Declared licenses and architectures clear only the operator's explicit
+accepted lists; they do not establish legal permission or runtime support.
+The source component comparison reuses `internal/advise` after complete GGUF
+metadata and a complete selected shard group have been checked. A malformed
+dimension, ambiguous layout or truncated metadata section stays unresolved.
+Even a readable early architecture name cannot prove that a later cache-layout
+key is absent.
+
+The operator chooses a per-file read bound, 32 KiB by default and at most 8 MiB,
+without automatic retries. Prefix observations and digests appear beside the
+fresh projection, while the immutable `--out` receipt remains metadata only.
+Declared weights plus modeled f16 cache exclude runtime overhead, placement
+effects and required companions. Their comparison with a component ceiling is
+not a safe-budget fit verdict. Runtime binding, local allocation and role
+quality still require separate evidence. See [source resolution](source-resolution.md).
 
 A verdict without a remedy is half an answer. `fitr advise` prints
 Compatible / Low memory / Incompatible, and every negative tier carries the

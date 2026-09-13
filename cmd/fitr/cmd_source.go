@@ -12,10 +12,17 @@ import (
 )
 
 const sourceHelp = `usage: fitr source resolve hf --repo owner/model --revision <revision> --file <path> [--file <path>...] --out <receipt.json> [--display MODE]
+       fitr source resolve hf ... --fit [--ctx N] [--fit-budget-gb GB] [--header-bytes N]
+       fitr source resolve hf ... --screen --ctx N --fit-budget-gb GB --allow-license ID --allow-architecture ID [--require-first-party]
        fitr source show <receipt.json> [--display MODE]
 
 Resolve public file metadata without downloading weights. Exact file metadata
-does not establish local fit, complete dependencies or model quality.`
+does not establish local fit, complete dependencies or model quality.
+Screen publisher, declared license, GGUF architecture and projected components
+in that order. Repeat allow flags for accepted identifiers. Runtime support,
+license terms, dependencies and actual resident memory still need verification.
+The saved receipt contains metadata only; --fit/--screen output includes the
+fresh header observations and projection. No weights or runtime are loaded.`
 
 type sourceFiles []string
 
@@ -33,6 +40,12 @@ func cmdSource(ctx context.Context, args []string) int {
 }
 
 func cmdSourceWithResolver(ctx context.Context, args []string, resolve func(context.Context, source.HFRequest) (source.Resolution, error)) int {
+	services := defaultSourceServices()
+	services.resolve = resolve
+	return cmdSourceWithServices(ctx, args, services)
+}
+
+func cmdSourceWithServices(ctx context.Context, args []string, services sourceServices) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
 		fmt.Fprintln(os.Stderr, sourceHelp)
 		return exitOK
@@ -41,21 +54,20 @@ func cmdSourceWithResolver(ctx context.Context, args []string, resolve func(cont
 	case "show":
 		return showSource(args[1:])
 	case "resolve":
-		return resolveSource(ctx, args[1:], resolve)
+		return resolveSource(ctx, args[1:], services)
 	default:
 		errPrint("unknown source action", "", "fitr source --help")
 		return exitUsage
 	}
 }
 
-func resolveSource(ctx context.Context, args []string, resolve func(context.Context, source.HFRequest) (source.Resolution, error)) int {
+func resolveSource(ctx context.Context, args []string, services sourceServices) int {
 	fs := flag.NewFlagSet("source resolve", flag.ContinueOnError)
 	repo := fs.String("repo", "", "explicit owner/repository")
 	revision := fs.String("revision", "", "explicit branch, tag or full commit")
 	output := fs.String("out", "", "new private receipt in an existing directory")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
-	fit := fs.Bool("fit", false, "read each resolved GGUF's opening bytes and project its fit on this machine")
-	ctxSize := fs.Int("ctx", 0, "requested context for --fit (default: the artifact's own maximum)")
+	fit := addSourceFitFlags(fs)
 	var files sourceFiles
 	fs.Var(&files, "file", "exact relative filename; repeat for each selected file")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -63,6 +75,10 @@ func resolveSource(ctx context.Context, args []string, resolve func(context.Cont
 	}
 	if fs.NArg() != 1 || fs.Arg(0) != "hf" || *output == "" || !render.ValidMode(*mode) {
 		errPrint("source resolution needs provider hf, an output path and a valid display mode", "", "fitr source --help")
+		return exitUsage
+	}
+	if err := fit.validate(); err != nil {
+		errPrint(err.Error(), "", "fitr source --help")
 		return exitUsage
 	}
 	request := source.HFRequest{RepoID: *repo, Revision: *revision, Files: files}
@@ -73,7 +89,7 @@ func resolveSource(ctx context.Context, args []string, resolve func(context.Cont
 	if err := source.ValidateOutputPath(*output); err != nil {
 		return sourceFailure(err)
 	}
-	resolution, err := resolve(ctx, request)
+	resolution, err := services.resolve(ctx, request)
 	if err != nil {
 		if ctx.Err() != nil {
 			errPrint("source resolution cancelled", "", "retry with a new receipt path when ready")
@@ -85,12 +101,11 @@ func resolveSource(ctx context.Context, args []string, resolve func(context.Cont
 		return sourceFailure(err)
 	}
 	fmt.Fprintf(os.Stderr, "  receipt  %s\n", terminalText(*output))
-	code := writeSourceResolution(resolution, *mode)
-	if *fit {
-		// A separate, explicitly requested read. Metadata resolution stays on
-		// its fixed host; this one follows the provider to wherever it stores
-		// the bytes, and the output records which host that was.
-		projectResolvedFit(ctx, resolution, *ctxSize, *mode)
+	var code int
+	if fit.enabled || fit.screen {
+		code = writeResolvedFit(ctx, resolution, fit, *mode, services)
+	} else {
+		code = writeSourceResolution(resolution, *mode)
 	}
 	if ctx.Err() != nil && code != exitError {
 		return exitInterrupt

@@ -3,7 +3,10 @@ package advise
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
+
+	"github.com/blisspixel/fitr/internal/analysis"
 )
 
 // Architecture metadata and the cache arithmetic derived from it.
@@ -15,19 +18,25 @@ import (
 // together makes the arithmetic auditable in one place.
 
 type Arch struct {
-	Name       string
-	Blocks     int
-	Embed      int
-	Heads      int
-	KVHeads    int
-	KeyLength  int // 0 → fall back to embed/heads and say so
-	ValLength  int
-	MaxCtx     int
-	Experts    int
-	ExpertUsed int
-	FFN        int // expert FFN if MoE, else dense FFN
-	Vocab      int
-	Params     int64
+	// InvalidMetadata distinguishes a malformed dimension from an absent key.
+	// A fallback must never make a wrong-shaped observation projectable.
+	InvalidMetadata bool
+	// The runtime's boolean per-layer recurrent pattern is recognized as a
+	// distinct unsupported layout, never mislabeled as a scalar layer count.
+	RecurrentPatternUnsupported bool
+	Name                        string
+	Blocks                      int
+	Embed                       int
+	Heads                       int
+	KVHeads                     int
+	KeyLength                   int // 0 → fall back to embed/heads and say so
+	ValLength                   int
+	MaxCtx                      int
+	Experts                     int
+	ExpertUsed                  int
+	FFN                         int // expert FFN if MoE, else dense FFN
+	Vocab                       int
+	Params                      int64
 	// Hybrid recurrent models need runtime state beyond a conventional KV
 	// cache. Their metadata is preserved, but weights-plus-KV arithmetic is
 	// not allowed to stand in for a measured allocation.
@@ -62,6 +71,10 @@ type Arch struct {
 	SSMInnerSize  int
 	SSMStateSize  int
 	SSMConvKernel int
+	SSMGroupCount int
+	// An observed zero group count and an absent group count have different
+	// meanings for the recurrent convolution width.
+	SSMGroupCountKnown bool
 }
 
 // modernKVLayout reports an architecture that declares grouped, windowed or
@@ -69,7 +82,7 @@ type Arch struct {
 // count is a gap in whichever source was read rather than a statement that
 // every head carries its own cache.
 func (a Arch) modernKVLayout() bool {
-	return a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 ||
+	return a.Hybrid || a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 ||
 		a.slidingWindowPresent() || a.SSMInnerSize > 0 ||
 		inherentHybridArchitecture(a.Name)
 }
@@ -86,9 +99,9 @@ func (a Arch) realBlocks() int {
 // fullAttentionLayers is how many layers hold a context-scaling KV cache in an
 // interval hybrid. Only the count is needed, never which layers they are:
 // llama.cpp's pattern places exactly one full-attention layer in every
-// full_attention_interval layers whichever way its dense_first argument falls,
-// so the count is the same under both conventions. That is what makes this
-// computable where a sliding-window layout is not.
+// full_attention_interval layers whichever way its dense_first argument falls
+// only when the interval divides the layer count. A partial final interval
+// needs the artifact's per-layer counts rather than a guessed convention.
 func (a Arch) fullAttentionLayers() int {
 	if a.FullAttentionInterval <= 0 {
 		return 0
@@ -103,14 +116,19 @@ func (a Arch) fullAttentionLayers() int {
 // no complete cache projection.
 func (a Arch) recurrentStateBytes() (float64, bool) {
 	linear := a.linearLayers()
-	if linear <= 0 || a.SSMInnerSize <= 0 || a.SSMStateSize <= 0 || a.SSMConvKernel <= 1 {
+	if linear <= 0 || a.SSMInnerSize <= 0 || a.SSMStateSize <= 0 || a.SSMConvKernel <= 1 || !a.SSMGroupCountKnown {
 		return 0, false
 	}
 	const fp32 = 4
 	state := float64(a.SSMInnerSize) * float64(a.SSMStateSize) * fp32
-	conv := float64(a.SSMInnerSize) * float64(a.SSMConvKernel-1) * fp32
+	// llama_hparams::n_embd_r in llama.cpp
+	// 4a89937354190cef5a97baf8eeb17336105eb72d stores the recurrent keys as
+	// well as values in the convolution window. Omitting these groups silently
+	// understates every hybrid's fixed cache allocation.
+	convWidth := float64(a.SSMInnerSize) + 2*float64(a.SSMGroupCount)*float64(a.SSMStateSize)
+	conv := convWidth * float64(a.SSMConvKernel-1) * fp32
 	total := float64(linear) * (state + conv)
-	if math.IsNaN(total) || math.IsInf(total, 0) || total <= 0 {
+	if math.IsNaN(total) || math.IsInf(total, 0) || total <= 0 || total >= float64(math.MaxInt64) {
 		return 0, false
 	}
 	return total, true
@@ -125,6 +143,12 @@ func (a Arch) recurrentStateBytes() (float64, bool) {
 // reason goes looking for the wrong fix.
 func (a Arch) UnsizableReason() (note, hint string) {
 	switch {
+	case a.InvalidMetadata:
+		return "architecture metadata contains a malformed or implausible dimension",
+			"use an artifact whose dimensions have the declared numeric shapes"
+	case a.RecurrentPatternUnsupported:
+		return "the artifact declares a recurrent pattern whose per-layer state allocation is not modeled",
+			"observe runtime allocation at the requested context"
 	case a.Blocks <= 0 || a.headDimK() <= 0 || a.headDimV() <= 0:
 		return "architecture metadata is missing or not believable",
 			"pass a GGUF whose layer count, KV heads and head dimensions are readable"
@@ -181,6 +205,12 @@ func (a Arch) intervalHybridProjectable() bool {
 	if a.FullAttentionInterval <= 0 {
 		return false
 	}
+	// llama_hparams::set_recr_pattern in llama.cpp
+	// 4a89937354190cef5a97baf8eeb17336105eb72d has two dense-first conventions.
+	// They disagree by one attention layer when the final interval is partial.
+	if len(a.KVHeadsPerLayer) == 0 && a.realBlocks()%a.FullAttentionInterval != 0 {
+		return false
+	}
 	if !a.kvClassifiable() || a.totalKVHeads() <= 0 {
 		return false
 	}
@@ -229,6 +259,9 @@ func (a Arch) totalKVHeads() int {
 // correct for Llama and wrong for Qwen3 (128, not 64) - that fallback is
 // disclosed, not hidden.
 func (a Arch) KVReady() bool {
+	if a.InvalidMetadata || a.RecurrentPatternUnsupported {
+		return false
+	}
 	if a.Hybrid && !a.intervalHybridProjectable() {
 		return false
 	}
@@ -250,7 +283,13 @@ func (a Arch) headDimV() int {
 	if a.ValLength > 0 {
 		return a.ValLength
 	}
-	return a.headDimK()
+	// llama.cpp 4a89937354190cef5a97baf8eeb17336105eb72d load_hparams
+	// defaults V independently to embed/heads. An explicit K override does
+	// not establish V, and missing inputs do not permit borrowing that width.
+	if a.Heads > 0 && a.Embed > 0 {
+		return a.Embed / a.Heads
+	}
+	return 0
 }
 
 func (a Arch) kvBytesPerToken(elem float64) float64 {
@@ -293,12 +332,14 @@ func (a Arch) cacheFixedBytes() float64 {
 // does not, the conventional arithmetic is not this model's allocation model
 // and the projection stays unavailable.
 func ProjectKVBytes(arch Arch, contextTokens int, elementBytes float64) (int64, bool) {
-	if contextTokens <= 0 || (arch.Hybrid && !arch.intervalHybridProjectable()) {
+	if contextTokens <= 0 || !arch.KVReady() {
 		return 0, false
 	}
 	perToken := arch.kvBytesPerToken(elementBytes)
 	projected := perToken*float64(contextTokens) + arch.cacheFixedBytes()
-	if projected <= 0 || math.IsNaN(projected) || math.IsInf(projected, 0) || projected > math.MaxInt64 {
+	// MaxInt64 rounds to 2^63 in float64, so equality is already outside the
+	// signed byte range and must be refused before conversion.
+	if projected <= 0 || math.IsNaN(projected) || math.IsInf(projected, 0) || projected >= float64(math.MaxInt64) {
 		return 0, false
 	}
 	return int64(math.Ceil(projected)), true
@@ -382,35 +423,7 @@ func (a Arch) reconstructActiveParams(expertActive int64) (int64, bool) {
 
 // ArchShape is the parsed architecture, as read. Absent fields are absent from
 // the metadata rather than zero, so each is omitted rather than reported as 0.
-type ArchShape struct {
-	Name                  string `json:"name,omitempty"`
-	Blocks                int    `json:"block_count,omitempty"`
-	RealBlocks            int    `json:"attention_blocks,omitempty"`
-	Heads                 int    `json:"head_count,omitempty"`
-	KVHeads               int    `json:"head_count_kv,omitempty"`
-	KVHeadsPerLayer       []int  `json:"head_count_kv_per_layer,omitempty"`
-	KeyLength             int    `json:"key_length,omitempty"`
-	ValLength             int    `json:"value_length,omitempty"`
-	MaxCtx                int    `json:"context_length,omitempty"`
-	Experts               int    `json:"expert_count,omitempty"`
-	ExpertUsed            int    `json:"expert_used_count,omitempty"`
-	FullAttentionInterval int    `json:"full_attention_interval,omitempty"`
-	FullAttentionLayers   int    `json:"full_attention_layers,omitempty"`
-	RecurrentLayers       int    `json:"recurrent_layers,omitempty"`
-	NextNPredictLayers    int    `json:"nextn_predict_layers,omitempty"`
-	SlidingWindow         int    `json:"sliding_window,omitempty"`
-	SlidingWindowPattern  int    `json:"sliding_window_pattern,omitempty"`
-	KeyLengthSWA          int    `json:"key_length_swa,omitempty"`
-	ValLengthSWA          int    `json:"value_length_swa,omitempty"`
-	SSMInnerSize          int    `json:"ssm_inner_size,omitempty"`
-	SSMStateSize          int    `json:"ssm_state_size,omitempty"`
-	SSMConvKernel         int    `json:"ssm_conv_kernel,omitempty"`
-	Hybrid                bool   `json:"hybrid,omitempty"`
-	KVSizable             bool   `json:"kv_sizable"`
-	KVBytesPerToken       int64  `json:"kv_bytes_per_token,omitempty"`
-	FixedCacheBytes       int64  `json:"fixed_cache_bytes,omitempty"`
-	UnsizableReason       string `json:"unsizable_reason,omitempty"`
-}
+type ArchShape = analysis.SourceArchitectureShape
 
 // Shape reports the architecture as parsed, including the derived figures a
 // reader would otherwise have to recompute to check a verdict.
@@ -428,6 +441,9 @@ func (a Arch) Shape() *ArchShape {
 		SSMInnerSize: a.SSMInnerSize, SSMStateSize: a.SSMStateSize,
 		SSMConvKernel: a.SSMConvKernel, Hybrid: a.Hybrid,
 		KVSizable: a.KVReady(),
+	}
+	if a.SSMGroupCountKnown {
+		s.SSMGroupCount = &a.SSMGroupCount
 	}
 	if s.KVSizable {
 		s.KVBytesPerToken = int64(a.kvBytesPerToken(2))
@@ -455,52 +471,107 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	if p != "" {
 		p += "."
 	}
-	a.Blocks = archDim(first(kvs, p+"block_count"))
-	a.Embed = archDim(first(kvs, p+"embedding_length"))
-	a.Heads = archDim(first(kvs, p+"attention.head_count"))
+	a.Blocks = a.dimension(kvs, p+"block_count")
+	a.Embed = a.dimension(kvs, p+"embedding_length")
+	a.Heads = a.dimension(kvs, p+"attention.head_count")
 	// Read before the KV heads: the per-layer array covers attention layers,
 	// while block_count may also count a prediction head, so the accepted
 	// lengths depend on this.
-	a.NextNPredictLayers = archDim(first(kvs, p+"nextn_predict_layers"))
-	kvHeads := first(kvs, p+"attention.head_count_kv")
+	a.NextNPredictLayers = a.dimension(kvs, p+"nextn_predict_layers")
+	kvHeads, kvHeadsPresent := kvs[p+"attention.head_count_kv"]
 	a.KVHeads = archDim(kvHeads)
 	a.PerLayerKVHeads = perLayerDimension(kvHeads)
 	if a.PerLayerKVHeads {
 		a.KVHeadsPerLayer = perLayerDimensions(kvHeads, a.Blocks, a.realBlocks())
 	}
-	if a.KVHeads == 0 && !a.PerLayerKVHeads && !a.modernKVLayout() {
-		// On a pre-GQA artifact an absent key really does mean every head
-		// carries its own KV, so the head count is the right substitute.
-		//
-		// It is the wrong substitute when the source simply did not report the
-		// key. Ollama's /api/show returns a null head_count_kv for current
-		// hybrid artifacts whose file carries the real value, and taking the
-		// full head count there charged 24 heads where the model uses 4: a six
-		// times over-projection that told the operator to cut their context.
-		// An architecture that declares a modern KV layout is not pre-GQA, so
-		// an absent count is unmeasured rather than equal to the head count.
-		a.KVHeads = a.Heads
-	}
-	a.KeyLength = archDim(first(kvs, p+"attention.key_length"))
-	a.ValLength = archDim(first(kvs, p+"attention.value_length"))
-	a.MaxCtx = archDim(first(kvs, p+"context_length"))
+	a.KeyLength = a.positiveDimension(kvs, p+"attention.key_length")
+	a.ValLength = a.positiveDimension(kvs, p+"attention.value_length")
+	a.MaxCtx = a.dimension(kvs, p+"context_length")
 	a.Experts = archDim(first(kvs, p+"expert_count"))
 	a.ExpertUsed = archDim(first(kvs, p+"expert_used_count"))
 	a.FFN = archDim(first(kvs, p+"expert_feed_forward_length", p+"feed_forward_length"))
-	a.SSMInnerSize = archDim(first(kvs, p+"ssm.inner_size"))
-	a.SSMStateSize = archDim(first(kvs, p+"ssm.state_size"))
-	a.SSMConvKernel = archDim(first(kvs, p+"ssm.conv_kernel"))
-	a.SlidingWindow = archDim(first(kvs, p+"attention.sliding_window"))
-	a.SlidingWindowPattern = archDim(first(kvs, p+"attention.sliding_window_pattern"))
-	a.KeyLengthSWA = archDim(first(kvs, p+"attention.key_length_swa"))
-	a.ValLengthSWA = archDim(first(kvs, p+"attention.value_length_swa"))
-	a.FullAttentionInterval = archDim(first(kvs, p+"full_attention_interval"))
-	// Keys.Attention.RECURRENT_LAYERS in llama.cpp gguf-py/gguf/constants.py,
-	// checked against master on 2026-09-11. An earlier spelling of this name
-	// was emitted by nothing, so the hybrid branch behind it never fired.
-	a.RecurrentLayers = archDim(first(kvs, p+"attention.recurrent_layers", "attention.recurrent_layers"))
-	a.Hybrid = a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 || inherentHybridArchitecture(arch)
+	a.SSMInnerSize = a.dimension(kvs, p+"ssm.inner_size")
+	a.SSMStateSize = a.dimension(kvs, p+"ssm.state_size")
+	a.SSMConvKernel = a.dimension(kvs, p+"ssm.conv_kernel")
+	a.SSMGroupCount = a.dimension(kvs, p+"ssm.group_count")
+	_, a.SSMGroupCountKnown = kvs[p+"ssm.group_count"]
+	a.SlidingWindow = a.dimension(kvs, p+"attention.sliding_window")
+	a.SlidingWindowPattern = a.dimension(kvs, p+"attention.sliding_window_pattern")
+	a.KeyLengthSWA = a.dimension(kvs, p+"attention.key_length_swa")
+	a.ValLengthSWA = a.dimension(kvs, p+"attention.value_length_swa")
+	a.FullAttentionInterval = a.dimension(kvs, p+"full_attention_interval")
+	recurrentPresent := a.readRecurrentPattern(kvs, p+"attention.recurrent_layers", "attention.recurrent_layers")
+	a.Hybrid = a.FullAttentionInterval > 0 || recurrentPresent || inherentHybridArchitecture(arch)
+	if !kvHeadsPresent && !a.modernKVLayout() {
+		// The pre-GQA default applies only to an absent key, after every layout
+		// discriminator is read. Explicit zero, null or malformed values are
+		// observations the default cannot repair; modern layouts need real KV
+		// heads instead of borrowing the query-head count.
+		a.KVHeads = a.Heads
+	}
 	return a
+}
+
+func (a *Arch) readRecurrentPattern(kvs map[string]any, keys ...string) bool {
+	// llama.cpp 4a89937354190cef5a97baf8eeb17336105eb72d qwen35.cpp
+	// loads attention.recurrent_layers with get_key_or_arr into a boolean
+	// is_recr_impl array. The spelling is not a scalar count contract.
+	for _, key := range keys {
+		value, present := kvs[key]
+		if !present {
+			continue
+		}
+		a.RecurrentPatternUnsupported = true
+		if !validRecurrentPattern(value, a.Blocks, a.realBlocks()) {
+			a.InvalidMetadata = true
+		}
+		return true
+	}
+	return false
+}
+
+func validRecurrentPattern(value any, blocks, realBlocks int) bool {
+	if _, ok := value.(bool); ok {
+		return true
+	}
+	entries, ok := value.([]any)
+	if !ok || len(entries) == 0 || (len(entries) != blocks && len(entries) != realBlocks) {
+		return false
+	}
+	for _, entry := range entries {
+		if _, ok := entry.(bool); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Arch) dimension(kvs map[string]any, keys ...string) int {
+	for _, key := range keys {
+		value, present := kvs[key]
+		if !present {
+			continue
+		}
+		n, ok := architectureInteger(value)
+		if !ok || n < 0 || n > maxArchDim {
+			a.InvalidMetadata = true
+			return 0
+		}
+		return int(n)
+	}
+	return 0
+}
+
+func (a *Arch) positiveDimension(kvs map[string]any, key string) int {
+	value := a.dimension(kvs, key)
+	// llama.cpp 4a89937354190cef5a97baf8eeb17336105eb72d load_hparams
+	// initializes attention widths before reading optional overrides. An
+	// explicit zero overrides that default; it is not an absent declaration
+	// that permits fitr to substitute embed/heads or the key width.
+	if _, present := kvs[key]; present && value == 0 {
+		a.InvalidMetadata = true
+	}
+	return value
 }
 
 // inherentHybridArchitecture is a GGUF architecture-string gate for families
@@ -579,8 +650,8 @@ func (a Arch) CompactLabel() string {
 // Such a key is present and readable but is not a model-wide scalar, which is
 // a different state from the key being absent.
 func perLayerDimension(v any) bool {
-	n, ok := v.([]any)
-	return ok && len(n) > 1
+	_, ok := v.([]any)
+	return ok
 }
 
 // perLayerDimensions reads a per-layer array as layer dimensions. It returns
@@ -602,8 +673,8 @@ func perLayerDimensions(v any, blocks, attentionBlocks int) []int {
 	}
 	dimensions := make([]int, 0, len(entries))
 	for _, entry := range entries {
-		n := asInt64(entry)
-		if n < 0 || n > maxArchDim {
+		n, valid := architectureInteger(entry)
+		if !valid || n < 0 || n > maxArchDim {
 			return nil
 		}
 		dimensions = append(dimensions, int(n))
@@ -612,11 +683,23 @@ func perLayerDimensions(v any, blocks, attentionBlocks int) []int {
 }
 
 func archDim(v any) int {
-	n := asInt(v)
-	if n < 0 || n > maxArchDim {
+	n, ok := architectureInteger(v)
+	if !ok || n < 0 || n > maxArchDim {
 		return 0
 	}
-	return n
+	return int(n)
+}
+
+// GGUF dimensions and JSON model_info numbers are numeric scalars. Integer
+// strings and singleton arrays remain supported by the general conversion
+// helper, but are not the numeric shape an architecture dimension declares.
+func architectureInteger(value any) (int64, bool) {
+	switch value.(type) {
+	case string, []any:
+		return 0, false
+	default:
+		return integerScalar(value)
+	}
 }
 
 func first(kvs map[string]any, keys ...string) any {
@@ -631,40 +714,41 @@ func first(kvs map[string]any, keys ...string) any {
 func asInt(v any) int { return int(asInt64(v)) }
 
 func asInt64(v any) int64 {
+	if entries, ok := v.([]any); ok {
+		if len(entries) != 1 {
+			return 0
+		}
+		return asInt64(entries[0])
+	}
+	n, _ := integerScalar(v)
+	return n
+}
+
+func integerScalar(v any) (int64, bool) {
 	switch n := v.(type) {
 	case int:
-		return int64(n)
+		return int64(n), true
 	case int32:
-		return int64(n)
+		return int64(n), true
 	case int64:
-		return n
+		return n, true
 	case uint32:
-		return int64(n)
+		return int64(n), true
 	case uint64:
 		if n > 1<<63-1 {
-			return 0
+			return 0, false
 		}
-		return int64(n)
+		return int64(n), true
 	case float64:
-		return int64(n)
+		if math.IsNaN(n) || math.IsInf(n, 0) || n < math.MinInt64 || n >= math.MaxInt64 || math.Trunc(n) != n {
+			return 0, false
+		}
+		return int64(n), true
 	case float32:
-		return int64(n)
-	case []any:
-		// A one-element array is an unambiguous scalar. A longer one is a
-		// per-layer array, and its first element is not the value for every
-		// layer: collapsing it silently reports one layer's dimension as the
-		// whole model's. Unmeasured is the honest answer, and it routes to
-		// SKIP rather than to a fabricated projection.
-		if len(n) != 1 {
-			return 0
-		}
-		return asInt64(n[0])
+		return integerScalar(float64(n))
 	case string:
-		var x int64
-		if _, err := fmt.Sscanf(n, "%d", &x); err != nil {
-			return 0
-		}
-		return x
+		parsed, err := strconv.ParseInt(n, 10, 64)
+		return parsed, err == nil
 	}
-	return 0
+	return 0, false
 }

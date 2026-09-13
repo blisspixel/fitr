@@ -58,11 +58,12 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.10 | Official MCP SDK binary acceptance and Ollama remote-provenance checks before local experiments |
 | Shipped | 0.10.11 | Bounded auto fitting with an explicit shortlist, owned Windows runtime, resource gates, quality-first comparison and fresh confirmation; a consistent terminal identity |
 | Shipped | 0.10.12 | Read-only MCP selection status for managed incumbents, bounded local path resolution and expanded official SDK acceptance |
-| Current | 0.10.13 | A collectable context-quality scorecard at one operating window, plus lock, interrupt and unobserved-configuration corrections |
+| Shipped | 0.10.13 | A collectable context-quality scorecard, plus lock, interrupt and evidence corrections |
+| Current | 0.10.14 | Context-quality HTML and TUI surfaces, ordered source screening, complete-header component projections, runtime provenance and current MCP package validation |
 | Now | 0.11 | Remaining context-quality surfaces and role connection, plus one pinned model-plus-harness workflow |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
-| Active | Candidate discovery | Capture ideas now; next resolve artifacts and build evidence-backed model and harness choices by role |
+| Active | Candidate discovery | Capture, pin and screen candidates now; next persist source projections, establish runtime and dependency support, then plan bounded local evidence |
 
 Progress is counted in releases, not dates. Each pre-1.0 release below states
 its own exit criterion. 1.0 ships when those criteria are met and not before:
@@ -81,7 +82,7 @@ evidence paths.
 | 2 | complete | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | active | Generalized validated-work receipts and explicit evidence classes | 0.10.4 seals the fixed contract and reconstructs timing with typed proof classes. Multi-attempt, approval, escalation and external protocol receipts remain work before arbitrary workflows. |
-| 5 | active | Source ideas into a personal role library and bounded fitting | Source receipts, private ideas and local hashes retain separate claims. The first connected auto cycle now collects and confirms an explicit installed shortlist under owned-runtime and resource checks. Search-driven shortlisting and scheduled refinement remain work. See [auto mode](docs/auto-mode.md), [artifact binding](docs/artifact-binding.md) and [roles](docs/roles.md). |
+| 5 | active | Source ideas into a personal role library and bounded fitting | Source receipts, publisher/license/architecture policies and component screening retain separate claims from local hashes and measurement. Next persist validated header observations, define runtime support profiles and bind dependency planning before download ownership. The first auto cycle already confirms an installed shortlist. See [source resolution](docs/source-resolution.md), [auto mode](docs/auto-mode.md) and [roles](docs/roles.md). |
 | 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. Build serving first: it is the instrument the other two report through. See [experiment families](#model-set-soak-and-serving-experiments). |
 
 Automatic selection must pass programmatic resource preflight and a separate
@@ -373,11 +374,11 @@ every need the code does.
 - [x] A model with no tool support is `n/a`, not a failure and not a fault.
       Runtimes signal it with a generic HTTP 400; reading that as transport
       discarded the whole battery for a model that is simply text-only.
-- [x] Prove a candidate can be sized without downloading it. A 4 KiB HTTP
-      range read returns a GGUF header, and every key the fit math needs --
+- [x] Read candidate architecture fields without downloading the complete
+      artifact. A 4 KiB HTTP range read recovered these GGUF fields --
       block_count, head counts, key and value length, context length, embedding
-      length, and the MoE expert fields -- sits ahead of the tokenizer vocab
-      array. Verified against a real 5 GB model: `arch=qwen3 layers=36
+      length, and the MoE expert fields -- ahead of one artifact's vocabulary.
+      Verified against a real 5 GB model: `arch=qwen3 layers=36
       kv_heads=8 ctx=40960` from 4,096 bytes, KV-ready.
 
       `ReadMetadata` discarded all of it, because an `io.ErrUnexpectedEOF` in
@@ -388,9 +389,11 @@ every need the code does.
       failure mode. It is covered by the existing CI fuzz gate, which now
       exercises both entry points.
 
-      This matters more than the bytes saved: an HTTP range body is an
-      `io.Reader`, so discovery reuses the fuzz-hardened fit arithmetic instead
-      of growing a second, weaker copy of it.
+      This proved a partial observation, not that later keys cannot change
+      the cache layout. Source projections now require complete metadata
+      inside an explicit bounded prefix: 32 KiB by default, at most 8 MiB
+      with `--header-bytes`, and no automatic escalation. The same fuzzed
+      decoder serves both local files and source projections.
 - [x] Remove the unsound adaptive verdict path from current runs. A second
       statistical audit found that the sequential Bernoulli process and the
       scorecard's clustered-family estimand did not match, and several specs
@@ -996,7 +999,12 @@ with researched protocol and harness profiles in [agent interoperability](docs/a
 
 - [x] Capture ideas from user-selected sources without executing their content.
 - [x] Resolve explicit public HF file metadata at an immutable commit through a bounded adapter.
-- [ ] Extract source claims, link resolution receipts to inbox ideas and establish dependency closure.
+- [x] Link resolution receipts to inbox ideas and report dependency, runtime and quality gaps.
+- [x] Screen publisher, declared license, accepted architecture and projected components in order under explicit operator policy.
+- [ ] Persist bounded header observations and rederive source projections on reopen; current `--out` saves metadata only.
+- [ ] Define versioned runtime support profiles and establish complete dependency and component plans before download ownership.
+- [ ] Project [explicit boolean recurrent-layer patterns](https://github.com/blisspixel/fitr/issues/21) only when complete artifact metadata determines both cache components; unsupported patterns remain unresolved.
+- [ ] Extract source claims without converting them into evidence.
 - [x] Attach role-specific battery evidence; bind model and runtime changes.
 - [ ] Bind independently validated external harness evidence to role qualification.
 - [x] Add user weights after hard constraints, fixed normalization, uncertainty
@@ -1011,10 +1019,22 @@ with researched protocol and harness profiles in [agent interoperability](docs/a
 
 [Immutable artifact resolution](https://github.com/blisspixel/fitr/issues/5)
 now supports explicit public HF repository, revision and file metadata. Declared
-hashes remain separate from verified bytes, dependency groups remain unresolved
-and no weights are downloaded. The next build should link these receipts to
-inbox ideas and produce explicit dependency and fit-planning gaps before any
-download or experiment authorization.
+hashes remain separate from verified bytes. Receipts already attach to ideas;
+local artifact bindings already hash explicit file mappings. `source resolve
+--screen` now sequences publisher, declared license, accepted architecture and
+weights-plus-cache ceiling checks. A complete metadata section is required
+inside the operator's bounded header read. The default 32 KiB was insufficient
+for the official Qwen3-0.6B artifact in live acceptance, which correctly remained
+unresolved rather than treating missing layout fields as conventional attention.
+
+The next increments are concrete: persist header observations and policy in a
+validated source projection; define architecture support for a pinned runtime
+build; then bind required, optional, disabled and unresolved companions into a
+dependency and component plan. Current screening establishes neither runtime
+support nor legal permission, and a component ceiling excludes overhead and
+companion allocation. Download ownership and source-driven experiments follow
+those boundaries. The current output is not a new 0.11 release or a role
+qualification receipt.
 
 Today fitr answers "is what I already have any good here?" The larger question
 is "what should I get?" fitr is positioned to answer it with the same local
@@ -1032,8 +1052,9 @@ anywhere
 
 Design constraints, in priority order:
 
-1. **Fit is deterministic; interest is not.** A registry index plus the
-   existing fit math answers "what fits here" with no model in the loop, and
+1. **Component arithmetic is deterministic; interest is not.** Complete
+   artifact metadata plus a declared ceiling can screen modeled components
+   with no model in the loop, and
    that path must stand alone: a new user has no local model to think with.
    But it does not answer "what is worth considering". Sorting a registry by
    downloads is a lagging indicator, structurally biased against exactly the

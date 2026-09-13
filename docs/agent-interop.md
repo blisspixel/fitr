@@ -1,6 +1,7 @@
 # Agent ecosystem compatibility
 
-Research checked September 5, 2026. The MCP profile was introduced in v0.10.6.
+Core protocol and package research checked September 13, 2026. Named-host
+assessments retain their individual dates below. The MCP profile was introduced in v0.10.6.
 Package discovery, wire-protocol behavior and independently
 verified model-plus-harness work are separate acceptance boundaries.
 
@@ -11,6 +12,14 @@ verified model-plus-harness work are separate acceptance boundaries.
 | MCP | 2026-07-28 | Read-only evidence server over stateless stdio; three bounded tools |
 | Agent Plugins | 1.0.0 | Portable skill plus root MCP configuration |
 | A2A | 1.0.0 specification, `1.0` wire version | Researched future evaluation adapter; no endpoint or adapter implemented |
+
+The current MCP revision is still `2026-07-28`, which can receive backwards
+compatible corrections without changing its date. Agent Plugins `1.0.0` is
+the published release; `1.1.0` is a working draft. The current acceptance pins
+the upstream schemas to immutable revisions recorded in
+[`scripts/testdata/interop-sources.json`](../scripts/testdata/interop-sources.json).
+See [MCP versioning](https://modelcontextprotocol.io/docs/2026-07-28/learn/versioning)
+and the [Agent Plugins repository status](https://github.com/agentplugins/agent-plugins-spec).
 
 The [MCP July release](https://blog.modelcontextprotocol.io/posts/2026-07-28/)
 replaces the initialization/session lifecycle with self-contained requests and
@@ -32,16 +41,24 @@ gate blocker after successful discovery.
     "fitr-evidence": {
       "type": "stdio",
       "command": "fitr",
-      "args": ["mcp", "serve"]
+      "args": ["mcp", "serve"],
+      "env": {
+        "FITR_RESULTS": "${PLUGIN_DATA}/results"
+      }
     }
   }
 }
 ```
 
 Use the host's documented local-package loading mechanism. An installed fitr
-executable must be resolvable by the host. Configure the child process's local
-`FITR_RESULTS` directory in the host environment before loading the MCP
-configuration. The package does not install fitr or supply credentials, hooks,
+executable must be resolvable by the host. The package explicitly sets
+`FITR_RESULTS` to `${PLUGIN_DATA}/results` in the host's persistent plugin data
+directory. Agent Plugins section 9.1 permits a host to discard ambient
+environment variables, so an ambient `FITR_RESULTS` is not the package's
+configuration mechanism. The selected store may initially be empty. Prepare
+evidence with the local CLI pointed at that same explicit path, or configure a
+separate native MCP entry for an existing evidence directory. The package does
+not install fitr or supply credentials, hooks,
 an executable or an A2A endpoint. The host can launch the configured subprocess;
 reading the skill alone does not launch it.
 
@@ -92,6 +109,11 @@ with a fixed diagnostic. The fixed input/output schemas follow the
 [tools contract](https://modelcontextprotocol.io/specification/2026-07-28/server/tools).
 Annotations describe behavior but do not authorize an action.
 
+Known nested client capability fields retain their specified object shapes;
+extension identifiers require a namespace prefix. Unsupported optional
+capabilities stay unused. Legacy `initialize` requests receive the supported
+modern version in their diagnostic, without creating a legacy session.
+
 The profile bounds input lines to 64 KiB, concurrency to four tool calls and
 rate to 60 calls per minute. One evidence review runs at a time. Cancellation
 suppresses the request's response; an already executing verification may finish
@@ -108,7 +130,7 @@ connect even when it recognizes the plugin package.
 ## Official SDK acceptance
 
 [`scripts/mcp_sdk_acceptance.py`](../scripts/mcp_sdk_acceptance.py) runs a built
-fitr executable through the official Python SDK **`mcp==2.0.0`**. Its
+fitr executable through the official Python SDK **`mcp==2.2.0`**. Its
 [test-only lock](../scripts/mcp-sdk-requirements.txt) pins every dependency and
 accepted wheel hash for CPython 3.14. These packages do not become Go runtime or
 plugin dependencies. This lock targets Linux x64, macOS arm64 and Windows x64,
@@ -121,6 +143,25 @@ empty and synthetic current-schema evidence stores. The
 also records official SDK acceptance for the Linux x64, macOS arm64 and Windows
 x64 CI binaries. Each receipt binds its own binary and inputs; these are not
 named-host acceptance results.
+
+The September 13 refresh upgrades only `mcp` and `mcp-types` to `2.2.0` using
+official PyPI wheel hashes and retains the other dependency pins. The package
+manifest, MCP configuration and actual request/response messages are validated
+against frozen official schemas, without network schema retrieval. The SDK
+child uses the portable package's arguments, explicit environment overlay and
+default plugin-root working directory. The harness resolves its bare `fitr`
+command to the exact candidate binary under test. Package and schema hashes
+are bound into the acceptance receipt. This validates the shipped profile and
+package; it does not establish every optional MCP feature or a named host.
+
+On September 13, the frozen Windows x64 working-tree candidate for 0.10.13
+passed all eight cases with CPython 3.14.7 and the hash-pinned SDK 2.2.0. Its
+SHA-256 was `ed445b7fd2a0096ddd6d70ca6008d6f7a6330bb09f80eb7feb994703bce03c09`.
+The separate raw-wire smoke observed exit 0. The candidate bytes, portable
+plugin's complete five-entry working-directory tree, and every temporary
+evidence tree remained unchanged. SDK cleanup took 0.012 to 0.026 seconds.
+This records a local candidate, not a published release or named-host result;
+CI must still validate its own binaries on all three supported platforms.
 
 The [0.10.12 release receipt](release-acceptance.md#01012-release-receipt)
 records the expanded eight-case suite on all three CI platforms and the public
@@ -135,8 +176,8 @@ discovery. The smoke instead calls `send_discover`, validates the real reply
 and adopts it. The default client also performs its own initial discovery;
 the transcript must contain both actual probes and no legacy `initialize`.
 These details follow the pinned
-[client implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v2.0.0/src/mcp/client/client.py)
-and [session implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v2.0.0/src/mcp/client/session.py).
+[client implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v2.2.0/src/mcp/client/client.py)
+and [session implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v2.2.0/src/mcp/client/session.py).
 
 Each case validates the catalog, closed schemas, all three tools, exact response
 IDs and complete results, an invalid role and an unknown tool. The synthetic
@@ -167,7 +208,7 @@ follow the host OS, including inherited Windows ACLs.
 Every SDK phase has a 20-second deadline and its cleanup must finish within
 five seconds. This establishes bounded SDK cleanup, not observed graceful
 child exit: the official
-[stdio transport](https://github.com/modelcontextprotocol/python-sdk/blob/v2.0.0/src/mcp/client/stdio.py)
+[stdio transport](https://github.com/modelcontextprotocol/python-sdk/blob/v2.2.0/src/mcp/client/stdio.py)
 can terminate an unresponsive child after its own two-second wait. The
 separate [native raw-wire smoke](../scripts/mcp-acceptance.py) checks the child's
 exit status. SDK acceptance does not test cancellation races or every protocol
@@ -190,7 +231,7 @@ with the same arguments. Keep `-I`; the test requires an isolated venv
 interpreter.
 Use a new receipt path on each run. Dependency installation needs PyPI; the
 acceptance cases use local stdio only. Update the lock deliberately from
-official [PyPI release metadata](https://pypi.org/pypi/mcp/2.0.0/json), retain
+official [PyPI release metadata](https://pypi.org/pypi/mcp/2.2.0/json), retain
 exact versions and matching wheel hashes, and rerun installation with
 `--require-hashes`, `pip check` and all platform acceptance jobs.
 
@@ -346,18 +387,23 @@ unresolved dependencies. A Git object ID is not relabeled as a SHA-256 of model 
 It uses explicit repository/revision/file inputs and at most two fixed-host
 anonymous metadata requests, following no redirects.
 
-`--fit` is a separate, explicitly requested read and has a different boundary.
+`--fit` and `--screen` can explicitly request an artifact prefix read and have
+a different boundary from metadata resolution.
 The bytes of a large artifact are not on the host that serves its metadata: the
 provider answers the canonical URL with a redirect to a signed, expiring
 location on a content network it chooses, so refusing every redirect refuses
 the bytes. That read follows exactly one redirect, to an absolute HTTPS
-location, takes a bounded byte range of the opening 32 KiB, sends no
+location, takes a bounded byte range of the opening 32 KiB by default, sends no
 credentials, and records the host that actually served the response. A
 projection built from those bytes cites that host rather than implying the
 canonical one served them, because it has a different provenance than a
 projection built from a file on disk. Unavailable hashes, denied
-metadata and ambiguous shard/encoder dependencies remain gaps. No model-card
-instructions, custom code, weight downloads or returned download URLs are used.
+metadata and ambiguous shard/encoder dependencies remain gaps. An explicit
+`--header-bytes` can raise the prefix bound to 8 MiB; it never triggers an
+automatic retry. `--screen` sequences publisher, license policy, architecture
+and fit gates with caller-supplied requirements. These are explicit CLI
+operations; the MCP profile has no source-resolution or network tool.
+No model-card instructions, custom code or complete weight downloads are used.
 
 **llmfit:** its [official CLI documentation](https://github.com/AlexsJones/llmfit/blob/main/docs/cli.md)
 and [project overview](https://github.com/AlexsJones/llmfit) expose hardware/model

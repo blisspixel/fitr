@@ -23,6 +23,9 @@ These are enforced in code and tests. Do not weaken them for convenience:
   not coerced into one. Reading the first entry of a per-layer `head_count_kv`
   array as the model's scalar passed every bounds check, passed `KVReady`, and
   put a fit verdict tens of times off on current artifacts.
+  Preserve absent fields, malformed values and declared zero separately;
+  apply defaults only where the upstream contract permits them. A truncated
+  GGUF header cannot establish that an unread layout key is absent.
 - Evidence compares only within one device fingerprint, runtime, artifact
   digest, effective context and placement. Do not add a cross-configuration
   ranking or a global score.
@@ -50,7 +53,8 @@ itself.
 |---|---|---|
 | CLI dispatch, flags, exit codes | `cmd/fitr/main.go` | 0 ok, 1 error, 2 usage, 3 a measured need FAILED, 4 required decision evidence unresolved or blocked, 130 interrupt. Adding a code is a contract change. |
 | Serving runtimes | `internal/llm` interface, adapters in `internal/ollama`, `internal/llamaserver`, `internal/openaicompat` | The measurement layer must not know which server it is talking to. |
-| Evidence schemas, sealing, signing, validation | `internal/record` | The only home. New fields carry `omitempty` so previously signed payloads keep their exact bytes and signatures; frozen fixtures prove it. |
+| Canonical run evidence schemas, sealing, signing, validation | `internal/record` | The only home for canonical run evidence. New fields carry `omitempty` so previously signed payloads keep their exact bytes and signatures; frozen fixtures prove it. |
+| Public source metadata and bounded artifact reads | `internal/source` | Metadata receipts remain separate from canonical run evidence. `internal/advise` owns source fit arithmetic, `internal/analysis` owns its facts and screening policy, and `internal/render` presents them. See `docs/source-resolution.md`. |
 | Derived renderer-neutral facts | `internal/analysis` | Reports are projections rebuilt from a validated record, never written back as evidence. |
 | Presentation | `internal/render` (CLI, HTML), `internal/top` (TUI) | Renderers consume analysis. A renderer never recomputes a verdict, and every surface composes to the resolved width. |
 | Battery, tasks, graders, execution adapters | `internal/eval` | Task definitions are canonical in `spec/` with an embedded copy under `internal/eval/tasks`. `make spec-sync` repairs drift; `TestEmbeddedSpecMatchesCanonical` fails the build without it. |
@@ -58,8 +62,13 @@ itself.
 | Fit arithmetic and GGUF metadata | `internal/advise` | The fit verdict the README leads with, plus the largest untrusted binary surface fitr has. KV and parameter arithmetic is overflow-checked and an implausible dimension is unmeasured, never a smaller number. `FuzzReadMetadata` is a CI gate over both the whole-file and bounded-prefix entry points. |
 | Device identity | `internal/device` | Any field added to the fingerprint changes what compares to what. Fingerprint errors corrupt comparison silently, which is the worst failure class here. |
 | Untrusted JSON | `internal/strictjson` | Duplicate-key rejection runs before any typed decode. |
+| MCP and portable agent package | `internal/mcp`, `plugins/fitr` | `docs/agent-interop.md` owns protocol, package and named-host boundaries; SDK acceptance lives in `scripts/mcp_sdk_acceptance.py`. |
 | Files and exclusion | `internal/atomicfile`, `internal/boundedio`, `internal/lock` | One way to write, one way to bound a read, one way to lock. |
 | Long-context document pack | `internal/contextquality` (pure plan, generate, verify, analyze), `internal/eval/contexttask.go` (submission), `internal/record/context_quality.go` (sealing), `fitr run --context-tiers` (collection) | CLI, JSON, HTML and the TUI project the sealed phase; its wording is derived once in `internal/analysis`. Role preferences and auto collection remain unconnected. See `docs/context-quality.md`. |
+
+New value-taking CLI flags also belong in `takesValue` in `cmd/fitr/main.go`.
+Exercise the documented space-separated form; `--flag=value` alone can hide
+argument-reordering defects.
 
 ## Verify
 
@@ -73,6 +82,12 @@ go test ./... -count=1
 golangci-lint run ./...
 sh scripts/check-coverage.sh 80
 go run ./cmd/fitr screenshots docs/assets && git diff --exit-code -- docs/assets
+```
+
+On Windows without `sh`, use the equivalent aggregate coverage gate:
+
+```powershell
+pwsh -NoProfile -File scripts/check-coverage.ps1 80
 ```
 
 Formatting: check the tracked tree only. `gofmt -l .` also walks the gitignored
@@ -107,7 +122,7 @@ package before believing it, and never edit a test on the strength of a single
 red run on Windows.
 
 `.github/workflows/ci.yml` is the authority on the full gate set and on every
-tool version. It additionally runs the race detector, ten fuzz smoke targets, a
+tool version. It additionally runs the race detector, twelve fuzz smoke targets, a
 1600-line cap on non-test `.go` files, a measured binary size cap in `dist`, a
 deterministic-rebuild comparison, installer smokes on three operating systems, and
 `govulncheck`. Take Go and linter versions from `go.mod` and that workflow, not
@@ -123,6 +138,11 @@ FITR_LIVE=<model> go test ./cmd/fitr -run TestLive
 
 Native rows are recorded in `docs/release-acceptance.md`. Do not describe a
 measurement path as working on unit tests alone.
+
+Tie verification claims to the tested snapshot. A prior green main run does
+not cover new working-tree edits. Distinguish local checks, CI for the exact
+commit, released binaries and live runtime measurements. A live source HTTP
+read establishes no inference behavior or resident memory.
 
 A regression test is not finished until it has been seen to fail. Reintroduce
 the defect, watch the new test catch it, then restore the fix. A test written
@@ -154,6 +174,11 @@ Check a borrowed name against the upstream source that defines it, and say in
 a comment which version you checked. Prefer a fixture taken from a real
 published artifact or a recorded wire exchange over a hand-built map, because
 only the former can disagree with you.
+
+For MCP or plugin changes, check the current primary specifications before
+updating the pins in `scripts/testdata/interop-sources.json`. Run official SDK
+acceptance against the exact candidate executable and plugin configuration;
+schema validation alone does not establish named-host compatibility.
 
 ## Adding a measurement
 

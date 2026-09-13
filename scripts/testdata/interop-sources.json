@@ -1,0 +1,26 @@
+{
+  "checked_at": "2026-09-13",
+  "sources": [
+    {
+      "file": "mcp-2026-07-28.schema.json",
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/cc2a84f5ca5404b2949683f7d7876f623344294f/schema/2026-07-28/schema.json",
+      "source_sha256": "ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203",
+      "sha256": "50c1cdb02ab57dee25e187eb88c700f2037e49b618622f224d05341ff8ae5436",
+      "normalization": "Unicode dash characters use JSON escapes and trailing blank lines are removed; decoded JSON is unchanged",
+      "license": "Apache-2.0/MIT transition; see retained upstream notice",
+      "license_file": "mcp-schema-LICENSE.txt"
+    },
+    {
+      "file": "agent-plugins-1.0.0-plugin.schema.json",
+      "url": "https://raw.githubusercontent.com/agentplugins/agent-plugins-spec/ff8ab5e392cc87bd88d87c060815a87490e51003/schemas/1.0.0/plugin.schema.json",
+      "sha256": "0a4aad95ce337878ad38802ebf0daa3fde76abe3f65400c86bcbb1ec0b3ab883",
+      "license": "Apache-2.0"
+    },
+    {
+      "file": "agent-plugins-1.0.0-mcp.schema.json",
+      "url": "https://raw.githubusercontent.com/agentplugins/agent-plugins-spec/ff8ab5e392cc87bd88d87c060815a87490e51003/schemas/1.0.0/mcp.schema.json",
+      "sha256": "6539175bfcdf43085855183e86da40ea94b166547a72b47ae9a0a390516d3acb",
+      "license": "Apache-2.0"
+    }
+  ]
+}

@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.10.13" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.10.13" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.10.13" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.10.13" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.10.14" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.10.14" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.10.14" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.10.14" alt="fitr top (demo data)" width="820">
 
 ### Bounded fitting
 
@@ -225,6 +225,7 @@ of installed RAM as an unconditional model budget.
 | `fitr role adopt <name> <bundle.json>` / `status <name>` / `rollback <name>` | explicitly retain a qualified selection, recheck it or restore valid previous evidence |
 | `fitr mcp serve` | serve bounded read-only role tools over MCP 2026-07-28 stdio; see [interop](agent-interop.md) |
 | `fitr source resolve hf --repo <owner/model> --revision <revision> --file <path> --out <receipt.json>` | resolve explicit public file metadata at an immutable commit without downloading weights; see [source resolution](source-resolution.md) |
+| `fitr source resolve hf ... --screen --ctx N --fit-budget-gb N --allow-license ID --allow-architecture ID` | screen publisher, declared license, GGUF architecture and projected components in order; runtime support and resident memory stay unmeasured |
 | `fitr artifact bind --source <receipt.json> --mapping <files.json> --out <artifact.json>` | hash explicitly mapped local files within byte/time bounds; see [artifact binding](artifact-binding.md) |
 | `fitr artifact show <artifact.json>` | validate and inspect a saved local-byte observation without reopening model files |
 | `fitr source show <receipt.json>` | validate and inspect a saved metadata receipt offline |
@@ -246,6 +247,24 @@ to 40 agent turns; it is not a coding grade until the isolated worker exists.
 Ctrl-C is safe (exit 130).
 
 ## Flags worth knowing
+
+For source resolution, `--screen` requires a positive context and component
+ceiling in GiB. Repeat `--allow-license` and `--allow-architecture` for explicitly
+accepted identifiers; missing lists leave their gates unresolved.
+`--require-first-party` optionally requires every declared base author to match
+the repository owner. `--fit` runs only the component projection, using the
+artifact's declared context and detected addressable capacity when not supplied.
+Neither command observes runtime allocation or interprets license terms.
+
+Both read at most 32 KiB per file by default. `--header-bytes N` explicitly
+changes the allowance up to 8 MiB; there is no automatic retry. Complete GGUF
+metadata and one complete file or consistent shard group are required.
+The prefix may contain leading tensor bytes when metadata is short. Missing
+metadata, unsupported arithmetic, companions or multiple independent models
+keep the projection unresolved. `--out` saves metadata only; fresh screening
+observations appear in stdout as one JSON document with `--display json`.
+Source screening and fit exit 4 when blocked or unresolved, and 0 only when the
+requested gates or component comparison clear. See [source resolution](source-resolution.md).
 
 - `-k N` explicitly sets the repeat count for noisy tasks and generated-check
   rounds. Without it, standard and full runs use three speed and classic-task
