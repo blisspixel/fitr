@@ -87,8 +87,11 @@ so it can go red on a commit that never touched Go. Check it with the rest
 rather than discovering it in CI:
 
 ```bash
-git ls-files '*.go' | grep -v '_test\.go$' | xargs wc -l | awk '$1 > 1600'
+git ls-files '*.go' | grep -v '_test\.go$' | xargs wc -l | grep -v ' total$' | awk '$1 > 1600'
 ```
+
+Nothing printed means nothing is over the cap. The `total` line has to be
+dropped or it reports the whole tree as a violation.
 
 Two things that look like failures and are not. `golangci-lint` type-checks with
 the Go toolchain it was itself built with, so a copy built by an older Go panics
