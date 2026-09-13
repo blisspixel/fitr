@@ -1422,6 +1422,12 @@ func TestArtifactRejectsStoredScorecardTampering(t *testing.T) {
 	}
 }
 
+// Accel makes the fixture report a compute backend the way every real
+// serving runtime does. Without it the fixture models a runtime that cannot
+// name its accelerator, which is correctly not comparable and is not what this
+// test is about.
+func (b *runIntegrationBackend) Accel(context.Context) string { return "cuda" }
+
 type runIntegrationBackend struct {
 	stopCalls     int
 	generateCalls int

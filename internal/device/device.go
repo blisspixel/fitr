@@ -205,12 +205,27 @@ type Fingerprint struct {
 	// own startup log. owned-launch is an explicitly sealed child environment.
 	// unobserved means the daemon was not read, so Config cannot be compared.
 	ConfigSource string `json:"config_source,omitempty"`
+	// AccelSource says how GPUBackend was obtained. GPUBackend is part of the
+	// comparability key, and on Ollama it is read from the serving runtime's
+	// log, so it moves when that log rotates, is unreadable, or has grown past
+	// the tail fitr samples. An empty accelerator then means either that the
+	// runtime computes on the CPU or that nothing was read, which are different
+	// facts. Empty is historical: records sealed before this existed.
+	AccelSource string `json:"accel_source,omitempty"`
 }
 
 const (
 	ConfigSourceServerLog   = "server-log"
 	ConfigSourceOwnedLaunch = "owned-launch"
 	ConfigSourceUnobserved  = "unobserved"
+)
+
+const (
+	// AccelSourceRuntime is a compute backend the serving runtime reported.
+	AccelSourceRuntime = "runtime-report"
+	// AccelSourceUnobserved means no runtime reported one. It is not a claim
+	// that inference runs on the CPU.
+	AccelSourceUnobserved = "unobserved"
 )
 
 // vendorForAccel maps a compute API onto the vendor whose name must appear on
@@ -333,6 +348,12 @@ func (f Fingerprint) RuntimeConfigObserved() bool {
 	return f.ConfigSource == ConfigSourceServerLog || f.ConfigSource == ConfigSourceOwnedLaunch
 }
 
+// AcceleratorObserved reports that a serving runtime named its compute backend.
+// A record sealed before this provenance existed keeps its original meaning.
+func (f Fingerprint) AcceleratorObserved() bool {
+	return f.AccelSource == "" || f.AccelSource == AccelSourceRuntime
+}
+
 func (f Fingerprint) Key() string {
 	c := f.Config
 	return strings.Join([]string{
@@ -374,9 +395,11 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	if b != nil {
 		version = b.Version(probeCtx)
 	}
-	accel := ""
+	accel, accelSource := "", AccelSourceUnobserved
 	if a, ok := b.(interface{ Accel(context.Context) string }); ok {
-		accel = NormalizeAccel(a.Accel(probeCtx))
+		if reported := NormalizeAccel(a.Accel(probeCtx)); reported != "" {
+			accel, accelSource = reported, AccelSourceRuntime
+		}
 	}
 	placement := inferenceDevice(probeCtx, b, "")
 	wg.Wait()
@@ -396,7 +419,7 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 		Host: host, OS: runtime.GOOS, CPU: cpu, RAMGb: ram,
 		GPU: gpu, GPUDriver: drv, GPUDriverDate: date,
 		Runtime: version, InferenceDevice: placement,
-		GPUBackend: accel, VRAMGb: vram, VRAMSource: vsrc, Config: cfg,
+		GPUBackend: accel, AccelSource: accelSource, VRAMGb: vram, VRAMSource: vsrc, Config: cfg,
 		ConfigSource: configSource,
 	}
 }

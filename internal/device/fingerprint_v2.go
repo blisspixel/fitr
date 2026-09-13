@@ -224,6 +224,13 @@ func (f FingerprintV2) ComparabilityKey() (string, error) {
 	if f.Device.ConfigSource == ConfigSourceUnobserved {
 		return "", errors.New("serving-runtime configuration is unobserved")
 	}
+	// The accelerator is in the key material below. An unobserved one is an
+	// absent reading rather than a CPU-only runtime, and letting the two share
+	// an empty string pools evidence from machines that compute differently,
+	// or splits one machine's evidence when a log rotates underneath it.
+	if !f.Device.AcceleratorObserved() {
+		return "", errors.New("the serving runtime's compute backend is unobserved")
+	}
 	material := fingerprintKeyMaterial{
 		Schema: f.Schema,
 		Host:   f.Device.Host, OS: f.Device.OS, CPU: f.Device.CPU,
