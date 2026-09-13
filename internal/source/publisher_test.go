@@ -8,7 +8,7 @@ import (
 
 func meta(author, base, license string, tags ...string) hfMetadata {
 	m := hfMetadata{ID: author + "/repo", Author: author, Tags: tags}
-	m.CardData.License = license
+	m.CardData.License, _ = json.Marshal(license)
 	if base != "" {
 		m.CardData.BaseModel = json.RawMessage(`["` + base + `"]`)
 	}
@@ -91,7 +91,7 @@ func TestSilentMetadataProducesNoPublisher(t *testing.T) {
 // The owner falls back to the repository id, which always carries it.
 func TestAuthorFallsBackToTheRepositoryOwner(t *testing.T) {
 	m := hfMetadata{ID: "bartowski/Some-Model-GGUF"}
-	m.CardData.License = "mit"
+	m.CardData.License = json.RawMessage(`"mit"`)
 	if p := publisherFrom(m); p == nil || p.Author != "bartowski" {
 		t.Fatalf("owner was not recovered from the id: %+v", p)
 	}

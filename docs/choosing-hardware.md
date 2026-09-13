@@ -267,8 +267,14 @@ MODEL SHAPE
 ```
 
 Total parameters help explain artifact capacity. Nominal active parameters
-help describe the MoE compute path. Hybrid and recurrent classes refuse
-weights-plus-KV FIT until a load receipt exists. None of these labels predict
+help describe the MoE compute path. An interval hybrid supports cache arithmetic
+when the artifact establishes both its attending-layer count and complete fixed
+recurrent state, including the recurrent group count. A per-layer KV-head array
+can establish the count directly; a uniform interval must divide the layer count
+to avoid choosing between runtime pattern conventions. Missing state dimensions,
+unsupported boolean recurrence patterns and sliding-window layouts still require
+an observed allocation. Component arithmetic remains separate from a measured
+safe-budget fit verdict. None of these labels predict
 speed, tool competence, or "the best quant for 24 GB." A quant string is a
 requested recipe class; two files with the same label remain different
 artifacts.

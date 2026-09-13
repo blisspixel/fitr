@@ -240,8 +240,9 @@ type hfMetadata struct {
 	Tags      []string        `json:"tags"`
 	Gated     json.RawMessage `json:"gated"`
 	CardData  struct {
-		BaseModel json.RawMessage `json:"base_model"`
-		License   string          `json:"license"`
+		BaseModel         json.RawMessage `json:"base_model"`
+		BaseModelRelation json.RawMessage `json:"base_model_relation"`
+		License           json.RawMessage `json:"license"`
 	} `json:"cardData"`
 	files map[string]FileMetadata
 }

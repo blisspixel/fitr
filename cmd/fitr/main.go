@@ -322,7 +322,7 @@ func takesValue(flagArg string) bool {
 	name := strings.TrimLeft(flagArg, "-")
 	switch name {
 	case "k", "n", "profile", "display", "backend", "seedset", "vram-gb", "ctx", "out", "lineage", "view", "spec",
-		"context-tiers",
+		"context-tiers", "fit-budget-gb", "allow-license", "allow-architecture", "header-bytes",
 		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim", "repo", "revision", "file", "source",
 		"quality", "minimum-rate", "memory-gb", "max-age-days", "min-age-days", "mapping", "max-bytes", "timeout",
 		"models", "runtime", "mode", "adoption", "candidate", "max-wall", "confirmation-wall", "max-requests", "max-requested-output-tokens", "max-points":

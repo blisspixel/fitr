@@ -56,6 +56,15 @@ func (result Resolution) validateFields() error {
 	if err := result.validateQueries(); err != nil {
 		return err
 	}
+	if err := result.Publisher.validate(); err != nil {
+		return err
+	}
+	if result.Publisher != nil && result.Publisher.Author != "" && result.ResolvedRepo != "" {
+		owner, _, _ := strings.Cut(result.ResolvedRepo, "/")
+		if !strings.EqualFold(result.Publisher.Author, owner) {
+			return errors.New("source publisher author contradicts its pinned repository owner")
+		}
+	}
 	if result.State == "unavailable" {
 		return result.validateUnavailable()
 	}
@@ -169,7 +178,7 @@ func queryStatusMatches(outcome string, status int) bool {
 }
 
 func (result Resolution) validateUnavailable() error {
-	if result.ResolvedRepo != "" || result.ResolvedCommit != "" || len(result.Files) != 0 ||
+	if result.ResolvedRepo != "" || result.ResolvedCommit != "" || result.Publisher != nil || len(result.Files) != 0 ||
 		len(result.InventoryPaths) != 0 || len(result.Dependencies) != 0 || len(result.Gaps) != 1 {
 		return errors.New("unavailable source receipt cannot assert resolved evidence")
 	}

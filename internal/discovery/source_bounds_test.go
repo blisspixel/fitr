@@ -136,6 +136,7 @@ func TestSourcePlanKeepsUnavailableMetadataUnmeasured(t *testing.T) {
 	receipt := sourceInboxReceipt(t, "one.gguf")
 	receipt.State = "unavailable"
 	receipt.ResolvedRepo, receipt.ResolvedCommit = "", ""
+	receipt.Publisher = nil
 	receipt.Files, receipt.InventoryPaths, receipt.Dependencies = nil, nil, nil
 	receipt.Queries = receipt.Queries[:1]
 	receipt.Queries[0].HTTPStatus = 403

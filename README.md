@@ -106,8 +106,25 @@ fitr discover plan <idea-id>
 <img src="docs/assets/source.svg?v=0.10.13" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
 
 The receipt pins a commit, preserves declared file sizes and hashes, and
-surfaces dependency gaps. It downloads no weights and does not qualify the
-model for a role. See [source resolution](docs/source-resolution.md),
+surfaces publisher lineage, declared license and dependency gaps. An optional
+screen applies your policies before considering a complete download:
+
+```bash
+fitr source resolve hf --repo owner/model --revision main --file model-Q4_K_M.gguf --out screened-source.json --screen --ctx 8192 --fit-budget-gb 16 --allow-license apache-2.0 --allow-architecture qwen3
+```
+
+The gates are publisher, declared license, architecture and projected weights
+plus cache. `--require-first-party` optionally requires every declared base
+model to share the publisher's author. Third-party authorship is not a quality
+failure. Missing policy or incomplete metadata keeps the screen unresolved.
+
+Screening reads at most 32 KiB per selected file by default. A complete metadata
+header is required; explicitly set `--header-bytes` up to 8 MiB when that bound
+is insufficient. The memory ceiling excludes runtime overhead and companions;
+clearing it does not establish runtime support, legal permission or measured
+fit. `--out` saves the metadata receipt; fresh screening and prefix observations
+appear in command output. The model remains unqualified for a role.
+See [source resolution](docs/source-resolution.md),
 [source attachments and investigation plans](docs/source-attachments.md),
 [discovery and the model library](docs/discovery.md) for the
 flow, and [agent interoperability](docs/agent-interop.md) for the portable
@@ -197,7 +214,7 @@ unresolved dependencies remain explicit. See [cleanup planning](docs/cleanup.md)
 | Capacity policy | A pre-load sealed resource domain, timestamped availability, explicit operator budget or reserve, exact usable-budget formula, component projection, and observed safe headroom | [Choosing hardware](docs/choosing-hardware.md#capacity), [usage](docs/usage.md#capacity-policy-for-a-run) |
 | Workload decisions | Constraint-based eligibility under a versioned declaration, with no universal weighted score | [Decisions](docs/decisions.md) |
 | Personal roles | Quality and resource floors, fixed preferences, fresh confirmation, explicit selection, evidence expiry and validated rollback | [Roles](docs/roles.md), [confirmation](docs/role-confirmation.md) |
-| Source resolution | Commit-pinned public file metadata, distinct declared hashes and unresolved dependencies, with no weight downloads | [Source metadata](docs/source-resolution.md) |
+| Source resolution and screening | Commit-pinned metadata, publisher lineage, explicit license and architecture filters, and bounded weights-plus-cache projections with unresolved dependencies | [Source metadata](docs/source-resolution.md) |
 | Discovery investigations | Private source attachments and separately stated metadata, dependency, runtime and quality gaps | [Source attachments](docs/source-attachments.md) |
 | Local artifact observations | Bounded whole-file hashes for explicit mappings, source comparisons and change detection without runtime promotion | [Artifact binding](docs/artifact-binding.md) |
 | Agent interoperability | Read-only MCP 2026-07-28 candidate review and selected status, official SDK acceptance and an Agent Plugins 1.0.0 package | [Protocol and client limits](docs/agent-interop.md) |

@@ -482,13 +482,13 @@ func TestRecurrentLayersKeyMarksAnUnlistedHybrid(t *testing.T) {
 		"nemotron_h.attention.head_count_kv":    uint64(8),
 		"nemotron_h.attention.key_length":       uint64(128),
 		"nemotron_h.attention.value_length":     uint64(128),
-		"nemotron_h.attention.recurrent_layers": uint64(38),
+		"nemotron_h.attention.recurrent_layers": true,
 	}
 	if inherentHybridArchitecture("nemotron_h") {
 		t.Fatal("this test is meaningless if the architecture is already on the name list")
 	}
 	arch := ArchFromKVs(kvs)
-	if arch.RecurrentLayers != 38 || !arch.Hybrid {
+	if arch.RecurrentLayers != 0 || !arch.Hybrid || !arch.RecurrentPatternUnsupported {
 		t.Fatalf("recurrent_layers must mark the model hybrid: %+v", arch)
 	}
 	report := Evaluate(Input{
@@ -520,6 +520,7 @@ func qwen38KVs() map[string]any {
 		"qwen35.ssm.conv_kernel":         uint64(4),
 		"qwen35.ssm.state_size":          uint64(128),
 		"qwen35.ssm.inner_size":          uint64(6144),
+		"qwen35.ssm.group_count":         uint64(16),
 	}
 }
 
@@ -565,7 +566,7 @@ func TestIntervalHybridChargesOnlyItsFullAttentionLayers(t *testing.T) {
 // attention layers alone.
 func TestIntervalHybridWithoutItsRecurrentShapeStaysUnsizable(t *testing.T) {
 	for _, missing := range []string{
-		"qwen35.ssm.inner_size", "qwen35.ssm.state_size", "qwen35.ssm.conv_kernel",
+		"qwen35.ssm.inner_size", "qwen35.ssm.state_size", "qwen35.ssm.conv_kernel", "qwen35.ssm.group_count",
 	} {
 		t.Run(missing, func(t *testing.T) {
 			kvs := qwen38KVs()
@@ -588,14 +589,12 @@ func TestHybridArchitectureRequiresMeasuredAllocation(t *testing.T) {
 		"qwen35.attention.head_count_kv": uint64(4),
 		"qwen35.attention.key_length":    uint64(128),
 		"qwen35.full_attention_interval": uint64(4),
-		// The key llama.cpp writes is attention.recurrent_layers. fitr read
-		// attention.recurrent_layer_count, which nothing emits, and this test
-		// asserted the same invented name -- so the branch could never fire in
-		// production and CI could never notice.
-		"qwen35.attention.recurrent_layers": uint64(48),
+		// This is a boolean pattern, not a numeric recurrent-layer count.
+		// Checked against llama.cpp 4a89937354190cef5a97baf8eeb17336105eb72d.
+		"qwen35.attention.recurrent_layers": true,
 	}
 	arch := ArchFromKVs(kvs)
-	if !arch.Hybrid || arch.FullAttentionInterval != 4 || arch.RecurrentLayers != 48 {
+	if !arch.Hybrid || arch.FullAttentionInterval != 4 || !arch.RecurrentPatternUnsupported {
 		t.Fatalf("hybrid metadata = %+v", arch)
 	}
 	report := Evaluate(Input{

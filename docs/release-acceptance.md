@@ -4,7 +4,50 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-09-05.
+Last updated: 2026-09-13.
+
+### Source screening acceptance, 2026-09-13 working tree
+
+The working tree's source CLI was checked against the official
+[Qwen3-0.6B GGUF artifact](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/blob/23749fefcc72300e3a2ad315e1317431b06b590a/Qwen3-0.6B-Q8_0.gguf)
+at commit `23749fefcc72300e3a2ad315e1317431b06b590a`. This is source metadata and
+bounded artifact-prefix acceptance. No runtime was started and no inference was
+performed; this is not a model quality result or release-binary receipt.
+
+Both checks required first-party lineage, accepted `apache-2.0` and `qwen3`, and
+used an 8192-token context with a 4 GiB component ceiling. The provider declared
+639,446,688 weight bytes and SHA-256
+`9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031`.
+The publisher and base author were both `Qwen`.
+
+| Explicit prefix allowance | Observed result | Exit |
+|---|---|---:|
+| Default 32,768 bytes | Publisher and license clear; metadata truncation leaves architecture unresolved and fit not checked | 4 |
+| `--header-bytes 8388608` | Complete metadata supports `qwen3`; 639,446,688 declared weight bytes plus 939,524,096 projected f16 cache bytes total 1,578,970,784, within the declared ceiling | 0 |
+
+Both prefix reads returned HTTP 206 from `us.aws.cdn.hf.co` after one redirect,
+with exactly the requested byte allowance. The 8 MiB prefix observation ran
+from `2026-09-13T14:02:52.6947652Z` to `2026-09-13T14:02:53.7937104Z`; its
+SHA-256 was `8a76f69709bee54c9243a2f65621b60ecc00a736a611d8d42c26c3c7cc334c75`.
+Its source receipt digest was
+`88e767a8827986ed6e1eb964cddad413cf5ba3c7ee9cc73e16e4ea7dda88bde2`.
+The default prefix SHA-256 was
+`7344216109f903dd383b0bdc9634fd472bde9480fd56561b34f8f152f1281c2b`.
+
+The raw pinned metadata response, default prefix and metadata receipt are
+retained as offline fixtures under `internal/source/testdata/qwen3-0.6b-*`.
+Tests check upstream lineage spellings and ensure the recorded incomplete
+prefix cannot clear a projection. The larger live check establishes that the
+complete-header path can clear; it does not establish runtime support, legal
+permission, dependency closure, safe resident memory or role quality. Fresh
+screening observations appear in stdout; `--out` retains metadata only.
+
+After final review, the frozen Windows amd64 candidate with SHA-256
+`ed445b7fd2a0096ddd6d70ca6008d6f7a6330bb09f80eb7feb994703bce03c09`
+repeated the 8 MiB case successfully. The response's complete file size also
+matched the pinned 639,446,688-byte declaration. The source receipt digest was
+`0f625492e9c9fb8c894097c2ed209fee7a022323d0b6dce3c54d506db4826feb`.
+This identifies a tested working-tree executable, not a published release.
 
 ### 0.10.12 release receipt
 

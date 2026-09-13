@@ -1,0 +1,75 @@
+{
+  "schema": "fitr.source.resolution.v1",
+  "resolution_sha256": "sha256:36a27c51f6c89aac019424801eba3f1f091c5802ce0ab17b67c4886d03e7b57e",
+  "observed_at": "2026-09-05T12:00:00.005Z",
+  "resolver_version": "0.10.7",
+  "policy_version": "fitr.source.hf.metadata.v1",
+  "provider": "huggingface",
+  "scope": "explicit_file_metadata",
+  "request": {
+    "repo_id": "owner/model",
+    "revision": "main",
+    "files": [
+      "model.gguf"
+    ]
+  },
+  "resolved_repo": "owner/model",
+  "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "state": "resolved",
+  "files": [
+    {
+      "path": "model.gguf",
+      "state": "present",
+      "size_bytes": 1234,
+      "git_blob_oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "declared_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "inventory_paths": [
+    "model.gguf"
+  ],
+  "dependencies": [
+    {
+      "kind": "cross_repository",
+      "status": "unknown",
+      "basis": "not_inspected"
+    },
+    {
+      "kind": "encoder",
+      "status": "unknown",
+      "basis": "not_inspected"
+    },
+    {
+      "kind": "projector",
+      "status": "unknown",
+      "basis": "not_inspected"
+    },
+    {
+      "kind": "tokenizer",
+      "status": "unknown",
+      "basis": "not_inspected"
+    }
+  ],
+  "gaps": [
+    "dependency_closure_unverified",
+    "local_artifact_unverified"
+  ],
+  "queries": [
+    {
+      "revision": "main",
+      "started_at": "2026-09-05T12:00:00.001Z",
+      "completed_at": "2026-09-05T12:00:00.002Z",
+      "http_status": 200,
+      "outcome": "complete",
+      "response_sha256": "sha256:770faaec033911b29761998757305d610ae62c7aea5bf4b7bf1f56aaa4718cb0"
+    },
+    {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-09-05T12:00:00.003Z",
+      "completed_at": "2026-09-05T12:00:00.004Z",
+      "http_status": 200,
+      "outcome": "complete",
+      "response_sha256": "sha256:770faaec033911b29761998757305d610ae62c7aea5bf4b7bf1f56aaa4718cb0"
+    }
+  ]
+}

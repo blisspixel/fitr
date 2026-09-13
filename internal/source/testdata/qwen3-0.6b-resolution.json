@@ -1,0 +1,90 @@
+{
+  "schema": "fitr.source.resolution.v1",
+  "resolution_sha256": "sha256:02df8ab8238c649fef7416a1cef03fbab6de888d948d93eda573bccd460d2c2b",
+  "observed_at": "2026-09-13T13:54:34.5200563Z",
+  "resolver_version": "0.10.13",
+  "policy_version": "fitr.source.hf.metadata.v1",
+  "provider": "huggingface",
+  "scope": "explicit_file_metadata",
+  "request": {
+    "repo_id": "Qwen/Qwen3-0.6B-GGUF",
+    "revision": "main",
+    "files": [
+      "Qwen3-0.6B-Q8_0.gguf"
+    ]
+  },
+  "resolved_repo": "Qwen/Qwen3-0.6B-GGUF",
+  "resolved_commit": "23749fefcc72300e3a2ad315e1317431b06b590a",
+  "state": "resolved",
+  "files": [
+    {
+      "path": "Qwen3-0.6B-Q8_0.gguf",
+      "state": "present",
+      "size_bytes": 639446688,
+      "git_blob_oid": "11bf194c8059f3b03e4454376ac67813a1e0eb52",
+      "declared_sha256": "sha256:9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031"
+    }
+  ],
+  "inventory_paths": [
+    ".gitattributes",
+    "LICENSE",
+    "Qwen3-0.6B-Q8_0.gguf",
+    "README.md",
+    "params"
+  ],
+  "dependencies": [
+    {
+      "kind": "cross_repository",
+      "status": "unknown",
+      "basis": "not_inspected"
+    },
+    {
+      "kind": "encoder",
+      "status": "unknown",
+      "basis": "not_inspected"
+    },
+    {
+      "kind": "projector",
+      "status": "unknown",
+      "basis": "not_inspected"
+    },
+    {
+      "kind": "tokenizer",
+      "status": "unknown",
+      "basis": "not_inspected"
+    }
+  ],
+  "gaps": [
+    "dependency_closure_unverified",
+    "local_artifact_unverified"
+  ],
+  "queries": [
+    {
+      "revision": "main",
+      "started_at": "2026-09-13T13:54:34.0224517Z",
+      "completed_at": "2026-09-13T13:54:34.3311574Z",
+      "http_status": 200,
+      "outcome": "complete",
+      "response_sha256": "sha256:2dde2b52d2d198cf3df580af10aaeeff9d145cea83e8be4814df176947cfbcd7"
+    },
+    {
+      "revision": "23749fefcc72300e3a2ad315e1317431b06b590a",
+      "started_at": "2026-09-13T13:54:34.3311574Z",
+      "completed_at": "2026-09-13T13:54:34.5200563Z",
+      "http_status": 200,
+      "outcome": "complete",
+      "response_sha256": "sha256:2dde2b52d2d198cf3df580af10aaeeff9d145cea83e8be4814df176947cfbcd7"
+    }
+  ],
+  "publisher": {
+    "author": "Qwen",
+    "base_models": [
+      "Qwen/Qwen3-0.6B"
+    ],
+    "base_author": "Qwen",
+    "first_party_conversion": true,
+    "declared_quantization": true,
+    "license": "apache-2.0",
+    "created_at": "2025-05-05T09:16:31.000Z"
+  }
+}
