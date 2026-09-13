@@ -79,6 +79,10 @@ jobs:
         run: go test ./internal/strictjson -run='^$' -fuzz=FuzzValidate -fuzztime=20000x -parallel=4
       - name: GGUF metadata fuzz smoke
         run: go test ./internal/advise -run='^$' -fuzz=FuzzReadMetadata -fuzztime=20000x -parallel=4
+      - name: source publisher metadata fuzz smoke
+        run: go test ./internal/source -run='^$' -fuzz=FuzzPublisherMetadata -fuzztime=20000x -parallel=4
+      - name: source prefix range fuzz smoke
+        run: go test ./internal/source -run='^$' -fuzz=FuzzPrefixRange -fuzztime=20000x -parallel=4
       - name: user task file fuzz smoke
         run: go test ./internal/eval -run='^$' -fuzz=FuzzUserCheck -fuzztime=20000x -parallel=4
       - name: conversion lineage fuzz smoke
@@ -107,7 +111,7 @@ jobs:
           done < <(git ls-files '*.go' | grep -v '_test\.go$' | xargs wc -l | grep -v ' total$')
           exit $fail
       - run: make dist
-      - name: reproducible Linux binary
+      - name: deterministic Linux rebuild
         shell: bash
         run: |
           CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${RUNNER_TEMP}/fitr-linux-amd64" ./cmd/fitr
@@ -120,22 +124,7 @@ jobs:
             exit 1
           fi
       - name: binary size gate
-        shell: bash
-        run: |
-          # The context task pack is reachable from record evidence validation,
-          # so its generator and verifier are linked rather than eliminated.
-          # Connecting the collection path adds the run level, the analysis
-          # projection and the terminal section on top of that: 20,992 bytes,
-          # measured against the previous commit rather than estimated.
-          # windows/amd64 is the largest at 15,260,672 bytes and sets the cap,
-          # keeping the same headroom the previous measured cap used. The other
-          # five targets are between 1.1 and 2.5 MiB below it.
-          max_bytes=15311000
-          for binary in dist/fitr-*; do
-            size="$(stat -c %s "$binary")"
-            printf '%-32s %10d bytes\n' "$binary" "$size"
-            test "$size" -le "$max_bytes"
-          done
+        run: sh scripts/check-binary-size.sh dist
       - name: verify binary and CLI contract
         shell: bash
         run: |

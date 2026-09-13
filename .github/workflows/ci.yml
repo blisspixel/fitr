@@ -112,22 +112,7 @@ jobs:
           test "$status" -eq 2
           grep -F "hint: fitr device" <<<"$diagnostic"
       - name: binary size gate
-        shell: bash
-        run: |
-          # Measured with CI's Go 1.27.0, CGO_ENABLED=0 and release flags on
-          # all six targets. Source policy screening, complete-header and
-          # shard validation, corrected cache arithmetic, and current MCP
-          # metadata checks add 77,824 bytes to windows/amd64 compared with
-          # 496e586: 15,341,056 -> 15,418,880. No new Go dependency was added.
-          # Windows amd64 remains largest. This cap leaves 36,120 bytes of
-          # headroom, close to the preceding cap's 33,944 on that baseline.
-          # Keep the gate measured; this is not an allowance for unknown growth.
-          max_bytes=15455000
-          for binary in dist/fitr-*; do
-            size="$(stat -c %s "$binary")"
-            printf '%-32s %10d bytes\n' "$binary" "$size"
-            test "$size" -le "$max_bytes"
-          done
+        run: sh scripts/check-binary-size.sh dist
       - name: checksums
         run: make dist-checksums
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
