@@ -84,6 +84,7 @@ func TestRecurrentLayerWireShapeIsNotAScalarCount(t *testing.T) {
 		}
 	}
 	kvs := qwen38KVs()
+	delete(kvs, "qwen35.ssm.inner_size")
 	layers := make([]any, 65)
 	for i := range layers {
 		layers[i] = i < 64 && i%4 != 3
@@ -93,6 +94,78 @@ func TestRecurrentLayerWireShapeIsNotAScalarCount(t *testing.T) {
 	note, _ := arch.UnsizableReason()
 	if arch.KVReady() || arch.InvalidMetadata || !strings.Contains(note, "recurrent pattern") {
 		t.Fatalf("valid but unsupported recurrent pattern was mislabeled: %+v, %q", arch, note)
+	}
+}
+
+func TestExplicitBooleanRecurrentPatternProjectsWhenMetadataIsComplete(t *testing.T) {
+	kvs := qwen38KVs()
+	delete(kvs, "qwen35.full_attention_interval")
+	layers := make([]any, 65)
+	for i := range layers {
+		layers[i] = i < 64 && i%4 != 3
+	}
+	kvs["qwen35.attention.recurrent_layers"] = layers
+	arch := ArchFromKVs(kvs)
+	if !arch.KVReady() {
+		note, _ := arch.UnsizableReason()
+		t.Fatalf("complete recurrent metadata must be sizable: %s", note)
+	}
+	if arch.RecurrentLayers != 48 {
+		t.Fatalf("recurrent layers = %d, want 48", arch.RecurrentLayers)
+	}
+	if arch.fullAttentionLayers() != 16 {
+		t.Fatalf("full attention layers = %d, want 16", arch.fullAttentionLayers())
+	}
+	projected, ok := ProjectKVBytes(arch, 32768, 2)
+	if !ok {
+		t.Fatal("failed to project KV bytes for complete boolean recurrent pattern")
+	}
+	fixed, ok := arch.recurrentStateBytes()
+	if !ok || fixed != 156893184 {
+		t.Fatalf("recurrentStateBytes = %v, %v", fixed, ok)
+	}
+	want := int64(65536*32768) + int64(fixed)
+	if projected != want {
+		t.Fatalf("projected = %d, want %d", projected, want)
+	}
+	// At 64K context, only the context-scaling KV half increases: 65536 bytes/token * 32768 tokens.
+	larger, ok := ProjectKVBytes(arch, 65536, 2)
+	if !ok || larger-projected != 65536*32768 {
+		t.Fatalf("recurrent state incorrectly scaled with context: %d -> %d", projected, larger)
+	}
+}
+
+func TestBooleanRecurrentPatternWithConflictingKVHeadsPerLayerIsInvalid(t *testing.T) {
+	kvs := qwen38KVs()
+	layers := make([]any, 65)
+	kvHeads := make([]any, 65)
+	for i := range layers {
+		layers[i] = i < 64 && i%4 != 3
+		// Contradiction: recurrent layer has positive KV heads.
+		kvHeads[i] = uint64(4)
+	}
+	kvs["qwen35.attention.recurrent_layers"] = layers
+	kvs["qwen35.attention.head_count_kv"] = kvHeads
+	arch := ArchFromKVs(kvs)
+	if !arch.InvalidMetadata || arch.KVReady() {
+		t.Fatalf("contradictory recurrent pattern and per-layer KV heads was accepted: %+v", arch)
+	}
+}
+
+func TestBooleanRecurrentPatternSingleBool(t *testing.T) {
+	// Single false on an unlisted family: no recurrent layers, pure full attention.
+	kvs := map[string]any{
+		"general.architecture":                   "custom_arch",
+		"custom_arch.block_count":                uint64(32),
+		"custom_arch.attention.head_count":       uint64(32),
+		"custom_arch.attention.head_count_kv":    uint64(8),
+		"custom_arch.attention.key_length":       uint64(128),
+		"custom_arch.attention.value_length":     uint64(128),
+		"custom_arch.attention.recurrent_layers": false,
+	}
+	arch := ArchFromKVs(kvs)
+	if !arch.KVReady() || arch.Hybrid || arch.RecurrentLayers != 0 || arch.totalKVHeads() != 256 {
+		t.Fatalf("single false recurrent pattern = %+v", arch)
 	}
 }
 

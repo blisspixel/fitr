@@ -103,6 +103,9 @@ func (a Arch) realBlocks() int {
 // only when the interval divides the layer count. A partial final interval
 // needs the artifact's per-layer counts rather than a guessed convention.
 func (a Arch) fullAttentionLayers() int {
+	if a.RecurrentLayers > 0 {
+		return a.realBlocks() - a.RecurrentLayers
+	}
 	if a.FullAttentionInterval <= 0 {
 		return 0
 	}
@@ -180,6 +183,9 @@ func (a Arch) UnsizableReason() (note, hint string) {
 // heads does not attend. That is exact, so it is preferred over dividing the
 // layer count by the interval, which only describes the repeating pattern.
 func (a Arch) linearLayers() int {
+	if a.RecurrentLayers > 0 {
+		return a.RecurrentLayers
+	}
 	if len(a.KVHeadsPerLayer) > 0 {
 		linear := 0
 		for _, heads := range a.KVHeadsPerLayer {
@@ -202,8 +208,18 @@ func (a Arch) linearLayers() int {
 // which layers attend and with how many heads, where the interval only
 // describes the repeating pattern. Current artifacts publish both.
 func (a Arch) intervalHybridProjectable() bool {
-	if a.FullAttentionInterval <= 0 {
+	if a.FullAttentionInterval <= 0 && a.RecurrentLayers <= 0 {
 		return false
+	}
+	if a.RecurrentLayers > 0 {
+		if !a.kvClassifiable() || a.totalKVHeads() <= 0 {
+			return false
+		}
+		if a.KVHeads <= 0 || a.fullAttentionLayers() <= 0 {
+			return false
+		}
+		_, ok := a.recurrentStateBytes()
+		return ok
 	}
 	// llama_hparams::set_recr_pattern in llama.cpp
 	// 4a89937354190cef5a97baf8eeb17336105eb72d has two dense-first conventions.
@@ -245,10 +261,10 @@ func (a Arch) totalKVHeads() int {
 		}
 		return total
 	}
-	// In an interval hybrid only the full-attention layers hold a cache that
+	// In an interval hybrid or explicit recurrent pattern only the full-attention layers hold a cache that
 	// grows with context. Charging every layer would report several times the
 	// cache the model actually allocates.
-	if a.FullAttentionInterval > 0 {
+	if a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 {
 		return a.fullAttentionLayers() * a.KVHeads
 	}
 	return a.realBlocks() * a.KVHeads
@@ -315,7 +331,7 @@ func (a Arch) kvBytesPerToken(elem float64) float64 {
 // state for an interval hybrid. Every caller that sizes a cache adds it, so a
 // projection is the complete allocation rather than only its scaling half.
 func (a Arch) cacheFixedBytes() float64 {
-	if a.FullAttentionInterval <= 0 {
+	if a.FullAttentionInterval <= 0 && a.RecurrentLayers <= 0 {
 		return 0
 	}
 	fixed, ok := a.recurrentStateBytes()
@@ -521,13 +537,114 @@ func (a *Arch) readRecurrentPattern(kvs map[string]any, keys ...string) bool {
 		if !present {
 			continue
 		}
-		a.RecurrentPatternUnsupported = true
 		if !validRecurrentPattern(value, a.Blocks, a.realBlocks()) {
 			a.InvalidMetadata = true
+			a.RecurrentPatternUnsupported = true
+			return true
+		}
+		recurrentCount, ok := parseRecurrentPattern(value, a.realBlocks())
+		if !ok {
+			a.InvalidMetadata = true
+			a.RecurrentPatternUnsupported = true
+			return true
+		}
+		if len(a.KVHeadsPerLayer) > 0 && !consistentRecurrentKVHeads(value, a.KVHeadsPerLayer, a.realBlocks()) {
+			a.InvalidMetadata = true
+			a.RecurrentPatternUnsupported = true
+			return true
+		}
+		a.RecurrentLayers = recurrentCount
+		// Project explicit boolean recurrent-layer patterns only when complete
+		// artifact metadata determines both cache components; unsupported
+		// patterns remain unresolved.
+		if !a.recurrentComponentsDetermined() {
+			a.RecurrentPatternUnsupported = true
+			a.RecurrentLayers = 0
+			return true
+		}
+		return recurrentCount > 0
+	}
+	return false
+}
+
+func parseRecurrentPattern(value any, realBlocks int) (int, bool) {
+	if b, ok := value.(bool); ok {
+		if b {
+			return realBlocks, true
+		}
+		return 0, true
+	}
+	entries, ok := value.([]any)
+	if !ok || len(entries) < realBlocks {
+		return 0, false
+	}
+	count := 0
+	for i := range realBlocks {
+		b, ok := entries[i].(bool)
+		if !ok {
+			return 0, false
+		}
+		if b {
+			count++
+		}
+	}
+	return count, true
+}
+
+func consistentRecurrentKVHeads(value any, kvHeadsPerLayer []int, realBlocks int) bool {
+	if b, ok := value.(bool); ok {
+		if b {
+			limit := min(realBlocks, len(kvHeadsPerLayer))
+			for i := range limit {
+				if kvHeadsPerLayer[i] > 0 {
+					return false
+				}
+			}
 		}
 		return true
 	}
-	return false
+	entries, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	limit := min(realBlocks, len(entries), len(kvHeadsPerLayer))
+	for i := range limit {
+		isRecr, ok := entries[i].(bool)
+		if !ok || (isRecr && kvHeadsPerLayer[i] > 0) {
+			return false
+		}
+	}
+	return true
+}
+
+func (a Arch) attendingComponentsDetermined(attending int) bool {
+	if attending <= 0 {
+		return true
+	}
+	if a.headDimK() <= 0 || a.headDimV() <= 0 || a.slidingWindowPresent() {
+		return false
+	}
+	if len(a.KVHeadsPerLayer) > 0 {
+		total := 0
+		for _, h := range a.KVHeadsPerLayer {
+			total += h
+		}
+		return total > 0
+	}
+	return a.KVHeads > 0
+}
+
+func (a Arch) recurrentComponentsDetermined() bool {
+	if a.realBlocks() <= 0 {
+		return false
+	}
+	// Fixed recurrent state requires complete SSM metadata when recurrent layers are present.
+	if a.RecurrentLayers > 0 {
+		if _, ok := a.recurrentStateBytes(); !ok {
+			return false
+		}
+	}
+	return a.attendingComponentsDetermined(a.realBlocks() - a.RecurrentLayers)
 }
 
 func validRecurrentPattern(value any, blocks, realBlocks int) bool {
