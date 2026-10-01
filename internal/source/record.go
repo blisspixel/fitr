@@ -75,15 +75,8 @@ func (result Resolution) validateFields() error {
 			return errors.New("source publisher author contradicts its pinned repository owner")
 		}
 	}
-	if result.ScreenPolicy != nil {
-		if err := result.ScreenPolicy.Validate(); err != nil {
-			return err
-		}
-	}
-	if result.HeaderObservations != nil {
-		if err := result.HeaderObservations.validate(result.Files); err != nil {
-			return err
-		}
+	if err := result.validateExtensions(); err != nil {
+		return err
 	}
 	if result.State == "unavailable" {
 		return result.validateUnavailable()
@@ -104,6 +97,25 @@ func (result Resolution) validateFields() error {
 		return errors.New("source state or gaps disagree with file evidence")
 	}
 	return result.validateDependencies()
+}
+
+func (result Resolution) validateExtensions() error {
+	if result.ScreenPolicy != nil {
+		if err := result.ScreenPolicy.Validate(); err != nil {
+			return err
+		}
+	}
+	if result.HeaderObservations != nil {
+		if err := result.HeaderObservations.validate(result.Files); err != nil {
+			return err
+		}
+	}
+	if result.ComponentPlan != nil {
+		if err := result.ComponentPlan.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validVersion(value string) bool {
@@ -199,7 +211,7 @@ func queryStatusMatches(outcome string, status int) bool {
 
 func (result Resolution) validateUnavailable() error {
 	if result.ResolvedRepo != "" || result.ResolvedCommit != "" || result.Publisher != nil ||
-		result.ScreenPolicy != nil || result.HeaderObservations != nil || len(result.Files) != 0 ||
+		result.ScreenPolicy != nil || result.HeaderObservations != nil || result.ComponentPlan != nil || len(result.Files) != 0 ||
 		len(result.InventoryPaths) != 0 || len(result.Dependencies) != 0 || len(result.Gaps) != 1 {
 		return errors.New("unavailable source receipt cannot assert resolved evidence")
 	}

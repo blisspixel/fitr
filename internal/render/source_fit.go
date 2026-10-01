@@ -20,7 +20,24 @@ func WriteSourceProjection(report io.Writer, projection *analysis.SourceFitRepor
 		return
 	}
 
+	if projection.RuntimeProfile != "" {
+		runtimeDetail := projection.RuntimeProfile + ": " + projection.RuntimeStatus
+		if projection.RuntimeReason != "" {
+			runtimeDetail += "; " + projection.RuntimeReason
+		}
+		Field(report, "  runtime", 15, runtimeDetail, width)
+	}
 	Field(report, "  architecture", 15, projection.ArchitectureReason, width)
+	if projection.ComponentPlan != nil {
+		planDetail := fmt.Sprintf("%s: %.3f GiB required", projection.ComponentPlan.Status, float64(projection.ComponentPlan.TotalRequiredBytes)/float64(1<<30))
+		if projection.ComponentPlan.TotalOptionalBytes > 0 {
+			planDetail += fmt.Sprintf(" (%.3f GiB optional)", float64(projection.ComponentPlan.TotalOptionalBytes)/float64(1<<30))
+		}
+		if projection.ComponentPlan.Reason != "" {
+			planDetail += "; " + projection.ComponentPlan.Reason
+		}
+		Field(report, "  plan", 15, planDetail, width)
+	}
 	Field(report, "  components", 15, projection.ProjectionReason, width)
 	if projection.CapacitySource != "" {
 		Field(report, "  ceiling", 15, projection.CapacitySource, width)

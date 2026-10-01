@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/analysis"
+	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/source"
 )
 
@@ -26,6 +28,8 @@ type SourceFitRequest struct {
 	Context        int
 	CapacityBytes  int64
 	CapacitySource string
+	RuntimeProfile *llm.RuntimeSupportProfile
+	ComponentPlan  *source.ComponentPlan
 }
 
 // SourceFitReport describes only declared weights plus modeled cache. Its
@@ -78,7 +82,94 @@ func ProjectSourceFit(resolution source.Resolution, headers []SourceHeader, requ
 	}
 	report.ArchitectureStatus = "available"
 	report.ArchitectureReason = "complete selected GGUF metadata supports the cache projection; runtime support is unmeasured"
+
+	requiredCompanions, blocked := applyRuntimeProfile(&report, request.RuntimeProfile, arch.Name)
+	if blocked {
+		return report
+	}
+
+	plan := resolveComponentPlan(resolution, request, arch.Name, requiredCompanions)
+	if !applyComponentPlan(&report, plan, &weights) {
+		return report
+	}
+
 	return compareSourceComponents(report, arch, weights, request)
+}
+
+func applyRuntimeProfile(report *SourceFitReport, profile *llm.RuntimeSupportProfile, archName string) ([]string, bool) {
+	if profile == nil {
+		return nil, false
+	}
+	report.RuntimeProfile = fmt.Sprintf("%s %s", profile.Runtime, profile.Version)
+	requiredCompanions := profile.RequiredCompanionsFor(archName)
+	_, status := profile.CheckArchitecture(archName)
+	switch status {
+	case llm.ArchitectureSupported:
+		report.RuntimeStatus = "profile_supported"
+		report.RuntimeReason = fmt.Sprintf("runtime profile %s %s declares support for architecture %s; behavioral execution remains unmeasured",
+			profile.Runtime, profile.Version, archName)
+	case llm.ArchitectureUnsupported:
+		report.RuntimeStatus = "unsupported"
+		report.RuntimeReason = fmt.Sprintf("runtime profile %s %s explicitly does not support architecture %s",
+			profile.Runtime, profile.Version, archName)
+		report.ProjectionStatus = "blocked"
+		report.ProjectionReason = report.RuntimeReason
+		return requiredCompanions, true
+	case llm.ArchitectureUnresolved:
+		report.RuntimeStatus = "unresolved"
+		report.RuntimeReason = fmt.Sprintf("architecture %s is unlisted in runtime profile %s %s",
+			archName, profile.Runtime, profile.Version)
+	}
+	return requiredCompanions, false
+}
+
+func resolveComponentPlan(resolution source.Resolution, request SourceFitRequest, archName string, requiredCompanions []string) *source.ComponentPlan {
+	if request.ComponentPlan != nil {
+		return request.ComponentPlan
+	}
+	if resolution.ComponentPlan != nil {
+		return resolution.ComponentPlan
+	}
+	if request.RuntimeProfile != nil || len(requiredCompanions) > 0 {
+		plan, err := source.BuildComponentPlan(resolution, source.BuildComponentPlanOptions{
+			Architecture:       archName,
+			RequiredCompanions: requiredCompanions,
+		})
+		if err == nil {
+			return plan
+		}
+	}
+	return nil
+}
+
+func applyComponentPlan(report *SourceFitReport, plan *source.ComponentPlan, weights *int64) bool {
+	if plan == nil {
+		return true
+	}
+	report.ComponentPlan = plan
+	switch plan.Status {
+	case source.PlanBlocked:
+		report.ProjectionStatus = "blocked"
+		report.ProjectionReason = "component plan is blocked: " + plan.Reason
+		return false
+	case source.PlanUnresolved:
+		report.ProjectionStatus = "unresolved"
+		report.ProjectionReason = "component plan is unresolved: " + plan.Reason
+		report.Gaps = append(report.Gaps, plan.Gaps...)
+		slices.Sort(report.Gaps)
+		report.Gaps = slices.Compact(report.Gaps)
+		return false
+	case source.PlanComplete:
+		*weights = plan.TotalRequiredBytes
+		report.WeightsBytes = weights
+		for i, gap := range report.Gaps {
+			if gap == "runtime buffers and required companions are excluded; dependency closure is unverified" {
+				report.Gaps[i] = "runtime buffers and placement are unmeasured; required companions are planned"
+			}
+		}
+		return true
+	}
+	return true
 }
 
 // RederiveSourceFit re-computes the component projection from validated header
@@ -95,7 +186,7 @@ func RederiveSourceFit(resolution source.Resolution) *SourceFitReport {
 		}
 		return report
 	}
-	return evaluateRederivedProjection(report, obs, resolution.ScreenPolicy)
+	return evaluateRederivedProjection(report, obs, resolution.ScreenPolicy, resolution.ComponentPlan)
 }
 
 func initialRederivedReport(resolution source.Resolution) *SourceFitReport {
@@ -124,40 +215,23 @@ func initialRederivedReport(resolution source.Resolution) *SourceFitReport {
 	}
 }
 
-func evaluateRederivedProjection(report *SourceFitReport, obs *source.HeaderObservations, policy *source.ScreenPolicy) *SourceFitReport {
-	context := 0
-	var ceiling int64
-	if policy != nil {
-		context = policy.Context
-		ceiling = policy.ComponentCeilingBytes
-	}
-	if context == 0 {
-		context = obs.Shape.MaxCtx
-	}
-	if context <= 0 {
-		report.ProjectionReason = "a positive requested context or declared model maximum is required"
+func evaluateRederivedProjection(report *SourceFitReport, obs *source.HeaderObservations, policy *source.ScreenPolicy, plan *source.ComponentPlan) *SourceFitReport {
+	context, ceiling, errReason := deriveContextAndCeiling(obs.Shape, policy)
+	if errReason != "" {
+		report.ProjectionReason = errReason
 		return report
 	}
 	report.Context = context
-	if obs.Shape.MaxCtx > 0 && context > obs.Shape.MaxCtx {
-		report.ProjectionReason = "requested context exceeds the artifact's declared maximum"
+	cache, errReason := projectShapeCache(obs.Shape, context)
+	if errReason != "" {
+		report.ProjectionReason = errReason
 		return report
 	}
-	if !obs.Shape.KVSizable {
-		report.ProjectionReason = obs.Shape.UnsizableReason
-		if report.ProjectionReason == "" {
-			report.ProjectionReason = "the artifact is not sizable"
-		}
+	weights := *obs.WeightsBytes
+	if !applyComponentPlan(report, plan, &weights) {
 		return report
 	}
-	perToken := float64(obs.Shape.KVBytesPerToken)
-	projected := perToken*float64(context) + float64(obs.Shape.FixedCacheBytes)
-	if projected <= 0 || math.IsNaN(projected) || math.IsInf(projected, 0) || projected >= float64(math.MaxInt64) {
-		report.ProjectionReason = "the requested cache projection exceeds the supported arithmetic range"
-		return report
-	}
-	cache := int64(math.Ceil(projected))
-	components, ok := addInt64(*obs.WeightsBytes, cache)
+	components, ok := addInt64(weights, cache)
 	if !ok {
 		report.ProjectionReason = "declared weights plus projected cache overflow the supported byte range"
 		return report
@@ -176,6 +250,41 @@ func evaluateRederivedProjection(report *SourceFitReport, obs *source.HeaderObse
 	report.ProjectionReason = fmt.Sprintf("declared weights plus f16 cache at %d tokens are %s; runtime allocation is unmeasured",
 		context, report.ProjectionStatus)
 	return report
+}
+
+func deriveContextAndCeiling(shape *source.ArchitectureShape, policy *source.ScreenPolicy) (int, int64, string) {
+	context := 0
+	var ceiling int64
+	if policy != nil {
+		context = policy.Context
+		ceiling = policy.ComponentCeilingBytes
+	}
+	if context == 0 {
+		context = shape.MaxCtx
+	}
+	if context <= 0 {
+		return 0, 0, "a positive requested context or declared model maximum is required"
+	}
+	if shape.MaxCtx > 0 && context > shape.MaxCtx {
+		return 0, 0, "requested context exceeds the artifact's declared maximum"
+	}
+	return context, ceiling, ""
+}
+
+func projectShapeCache(shape *source.ArchitectureShape, context int) (int64, string) {
+	if !shape.KVSizable {
+		reason := shape.UnsizableReason
+		if reason == "" {
+			reason = "the artifact is not sizable"
+		}
+		return 0, reason
+	}
+	perToken := float64(shape.KVBytesPerToken)
+	projected := perToken*float64(context) + float64(shape.FixedCacheBytes)
+	if projected <= 0 || math.IsNaN(projected) || math.IsInf(projected, 0) || projected >= float64(math.MaxInt64) {
+		return 0, "the requested cache projection exceeds the supported arithmetic range"
+	}
+	return int64(math.Ceil(projected)), ""
 }
 
 func unresolvedSourceFit(report SourceFitReport, reason string) SourceFitReport {

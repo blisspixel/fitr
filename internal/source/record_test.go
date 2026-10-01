@@ -232,3 +232,29 @@ func TestSourceRejectsSymlinks(t *testing.T) {
 		t.Fatal("symlink receipt loaded")
 	}
 }
+
+func TestResolutionWithComponentPlanPreservesDigest(t *testing.T) {
+	fixture := sourceFixture(t)
+	// Base fixture without component_plan validates and digest matches
+	digest1, err := fixture.Digest()
+	if err != nil {
+		t.Fatalf("base fixture digest error: %v", err)
+	}
+	if digest1 != fixture.ResolutionSHA256 {
+		t.Fatalf("base fixture digest mismatch: %s vs %s", digest1, fixture.ResolutionSHA256)
+	}
+
+	// Add component plan
+	plan, err := BuildComponentPlan(fixture, BuildComponentPlanOptions{})
+	if err != nil {
+		t.Fatalf("build component plan error: %v", err)
+	}
+	fixtureWithPlan := sourceClone(t, fixture)
+	fixtureWithPlan.ComponentPlan = plan
+	if err := fixtureWithPlan.Seal(); err != nil {
+		t.Fatalf("seal failed: %v", err)
+	}
+	if err := fixtureWithPlan.Validate(); err != nil {
+		t.Fatalf("resolution with component plan failed validation: %v", err)
+	}
+}

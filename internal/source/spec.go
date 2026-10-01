@@ -154,6 +154,9 @@ type Resolution struct {
 	// HeaderObservations records the bounded artifact prefix observations and
 	// parsed GGUF metadata when --fit or --screen was requested.
 	HeaderObservations *HeaderObservations `json:"header_observations,omitempty"`
+	// ComponentPlan records the explicit dependency and companion allocation plan.
+	// It is omitted when not planned, so older receipts keep their exact bytes and digest.
+	ComponentPlan *ComponentPlan `json:"component_plan,omitempty"`
 }
 
 // ScreenPolicy filters declarations and a component projection. An

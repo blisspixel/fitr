@@ -79,6 +79,25 @@ func populateDiscoveryPlan(card *render.DiscoveryCard, proposal discovery.Source
 	if proposal.Selected == nil {
 		return
 	}
+	if proposal.Selected.ComponentPlan != nil {
+		card.Facets = append(card.Facets, render.DiscoveryStep{
+			Label: "plan",
+			Text:  string(proposal.Selected.ComponentPlan.Status) + ": " + proposal.Selected.ComponentPlan.Reason,
+		})
+		for _, c := range proposal.Selected.ComponentPlan.Components {
+			details := []string{string(c.Kind) + ": " + string(c.State)}
+			if c.Path != "" {
+				details = append(details, c.Path)
+			}
+			if c.SizeBytes != nil {
+				details = append(details, fmt.Sprintf("%d bytes", *c.SizeBytes))
+			}
+			if c.Reason != "" {
+				details = append(details, c.Reason)
+			}
+			card.Facets = append(card.Facets, render.DiscoveryStep{Label: "component", Text: strings.Join(details, " | ")})
+		}
+	}
 	for _, dependency := range proposal.Selected.Dependencies {
 		details := []string{dependency.Kind + ": " + dependency.Status}
 		if dependency.SourceFile != "" {

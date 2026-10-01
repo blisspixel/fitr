@@ -106,17 +106,22 @@ func buildSourcePlan(idea Idea, attachments []SourceAttachment, selectedResoluti
 
 func sourceFacets(receipt *source.Resolution, state string) []SourceFacet {
 	metadataState, fileState := state, "unresolved"
+	depState, depText := "unverified", "Filename candidates and shard gaps do not establish compatible or complete dependencies."
 	if receipt != nil {
 		metadataState = receipt.State
 		fileState = "declared"
 		if receipt.State != "resolved" {
 			fileState = "incomplete"
 		}
+		if receipt.ComponentPlan != nil {
+			depState = string(receipt.ComponentPlan.Status)
+			depText = receipt.ComponentPlan.Reason
+		}
 	}
 	return []SourceFacet{
 		{Code: "metadata", State: metadataState, Text: "Remote file metadata observations only; provider-declared hashes are not verified local bytes."},
 		{Code: "files", State: fileState, Text: "Only the selected receipt's explicit files belong to this plan; receipts are never merged."},
-		{Code: "dependencies", State: "unverified", Text: "Filename candidates and shard gaps do not establish compatible or complete dependencies."},
+		{Code: "dependencies", State: depState, Text: depText},
 		{Code: "runtime", State: "unbound", Text: "No installed artifact, context, device or runtime configuration is bound."},
 		{Code: "quality", State: "unmeasured", Text: "The idea and its original source claim remain unmeasured; no role qualification or adoption is authorized."},
 	}

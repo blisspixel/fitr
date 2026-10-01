@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/source"
 )
 
@@ -284,5 +285,77 @@ func TestSourceFitHonorsExplicitHeaderReadBounds(t *testing.T) {
 	report := ProjectSourceFit(resolution, []SourceHeader{header}, sourceFitRequest())
 	if report.ProjectionStatus != "within_ceiling" || report.SourceSHA256 != resolution.ResolutionSHA256 {
 		t.Fatalf("explicit larger observation lost its source binding: %+v", report)
+	}
+}
+
+func TestSourceFitWithRuntimeProfile(t *testing.T) {
+	resolution := sourceFitResolution(t, []string{"model.gguf"}, []int64{GiB})
+	header := sourceFitHeader(t, "model.gguf", sourceFitMetadata())
+
+	// 1. Profile supporting llama
+	supportedProfile := llm.DefaultProfile("llama-server")
+	reqSupported := sourceFitRequest()
+	reqSupported.RuntimeProfile = supportedProfile
+
+	report := ProjectSourceFit(resolution, []SourceHeader{header}, reqSupported)
+	if report.RuntimeStatus != "profile_supported" {
+		t.Fatalf("expected profile_supported, got %s", report.RuntimeStatus)
+	}
+	if report.ComponentPlan == nil || report.ComponentPlan.Status != source.PlanComplete {
+		t.Fatalf("expected complete component plan, got %+v", report.ComponentPlan)
+	}
+
+	// 2. Profile explicitly not supporting architecture
+	unsupportedProfile := &llm.RuntimeSupportProfile{
+		Schema:  llm.ProfileSchema,
+		Runtime: "custom-rt",
+		Version: "1.0",
+		Architectures: []llm.ArchitectureSupport{
+			{Architecture: "llama", Status: "unsupported"},
+		},
+	}
+	reqUnsupported := sourceFitRequest()
+	reqUnsupported.RuntimeProfile = unsupportedProfile
+
+	reportUnsup := ProjectSourceFit(resolution, []SourceHeader{header}, reqUnsupported)
+	if reportUnsup.RuntimeStatus != "unsupported" || reportUnsup.ProjectionStatus != "blocked" {
+		t.Fatalf("expected unsupported and blocked, got %s, %s", reportUnsup.RuntimeStatus, reportUnsup.ProjectionStatus)
+	}
+
+	// 3. Profile unlisting architecture
+	unlistedProfile := &llm.RuntimeSupportProfile{
+		Schema:  llm.ProfileSchema,
+		Runtime: "custom-rt",
+		Version: "1.0",
+		Architectures: []llm.ArchitectureSupport{
+			{Architecture: "qwen2", Status: "supported"},
+		},
+	}
+	reqUnlisted := sourceFitRequest()
+	reqUnlisted.RuntimeProfile = unlistedProfile
+
+	reportUnlisted := ProjectSourceFit(resolution, []SourceHeader{header}, reqUnlisted)
+	if reportUnlisted.RuntimeStatus != "unresolved" {
+		t.Fatalf("expected unresolved runtime status, got %s", reportUnlisted.RuntimeStatus)
+	}
+}
+
+func TestSourceFitWithComponentPlan(t *testing.T) {
+	resolution := sourceFitResolution(t, []string{"model.gguf"}, []int64{GiB})
+	header := sourceFitHeader(t, "model.gguf", sourceFitMetadata())
+
+	reqPlanUnresolved := sourceFitRequest()
+	unresolvedPlan := &source.ComponentPlan{
+		Schema:       source.ComponentPlanSchema,
+		SourceSHA256: resolution.ResolutionSHA256,
+		Status:       source.PlanUnresolved,
+		Reason:       "missing companion",
+		Gaps:         []string{"missing_companion: projector"},
+	}
+	reqPlanUnresolved.ComponentPlan = unresolvedPlan
+
+	reportPlanUnresolved := ProjectSourceFit(resolution, []SourceHeader{header}, reqPlanUnresolved)
+	if reportPlanUnresolved.ProjectionStatus != "unresolved" {
+		t.Fatalf("expected unresolved projection when component plan is unresolved, got %s", reportPlanUnresolved.ProjectionStatus)
 	}
 }

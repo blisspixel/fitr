@@ -14,6 +14,7 @@ import (
 	"github.com/blisspixel/fitr/internal/advise"
 	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/device"
+	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/source"
 )
@@ -34,6 +35,7 @@ type sourceFitFlags struct {
 	context, headerBytes        int
 	budgetGB                    float64
 	licenses, architectures     sourceFiles
+	runtime, profile            string
 }
 
 func addSourceFitFlags(fs *flag.FlagSet) *sourceFitFlags {
@@ -46,6 +48,8 @@ func addSourceFitFlags(fs *flag.FlagSet) *sourceFitFlags {
 	fs.BoolVar(&options.firstParty, "require-first-party", false, "require every declared base model to share the repository author")
 	fs.Var(&options.licenses, "allow-license", "accepted declared license identifier; repeat for alternatives")
 	fs.Var(&options.architectures, "allow-architecture", "accepted GGUF architecture identifier; does not establish runtime support")
+	fs.StringVar(&options.runtime, "runtime", "", "intended runtime build profile (e.g. ollama, llama-server)")
+	fs.StringVar(&options.profile, "profile", "", "path to explicit runtime support profile JSON")
 	return options
 }
 
@@ -62,6 +66,12 @@ func (options sourceFitFlags) validate() error {
 	if options.context < 0 || options.context > 1<<30 || math.IsNaN(options.budgetGB) || math.IsInf(options.budgetGB, 0) ||
 		options.budgetGB < 0 || options.budgetGB > 1<<30 || (options.budgetGB > 0 && options.budgetGB*advise.GiB < 1) {
 		return errors.New("source projection needs a bounded nonnegative context and memory ceiling")
+	}
+	if options.profile != "" && options.runtime != "" {
+		return errors.New("cannot specify both --runtime and --profile")
+	}
+	if !options.enabled && !options.screen && (options.runtime != "" || options.profile != "") {
+		return errors.New("--runtime and --profile require --fit or --screen")
 	}
 	if options.screen {
 		return options.policy().Validate()
@@ -133,7 +143,10 @@ func finalizeSourceResolution(resolution *source.Resolution, output *sourceFitOu
 	if len(output.Headers) > 0 || output.Projection != nil {
 		resolution.HeaderObservations = headerObservationsFromOutput(output)
 	}
-	if resolution.ScreenPolicy != nil || resolution.HeaderObservations != nil {
+	if output.Projection != nil && output.Projection.ComponentPlan != nil {
+		resolution.ComponentPlan = output.Projection.ComponentPlan
+	}
+	if resolution.ScreenPolicy != nil || resolution.HeaderObservations != nil || resolution.ComponentPlan != nil {
 		if err := resolution.Seal(); err != nil {
 			return err
 		}
@@ -222,6 +235,31 @@ func sourceNeedsHeaders(output sourceFitOutput, options *sourceFitFlags) bool {
 func collectSourceFit(ctx context.Context, output *sourceFitOutput, options *sourceFitFlags, services sourceServices) {
 	request := advise.SourceFitRequest{Context: options.context,
 		CapacityBytes: int64(options.budgetGB * advise.GiB), CapacitySource: "operator component ceiling"}
+	if options.profile != "" {
+		prof, err := llm.LoadProfile(options.profile)
+		if err != nil {
+			output.Projection = &advise.SourceFitReport{
+				Schema: "fitr.source.fit.v1", SourceSHA256: output.Resolution.ResolutionSHA256,
+				ArchitectureStatus: "unresolved", ProjectionStatus: "unresolved",
+				RuntimeStatus: "unresolved", RuntimeReason: err.Error(),
+				ProjectionReason: "could not load runtime support profile: " + err.Error(),
+			}
+			return
+		}
+		request.RuntimeProfile = prof
+	} else if options.runtime != "" {
+		prof := llm.DefaultProfile(options.runtime)
+		if prof == nil {
+			output.Projection = &advise.SourceFitReport{
+				Schema: "fitr.source.fit.v1", SourceSHA256: output.Resolution.ResolutionSHA256,
+				ArchitectureStatus: "unresolved", ProjectionStatus: "unresolved",
+				RuntimeStatus: "unresolved", RuntimeReason: fmt.Sprintf("no built-in support profile for %q", options.runtime),
+				ProjectionReason: fmt.Sprintf("no built-in support profile for %q", options.runtime),
+			}
+			return
+		}
+		request.RuntimeProfile = prof
+	}
 	if request.CapacityBytes == 0 {
 		fingerprint := services.detect(ctx)
 		if fingerprint.VRAMGb > 0 && fingerprint.VRAMGb <= 1<<30 && !math.IsInf(fingerprint.VRAMGb, 0) {

@@ -82,7 +82,7 @@ evidence paths.
 | 2 | complete | One central analysis and decision path across CLI, TUI, HTML, and JSON | Every surface must explain the same claim, gap, support class, and next evidence action. This prevents seven product layers from becoming seven adjacent systems. |
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | active | Generalized validated-work receipts and explicit evidence classes | 0.10.4 seals the fixed contract and reconstructs timing with typed proof classes. Multi-attempt, approval, escalation and external protocol receipts remain work before arbitrary workflows. |
-| 5 | active | Source ideas into a personal role library and bounded fitting | Source receipts, publisher/license/architecture policies and component screening retain separate claims from local hashes and measurement. Next persist validated header observations, define runtime support profiles and bind dependency planning before download ownership. The first auto cycle already confirms an installed shortlist. See [source resolution](docs/source-resolution.md), [auto mode](docs/auto-mode.md) and [roles](docs/roles.md). |
+| 5 | active | Source ideas into a personal role library and bounded fitting | Source receipts, publisher/license/architecture policies, screening observations, runtime support profiles and component plans retain separate claims from local hashes and measurement. Next project explicit boolean recurrent-layer patterns before download ownership. The first auto cycle already confirms an installed shortlist. See [source resolution](docs/source-resolution.md), [auto mode](docs/auto-mode.md) and [roles](docs/roles.md). |
 | 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. Build serving first: it is the instrument the other two report through. See [experiment families](#model-set-soak-and-serving-experiments). |
 
 Automatic selection must pass programmatic resource preflight and a separate
@@ -1003,8 +1003,8 @@ with researched protocol and harness profiles in [agent interoperability](docs/a
 - [x] Resolve explicit public HF file metadata at an immutable commit through a bounded adapter.
 - [x] Link resolution receipts to inbox ideas and report dependency, runtime and quality gaps.
 - [x] Screen publisher, declared license, accepted architecture and projected components in order under explicit operator policy.
-- [ ] [Persist bounded header observations and screening policy](https://github.com/blisspixel/fitr/issues/25), then rederive source projections on reopen; current `--out` saves metadata only.
-- [ ] Define versioned runtime support profiles and establish complete dependency and component plans before download ownership.
+- [x] [Persist bounded header observations and screening policy](https://github.com/blisspixel/fitr/issues/25), then rederive source projections on reopen; current `--out` saves metadata only.
+- [x] Define versioned runtime support profiles and establish complete dependency and component plans before download ownership.
 - [ ] Project [explicit boolean recurrent-layer patterns](https://github.com/blisspixel/fitr/issues/21) only when complete artifact metadata determines both cache components; unsupported patterns remain unresolved.
 - [ ] Extract source claims without converting them into evidence.
 - [x] Attach role-specific battery evidence; bind model and runtime changes.
@@ -1028,14 +1028,18 @@ weights-plus-cache ceiling checks. A complete metadata section is required
 inside the operator's bounded header read. The default 32 KiB was insufficient
 for the official Qwen3-0.6B artifact in live acceptance, which correctly remained
 unresolved rather than treating missing layout fields as conventional attention.
+Versioned runtime support profiles (`fitr.runtime.profile.v1`) and explicit
+component plans (`fitr.source.component-plan.v1`) now bind runtime architecture
+contracts and companion allocations (such as vision projectors and model shards)
+before download ownership.
 
-Build the next source increments in this order:
+Completed source increments:
 
-| Next increment | Why it comes next | Exit evidence |
+| Shipped increment | What it established | Exit evidence |
 |---|---|---|
-| Persist screening observations and policy ([#25](https://github.com/blisspixel/fitr/issues/25)) | Today's screen exists only in command output; later planning needs an inspectable source result. | Offline reopen derives the same gates from validated observations and exact policy, without implicit network access or changes to old receipt digests. |
-| Define support profiles for pinned runtime builds | An architecture allowlist records operator intent; it does not establish backend support. | Versioned profiles bind upstream contracts to the exact runtime build; unsupported and unknown cases stay unresolved, and capability declarations remain separate from behavioral evidence. |
-| Bind dependency and component plans | The current weight/cache ceiling excludes runtime overhead and companion allocation. | Required, optional, disabled and unresolved components are explicit before an owned download or source-driven local experiment can be planned. |
+| Persist screening observations and policy ([#25](https://github.com/blisspixel/fitr/issues/25)) | Saved screening policies and prefix observations into the receipt without invalidating historical digests. | Offline reopen derives the same gates from validated observations and exact policy, without implicit network access. |
+| Define support profiles for pinned runtime builds | Versioned profiles (`fitr.runtime.profile.v1`) bind upstream contracts to the exact runtime build. | Unsupported and unknown cases stay unresolved, and capability declarations remain separate from behavioral evidence. |
+| Bind dependency and component plans | Binds model shards and companion allocations into sealed plans (`fitr.source.component-plan.v1`). | Required, optional, disabled and unresolved components are explicit before an owned download or source-driven local experiment can be planned. |
 
 Current screening establishes neither runtime support nor legal permission.
 Download ownership and source-driven experiments follow these boundaries.

@@ -257,3 +257,77 @@ func TestSourceFitUsesOneEnvelopeAndHonorsExplicitReadBound(t *testing.T) {
 		})
 	}
 }
+
+func TestSourceScreenWithRuntimeProfileAndComponentPlan(t *testing.T) {
+	reads := 0
+	body := sourceScreenHeader(t)
+	services := sourceScreenServices(t, "apache-2.0", body, &reads)
+
+	receiptPath := filepath.Join(sourceTestDirectory(t), "screened_with_plan.json")
+	args := []string{
+		"resolve", "hf", "--repo", "owner/model", "--revision", "main", "--file", "model.gguf",
+		"--screen", "--ctx", "4096", "--fit-budget-gb", "16",
+		"--allow-license", "apache-2.0", "--allow-architecture", "llama",
+		"--runtime", "llama-server",
+		"--out", receiptPath,
+		"--display", "json",
+	}
+
+	output, code := captureTopStdout(t, func() int { return cmdSourceWithServices(context.Background(), args, services) })
+	if code != exitOK {
+		t.Fatalf("expected exitOK, got %d, output: %s", code, output)
+	}
+
+	var fitOutput sourceFitOutput
+	if err := json.Unmarshal([]byte(output), &fitOutput); err != nil {
+		t.Fatalf("unmarshal output failed: %v", err)
+	}
+	if fitOutput.Projection == nil {
+		t.Fatal("expected non-nil projection in output")
+	}
+	if fitOutput.Projection.RuntimeStatus != "profile_supported" {
+		t.Fatalf("expected profile_supported, got %s", fitOutput.Projection.RuntimeStatus)
+	}
+	if fitOutput.Projection.ComponentPlan == nil || fitOutput.Projection.ComponentPlan.Status != "complete" {
+		t.Fatalf("expected complete component plan in projection, got %+v", fitOutput.Projection.ComponentPlan)
+	}
+
+	verifySavedReceiptPlan(t, receiptPath)
+	verifyOfflineShowPlan(t, receiptPath, services)
+}
+
+func verifySavedReceiptPlan(t *testing.T, receiptPath string) {
+	t.Helper()
+	receipt, err := source.LoadResolution(receiptPath)
+	if err != nil {
+		t.Fatalf("failed to load saved receipt: %v", err)
+	}
+	if receipt.ComponentPlan == nil {
+		t.Fatal("saved receipt is missing ComponentPlan")
+	}
+	if receipt.ComponentPlan.Status != "complete" {
+		t.Fatalf("saved component plan status %s != complete", receipt.ComponentPlan.Status)
+	}
+	if receipt.ComponentPlan.TotalRequiredBytes != 1073741824 {
+		t.Fatalf("saved required bytes %d != 1073741824", receipt.ComponentPlan.TotalRequiredBytes)
+	}
+}
+
+func verifyOfflineShowPlan(t *testing.T, receiptPath string, services sourceServices) {
+	t.Helper()
+	showArgs := []string{"show", receiptPath, "--display", "json"}
+	showOutput, showCode := captureTopStdout(t, func() int { return cmdSourceWithServices(context.Background(), showArgs, services) })
+	if showCode != exitOK {
+		t.Fatalf("show command failed: %d, output: %s", showCode, showOutput)
+	}
+	var showResult sourceFitOutput
+	if err := json.Unmarshal([]byte(showOutput), &showResult); err != nil {
+		t.Fatalf("unmarshal show output failed: %v", err)
+	}
+	if showResult.Projection == nil || showResult.Projection.ComponentPlan == nil {
+		t.Fatalf("offline show lost component plan: %+v", showResult)
+	}
+	if showResult.Projection.ComponentPlan.Status != "complete" {
+		t.Fatalf("offline show component plan status mismatch: %s", showResult.Projection.ComponentPlan.Status)
+	}
+}

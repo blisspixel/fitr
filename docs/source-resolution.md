@@ -125,13 +125,33 @@ is immutable: the command will not overwrite an existing file. All commands
 support `--display auto|rich|plain|json|none`; the saved path is printed to stderr.
 The same validated metadata receipt supplies text and JSON.
 
-`--out` stores metadata only. `source show` reopens it offline and does not
-replay the screen. Fresh `--fit` and `--screen` output carries the source receipt,
-policy where applicable, header observations, prefix digests and component
-analysis in one JSON document. This output is not sealed into the metadata
-receipt. It retains public filenames and serving hosts, not raw header bytes or
-signed download URLs. `--display none` suppresses the report but still performs
-the requested checks and returns their outcome.
+When `--out` is specified with `--fit` or `--screen`, the operator's screening
+policy, bounded prefix observations, and sealed component plan are persisted
+directly into the receipt with `omitempty`, preserving the exact bytes and digests
+of historical receipts. Offline `source show` and `fitr discover plan` rederive
+the same component projections and screening facts without implicit network requests.
+`--display none` suppresses the report but still performs the requested checks and
+returns their outcome.
+
+## Bind runtime support profiles and component plans
+
+An architecture allowlist records operator intent; it does not establish backend
+support. `--runtime <name>` (such as `ollama` or `llama-server`) or `--profile <path>`
+binds the candidate's upstream GGUF architecture declaration to a versioned runtime
+support profile (`fitr.runtime.profile.v1`).
+
+Supported architectures report `profile_supported`, explicitly unsupported
+architectures are `unsupported` (blocking projection), and unlisted architectures
+remain `unresolved`. Capability declarations remain separate from behavioral
+evidence: a profile declaration is routing evidence, never a measured PASS.
+
+Component plans (`fitr.source.component-plan.v1`) make required model shards,
+required companions (such as vision projectors for multimodal architectures like
+`llava`), optional files and disabled files explicit before an owned download
+or local experiment. When a component plan is complete, required companions are
+summed into `TotalRequiredBytes`, accounting for both weights and companions in
+the component ceiling comparison. Unselected or missing required companions
+leave the plan and projection `unresolved`.
 
 ## Select explicitly and pin once
 

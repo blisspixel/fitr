@@ -238,3 +238,39 @@ func TestDiscoverySourceArgumentsAndOutputFailures(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoverySourcePlanRendersComponentPlan(t *testing.T) {
+	idea := discoveryCLIIdea(t)
+	fileName := "model.gguf"
+	metadata := fmt.Sprintf(`{"id":"owner/model","sha":%q,"siblings":[{"rfilename":%q,"size":1073741824,"lfs":{"size":1073741824,"sha256":%q}}]}`,
+		strings.Repeat("a", 40), fileName, strings.Repeat("b", 64))
+	_, receipt := discoveryCLIResolvedReceipt(t, metadata, fileName)
+
+	plan, err := source.BuildComponentPlan(receipt, source.BuildComponentPlanOptions{})
+	if err != nil {
+		t.Fatalf("build component plan error: %v", err)
+	}
+	receipt.ComponentPlan = plan
+	if err := receipt.Seal(); err != nil {
+		t.Fatalf("seal failed: %v", err)
+	}
+	pathWithPlan := filepath.Join(t.TempDir(), "receipt_with_plan.json")
+	if err := source.WriteResolution(pathWithPlan, receipt); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	attachDiscoveryCLIReceipt(t, idea.ID, pathWithPlan)
+
+	output, code := captureTopStdout(t, func() int {
+		return cmdDiscover(t.Context(), []string{"plan", idea.ID, "--display", "plain"})
+	})
+	if code != exitOK {
+		t.Fatalf("plan exited %d, output: %s", code, output)
+	}
+	if !strings.Contains(output, "plan") || !strings.Contains(output, "complete") {
+		t.Fatalf("expected plan facet in output: %s", output)
+	}
+	if !strings.Contains(output, "component") || !strings.Contains(output, "model_shard: required") {
+		t.Fatalf("expected planned component in output: %s", output)
+	}
+}
