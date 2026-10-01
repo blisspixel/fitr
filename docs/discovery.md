@@ -47,7 +47,11 @@ ideas and expose dependency, runtime and quality gaps in individual plans.
 In 0.10.9, [artifact binding](artifact-binding.md) compares explicitly mapped
 local files with the source receipt under byte and time bounds. These local
 observations do not establish loaded-runtime identity or qualify a role.
-Dependency closure, exact runtime binding, source extraction, automatic fit
+When a source receipt and its component plan resolve, `fitr discover plan` builds
+an explicit download plan (`fitr.discovery.download-plan.v1`) and artifact mapping
+template (`artifact.Spec`), defining required download files, byte footprints and
+provider SHA-256 bounds before network fetch or disk allocation.
+Exact runtime binding, source extraction, automatic fit
 planning and bounded automation remain work in the complete flow:
 
 ```text

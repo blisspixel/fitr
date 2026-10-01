@@ -10,6 +10,7 @@ import (
 
 	"github.com/blisspixel/fitr/internal/discovery"
 	"github.com/blisspixel/fitr/internal/render"
+	"github.com/blisspixel/fitr/internal/source"
 )
 
 type discoveryInboxOutput struct {
@@ -80,23 +81,13 @@ func populateDiscoveryPlan(card *render.DiscoveryCard, proposal discovery.Source
 		return
 	}
 	if proposal.Selected.ComponentPlan != nil {
+		populateComponentPlanFacets(card, proposal.Selected.ComponentPlan)
+	}
+	if proposal.DownloadPlan != nil {
 		card.Facets = append(card.Facets, render.DiscoveryStep{
-			Label: "plan",
-			Text:  string(proposal.Selected.ComponentPlan.Status) + ": " + proposal.Selected.ComponentPlan.Reason,
+			Label: "download_plan",
+			Text:  proposal.DownloadPlan.Status + ": " + proposal.DownloadPlan.Reason,
 		})
-		for _, c := range proposal.Selected.ComponentPlan.Components {
-			details := []string{string(c.Kind) + ": " + string(c.State)}
-			if c.Path != "" {
-				details = append(details, c.Path)
-			}
-			if c.SizeBytes != nil {
-				details = append(details, fmt.Sprintf("%d bytes", *c.SizeBytes))
-			}
-			if c.Reason != "" {
-				details = append(details, c.Reason)
-			}
-			card.Facets = append(card.Facets, render.DiscoveryStep{Label: "component", Text: strings.Join(details, " | ")})
-		}
 	}
 	for _, dependency := range proposal.Selected.Dependencies {
 		details := []string{dependency.Kind + ": " + dependency.Status}
@@ -122,5 +113,25 @@ func populateDiscoveryPlan(card *render.DiscoveryCard, proposal discovery.Source
 			details = append(details, "content SHA-256 unavailable")
 		}
 		card.Files = append(card.Files, strings.Join(details, " | "))
+	}
+}
+
+func populateComponentPlanFacets(card *render.DiscoveryCard, cp *source.ComponentPlan) {
+	card.Facets = append(card.Facets, render.DiscoveryStep{
+		Label: "plan",
+		Text:  string(cp.Status) + ": " + cp.Reason,
+	})
+	for _, c := range cp.Components {
+		details := []string{string(c.Kind) + ": " + string(c.State)}
+		if c.Path != "" {
+			details = append(details, c.Path)
+		}
+		if c.SizeBytes != nil {
+			details = append(details, fmt.Sprintf("%d bytes", *c.SizeBytes))
+		}
+		if c.Reason != "" {
+			details = append(details, c.Reason)
+		}
+		card.Facets = append(card.Facets, render.DiscoveryStep{Label: "component", Text: strings.Join(details, " | ")})
 	}
 }

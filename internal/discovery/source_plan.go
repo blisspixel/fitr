@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/blisspixel/fitr/internal/source"
 )
@@ -21,6 +22,7 @@ type SourceProposal struct {
 	Selected                 *source.Resolution `json:"selected,omitempty"`
 	Facets                   []SourceFacet      `json:"facets"`
 	Steps                    []Step             `json:"steps"`
+	DownloadPlan             *DownloadPlan      `json:"download_plan,omitempty"`
 }
 
 // Plan inspects one idea through the same bounded snapshot used by Plans.
@@ -101,6 +103,24 @@ func buildSourcePlan(idea Idea, attachments []SourceAttachment, selectedResoluti
 		return SourceProposal{}, errors.New("selected source digest is not attached to this idea")
 	}
 	plan.Facets = sourceFacets(plan.Selected, plan.State)
+	if plan.Selected != nil {
+		plan.DownloadPlan = BuildDownloadPlan(plan.Selected)
+		if plan.DownloadPlan != nil && plan.DownloadPlan.Status == "ready" {
+			reqCount := 0
+			for _, f := range plan.DownloadPlan.Files {
+				if f.Required {
+					reqCount++
+				}
+			}
+			plan.Steps = []Step{
+				{Code: "inspect", Text: "Inspect the source metadata and its declared file identities; operator association does not verify the original source claim."},
+				{Code: "download", Text: fmt.Sprintf("Download %d required component files (%d bytes declared) with provider SHA-256 verification bounds.", reqCount, plan.DownloadPlan.TotalRequiredBytes)},
+				{Code: "bind", Text: "Bind downloaded local files and verify whole-file SHA-256 hashes against declared metadata (fitr artifact bind)."},
+				{Code: "runtime", Text: "Bind locally verified bytes to an exact runtime configuration before measuring this candidate."},
+				{Code: "quality", Text: "Declare quality floors and collect task evidence before comparison or adoption."},
+			}
+		}
+	}
 	return plan, nil
 }
 
