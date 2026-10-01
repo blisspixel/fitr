@@ -65,11 +65,11 @@ func preferenceMetric(preference Preference, definitions []decision.Requirement,
 			continue
 		}
 		low, high := requirement.IntervalLow, requirement.IntervalHigh
-		// Resident bytes are an exact-context observation, not a sample mean.
+		// Resident bytes and usable context bytes are exact observations, not a sample mean.
 		// A single throughput sample must not acquire zero uncertainty this way.
 		if low == nil || high == nil {
 			for _, definition := range definitions {
-				if definition.ID == preference.Requirement && definition.Capacity != nil {
+				if definition.ID == preference.Requirement && (definition.Capacity != nil || (definition.Context != nil && definition.Context.MinimumUsableContextBytes != nil)) {
 					low, high = requirement.Observed, requirement.Observed
 				}
 			}

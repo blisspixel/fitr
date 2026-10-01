@@ -47,7 +47,7 @@ func newAutoLifecycleFixture(t *testing.T, previous *autoLifecycleFixture, adopt
 		t.Setenv("FITR_BACKEND", "invalid-must-not-run")
 	}
 	roles, records := autoStores()
-	spec := initialRoleSpec("coding", "structured_output", 0.5, 22, eval.NumCtx, 30)
+	spec := initialRoleSpec("coding", "structured_output", 0.5, 22, eval.NumCtx, 30, 0)
 	minimum := 1.0
 	spec.Decision.Requirements = append(spec.Decision.Requirements, decision.Requirement{
 		ID: "speed", Performance: &decision.PerformanceRequirement{Metric: decision.MetricDecodeTPS, AtLeast: &minimum},

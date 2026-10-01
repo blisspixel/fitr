@@ -20,7 +20,7 @@ func cmdRole(ctx context.Context, args []string) int {
 		args = []string{"list"}
 	}
 	if args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(os.Stderr, "usage: fitr role init <name> --quality <need> --memory-gb <limit> [--minimum-rate 0.9] [--ctx 8192]")
+		fmt.Fprintln(os.Stderr, "usage: fitr role init <name> --quality <need> --memory-gb <limit> [--minimum-rate 0.9] [--ctx 8192] [--usable-context-bytes N]")
 		fmt.Fprintln(os.Stderr, "       fitr role define <role.json> | list | show <name> | review <name>")
 		fmt.Fprintln(os.Stderr, "       fitr role attach <name> <result.json> | detach <name> <evidence-sha256>")
 		fmt.Fprintln(os.Stderr, "       fitr role confirm <name|bundle.json> | adopt <name> <bundle.json> | status <name> | rollback <name>")
@@ -66,6 +66,7 @@ type roleOptions struct {
 	display, quality string
 	minimum, memory  float64
 	context, age     int
+	usableBytes      int
 }
 
 func parseRoleOptions(action string, args []string) (roleOptions, []string, int) {
@@ -77,6 +78,7 @@ func parseRoleOptions(action string, args []string) (roleOptions, []string, int)
 		fs.Float64Var(&options.minimum, "minimum-rate", 0.9, "minimum independently checked quality rate")
 		fs.Float64Var(&options.memory, "memory-gb", 0, "maximum observed resident memory in GiB (required)")
 		fs.IntVar(&options.context, "ctx", 8192, "minimum verified context and resident-memory measurement context")
+		fs.IntVar(&options.usableBytes, "usable-context-bytes", 0, "optional floor for verified usable document context in bytes")
 		fs.IntVar(&options.age, "max-age-days", 30, "maximum evidence age before a new measurement is required")
 	}
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -87,7 +89,7 @@ func parseRoleOptions(action string, args []string) (roleOptions, []string, int)
 		return options, nil, exitUsage
 	}
 	if action == "init" {
-		spec := initialRoleSpec(fs.Arg(0), options.quality, options.minimum, options.memory, options.context, options.age)
+		spec := initialRoleSpec(fs.Arg(0), options.quality, options.minimum, options.memory, options.context, options.age, options.usableBytes)
 		if err := spec.Validate(); err != nil {
 			errPrint(err.Error(), "", "provide a quality need, positive memory budget and supported context")
 			return options, nil, exitUsage
@@ -99,7 +101,7 @@ func parseRoleOptions(action string, args []string) (roleOptions, []string, int)
 func loadRoleAction(store role.Store, action string, args []string, options roleOptions) (role.Library, error) {
 	switch action {
 	case "init":
-		return store.Define(initialRoleSpec(args[0], options.quality, options.minimum, options.memory, options.context, options.age))
+		return store.Define(initialRoleSpec(args[0], options.quality, options.minimum, options.memory, options.context, options.age, options.usableBytes))
 	case "define":
 		spec, err := role.LoadSpec(args[0])
 		if err != nil {
@@ -168,14 +170,18 @@ func roleArgCount(action string, count int) bool {
 	}
 }
 
-func initialRoleSpec(name, quality string, minimum, memory float64, contextSize, age int) role.Spec {
+func initialRoleSpec(name, quality string, minimum, memory float64, contextSize, age, usableBytes int) role.Spec {
+	contextReq := decision.ContextRequirement{MinimumEffectiveTokens: contextSize}
+	if usableBytes > 0 {
+		contextReq.MinimumUsableContextBytes = &usableBytes
+	}
 	return role.Spec{
 		Schema: role.SpecSchema, Name: name, MaxAgeDays: age,
 		Decision: decision.DecisionSpec{
 			Schema: decision.SpecSchema, Name: name, Evidence: decision.EvidenceDecide,
 			Requirements: []decision.Requirement{
 				{ID: "quality", Behavior: &decision.BehaviorRequirement{Need: quality, MinimumRate: &minimum}},
-				{ID: "context", Context: &decision.ContextRequirement{MinimumEffectiveTokens: contextSize}},
+				{ID: "context", Context: &contextReq},
 				{ID: "memory", Capacity: &decision.CapacityRequirement{MaximumResidentGB: memory, RequestedContext: contextSize}},
 			},
 		},

@@ -170,6 +170,120 @@ func TestCapacityRequirementRequiresExactContext(t *testing.T) {
 	}
 }
 
+func TestContextRequirementUsableContextMissingOrBlocked(t *testing.T) {
+	effectiveTokens := 8192
+	prefixBytes := 16384
+	neededBytes := 16384
+
+	t.Run("missing context tasks", func(t *testing.T) {
+		report := analysis.Report{Context: analysis.Context{Effective: &effectiveTokens}}
+		outcome := evaluateContext(report, "usable_context", ContextRequirement{MinimumUsableContextBytes: &neededBytes})
+		if outcome.State != RequirementUnresolved || outcome.NextAction == nil || outcome.NextAction.Code != "measure_usable_context_quality" {
+			t.Fatalf("missing context tasks outcome = %+v", outcome)
+		}
+	})
+
+	t.Run("descriptive only context tasks", func(t *testing.T) {
+		report := analysis.Report{
+			Context: analysis.Context{Effective: &effectiveTokens},
+			ContextTasks: &analysis.ContextTasks{
+				Status:              analysis.StatusDescriptiveOnly,
+				VerifiedPrefixBytes: &prefixBytes,
+			},
+		}
+		outcome := evaluateContext(report, "usable_context", ContextRequirement{MinimumUsableContextBytes: &neededBytes})
+		if outcome.State != RequirementBlocked {
+			t.Fatalf("descriptive only outcome = %+v", outcome)
+		}
+	})
+
+	t.Run("unavailable cell suppresses prefix", func(t *testing.T) {
+		report := analysis.Report{
+			Context: analysis.Context{Effective: &effectiveTokens},
+			ContextTasks: &analysis.ContextTasks{
+				Status:      analysis.StatusAvailable,
+				Unavailable: 1,
+			},
+		}
+		outcome := evaluateContext(report, "usable_context", ContextRequirement{MinimumUsableContextBytes: &neededBytes})
+		if outcome.State != RequirementUnresolved || outcome.NextAction == nil || outcome.NextAction.Code != "measure_usable_context_quality" {
+			t.Fatalf("suppressed prefix outcome = %+v", outcome)
+		}
+	})
+}
+
+func TestContextRequirementUsableContextEvaluation(t *testing.T) {
+	effectiveTokens := 8192
+	prefixBytes := 16384
+	neededBytes := 16384
+	higherNeeded := 32768
+
+	t.Run("established when prefix clears floor", func(t *testing.T) {
+		report := analysis.Report{
+			Context: analysis.Context{Effective: &effectiveTokens},
+			ContextTasks: &analysis.ContextTasks{
+				Status:              analysis.StatusAvailable,
+				VerifiedPrefixBytes: &prefixBytes,
+			},
+		}
+		outcome := evaluateContext(report, "usable_context", ContextRequirement{
+			MinimumEffectiveTokens:    4096,
+			MinimumUsableContextBytes: &neededBytes,
+		})
+		if outcome.State != RequirementEstablished || outcome.Observed == nil || *outcome.Observed != 16384 || outcome.Unit != analysis.UnitBytes {
+			t.Fatalf("clearing floor outcome = %+v", outcome)
+		}
+	})
+
+	t.Run("disproven when prefix is below floor", func(t *testing.T) {
+		report := analysis.Report{
+			Context: analysis.Context{Effective: &effectiveTokens},
+			ContextTasks: &analysis.ContextTasks{
+				Status:              analysis.StatusAvailable,
+				VerifiedPrefixBytes: &prefixBytes,
+			},
+		}
+		outcome := evaluateContext(report, "usable_context", ContextRequirement{MinimumUsableContextBytes: &higherNeeded})
+		if outcome.State != RequirementDisproven || outcome.Observed == nil || *outcome.Observed != 16384 || outcome.Unit != analysis.UnitBytes {
+			t.Fatalf("below floor outcome = %+v", outcome)
+		}
+	})
+
+	t.Run("disproven when smallest tier failed", func(t *testing.T) {
+		report := analysis.Report{
+			Context: analysis.Context{Effective: &effectiveTokens},
+			ContextTasks: &analysis.ContextTasks{
+				Status:      analysis.StatusAvailable,
+				Unavailable: 0,
+			},
+		}
+		outcome := evaluateContext(report, "usable_context", ContextRequirement{MinimumUsableContextBytes: &neededBytes})
+		if outcome.State != RequirementDisproven || outcome.Observed == nil || *outcome.Observed != 0 || outcome.Unit != analysis.UnitBytes {
+			t.Fatalf("failed smallest tier outcome = %+v", outcome)
+		}
+	})
+}
+
+func TestContextRequirementUsableContextCombined(t *testing.T) {
+	lowEffective := 2048
+	prefixBytes := 16384
+	neededBytes := 16384
+	report := analysis.Report{
+		Context: analysis.Context{Effective: &lowEffective},
+		ContextTasks: &analysis.ContextTasks{
+			Status:              analysis.StatusAvailable,
+			VerifiedPrefixBytes: &prefixBytes,
+		},
+	}
+	outcome := evaluateContext(report, "usable_context", ContextRequirement{
+		MinimumEffectiveTokens:    8192,
+		MinimumUsableContextBytes: &neededBytes,
+	})
+	if outcome.State != RequirementDisproven || outcome.Unit != analysis.UnitTokens {
+		t.Fatalf("effective context failure outcome = %+v", outcome)
+	}
+}
+
 func TestConfirmationCannotReuseOrdinaryRunAsFreshEvidence(t *testing.T) {
 	result := sealedDecisionRecord(t)
 	spec := DecisionSpec{

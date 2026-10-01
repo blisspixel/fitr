@@ -333,20 +333,59 @@ func evaluateCapability(result *record.Record, id string, requirement Capability
 }
 
 func evaluateContext(report analysis.Report, id string, requirement ContextRequirement) RequirementResult {
-	if report.Context.Effective == nil {
-		return unresolvedRequirement(id, "effective context was not runtime verified",
-			[]string{"runtime-verified effective context"}, &Action{Code: "verify_effective_context", Experiment: "context",
-				Reason: "run a context probe that returns a positive effective-context receipt"})
+	if requirement.MinimumEffectiveTokens > 0 {
+		if report.Context.Effective == nil {
+			return unresolvedRequirement(id, "effective context was not runtime verified",
+				[]string{"runtime-verified effective context"}, &Action{Code: "verify_effective_context", Experiment: "context",
+					Reason: "run a context probe that returns a positive effective-context receipt"})
+		}
+		if *report.Context.Effective < requirement.MinimumEffectiveTokens {
+			observed := float64(*report.Context.Effective)
+			return RequirementResult{ID: id, State: RequirementDisproven, Observed: &observed,
+				Unit: analysis.UnitTokens, Reason: "verified effective context is below the declared minimum",
+				EvidenceRefs: []string{"device_fingerprint_v2.context"}}
+		}
+	}
+	if requirement.MinimumUsableContextBytes != nil {
+		return evaluateUsableContextBytes(report, id, requirement)
 	}
 	observed := float64(*report.Context.Effective)
-	if *report.Context.Effective >= requirement.MinimumEffectiveTokens {
+	return RequirementResult{ID: id, State: RequirementEstablished, Observed: &observed,
+		Unit: analysis.UnitTokens, Reason: "verified effective context clears the declared minimum",
+		EvidenceRefs: []string{"device_fingerprint_v2.context"}}
+}
+
+func evaluateUsableContextBytes(report analysis.Report, id string, requirement ContextRequirement) RequirementResult {
+	if report.ContextTasks == nil {
+		return unresolvedRequirement(id, "usable context quality was not measured",
+			[]string{"usable context quality scorecard"}, contextTiersAction())
+	}
+	if report.ContextTasks.Status == analysis.StatusDescriptiveOnly {
+		return blockedRequirement(id, "usable context quality observation is descriptive only", "analysis.context_tasks")
+	}
+	if report.ContextTasks.VerifiedPrefixBytes == nil {
+		if report.ContextTasks.Unavailable > 0 {
+			return unresolvedRequirement(id, "usable context prefix is suppressed due to unavailable cell",
+				[]string{"verified usable context prefix"}, contextTiersAction())
+		}
+		observed := 0.0
+		return RequirementResult{ID: id, State: RequirementDisproven, Observed: &observed,
+			Unit: analysis.UnitBytes, Reason: "verified usable context is below the declared minimum",
+			EvidenceRefs: []string{"context_quality.report.verified_prefix_utf8_bytes"}}
+	}
+	observed := float64(*report.ContextTasks.VerifiedPrefixBytes)
+	refs := []string{"context_quality.report.verified_prefix_utf8_bytes"}
+	if requirement.MinimumEffectiveTokens > 0 {
+		refs = append(refs, "device_fingerprint_v2.context")
+	}
+	if *report.ContextTasks.VerifiedPrefixBytes >= *requirement.MinimumUsableContextBytes {
 		return RequirementResult{ID: id, State: RequirementEstablished, Observed: &observed,
-			Unit: analysis.UnitTokens, Reason: "verified effective context clears the declared minimum",
-			EvidenceRefs: []string{"device_fingerprint_v2.context"}}
+			Unit: analysis.UnitBytes, Reason: "verified usable context clears the declared minimum",
+			EvidenceRefs: refs}
 	}
 	return RequirementResult{ID: id, State: RequirementDisproven, Observed: &observed,
-		Unit: analysis.UnitTokens, Reason: "verified effective context is below the declared minimum",
-		EvidenceRefs: []string{"device_fingerprint_v2.context"}}
+		Unit: analysis.UnitBytes, Reason: "verified usable context is below the declared minimum",
+		EvidenceRefs: refs}
 }
 
 func evaluatePerformance(report analysis.Report, id string, requirement PerformanceRequirement) RequirementResult {
@@ -580,6 +619,15 @@ func capacityAction(context int) *Action {
 		action.Argv = append(action.Argv, "--ctx", strconv.Itoa(context))
 	}
 	return action
+}
+
+func contextTiersAction() *Action {
+	return &Action{
+		Code:       "measure_usable_context_quality",
+		Experiment: "context_quality",
+		Argv:       []string{"fitr", "run", currentModelPlaceholder, "--context-tiers", "2048,8192,32768"},
+		Reason:     "measure usable context quality scorecard with declared tiers",
+	}
 }
 
 func maximumResidentBytes(requirement CapacityRequirement) int64 {

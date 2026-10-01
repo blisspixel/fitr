@@ -26,6 +26,7 @@ func persistenceSpec() Spec {
 }
 
 func persistenceNumber(value float64) *float64 { return &value }
+func persistenceInt(value int) *int            { return &value }
 
 func TestSpecIdentityAndDigest(t *testing.T) {
 	spec := persistenceSpec()
@@ -97,6 +98,8 @@ func TestPreferenceNumericContracts(t *testing.T) {
 		{"throughput", decision.Requirement{Performance: &decision.PerformanceRequirement{AtLeast: persistenceNumber(10)}}, Preference{Weight: 1, Worst: 0, Best: 100}, true},
 		{"latency", decision.Requirement{Performance: &decision.PerformanceRequirement{AtMost: persistenceNumber(10)}}, Preference{Weight: 1, Worst: 100, Best: 0}, true},
 		{"context", decision.Requirement{Context: &decision.ContextRequirement{}}, Preference{Weight: 1, Worst: 0, Best: 100}, false},
+		{"usable context", decision.Requirement{Context: &decision.ContextRequirement{MinimumUsableContextBytes: persistenceInt(16384)}}, Preference{Weight: 1, Worst: 8192, Best: 32768}, true},
+		{"usable context reversed", decision.Requirement{Context: &decision.ContextRequirement{MinimumUsableContextBytes: persistenceInt(16384)}}, Preference{Weight: 1, Worst: 32768, Best: 8192}, false},
 		{"state", decision.Requirement{Behavior: &decision.BehaviorRequirement{RequiredState: score.Pass}}, Preference{Weight: 1, Worst: 0, Best: 1}, false},
 	}
 	for _, test := range tests {

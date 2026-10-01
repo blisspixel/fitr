@@ -89,3 +89,31 @@ func TestRoleShippedExampleDefinesEditablePolicy(t *testing.T) {
 		t.Fatalf("example lost its editable preference policy: %s", output)
 	}
 }
+
+func TestRoleInitWithUsableContextBytes(t *testing.T) {
+	t.Setenv("FITR_RESULTS", t.TempDir())
+	t.Setenv("FITR_BACKEND", "invalid-must-not-be-used")
+	output, code := captureTopStdout(t, func() int {
+		return commandHandler("role")(context.Background(), []string{
+			"init", "longctx", "--quality", "user_tasks", "--memory-gb", "22",
+			"--usable-context-bytes", "16384", "--display", "json",
+		})
+	})
+	if code != exitOK || !strings.Contains(output, role.LibrarySchema) {
+		t.Fatalf("init code=%d output=%s", code, output)
+	}
+	output, code = captureTopStdout(t, func() int { return cmdRole(context.Background(), []string{"show", "longctx"}) })
+	var spec role.Spec
+	if code != exitOK || json.Unmarshal([]byte(output), &spec) != nil || spec.Validate() != nil {
+		t.Fatalf("show did not export an editable spec: %s", output)
+	}
+	var foundContext bool
+	for _, req := range spec.Decision.Requirements {
+		if req.ID == "context" && req.Context != nil && req.Context.MinimumUsableContextBytes != nil && *req.Context.MinimumUsableContextBytes == 16384 {
+			foundContext = true
+		}
+	}
+	if !foundContext {
+		t.Fatalf("usable context bytes was not set on role spec: %+v", spec)
+	}
+}

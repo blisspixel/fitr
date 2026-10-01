@@ -68,6 +68,32 @@ func TestPreferencePropagatesWeightedBoundsAndMinimization(t *testing.T) {
 	}
 }
 
+func TestPreferenceUsableContextMetrics(t *testing.T) {
+	spec := roleReviewSpec()
+	usableBytes := 16384
+	spec.Decision.Requirements = append(spec.Decision.Requirements, decision.Requirement{
+		ID: "usable_context", Context: &decision.ContextRequirement{MinimumUsableContextBytes: &usableBytes},
+	})
+	spec.Preferences = []Preference{
+		{Requirement: "usable_context", Weight: 1, Worst: 8192, Best: 32768},
+	}
+	observed := float64(24576)
+	requirements := []decision.RequirementResult{
+		{ID: "usable_context", State: decision.RequirementEstablished, Observed: &observed, Unit: analysis.UnitBytes},
+	}
+	result, gaps := preferenceResult(spec, requirements)
+	if result == nil || len(gaps) != 0 {
+		t.Fatalf("usable context preference failed: result=%+v gaps=%v", result, gaps)
+	}
+	expected := (24576.0 - 8192.0) / (32768.0 - 8192.0)
+	if math.Abs(result.Estimate-expected) > 1e-12 || math.Abs(result.Low-expected) > 1e-12 || math.Abs(result.High-expected) > 1e-12 {
+		t.Fatalf("usable context utility bounds = %+v, want %v", result, expected)
+	}
+	if len(result.Metrics) != 1 || result.Metrics[0].Unit != analysis.UnitBytes {
+		t.Fatalf("usable context metric = %+v", result.Metrics)
+	}
+}
+
 func TestPreferenceMissingOrInvalidBoundsCannotManufactureCertainty(t *testing.T) {
 	for _, scenario := range []string{"missing", "unestablished", "no observation", "no lower", "no upper", "nan", "infinite", "reversed", "outside"} {
 		t.Run(scenario, func(t *testing.T) {

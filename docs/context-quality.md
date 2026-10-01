@@ -11,8 +11,9 @@ tier set. The declared sizes are sealed into the policy digest, so the operator
 states what was tested rather than inheriting an untested product choice.
 
 The result is an ordinary signed run record whose only planned work is the
-phase. Role preferences, auto collection and fresh confirmation are not
-connected yet, so nothing consumes this scorecard to qualify a model.
+phase. Personal roles and decision specifications consume this scorecard via
+`minimum_usable_context_bytes` requirements and usable-context preferences.
+Auto collection and fresh confirmation remain separate planned work.
 
 ## What the document pack measures
 

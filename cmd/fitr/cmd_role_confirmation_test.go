@@ -99,7 +99,7 @@ func cliRoleConfirmationFixture(t *testing.T) (string, role.ConfirmationBundle) 
 	now := time.Now()
 	store := role.Store{Dir: filepath.Join(resultsDir(), ".roles")}
 	records := record.Store{Dir: resultsDir()}
-	spec := initialRoleSpec("coding", "structured_output", 0.5, 22, eval.NumCtx, 30)
+	spec := initialRoleSpec("coding", "structured_output", 0.5, 22, eval.NumCtx, 30, 0)
 	minimum := 1.0
 	spec.Decision.Requirements = append(spec.Decision.Requirements, decision.Requirement{
 		ID: "speed", Performance: &decision.PerformanceRequirement{Metric: decision.MetricDecodeTPS, AtLeast: &minimum},

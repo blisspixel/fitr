@@ -74,3 +74,38 @@ func TestDecisionSpecRejectsUnknownObjectiveMetric(t *testing.T) {
 		t.Fatalf("unknown objective metric error = %v", err)
 	}
 }
+
+func TestDecisionSpecContextValidation(t *testing.T) {
+	intPointer := func(v int) *int { return &v }
+	tests := []struct {
+		name        string
+		tokens      int
+		usableBytes *int
+		valid       bool
+	}{
+		{"tokens only", 4096, nil, true},
+		{"usable bytes only", 0, intPointer(16384), true},
+		{"both tokens and usable bytes", 4096, intPointer(16384), true},
+		{"neither specified", 0, nil, false},
+		{"negative tokens", -1, nil, false},
+		{"zero usable bytes", 0, intPointer(0), false},
+		{"negative usable bytes", 0, intPointer(-100), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := DecisionSpec{
+				Schema: SpecSchema, Name: "context spec", Evidence: EvidenceDecide,
+				Requirements: []Requirement{{
+					ID: "context", Context: &ContextRequirement{
+						MinimumEffectiveTokens:    tc.tokens,
+						MinimumUsableContextBytes: tc.usableBytes,
+					},
+				}},
+			}
+			err := spec.Validate()
+			if (err == nil) != tc.valid {
+				t.Fatalf("Validate() error = %v, want valid=%v", err, tc.valid)
+			}
+		})
+	}
+}

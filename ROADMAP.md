@@ -107,8 +107,10 @@ the execution adapter that submits one sealed plan, the signed run evidence that
 persists it, and `fitr run --context-tiers`, which collects one phase as its own
 run level and projects it through the central analysis contract. A model served
 by Ollama's MLX runner is refused, because that runner silently reduces the
-output reserve the qualification rests on. Owned auto collection, personal
-selection and the remaining result surfaces are still to be connected.
+output reserve the qualification rests on. Personal roles and decision
+specifications now evaluate usable-context floors and preferences. Owned auto
+collection, selection across run levels and the remaining result surfaces are
+still to be connected.
 The [host compatibility matrix](docs/agent-interop.md) records current protocol
 gaps before any named-harness support is claimed.
 

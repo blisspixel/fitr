@@ -2,11 +2,11 @@
 
 fitr is a tailor for local AI: it turns a general-purpose model into a tested
 choice for a person's work and machine. This document describes the next
-product direction. Context-quality role attributes, harness task scorecards
-and the guided fitting flow below are not yet available. `fitr run --context-tiers`
-collects the first document scorecard as its own run; see
-[context task evidence](context-quality.md) for what that measurement does and
-does not establish.
+product direction. Harness task scorecards and the guided fitting flow below
+are not yet available. Usable-context floors and preferences are supported in
+roles and decisions. `fitr run --context-tiers` collects the document scorecard
+as its own run; see [context task evidence](context-quality.md) for what that
+measurement does and does not establish.
 
 ## From an idea to an earned choice
 
@@ -83,10 +83,11 @@ preference points.
 | Evidence | Trials, task families, configuration, uncertainty and age | Missing observations stay unknown |
 | Confirmation | A new fixed collection for the preselected choice | An uncertain or failed challenge preserves the selection |
 
-The current role schema has behavioral, performance and capacity preferences.
-Its context requirement verifies a runtime window; it does not measure how
-well the model uses a long prompt. A usable-context preference needs a typed
-measurement and schema extension before the interface offers that control.
+The role schema supports behavioral, performance, capacity and usable-context
+preferences. Its context requirement can verify a runtime window, an explicit
+usable-context floor in bytes (`minimum_usable_context_bytes`), or both.
+Usable-context preferences evaluate demonstrated tier prefix evidence without
+confusing basic runtime window with verified quality.
 
 ## Measure usable context
 

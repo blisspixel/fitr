@@ -81,7 +81,8 @@ type CapabilityRequirement struct {
 }
 
 type ContextRequirement struct {
-	MinimumEffectiveTokens int `json:"minimum_effective_tokens"`
+	MinimumEffectiveTokens    int  `json:"minimum_effective_tokens,omitempty"`
+	MinimumUsableContextBytes *int `json:"minimum_usable_context_bytes,omitempty"`
 }
 
 type PerformanceMetric string
@@ -171,8 +172,16 @@ func (r Requirement) validate() error {
 	case r.Capability != nil:
 		return r.Capability.validate()
 	case r.Context != nil:
-		if r.Context.MinimumEffectiveTokens <= 0 {
+		tokensSet := r.Context.MinimumEffectiveTokens > 0
+		bytesSet := r.Context.MinimumUsableContextBytes != nil
+		if !tokensSet && !bytesSet {
+			return errors.New("context requirement needs minimum effective context or usable context bytes")
+		}
+		if r.Context.MinimumEffectiveTokens < 0 {
 			return errors.New("minimum effective context must be positive")
+		}
+		if r.Context.MinimumUsableContextBytes != nil && *r.Context.MinimumUsableContextBytes <= 0 {
+			return errors.New("minimum usable context bytes must be positive")
 		}
 	case r.Performance != nil:
 		return r.Performance.validate()

@@ -129,8 +129,13 @@ func validatePreference(preference Preference, requirement decision.Requirement)
 		maximize = requirement.Performance.AtLeast != nil
 	case requirement.Capacity != nil:
 		maximize = false
+	case requirement.Context != nil:
+		if requirement.Context.MinimumUsableContextBytes == nil {
+			return errors.New("context preference requires a usable-context requirement; runtime window alone cannot be a preference")
+		}
+		maximize = true
 	default:
-		return errors.New("preference must reference numeric behavior, performance, or capacity")
+		return errors.New("preference must reference numeric behavior, performance, capacity, or usable context")
 	}
 	if maximize != (preference.Best > preference.Worst) {
 		return errors.New("anchor direction conflicts with the requirement bound")
