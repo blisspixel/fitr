@@ -1,9 +1,7 @@
 package analysis
 
 import (
-	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -15,34 +13,7 @@ const SourceScreenSchema = "fitr.analysis.source_screen.v1"
 // SourceScreenPolicy filters declarations and a component projection. An
 // operator's accepted architecture names are not runtime capability evidence,
 // and an accepted license identifier is not an interpretation of legal terms.
-type SourceScreenPolicy struct {
-	RequireFirstParty     bool     `json:"require_first_party"`
-	AllowedLicenses       []string `json:"allowed_licenses"`
-	AllowedArchitectures  []string `json:"allowed_architectures"`
-	Context               int      `json:"context"`
-	ComponentCeilingBytes int64    `json:"component_ceiling_bytes"`
-}
-
-var sourcePolicyIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
-
-func (policy SourceScreenPolicy) Validate() error {
-	if policy.Context <= 0 || policy.Context > 1<<30 || policy.ComponentCeilingBytes <= 0 || policy.ComponentCeilingBytes > 1<<60 {
-		return errors.New("screening requires a positive bounded context and component memory ceiling")
-	}
-	for _, values := range [][]string{policy.AllowedLicenses, policy.AllowedArchitectures} {
-		if len(values) > 32 {
-			return errors.New("screening accepts at most 32 identifiers per policy list")
-		}
-		seen := make(map[string]bool)
-		for _, value := range values {
-			if !sourcePolicyIdentifier.MatchString(value) || seen[value] {
-				return errors.New("screening identifiers must be unique lowercase names containing letters, numbers, dot, underscore or hyphen")
-			}
-			seen[value] = true
-		}
-	}
-	return nil
-}
+type SourceScreenPolicy = source.ScreenPolicy
 
 type SourceScreenGate struct {
 	Name   string `json:"name"`

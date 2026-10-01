@@ -23,11 +23,12 @@ const (
 )
 
 var (
-	repoPartPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$`)
-	pathPattern     = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
-	commitPattern   = regexp.MustCompile(`^[0-9a-f]{40}$`)
-	shaPattern      = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	versionPattern  = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,128}$`)
+	repoPartPattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$`)
+	pathPattern            = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+	commitPattern          = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	shaPattern             = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	versionPattern         = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,128}$`)
+	sourcePolicyIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 )
 
 // HFRequest deliberately accepts identifiers, not URLs, implicit revisions or
@@ -148,6 +149,41 @@ type Resolution struct {
 	// when the provider said nothing, so receipts written before it existed
 	// keep their exact bytes and their digest.
 	Publisher *Publisher `json:"publisher,omitempty"`
+	// ScreenPolicy is the operator's screening policy when --screen was requested.
+	ScreenPolicy *ScreenPolicy `json:"screen_policy,omitempty"`
+	// HeaderObservations records the bounded artifact prefix observations and
+	// parsed GGUF metadata when --fit or --screen was requested.
+	HeaderObservations *HeaderObservations `json:"header_observations,omitempty"`
+}
+
+// ScreenPolicy filters declarations and a component projection. An
+// operator's accepted architecture names are not runtime capability evidence,
+// and an accepted license identifier is not an interpretation of legal terms.
+type ScreenPolicy struct {
+	RequireFirstParty     bool     `json:"require_first_party,omitempty"`
+	AllowedLicenses       []string `json:"allowed_licenses,omitempty"`
+	AllowedArchitectures  []string `json:"allowed_architectures,omitempty"`
+	Context               int      `json:"context"`
+	ComponentCeilingBytes int64    `json:"component_ceiling_bytes"`
+}
+
+func (policy ScreenPolicy) Validate() error {
+	if policy.Context <= 0 || policy.Context > 1<<30 || policy.ComponentCeilingBytes <= 0 || policy.ComponentCeilingBytes > 1<<60 {
+		return errors.New("screening requires a positive bounded context and component memory ceiling")
+	}
+	for _, values := range [][]string{policy.AllowedLicenses, policy.AllowedArchitectures} {
+		if len(values) > 32 {
+			return errors.New("screening accepts at most 32 identifiers per policy list")
+		}
+		seen := make(map[string]bool)
+		for _, value := range values {
+			if !sourcePolicyIdentifier.MatchString(value) || seen[value] {
+				return errors.New("screening identifiers must be unique lowercase names containing letters, numbers, dot, underscore or hyphen")
+			}
+			seen[value] = true
+		}
+	}
+	return nil
 }
 
 func selectedState(files []FileMetadata) (string, []string) {

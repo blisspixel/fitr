@@ -215,10 +215,15 @@ the actual behavior and quality floors for that exact configuration.
   does not encrypt receipts or replace Windows ACLs. A writer can edit a saved
   receipt and recompute its unkeyed integrity seal.
 
+When `--out` is combined with `--fit` or `--screen`, the saved receipt also
+persists the operator's screening policy and bounded header observations. Reopening
+the saved receipt offline with `fitr source show <receipt.json>` re-derives the exact
+screening gates and component projection without repeating remote queries or
+requiring network access.
+
 Resolution does not download weights, execute repository code, alter a role,
 grant adoption authority or delete files. Attach a receipt to a discovery idea
 with [source attachments](source-attachments.md); the idea remains unmeasured.
-Source extraction, download ownership, complete dependency graphs,
-persisted screening observations, runtime support profiles and the larger
-automation loop remain separate work. The next connected boundary is described
-in the [artifact/runtime plan](artifact-runtime-plan.md).
+Source extraction, download ownership, complete dependency graphs, runtime
+support profiles and the larger automation loop remain separate work. The next
+connected boundary is described in the [artifact/runtime plan](artifact-runtime-plan.md).

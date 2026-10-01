@@ -97,14 +97,14 @@ func resolveSource(ctx context.Context, args []string, services sourceServices) 
 		}
 		return sourceFailure(err)
 	}
-	if err := source.WriteResolution(*output, resolution); err != nil {
-		return sourceFailure(err)
-	}
-	fmt.Fprintf(os.Stderr, "  receipt  %s\n", terminalText(*output))
 	var code int
 	if fit.enabled || fit.screen {
-		code = writeResolvedFit(ctx, resolution, fit, *mode, services)
+		code = writeResolvedFit(ctx, resolution, fit, *output, *mode, services)
 	} else {
+		if err := source.WriteResolution(*output, resolution); err != nil {
+			return sourceFailure(err)
+		}
+		fmt.Fprintf(os.Stderr, "  receipt  %s\n", terminalText(*output))
 		code = writeSourceResolution(resolution, *mode)
 	}
 	if ctx.Err() != nil && code != exitError {
@@ -126,6 +126,9 @@ func showSource(args []string) int {
 	resolution, err := source.LoadResolution(fs.Arg(0))
 	if err != nil {
 		return sourceFailure(err)
+	}
+	if resolution.ScreenPolicy != nil || resolution.HeaderObservations != nil {
+		return writeRederivedSource(resolution, *mode)
 	}
 	return writeSourceResolution(resolution, *mode)
 }

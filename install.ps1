@@ -148,6 +148,18 @@ if (-not $onPath -and $env:FITR_NO_PATH -ne "1") {
 $env:Path = "$BinDir;$env:Path"
 
 Write-Host "  installed: $dest"
+
+try {
+    $installedVer = & "$dest" version 2>$null
+    if ($installedVer) {
+        Write-Host "  verified execution: $installedVer"
+    }
+} catch {}
+
+if (Get-Command ollama -ErrorAction SilentlyContinue) {
+    Write-Host "  runtime: found ollama on PATH"
+}
+
 Write-Host ""
 Write-Host "  next:  fitr                        # hardware and reachable runtime"
 Write-Host "         fitr advise <model>         # does this quant fit"

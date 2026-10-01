@@ -88,10 +88,11 @@ type sourceFitOutput struct {
 
 type sourceHeaderRead = analysis.SourceHeaderRead
 
-func writeResolvedFit(ctx context.Context, resolution source.Resolution, options *sourceFitFlags, mode string, services sourceServices) int {
+func writeResolvedFit(ctx context.Context, resolution source.Resolution, options *sourceFitFlags, outputPath, mode string, services sourceServices) int {
 	output := sourceFitOutput{Schema: "fitr.source.screening.v1", Resolution: resolution, Headers: []sourceHeaderRead{}}
 	if options.screen {
-		screen, err := analysis.AnalyzeSourceScreen(resolution, options.policy(), analysis.SourceScreenFacts{})
+		policy := options.policy()
+		screen, err := analysis.AnalyzeSourceScreen(resolution, policy, analysis.SourceScreenFacts{})
 		if err != nil {
 			return sourceFailure(err)
 		}
@@ -100,13 +101,14 @@ func writeResolvedFit(ctx context.Context, resolution source.Resolution, options
 	if sourceNeedsHeaders(output, options) && ctx.Err() == nil {
 		collectSourceFit(ctx, &output, options, services)
 	}
-	if output.Screen != nil && output.Projection != nil {
-		facts := sourceScreenFacts(*output.Projection)
-		screen, err := analysis.AnalyzeSourceScreen(resolution, options.policy(), facts)
-		if err != nil {
+	if err := finalizeSourceResolution(&resolution, &output, options); err != nil {
+		return sourceFailure(err)
+	}
+	if outputPath != "" {
+		if err := source.WriteResolution(outputPath, resolution); err != nil {
 			return sourceFailure(err)
 		}
-		output.Screen = &screen
+		fmt.Fprintf(os.Stderr, "  receipt  %s\n", terminalText(outputPath))
 	}
 	if err := output.write(mode); err != nil {
 		return sourceFailure(err)
@@ -118,6 +120,93 @@ func writeResolvedFit(ctx context.Context, resolution source.Resolution, options
 		return exitOK
 	}
 	if output.Screen == nil && output.Projection != nil && output.Projection.ProjectionStatus == "within_ceiling" {
+		return exitOK
+	}
+	return exitUnresolved
+}
+
+func finalizeSourceResolution(resolution *source.Resolution, output *sourceFitOutput, options *sourceFitFlags) error {
+	if options.screen {
+		policy := options.policy()
+		resolution.ScreenPolicy = &policy
+	}
+	if len(output.Headers) > 0 || output.Projection != nil {
+		resolution.HeaderObservations = headerObservationsFromOutput(output)
+	}
+	if resolution.ScreenPolicy != nil || resolution.HeaderObservations != nil {
+		if err := resolution.Seal(); err != nil {
+			return err
+		}
+	}
+	output.Resolution = *resolution
+	if output.Screen != nil {
+		output.Screen.SourceSHA256 = resolution.ResolutionSHA256
+	}
+	if output.Projection != nil {
+		output.Projection.SourceSHA256 = resolution.ResolutionSHA256
+	}
+	if output.Screen != nil && output.Projection != nil {
+		facts := sourceScreenFacts(*output.Projection)
+		screen, err := analysis.AnalyzeSourceScreen(*resolution, options.policy(), facts)
+		if err != nil {
+			return err
+		}
+		output.Screen = &screen
+	}
+	return nil
+}
+
+func headerObservationsFromOutput(output *sourceFitOutput) *source.HeaderObservations {
+	var shape *source.ArchitectureShape
+	var weights *int64
+	var archStatus, archReason string
+	if output.Projection != nil {
+		shape = output.Projection.Shape
+		weights = output.Projection.WeightsBytes
+		archStatus = output.Projection.ArchitectureStatus
+		archReason = output.Projection.ArchitectureReason
+	}
+	return &source.HeaderObservations{
+		Reads:              output.Headers,
+		ArchitectureStatus: archStatus,
+		ArchitectureReason: archReason,
+		WeightsBytes:       weights,
+		Shape:              shape,
+	}
+}
+
+func writeRederivedSource(resolution source.Resolution, mode string) int {
+	projection := advise.RederiveSourceFit(resolution)
+	var screen *analysis.SourceScreen
+	if resolution.ScreenPolicy != nil {
+		facts := analysis.SourceScreenFacts{}
+		if projection != nil {
+			facts = sourceScreenFacts(*projection)
+		}
+		s, err := analysis.AnalyzeSourceScreen(resolution, *resolution.ScreenPolicy, facts)
+		if err != nil {
+			return sourceFailure(err)
+		}
+		screen = &s
+	}
+	var headers []sourceHeaderRead
+	if resolution.HeaderObservations != nil {
+		headers = resolution.HeaderObservations.Reads
+	}
+	output := sourceFitOutput{
+		Schema:     "fitr.source.screening.v1",
+		Resolution: resolution,
+		Screen:     screen,
+		Projection: projection,
+		Headers:    headers,
+	}
+	if err := output.write(mode); err != nil {
+		return sourceFailure(err)
+	}
+	if screen != nil && screen.State == "clear" {
+		return exitOK
+	}
+	if screen == nil && projection != nil && projection.ProjectionStatus == "within_ceiling" {
 		return exitOK
 	}
 	return exitUnresolved

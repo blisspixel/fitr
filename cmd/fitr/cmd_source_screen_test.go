@@ -103,6 +103,25 @@ func TestSourceScreenNaturalFlagsProduceOneJSONDocument(t *testing.T) {
 		if err != nil || resolution.ResolutionSHA256 != report.Resolution.ResolutionSHA256 {
 			t.Fatalf("saved metadata changed: %v", err)
 		}
+		if resolution.ScreenPolicy == nil || resolution.HeaderObservations == nil {
+			t.Fatalf("saved receipt missing screen policy or header observations: %+v", resolution)
+		}
+		if len(resolution.HeaderObservations.Reads) != 1 || resolution.HeaderObservations.Reads[0].Path != "model.gguf" {
+			t.Fatalf("saved receipt header reads missing: %+v", resolution.HeaderObservations)
+		}
+		showOutput, showCode := captureTopStdout(t, func() int {
+			return cmdSourceWithServices(context.Background(), []string{"show", args[index+1], "--display", "json"}, sourceServices{})
+		})
+		if showCode != exitOK {
+			t.Fatalf("show source exit code=%d output=%s", showCode, showOutput)
+		}
+		var showReport sourceFitOutput
+		if err := json.Unmarshal([]byte(showOutput), &showReport); err != nil {
+			t.Fatalf("failed to decode show output: %v", err)
+		}
+		if showReport.Screen == nil || showReport.Screen.State != "clear" || showReport.Projection == nil {
+			t.Fatalf("offline rederivation failed: %+v", showReport)
+		}
 	}
 }
 

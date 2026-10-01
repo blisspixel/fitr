@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +45,69 @@ type PrefixObservation struct {
 	Outcome        string `json:"outcome"`
 	StartedAt      string `json:"started_at,omitempty"`
 	CompletedAt    string `json:"completed_at,omitempty"`
+}
+
+// HeaderRead retains the selected filename, prefix digest and transport
+// provenance without raw model bytes or a signed download location.
+type HeaderRead struct {
+	Path        string            `json:"path"`
+	SHA256      string            `json:"prefix_sha256,omitempty"`
+	Observation PrefixObservation `json:"observation"`
+}
+
+// HeaderObservations records the bounded prefix reads and any GGUF architecture
+// shape observed from them. Raw header bytes are never stored.
+type HeaderObservations struct {
+	Reads              []HeaderRead       `json:"reads"`
+	ArchitectureStatus string             `json:"architecture_status,omitempty"`
+	ArchitectureReason string             `json:"architecture_reason,omitempty"`
+	WeightsBytes       *int64             `json:"weights_bytes,omitempty"`
+	Shape              *ArchitectureShape `json:"shape,omitempty"`
+}
+
+func (h *HeaderObservations) validate(files []FileMetadata) error {
+	if h == nil {
+		return nil
+	}
+	if len(h.Reads) > MaxFiles {
+		return errors.New("header reads exceed maximum file limit")
+	}
+	validPaths := make(map[string]bool, len(files))
+	for _, f := range files {
+		validPaths[f.Path] = true
+	}
+	seenReads := make(map[string]bool, len(h.Reads))
+	for _, read := range h.Reads {
+		if !validPath(read.Path, 512) {
+			return errors.New("invalid header read path")
+		}
+		if !validPaths[read.Path] {
+			return errors.New("header read path is not a selected file")
+		}
+		if seenReads[read.Path] {
+			return errors.New("duplicate header read path")
+		}
+		seenReads[read.Path] = true
+		if read.SHA256 != "" && !shaPattern.MatchString(read.SHA256) {
+			return errors.New("invalid header read digest")
+		}
+		if read.Observation.RequestedBytes < 0 || read.Observation.RequestedBytes > MaxScreeningPrefixBytes {
+			return errors.New("invalid header read requested bytes")
+		}
+		if read.Observation.Outcome == "" {
+			return errors.New("header read observation outcome is required")
+		}
+	}
+	if h.ArchitectureStatus != "" && !slices.Contains([]string{"available", "unresolved"}, h.ArchitectureStatus) {
+		return errors.New("invalid header architecture status")
+	}
+	if h.WeightsBytes != nil && (*h.WeightsBytes < 0 || *h.WeightsBytes > maxFileBytes) {
+		return errors.New("invalid header weights bytes")
+	}
+	if err := h.Shape.validate(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // maxPrefixRedirects is one.

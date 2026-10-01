@@ -174,13 +174,42 @@ else
 fi
 
 echo "  installed: $BIN_DIR/$bin"
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *)
-    echo " hint: $BIN_DIR is not on your PATH; add it to your shell profile"
-    echo "       echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.profile"
-    ;;
-esac
+if [ -x "$BIN_DIR/$bin" ]; then
+  installed_ver=$("$BIN_DIR/$bin" version 2>/dev/null || true)
+  if [ -n "$installed_ver" ]; then
+    echo "  verified execution: $installed_ver"
+  fi
+fi
+
+if [ "${FITR_NO_PATH:-}" != "1" ]; then
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *)
+      profile_file=""
+      if [ -f "$HOME/.zshrc" ]; then
+        profile_file="$HOME/.zshrc"
+      elif [ -f "$HOME/.bashrc" ]; then
+        profile_file="$HOME/.bashrc"
+      elif [ -f "$HOME/.bash_profile" ]; then
+        profile_file="$HOME/.bash_profile"
+      elif [ -f "$HOME/.profile" ]; then
+        profile_file="$HOME/.profile"
+      fi
+      if [ -n "$profile_file" ] && [ -w "$profile_file" ]; then
+        printf '\nexport PATH="%s:$PATH"\n' "$BIN_DIR" >> "$profile_file"
+        echo "  added $BIN_DIR to $profile_file"
+      else
+        echo " hint: $BIN_DIR is not on your PATH; add it to your shell profile"
+        echo "       echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.profile"
+      fi
+      ;;
+  esac
+fi
+
+if have ollama; then
+  echo "  runtime: found ollama on PATH"
+fi
+
 echo
 echo "  next:  fitr                        # hardware and reachable runtime"
 echo "         fitr advise <model>         # does this quant fit"

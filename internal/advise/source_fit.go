@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 
@@ -78,6 +79,103 @@ func ProjectSourceFit(resolution source.Resolution, headers []SourceHeader, requ
 	report.ArchitectureStatus = "available"
 	report.ArchitectureReason = "complete selected GGUF metadata supports the cache projection; runtime support is unmeasured"
 	return compareSourceComponents(report, arch, weights, request)
+}
+
+// RederiveSourceFit re-computes the component projection from validated header
+// observations and screening policy without network access.
+func RederiveSourceFit(resolution source.Resolution) *SourceFitReport {
+	if resolution.HeaderObservations == nil {
+		return nil
+	}
+	report := initialRederivedReport(resolution)
+	obs := resolution.HeaderObservations
+	if obs.Shape == nil || obs.WeightsBytes == nil || obs.ArchitectureStatus != "available" {
+		if report.ProjectionReason == "" {
+			report.ProjectionReason = "GGUF metadata was incomplete or unreadable; cache projection is unavailable"
+		}
+		return report
+	}
+	return evaluateRederivedProjection(report, obs, resolution.ScreenPolicy)
+}
+
+func initialRederivedReport(resolution source.Resolution) *SourceFitReport {
+	obs := resolution.HeaderObservations
+	files := make([]string, 0, len(resolution.Files))
+	for _, file := range resolution.Files {
+		files = append(files, file.Path)
+	}
+	return &SourceFitReport{
+		Schema:             "fitr.source.fit.v1",
+		SourceSHA256:       resolution.ResolutionSHA256,
+		ArchitectureStatus: obs.ArchitectureStatus,
+		ArchitectureReason: obs.ArchitectureReason,
+		ProjectionStatus:   "unresolved",
+		ProjectionReason:   obs.ArchitectureReason,
+		RuntimeStatus:      "unmeasured",
+		Files:              files,
+		Gaps: []string{
+			"provider-declared sizes and header bytes have not been verified against whole-file hashes",
+			"runtime support, placement and resident allocation are unmeasured",
+			"runtime buffers and required companions are excluded; dependency closure is unverified",
+			"cache projection assumes f16 KV elements",
+		},
+		WeightsBytes: obs.WeightsBytes,
+		Shape:        obs.Shape,
+	}
+}
+
+func evaluateRederivedProjection(report *SourceFitReport, obs *source.HeaderObservations, policy *source.ScreenPolicy) *SourceFitReport {
+	context := 0
+	var ceiling int64
+	if policy != nil {
+		context = policy.Context
+		ceiling = policy.ComponentCeilingBytes
+	}
+	if context == 0 {
+		context = obs.Shape.MaxCtx
+	}
+	if context <= 0 {
+		report.ProjectionReason = "a positive requested context or declared model maximum is required"
+		return report
+	}
+	report.Context = context
+	if obs.Shape.MaxCtx > 0 && context > obs.Shape.MaxCtx {
+		report.ProjectionReason = "requested context exceeds the artifact's declared maximum"
+		return report
+	}
+	if !obs.Shape.KVSizable {
+		report.ProjectionReason = obs.Shape.UnsizableReason
+		if report.ProjectionReason == "" {
+			report.ProjectionReason = "the artifact is not sizable"
+		}
+		return report
+	}
+	perToken := float64(obs.Shape.KVBytesPerToken)
+	projected := perToken*float64(context) + float64(obs.Shape.FixedCacheBytes)
+	if projected <= 0 || math.IsNaN(projected) || math.IsInf(projected, 0) || projected >= float64(math.MaxInt64) {
+		report.ProjectionReason = "the requested cache projection exceeds the supported arithmetic range"
+		return report
+	}
+	cache := int64(math.Ceil(projected))
+	components, ok := addInt64(*obs.WeightsBytes, cache)
+	if !ok {
+		report.ProjectionReason = "declared weights plus projected cache overflow the supported byte range"
+		return report
+	}
+	report.CacheBytes, report.ComponentBytes = &cache, &components
+	if ceiling <= 0 {
+		report.ProjectionReason = "an explicit positive operator ceiling is required for the component comparison"
+		return report
+	}
+	report.CapacityBytes = &ceiling
+	report.CapacitySource = "operator component ceiling"
+	report.ProjectionStatus = "within_ceiling"
+	if components > ceiling {
+		report.ProjectionStatus = "exceeds_ceiling"
+	}
+	report.ProjectionReason = fmt.Sprintf("declared weights plus f16 cache at %d tokens are %s; runtime allocation is unmeasured",
+		context, report.ProjectionStatus)
+	return report
 }
 
 func unresolvedSourceFit(report SourceFitReport, reason string) SourceFitReport {

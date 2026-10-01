@@ -9,6 +9,16 @@ Start with a model. Find the configuration that fits your machine, your work,
 and your priorities. fitr measures the fit, tests the output, and keeps the
 evidence behind each choice.
 
+```bash
+# macOS and Linux
+curl -fsSL https://raw.githubusercontent.com/blisspixel/fitr/main/install.sh | sh
+```
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/blisspixel/fitr/main/install.ps1 | iex
+```
+
 Model names and public leaderboards do not answer the local questions. Will
 this artifact fit at the context you need? Is the runtime really using the
 accelerator? Are tool calls reaching the tool channel? Is the faster quant

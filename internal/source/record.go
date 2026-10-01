@@ -25,6 +25,16 @@ func (result Resolution) Validate() error {
 	return nil
 }
 
+// Seal recomputes and records the resolution's integrity digest after all fields are finalized.
+func (result *Resolution) Seal() error {
+	digest, err := result.Digest()
+	if err != nil {
+		return err
+	}
+	result.ResolutionSHA256 = digest
+	return result.Validate()
+}
+
 // Digest validates the receipt's semantics before computing its integrity seal.
 // It excludes ResolutionSHA256, so callers can detect mutation of a copy.
 func (result Resolution) Digest() (string, error) {
@@ -63,6 +73,16 @@ func (result Resolution) validateFields() error {
 		owner, _, _ := strings.Cut(result.ResolvedRepo, "/")
 		if !strings.EqualFold(result.Publisher.Author, owner) {
 			return errors.New("source publisher author contradicts its pinned repository owner")
+		}
+	}
+	if result.ScreenPolicy != nil {
+		if err := result.ScreenPolicy.Validate(); err != nil {
+			return err
+		}
+	}
+	if result.HeaderObservations != nil {
+		if err := result.HeaderObservations.validate(result.Files); err != nil {
+			return err
 		}
 	}
 	if result.State == "unavailable" {
@@ -178,7 +198,8 @@ func queryStatusMatches(outcome string, status int) bool {
 }
 
 func (result Resolution) validateUnavailable() error {
-	if result.ResolvedRepo != "" || result.ResolvedCommit != "" || result.Publisher != nil || len(result.Files) != 0 ||
+	if result.ResolvedRepo != "" || result.ResolvedCommit != "" || result.Publisher != nil ||
+		result.ScreenPolicy != nil || result.HeaderObservations != nil || len(result.Files) != 0 ||
 		len(result.InventoryPaths) != 0 || len(result.Dependencies) != 0 || len(result.Gaps) != 1 {
 		return errors.New("unavailable source receipt cannot assert resolved evidence")
 	}
