@@ -32,6 +32,7 @@ type Plan struct {
 	MaxTurns         int                  `json:"max_turns"`
 	TimeoutSeconds   int                  `json:"timeout_seconds"`
 	RequestedContext int                  `json:"requested_context"`
+	MaxAttempts      int                  `json:"max_attempts,omitempty"`
 	Retention        RetentionPolicy      `json:"retention"`
 	Contract         *WorkflowContract    `json:"contract,omitempty"`
 }
@@ -39,20 +40,31 @@ type Plan struct {
 type EventType string
 
 const (
-	EventScenarioReleased  EventType = "scenario_released"
-	EventWorkerStarted     EventType = "worker_started"
-	EventModelStarted      EventType = "model_request_started"
-	EventModelCompleted    EventType = "model_request_completed"
-	EventToolStarted       EventType = "tool_started"
-	EventToolCompleted     EventType = "tool_completed"
-	EventWorkerCompleted   EventType = "worker_completed"
-	EventVerifierQueued    EventType = "verifier_queued"
-	EventVerifierStarted   EventType = "verifier_started"
-	EventVerifierCompleted EventType = "verifier_completed"
-	EventAccepted          EventType = "accepted"
-	EventRejected          EventType = "rejected"
-	EventTimedOut          EventType = "timed_out"
-	EventInfrastructure    EventType = "infrastructure_fault"
+	EventScenarioReleased    EventType = "scenario_released"
+	EventWorkerStarted       EventType = "worker_started"
+	EventModelStarted        EventType = "model_request_started"
+	EventModelCompleted      EventType = "model_request_completed"
+	EventToolStarted         EventType = "tool_started"
+	EventToolCompleted       EventType = "tool_completed"
+	EventApprovalRequested   EventType = "approval_requested"
+	EventApprovalGranted     EventType = "approval_granted"
+	EventApprovalDenied      EventType = "approval_denied"
+	EventEscalationRequested EventType = "escalation_requested"
+	EventEscalationCompleted EventType = "escalation_completed"
+	EventHumanWaitStarted    EventType = "human_wait_started"
+	EventHumanWaitCompleted  EventType = "human_wait_completed"
+	EventCompactionStarted   EventType = "compaction_started"
+	EventCompactionCompleted EventType = "compaction_completed"
+	EventCheckpointResumed   EventType = "checkpoint_resumed"
+	EventRetry               EventType = "retry"
+	EventWorkerCompleted     EventType = "worker_completed"
+	EventVerifierQueued      EventType = "verifier_queued"
+	EventVerifierStarted     EventType = "verifier_started"
+	EventVerifierCompleted   EventType = "verifier_completed"
+	EventAccepted            EventType = "accepted"
+	EventRejected            EventType = "rejected"
+	EventTimedOut            EventType = "timed_out"
+	EventInfrastructure      EventType = "infrastructure_fault"
 )
 
 type Event struct {

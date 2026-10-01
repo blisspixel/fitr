@@ -1,5 +1,7 @@
 package workload
 
+import "fmt"
+
 // TrialAnalysis is reconstructed from a validated trial's harness events.
 // Worker includes model and tool time; those components must not be added to it.
 type TrialAnalysis struct {
@@ -10,6 +12,8 @@ type TrialAnalysis struct {
 	Retries      string        `json:"retries"`
 	HumanWait    string        `json:"human_wait"`
 	Escalation   string        `json:"escalation"`
+	Approvals    string        `json:"approvals,omitempty"`
+	Compaction   string        `json:"compaction,omitempty"`
 }
 
 type TrialTiming struct {
@@ -21,6 +25,9 @@ type TrialTiming struct {
 	VerifierQueueMillis     int64  `json:"verifier_queue_ms"`
 	VerifierMillis          int64  `json:"verifier_ms"`
 	HarnessOverheadMillis   int64  `json:"harness_overhead_ms"`
+	HumanWaitMillis         int64  `json:"human_wait_ms,omitempty"`
+	EscalationMillis        int64  `json:"escalation_ms,omitempty"`
+	CompactionMillis        int64  `json:"compaction_ms,omitempty"`
 	TimeToValidMillis       *int64 `json:"time_to_valid_ms,omitempty"`
 }
 
@@ -30,10 +37,17 @@ func analyzeTrial(trial Trial) TrialAnalysis {
 		TimingStatus: "unavailable", Retries: "not_permitted",
 		HumanWait: "unsupported", Escalation: "unsupported",
 	}
-	if _, err := validateEvents(trial.Events, trial.Outcome, trial.Verifier); err != nil {
+	stats, err := validateEvents(trial.Events, trial.Outcome, trial.Verifier)
+	if err != nil {
 		return analysis
 	}
-	events := trial.Events
+	timing := calculateTiming(trial.Events, trial.Outcome)
+	populateAnalysisFields(&analysis, trial, stats, &timing)
+	analysis.Timing, analysis.TimingStatus = &timing, "harness_observed"
+	return analysis
+}
+
+func calculateTiming(events []Event, outcome Outcome) TrialTiming {
 	end := len(events) - 1
 	timing := TrialTiming{
 		ReleaseToTerminalMillis: events[end].ElapsedMillis - events[0].ElapsedMillis,
@@ -42,20 +56,52 @@ func analyzeTrial(trial Trial) TrialAnalysis {
 		VerifierMillis:          events[end-1].ElapsedMillis - events[end-2].ElapsedMillis,
 	}
 	for index, event := range events {
+		if index == 0 {
+			continue
+		}
+		duration := event.ElapsedMillis - events[index-1].ElapsedMillis
 		switch event.Type {
 		case EventModelCompleted:
-			timing.ModelMillis += event.ElapsedMillis - events[index-1].ElapsedMillis
+			timing.ModelMillis += duration
 		case EventToolCompleted:
-			timing.ToolMillis += event.ElapsedMillis - events[index-1].ElapsedMillis
+			timing.ToolMillis += duration
+		case EventHumanWaitCompleted:
+			timing.HumanWaitMillis += duration
+		case EventEscalationCompleted:
+			timing.EscalationMillis += duration
+		case EventCompactionCompleted:
+			timing.CompactionMillis += duration
 		}
 	}
-	timing.WorkerOverheadMillis = timing.WorkerMillis - timing.ModelMillis - timing.ToolMillis
+	timing.WorkerOverheadMillis = timing.WorkerMillis - timing.ModelMillis - timing.ToolMillis -
+		timing.HumanWaitMillis - timing.EscalationMillis - timing.CompactionMillis
 	timing.HarnessOverheadMillis = timing.ReleaseToTerminalMillis - timing.WorkerMillis -
 		timing.VerifierQueueMillis - timing.VerifierMillis
-	if trial.Outcome == OutcomeAccepted {
+	if outcome == OutcomeAccepted {
 		elapsed := timing.ReleaseToTerminalMillis
 		timing.TimeToValidMillis = &elapsed
 	}
-	analysis.Timing, analysis.TimingStatus = &timing, "harness_observed"
-	return analysis
+	return timing
+}
+
+func populateAnalysisFields(analysis *TrialAnalysis, trial Trial, stats eventStats, timing *TrialTiming) {
+	if trial.Attempts > 1 {
+		analysis.Retries = fmt.Sprintf("%d_attempts", trial.Attempts)
+	} else if stats.retries > 0 {
+		analysis.Retries = "attempted"
+	}
+	if timing.HumanWaitMillis > 0 || stats.humanWaits > 0 {
+		analysis.HumanWait = "observed"
+	}
+	if timing.EscalationMillis > 0 || stats.escalations > 0 {
+		analysis.Escalation = "observed"
+	}
+	if stats.approvalsDenied > 0 {
+		analysis.Approvals = "denied"
+	} else if stats.approvalsGranted > 0 {
+		analysis.Approvals = "granted"
+	}
+	if stats.compactions > 0 || timing.CompactionMillis > 0 {
+		analysis.Compaction = "observed"
+	}
 }

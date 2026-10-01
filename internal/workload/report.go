@@ -87,8 +87,11 @@ func validateTrialBinding(trial Trial, plan Plan) error {
 	if trial.Schema != TrialSchema || trial.PlanSHA256 != plan.PlanSHA256 {
 		return errors.New("workload trial schema or plan binding is invalid")
 	}
-	if trial.Index < 1 || trial.Index > plan.Trials || trial.Attempts != 1 {
+	if trial.Index < 1 || trial.Index > plan.Trials || trial.Attempts < 1 {
 		return errors.New("workload trial index or attempt count is invalid")
+	}
+	if plan.Contract != nil && plan.Contract.RetryPolicy == "one-attempt-no-retry" && trial.Attempts != 1 {
+		return errors.New("workload trial attempt count exceeds contract retry policy")
 	}
 	if trial.TrialID != fmt.Sprintf("%s:%d", plan.PlanSHA256, trial.Index) {
 		return errors.New("workload trial id does not match its plan position")
@@ -155,9 +158,11 @@ func validateTrialSignature(trial Trial, plan Plan) error {
 }
 
 type eventStats struct {
-	turns, toolCalls, duplicateCalls int
-	terminalElapsed                  int64
-	workerStatus, lastModelStatus    string
+	turns, toolCalls, duplicateCalls              int
+	approvalsGranted, approvalsDenied             int
+	escalations, humanWaits, compactions, retries int
+	terminalElapsed                               int64
+	workerStatus, lastModelStatus                 string
 }
 
 func validateEvents(events []Event, outcome Outcome, verifier VerifierReceipt) (eventStats, error) {
@@ -190,7 +195,7 @@ func validateEventOrdering(events []Event) error {
 	var priorElapsed int64
 	for index, event := range events {
 		if event.Sequence != index+1 || event.ElapsedMillis < priorElapsed ||
-			event.ElapsedMillis < 0 || event.Attempt != 1 {
+			event.ElapsedMillis < 0 || event.Attempt < 1 {
 			return errors.New("workload trial events are out of order")
 		}
 		if eventRequiresEvidence(event.Type) && !validSHA256(event.EvidenceSHA256) {
@@ -212,7 +217,8 @@ func eventRequiresEvidence(eventType EventType) bool {
 	switch eventType {
 	case EventScenarioReleased, EventModelStarted, EventModelCompleted, EventToolStarted,
 		EventToolCompleted, EventVerifierCompleted, EventAccepted, EventRejected, EventTimedOut,
-		EventInfrastructure:
+		EventInfrastructure, EventApprovalRequested, EventApprovalGranted, EventApprovalDenied,
+		EventEscalationRequested, EventEscalationCompleted, EventCompactionCompleted, EventRetry:
 		return true
 	default:
 		return false
@@ -223,34 +229,126 @@ func validateWorkerEvents(events []Event) (eventStats, int, error) {
 	stats := eventStats{}
 	cursor := 2
 	seenCalls := make(map[string]int)
-	for cursor < len(events) && events[cursor].Type == EventModelStarted {
-		if events[cursor].Actor != "worker" || cursor+1 >= len(events) ||
-			events[cursor].Status != "started" || events[cursor+1].Type != EventModelCompleted ||
-			events[cursor+1].Actor != "worker" ||
-			!validModelCompletionStatus(events[cursor+1].Status) {
-			return stats, cursor, errors.New("workload trial model request events are unbalanced")
+	for cursor < len(events) && events[cursor].Type != EventWorkerCompleted {
+		handled, err := consumeWorkerControlEvent(events, &cursor, &stats)
+		if err != nil {
+			return stats, cursor, err
 		}
-		stats.turns++
-		stats.lastModelStatus = events[cursor+1].Status
-		cursor += 2
-		if stats.lastModelStatus != "completed" && cursor < len(events) &&
-			(events[cursor].Type == EventToolStarted || events[cursor].Type == EventModelStarted) {
-			return stats, cursor, errors.New("workload trial continued after a failed model request")
+		if handled {
+			continue
 		}
-		priorCalls := stats.toolCalls
-		for cursor < len(events) && events[cursor].Type == EventToolStarted {
-			if err := consumeToolEvents(events, &cursor, seenCalls, &stats); err != nil {
-				return stats, cursor, err
-			}
+		if events[cursor].Type != EventModelStarted {
+			break
 		}
-		if stats.toolCalls-priorCalls > maximumToolCallsPerTurn {
-			return stats, cursor, errors.New("workload trial exceeds the per-turn tool-call limit")
+		if err := validateModelTurn(events, &cursor, seenCalls, &stats); err != nil {
+			return stats, cursor, err
 		}
 	}
 	if stats.turns == 0 || len(events)-cursor != 5 {
 		return stats, cursor, errors.New("workload trial event state machine is incomplete")
 	}
 	return stats, cursor, nil
+}
+
+func validateModelTurn(events []Event, cursor *int, seenCalls map[string]int, stats *eventStats) error {
+	c := *cursor
+	if events[c].Actor != "worker" || c+1 >= len(events) ||
+		events[c].Status != "started" || events[c+1].Type != EventModelCompleted ||
+		events[c+1].Actor != "worker" ||
+		!validModelCompletionStatus(events[c+1].Status) {
+		return errors.New("workload trial model request events are unbalanced")
+	}
+	stats.turns++
+	stats.lastModelStatus = events[c+1].Status
+	*cursor += 2
+	c = *cursor
+	if stats.lastModelStatus != "completed" && c < len(events) &&
+		(events[c].Type == EventToolStarted || events[c].Type == EventModelStarted) {
+		return errors.New("workload trial continued after a failed model request")
+	}
+	priorCalls := stats.toolCalls
+	for *cursor < len(events) && (events[*cursor].Type == EventToolStarted || isApprovalOrControl(events[*cursor].Type)) {
+		ctrlHandled, ctrlErr := consumeWorkerControlEvent(events, cursor, stats)
+		if ctrlErr != nil {
+			return ctrlErr
+		}
+		if ctrlHandled {
+			continue
+		}
+		if err := consumeToolEvents(events, cursor, seenCalls, stats); err != nil {
+			return err
+		}
+	}
+	if stats.toolCalls-priorCalls > maximumToolCallsPerTurn {
+		return errors.New("workload trial exceeds the per-turn tool-call limit")
+	}
+	return nil
+}
+
+func isApprovalOrControl(t EventType) bool {
+	switch t {
+	case EventApprovalRequested, EventApprovalGranted, EventApprovalDenied,
+		EventEscalationRequested, EventEscalationCompleted,
+		EventHumanWaitStarted, EventHumanWaitCompleted,
+		EventCompactionStarted, EventCompactionCompleted, EventCheckpointResumed,
+		EventRetry:
+		return true
+	default:
+		return false
+	}
+}
+
+func consumeWorkerControlEvent(events []Event, cursor *int, stats *eventStats) (bool, error) {
+	if *cursor >= len(events) {
+		return false, nil
+	}
+	switch events[*cursor].Type {
+	case EventApprovalRequested:
+		if *cursor+1 >= len(events) {
+			return true, errors.New("workload trial approval event sequence is incomplete")
+		}
+		next := events[*cursor+1]
+		if next.Type != EventApprovalGranted && next.Type != EventApprovalDenied {
+			return true, errors.New("workload trial approval response event is invalid")
+		}
+		if next.Type == EventApprovalGranted {
+			stats.approvalsGranted++
+		} else {
+			stats.approvalsDenied++
+		}
+		*cursor += 2
+		return true, nil
+	case EventEscalationRequested:
+		if *cursor+1 >= len(events) || events[*cursor+1].Type != EventEscalationCompleted {
+			return true, errors.New("workload trial escalation event sequence is incomplete")
+		}
+		stats.escalations++
+		*cursor += 2
+		return true, nil
+	case EventHumanWaitStarted:
+		if *cursor+1 >= len(events) || events[*cursor+1].Type != EventHumanWaitCompleted {
+			return true, errors.New("workload trial human wait event sequence is incomplete")
+		}
+		stats.humanWaits++
+		*cursor += 2
+		return true, nil
+	case EventCompactionStarted:
+		if *cursor+1 >= len(events) || events[*cursor+1].Type != EventCompactionCompleted {
+			return true, errors.New("workload trial compaction event sequence is incomplete")
+		}
+		stats.compactions++
+		*cursor += 2
+		if *cursor < len(events) && events[*cursor].Type == EventCheckpointResumed {
+			*cursor++
+		}
+		return true, nil
+	case EventRetry:
+		stats.retries++
+		*cursor++
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 func consumeToolEvents(events []Event, cursor *int, seenCalls map[string]int, stats *eventStats) error {

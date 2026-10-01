@@ -2,13 +2,14 @@ package workload
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 )
 
 func TestEvidenceClassesDoNotPromoteWorkerOrProtocolSuccess(t *testing.T) {
 	for _, class := range []EvidenceClass{EvidenceDeterministic, EvidenceExternalState, EvidenceIndependent,
-		EvidenceHarness, EvidenceHeuristic, EvidenceModelJudged, EvidenceSelfReported, EvidenceNone, "invented"} {
+		EvidenceHarness, EvidenceHeuristic, EvidenceModelJudged, EvidenceSelfReported, EvidenceExternalProtocol, EvidenceNone, "invented"} {
 		want := class == EvidenceDeterministic || class == EvidenceExternalState || class == EvidenceIndependent
 		if class.CanEstablishCompletion() != want || class.Valid() != (class != "invented") {
 			t.Fatalf("incorrect evidence policy for %q", class)
@@ -118,4 +119,95 @@ func TestWorkloadRejectsContradictoryRejectionAndPerTurnOverflow(t *testing.T) {
 	if _, err := validateEvents(trial.Events, trial.Outcome, trial.Verifier); err == nil {
 		t.Fatal("per-turn tool overflow was accepted")
 	}
+}
+
+func makeGeneralizedControlEvents(evHash string) []Event {
+	return []Event{
+		{Type: EventApprovalRequested, Actor: "harness", Status: "requested", EvidenceSHA256: evHash, Attempt: 1},
+		{Type: EventApprovalGranted, Actor: "harness", Status: "granted", EvidenceSHA256: evHash, Attempt: 1},
+		{Type: EventHumanWaitStarted, Actor: "harness", Status: "waiting", Attempt: 1},
+		{Type: EventHumanWaitCompleted, Actor: "harness", Status: "resumed", Attempt: 1},
+		{Type: EventEscalationRequested, Actor: "worker", Status: "escalated", EvidenceSHA256: evHash, Attempt: 1},
+		{Type: EventEscalationCompleted, Actor: "harness", Status: "resolved", EvidenceSHA256: evHash, Attempt: 1},
+		{Type: EventCompactionStarted, Actor: "harness", Status: "compacting", Attempt: 1},
+		{Type: EventCompactionCompleted, Actor: "harness", Status: "compacted", EvidenceSHA256: evHash, Attempt: 1},
+		{Type: EventCheckpointResumed, Actor: "harness", Status: "resumed", Attempt: 1},
+		{Type: EventRetry, Actor: "harness", Status: "retry", EvidenceSHA256: evHash, Attempt: 2},
+	}
+}
+
+func verifyGeneralizedTrialAnalysis(t *testing.T, analysis TrialAnalysis) {
+	t.Helper()
+	if analysis.Retries != "2_attempts" {
+		t.Fatalf("retries = %q, want 2_attempts", analysis.Retries)
+	}
+	if analysis.HumanWait != "observed" {
+		t.Fatalf("human wait = %q, want observed", analysis.HumanWait)
+	}
+	if analysis.Escalation != "observed" {
+		t.Fatalf("escalation = %q, want observed", analysis.Escalation)
+	}
+	if analysis.Approvals != "granted" {
+		t.Fatalf("approvals = %q, want granted", analysis.Approvals)
+	}
+	if analysis.Compaction != "observed" {
+		t.Fatalf("compaction = %q, want observed", analysis.Compaction)
+	}
+
+	timing := analysis.Timing
+	if timing == nil {
+		t.Fatal("timing is nil")
+	}
+	if timing.HumanWaitMillis != 10 {
+		t.Fatalf("human wait ms = %d, want 10", timing.HumanWaitMillis)
+	}
+	if timing.EscalationMillis != 10 {
+		t.Fatalf("escalation ms = %d, want 10", timing.EscalationMillis)
+	}
+	if timing.CompactionMillis != 10 {
+		t.Fatalf("compaction ms = %d, want 10", timing.CompactionMillis)
+	}
+	expectedWorkerOverhead := timing.WorkerMillis - timing.ModelMillis - timing.ToolMillis -
+		timing.HumanWaitMillis - timing.EscalationMillis - timing.CompactionMillis
+	if timing.WorkerOverheadMillis != expectedWorkerOverhead {
+		t.Fatalf("worker overhead = %d, want %d", timing.WorkerOverheadMillis, expectedWorkerOverhead)
+	}
+}
+
+func TestGeneralizedWorkloadReceiptsTimingAndAnalysis(t *testing.T) {
+	sealed := workloadTestPlan(t, 1)
+	sealed.Plan.Workflow = "generalized"
+	sealed.Plan.Contract.RetryPolicy = "bounded-retry-2"
+	sealed.Plan.Contract.ApprovalPolicy = "policy-gate"
+	sealed.Plan.Contract.CompactionPolicy = "requested-threshold"
+	sealed.Plan.PlanSHA256, _ = planDigest(sealed.Plan)
+
+	trial, err := sealed.runTrial(context.Background(), &scriptedWorkflowBackend{}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trial.PlanSHA256 = sealed.Plan.PlanSHA256
+	trial.TrialID = fmt.Sprintf("%s:%d", sealed.Plan.PlanSHA256, trial.Index)
+
+	evHash := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	insertIdx := len(trial.Events) - 5
+	controlEvents := makeGeneralizedControlEvents(evHash)
+
+	trial.Events = append(trial.Events[:insertIdx], append(controlEvents, trial.Events[insertIdx:]...)...)
+	trial.Attempts = 2
+	for index := range trial.Events {
+		trial.Events[index].ElapsedMillis = int64(index * 10)
+	}
+	trial.ElapsedMillis = trial.Events[len(trial.Events)-1].ElapsedMillis + 10
+	resequenceEvents(trial.Events)
+
+	if err := sealed.signTrial(&trial); err != nil {
+		t.Fatal(err)
+	}
+	if err := trial.Validate(sealed.Plan); err != nil {
+		t.Fatalf("generalized trial failed validation: %v", err)
+	}
+
+	analysis := analyzeTrial(trial)
+	verifyGeneralizedTrialAnalysis(t, analysis)
 }

@@ -13,12 +13,15 @@ an authority envelope, and independent proof.
 
 ## What exists today
 
-The separate `experiment workload` path ships a fixed policy-repair contract,
-signed per-trial events and independent deterministic verification. In 0.10.4,
-plan v2 binds scenario/tool digests and authority/proof policies, and analysis
-v2 reconstructs timing partitions. See [usage](usage.md#validated-work-experiment)
-for the exact supported fields. Human approvals, escalation, multiple attempts,
-arbitrary workflows and live harness/protocol adapters remain unsupported.
+The separate `experiment workload` path ships a fixed policy-repair contract
+as well as generalized workflow contracts, signed per-trial events and
+independent deterministic verification. In 0.10.4+, plan v2 binds scenario/tool
+digests and authority/proof policies, and analysis v2 reconstructs timing
+partitions including human wait, escalation, and compaction segregated from
+worker overhead. Multi-attempt retries, approval requests and grants/denials,
+human wait periods, escalation intervals, compaction/checkpoint resumption, and
+typed external protocol receipts are explicit before execution. See
+[usage](usage.md#validated-work-experiment) for the exact supported fields.
 
 The current task battery already provides strong foundations:
 
@@ -47,6 +50,7 @@ Every workflow verdict should name its proof class:
 | external state | A named system-state observation outside the worker output | yes, within its stated boundary |
 | independent verifier | A separately isolated verifier with a sealed identity | yes |
 | harness state machine | The harness observed a bounded protocol property | only for that narrow property, not workflow completion |
+| external protocol | Transcript or exchange recorded by an external protocol runner | no; external exchange observation only |
 | heuristic classifier | Reproducible rule without ground-truth verification | no; labeled observation only |
 | model judged | Another model evaluated the output | no; labeled observation only |
 | self reported | The worker claimed completion | no |

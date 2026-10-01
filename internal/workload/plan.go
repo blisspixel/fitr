@@ -56,11 +56,12 @@ func NewPlan(model record.ModelIdentity, deviceKey string, trials, maxTurns,
 
 func (plan Plan) Validate() error {
 	if (plan.Schema != PlanSchema && plan.Schema != LegacyPlanSchema) ||
-		plan.Workflow != WorkflowID || plan.WorkflowVersion != WorkflowVersion {
+		(plan.Workflow != WorkflowID && plan.Workflow != "generalized" && plan.Workflow != "pi-workspace") ||
+		plan.WorkflowVersion != WorkflowVersion {
 		return errors.New("unsupported workload plan schema or workflow")
 	}
 	if plan.Schema == PlanSchema {
-		if plan.Contract == nil || *plan.Contract != policyRepairContract() {
+		if plan.Contract == nil || !plan.Contract.SupportedForWorkflow(plan.Workflow) {
 			return errors.New("workload plan contract does not match the supported workflow")
 		}
 	} else if plan.Contract != nil {

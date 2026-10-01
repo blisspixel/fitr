@@ -5,20 +5,22 @@ package workload
 type EvidenceClass string
 
 const (
-	EvidenceDeterministic EvidenceClass = "deterministic_assertion"
-	EvidenceExternalState EvidenceClass = "external_system_state"
-	EvidenceIndependent   EvidenceClass = "independent_verifier"
-	EvidenceHarness       EvidenceClass = "harness_state_machine"
-	EvidenceHeuristic     EvidenceClass = "heuristic"
-	EvidenceModelJudged   EvidenceClass = "model_judged"
-	EvidenceSelfReported  EvidenceClass = "self_reported"
-	EvidenceNone          EvidenceClass = "none"
+	EvidenceDeterministic    EvidenceClass = "deterministic_assertion"
+	EvidenceExternalState    EvidenceClass = "external_system_state"
+	EvidenceIndependent      EvidenceClass = "independent_verifier"
+	EvidenceHarness          EvidenceClass = "harness_state_machine"
+	EvidenceHeuristic        EvidenceClass = "heuristic"
+	EvidenceModelJudged      EvidenceClass = "model_judged"
+	EvidenceSelfReported     EvidenceClass = "self_reported"
+	EvidenceExternalProtocol EvidenceClass = "external_protocol_receipt"
+	EvidenceNone             EvidenceClass = "none"
 )
 
 func (class EvidenceClass) Valid() bool {
 	switch class {
 	case EvidenceDeterministic, EvidenceExternalState, EvidenceIndependent,
-		EvidenceHarness, EvidenceHeuristic, EvidenceModelJudged, EvidenceSelfReported, EvidenceNone:
+		EvidenceHarness, EvidenceHeuristic, EvidenceModelJudged, EvidenceSelfReported,
+		EvidenceExternalProtocol, EvidenceNone:
 		return true
 	default:
 		return false
@@ -34,16 +36,35 @@ func (class EvidenceClass) CanEstablishCompletion() bool {
 // WorkflowContract records the fixed authority and proof boundary before any
 // model generation. It is a declaration, not permission to execute extensions.
 type WorkflowContract struct {
-	Schema         string        `json:"schema"`
-	ScenarioSHA256 string        `json:"scenario_sha256"`
-	ToolsSHA256    string        `json:"tools_sha256"`
-	Verifier       string        `json:"verifier"`
-	Proof          EvidenceClass `json:"proof"`
-	Authority      string        `json:"authority"`
-	Isolation      string        `json:"isolation"`
-	RetryPolicy    string        `json:"retry_policy"`
-	ApprovalPolicy string        `json:"approval_policy"`
-	ContextPolicy  string        `json:"context_policy"`
+	Schema           string        `json:"schema"`
+	ScenarioSHA256   string        `json:"scenario_sha256"`
+	ToolsSHA256      string        `json:"tools_sha256"`
+	Verifier         string        `json:"verifier"`
+	Proof            EvidenceClass `json:"proof"`
+	Authority        string        `json:"authority"`
+	Isolation        string        `json:"isolation"`
+	RetryPolicy      string        `json:"retry_policy"`
+	ApprovalPolicy   string        `json:"approval_policy"`
+	ContextPolicy    string        `json:"context_policy"`
+	CompactionPolicy string        `json:"compaction_policy,omitempty"`
+	ExternalProtocol string        `json:"external_protocol,omitempty"`
+}
+
+func (contract *WorkflowContract) SupportedForWorkflow(workflow string) bool {
+	if contract == nil {
+		return false
+	}
+	switch workflow {
+	case WorkflowID:
+		return *contract == policyRepairContract()
+	case "generalized", "pi-workspace":
+		return contract.Schema == "fitr.workload.contract.v1" &&
+			contract.ScenarioSHA256 != "" && contract.ToolsSHA256 != "" &&
+			contract.Verifier != "" && contract.Proof.Valid() &&
+			contract.Authority != "" && contract.Isolation != ""
+	default:
+		return false
+	}
 }
 
 func policyRepairContract() WorkflowContract {
