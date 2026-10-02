@@ -254,7 +254,7 @@ func TestDiscoverySourcePlanRendersComponentPlan(t *testing.T) {
 	if err := receipt.Seal(); err != nil {
 		t.Fatalf("seal failed: %v", err)
 	}
-	pathWithPlan := filepath.Join(t.TempDir(), "receipt_with_plan.json")
+	pathWithPlan := filepath.Join(sourceTestDirectory(t), "receipt_with_plan.json")
 	if err := source.WriteResolution(pathWithPlan, receipt); err != nil {
 		t.Fatalf("write failed: %v", err)
 	}

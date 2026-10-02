@@ -60,6 +60,7 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.12 | Read-only MCP selection status for managed incumbents, bounded local path resolution and expanded official SDK acceptance |
 | Shipped | 0.10.13 | A collectable context-quality scorecard, plus lock, interrupt and evidence corrections |
 | Shipped | 0.10.14 | Context-quality HTML and TUI surfaces, ordered source screening, complete-header component projections, runtime provenance and current MCP package validation |
+| Shipped | 0.10.15 | Source screening persistence, 1-command installer onboarding, usable-context role scorecards, runtime support profiles, component & download plans, boolean recurrent projections, generalized workflow evidence, and serving concurrency experiments |
 | Now | 0.11 | Remaining context-quality surfaces and role connection, plus one pinned model-plus-harness workflow |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -1478,6 +1479,7 @@ These features must preserve the evidence contract.
 | 0.10.12 | Read-only MCP selection status for managed incumbents, bounded local path resolution and expanded official SDK acceptance |
 | 0.10.13 | Collectable context-quality scorecards and lock, interrupt and evidence corrections |
 | 0.10.14 | Ordered source screening, complete-header component projections, GGUF metadata corrections, context-quality HTML/TUI surfaces, precise comparison gaps and current MCP/package acceptance |
+| 0.10.15 | Source screening persistence, 1-command installer onboarding, usable-context role scorecards, runtime support profiles, component & download plans, boolean recurrent projections, generalized workflow evidence, and serving concurrency experiments |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).
