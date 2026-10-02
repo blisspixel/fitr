@@ -212,6 +212,7 @@ of installed RAM as an unconditional model budget.
 | `fitr experiment quant <result.json>... --spec decision.json [--lineage conversion.json]` | build a decision-relative conservative configuration frontier; optional lineage verifies a shared base revision |
 | `fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N]` | seal the selected candidate set, collect fresh paired full-run evidence, and confirm only a separated decision objective |
 | `fitr experiment workload <model> [-n 3] [--ctx N]` | run the fixed bounded policy-repair workflow with independent deterministic verification and signed per-trial receipts |
+| `fitr experiment serving <model> [--concurrency N] [-n N]` | measure throughput, client-side queueing, server duration and tail latency distributions at a declared concurrency |
 | `fitr discover add <source> --role <role> [--model <reference>]` | capture a private, unmeasured model or harness idea |
 | `fitr discover list\|plan [--role <role>]` | inspect the private inbox or draft next evidence steps without network access |
 | `fitr discover attach-source <idea-id> <receipt.json>` | copy validated source metadata into a private association; keep the idea unmeasured |
@@ -897,6 +898,41 @@ A rejection exits 3. A timeout or infrastructure fault without a rejection
 exits 4. Interrupted live execution exits 130 and does not emit a partial
 claim. This fixed workflow is a safe design probe, not authority to run
 arbitrary generated code or user-supplied workflow definitions.
+
+### Serving experiments
+
+`fitr experiment serving <model>` measures concurrency behavior under a declared
+worker pool:
+
+```bash
+fitr experiment serving qwen3:8b --concurrency 4 -n 20 --warmup 2
+```
+
+The measurement enforces four strict evidence rules:
+
+1. **Client queueing vs. server duration**: Offered load is not achieved load.
+   Client-side wait time in the queue is measured and reported beside the
+   server's own duration, never folded into it.
+2. **Declared vs. verified concurrency**: Declared concurrency is an operator
+   request. Backends that expose parallel slot receipts (such as llama-server
+   via `/slots`) verify that the level took effect; backends that do not (such
+   as Ollama) record the level as declared-only.
+3. **Warm-up exclusion**: Warm-up requests are explicit, recorded in the request
+   list for transparency, and excluded from all evaluated throughput, latency,
+   and accepted work figures.
+4. **Tail percentile thresholds**: A percentile is a claim about a distribution's
+   tail. p95 requires at least 20 evaluated samples and is withheld when sample
+   size is below 20. p50 requires at least 3 samples.
+
+Saved serving bundles can be reopened and validated offline:
+
+```bash
+fitr experiment serving path/to/serving-bundle.json
+```
+
+Reopening re-derives the report from the sealed request observations; any
+tampered report is rejected. A serving measurement does not claim to predict
+multi-model co-residency or unobserved external workload interference.
 
 ## Apply
 

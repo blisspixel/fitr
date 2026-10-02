@@ -32,6 +32,8 @@ const experimentUsage = `usage:
   fitr experiment confirm <confirmation-bundle.json> [--display MODE]
   fitr experiment workload <model> [-n 3] [--ctx N] [--backend B]
   fitr experiment workload <workload-bundle.json> [--display MODE]
+  fitr experiment serving <model> [--concurrency N] [-n N] [--warmup N] [--ctx N] [--backend B]
+  fitr experiment serving <serving-bundle.json> [--display MODE]
 
 Context analysis is exploratory. Every input must be a sealed fitr result.
 Requested context is the treatment; artifact, backend/runtime, device
@@ -55,6 +57,8 @@ func cmdExperiment(ctx context.Context, args []string) int {
 		return cmdExperimentConfirm(ctx, args[1:])
 	case "workload":
 		return cmdExperimentWorkload(ctx, args[1:])
+	case "serving":
+		return cmdExperimentServing(ctx, args[1:])
 	default:
 		errPrint("unknown experiment", args[0], "fitr experiment context --help")
 		return exitUsage

@@ -51,6 +51,7 @@ type Client struct {
 
 var _ llm.Backend = (*Client)(nil)
 var _ llm.EffectiveContextObserver = (*Client)(nil)
+var _ llm.SlotObserver = (*Client)(nil)
 
 func New() *Client {
 	base := os.Getenv("LLAMA_SERVER_URL")
@@ -255,6 +256,40 @@ func (c *Client) EffectiveContext(ctx context.Context, _ string) (int, bool, err
 // StopAll is a no-op: a llama-server process serves one model for its whole
 // lifetime, so the one-model-resident invariant holds by construction.
 func (c *Client) StopAll(ctx context.Context) ([]string, error) { return nil, nil }
+
+type slotEntry struct {
+	ID int `json:"id"`
+}
+
+// ObserveSlots inspects llama-server's /slots endpoint to verify active parallel slots.
+func (c *Client) ObserveSlots(ctx context.Context) (int, bool, error) {
+	cctx, cancel := context.WithTimeout(ctx, controlPlaneTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, c.BaseURL+"/slots", nil)
+	if err != nil {
+		return 0, false, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return 0, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return 0, false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, false, fmt.Errorf("llama-server /slots returned HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxNativeBody))
+	if err != nil {
+		return 0, false, err
+	}
+	var slots []slotEntry
+	if err := strictjson.Unmarshal(body, &slots); err != nil {
+		return 0, false, fmt.Errorf("decode llama-server slots: %w", err)
+	}
+	return len(slots), true, nil
+}
 
 // ---------------------------------------------------------------- generate
 type completionResp struct {

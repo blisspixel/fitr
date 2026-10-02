@@ -134,6 +134,8 @@ usage:
   fitr experiment confirm <confirmation-bundle.json> [--display MODE]
   fitr experiment workload <model> [-n N] [--ctx N] [--backend B]
   fitr experiment workload <workload-bundle.json> [--display MODE]
+  fitr experiment serving <model> [--concurrency N] [-n N] [--warmup N] [--ctx N] [--backend B]
+  fitr experiment serving <serving-bundle.json> [--display MODE]
   fitr discover add <source> --role <role> [--model <reference>] [--harness <name>]
   fitr discover list|plan [--role <role>] [--display MODE]
   fitr role init <name> --quality <need> --memory-gb <limit> [--ctx N]
@@ -192,6 +194,7 @@ examples:
   fitr experiment quant q8-result.json q4-result.json --spec coding.json --lineage conversion.json
   fitr experiment confirm qwen3:8b-q8_0 qwen3:8b-q4_K_M --spec coding-confirm.json
   fitr experiment workload qwen3-coder:30b -n 3
+  fitr experiment serving qwen3:8b --concurrency 4 -n 20
   fitr run qwen3:8b --ctx 16384 --context-tiers 2048,8192,32768
 `
 
@@ -325,7 +328,8 @@ func takesValue(flagArg string) bool {
 		"context-tiers", "fit-budget-gb", "allow-license", "allow-architecture", "header-bytes",
 		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim", "repo", "revision", "file", "source",
 		"quality", "minimum-rate", "memory-gb", "usable-context-bytes", "max-age-days", "min-age-days", "mapping", "max-bytes", "timeout",
-		"models", "runtime", "mode", "adoption", "candidate", "max-wall", "confirmation-wall", "max-requests", "max-requested-output-tokens", "max-points":
+		"models", "runtime", "mode", "adoption", "candidate", "max-wall", "confirmation-wall", "max-requests", "max-requested-output-tokens", "max-points",
+		"concurrency", "warmup":
 		return true
 	}
 	return false

@@ -545,3 +545,48 @@ func TestSuccessfulJSONResponsesAreBoundedAndSingular(t *testing.T) {
 		})
 	}
 }
+
+func TestObserveSlots(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		status       int
+		body         string
+		wantSlots    int
+		wantObserved bool
+		wantErr      string
+	}{
+		{"valid slots array", http.StatusOK, `[{"id":0},{"id":1},{"id":2},{"id":3}]`, 4, true, ""},
+		{"not found endpoint", http.StatusNotFound, `404 not found`, 0, false, ""},
+		{"server error status", http.StatusInternalServerError, `internal error`, 0, false, "llama-server /slots returned HTTP 500"},
+		{"malformed JSON", http.StatusOK, `[{"id":0},`, 0, false, "decode llama-server slots"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertObserveSlotsCase(t, tc.status, tc.body, tc.wantSlots, tc.wantObserved, tc.wantErr)
+		})
+	}
+}
+
+func assertObserveSlotsCase(t *testing.T, status int, body string, wantSlots int, wantObserved bool, wantErr string) {
+	t.Helper()
+	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/slots" {
+			t.Errorf("path = %s, want /slots", r.URL.Path)
+		}
+		w.WriteHeader(status)
+		w.Write([]byte(body))
+	})
+	defer done()
+	slots, observed, err := c.ObserveSlots(context.Background())
+	if wantErr == "" && err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if wantErr != "" && (err == nil || !strings.Contains(err.Error(), wantErr)) {
+		t.Fatalf("error = %v, want substring %q", err, wantErr)
+	}
+	if slots != wantSlots {
+		t.Fatalf("slots = %d, want %d", slots, wantSlots)
+	}
+	if observed != wantObserved {
+		t.Fatalf("observed = %v, want %v", observed, wantObserved)
+	}
+}

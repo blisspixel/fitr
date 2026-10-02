@@ -61,3 +61,11 @@ var _ EffectiveContextObserver = (*ollama.Client)(nil)
 type ModelDigestVerifier interface {
 	VerifyModelDigest(model, reported string) (string, error)
 }
+
+// SlotObserver is an optional runtime receipt for parallel slots exposed by
+// the serving runtime. observed=false means the runtime did not expose slot
+// state and slots must be zero. Absence is not an error and callers must not
+// treat unobserved as matching declared concurrency.
+type SlotObserver interface {
+	ObserveSlots(ctx context.Context) (slots int, observed bool, err error)
+}

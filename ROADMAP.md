@@ -83,7 +83,7 @@ evidence paths.
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | complete | Generalized validated-work receipts and explicit evidence classes | Multi-attempt, approval, escalation, human wait, compaction, and external protocol receipts are sealed with explicit evidence classes and partitioned timing. |
 | 5 | complete | Source ideas into a personal role library and bounded fitting | Source receipts, screening policies, runtime support profiles, component plans, boolean recurrent projections, and owned download plans (`fitr.discovery.download-plan.v1`) with bounded artifact mappings (`artifact.Spec`) are explicit before local execution. See [source resolution](docs/source-resolution.md), [auto mode](docs/auto-mode.md) and [roles](docs/roles.md). |
-| 6 | queued | Model-set, soak, and serving experiments | Co-residency and operational reliability depend on capacity and validated outcomes. Keep these separate from ordinary runs. Build serving first: it is the instrument the other two report through. See [experiment families](#model-set-soak-and-serving-experiments). |
+| 6 | active | Model-set, soak, and serving experiments | Serving is complete: client-side queueing is reported beside server timing, declared concurrency is verified via slot state where supported, warmup is excluded, and tail percentiles require sample size >= 20. Model-set and soak follow. See [experiment families](#model-set-soak-and-serving-experiments). |
 
 Automatic selection must pass programmatic resource preflight and a separate
 role quality floor. Speed cannot compensate for failed task outcomes. A
@@ -1281,6 +1281,7 @@ the Ollama route currently cannot, so the level stays declared-only there.
 Warm-up is explicit and excluded. A percentile is a claim about a
 distribution's tail, so it is reported only with the sample size that supports
 it, under the existing rule against implying a rate from a finite set.
+Serving is implemented via `fitr experiment serving` (`fitr.experiment.serving.plan.v1`, `fitr.experiment.serving.analysis.v1`, `fitr.experiment.serving.bundle.v1`).
 
 **Model sets.** The refusal stands: isolated measurements are never summed into
 a co-residency claim. What changes is that one runtime can now discharge it.
