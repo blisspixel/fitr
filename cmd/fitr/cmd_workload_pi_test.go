@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/blisspixel/fitr/internal/record"
+	"github.com/blisspixel/fitr/internal/render"
 	"github.com/blisspixel/fitr/internal/workload"
 )
 
@@ -42,8 +43,8 @@ func TestPiWorkspaceTextProjectsTheSealedProof(t *testing.T) {
 	}
 	policyText := workloadPlain(t, policy.Plan)
 	piText := workloadPlain(t, pi.Plan)
-	const policyProof = "  proof        deterministic assertion; retries not permitted; human wait and escalation unsupported\n"
-	if !strings.Contains(policyText, policyProof) || strings.Contains(policyText, "does not launch Pi") {
+	const policyProof = "deterministic assertion; retries not permitted; human wait and escalation unsupported"
+	if collapsed := strings.Join(strings.Fields(policyText), " "); !strings.Contains(collapsed, policyProof) || strings.Contains(policyText, "does not launch Pi") {
 		t.Fatalf("policy-repair text changed its sealed proof:\n%s", policyText)
 	}
 	if strings.Contains(piText, "deterministic assertion") ||
@@ -110,6 +111,50 @@ func workloadPlain(t *testing.T, plan workload.Plan) string {
 		t.Fatalf("plain workload exit=%d output=%s", code, plain)
 	}
 	return plain
+}
+
+func TestWorkloadTextKeepsTheContractWithTheHeader(t *testing.T) {
+	identity, err := record.NewModelIdentity("model", "model", "fake", "fake-runtime-v1",
+		integrationDigest(), "", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pi, err := workload.NewPiPlan(identity, "device-key", 1, 30, 8192, workload.PiProviderLocal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := workloadPlain(t, pi.Plan)
+	proofAt := strings.Index(text, "proof")
+	trialsAt := strings.Index(text, "TRIALS")
+	if proofAt < 0 || trialsAt < 0 || proofAt > trialsAt {
+		t.Fatalf("contract was printed as trial detail:\n%s", text)
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if len([]rune(line)) > render.DefaultWidth {
+			t.Errorf("line is %d cols against %d: %q", len([]rune(line)), render.DefaultWidth, line)
+		}
+	}
+	bundle := workload.Bundle{
+		Trials: []workload.Trial{
+			{Index: 1, TrialID: "one", Outcome: workload.OutcomeAccepted, ElapsedMillis: 1000},
+			{Index: 2, TrialID: "two", Outcome: workload.OutcomeAccepted, ElapsedMillis: 2000},
+		},
+		Report: workload.Report{TrialAnalysis: []workload.TrialAnalysis{
+			{TrialID: "two", Timing: &workload.TrialTiming{ModelMillis: 222}},
+			{TrialID: "one", Timing: &workload.TrialTiming{ModelMillis: 111}},
+		}},
+	}
+	ordered := workloadPlain(t, bundle.Plan)
+	rendered, code := captureTopStdout(t, func() int { return renderWorkloadExperiment(bundle, "plain") })
+	if code != exitOK {
+		t.Fatalf("timed workload exit=%d output=%s", code, rendered)
+	}
+	first := strings.Index(rendered, "0.111s")
+	secondRow := strings.Index(rendered, "2   ")
+	second := strings.Index(rendered, "0.222s")
+	if first < 0 || secondRow < 0 || second < 0 || first > secondRow || secondRow > second || strings.Contains(ordered, "0.111s") {
+		t.Fatalf("timing followed analysis order instead of the trial:\n%s", rendered)
+	}
 }
 
 func TestPinnedSessionRejectsAForeignTurnCap(t *testing.T) {

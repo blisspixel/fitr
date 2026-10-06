@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/automation"
+	"github.com/blisspixel/fitr/internal/contextquality"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
@@ -253,6 +254,21 @@ func TestAutoStatusRejectsMissingOrCorruptedExploration(t *testing.T) {
 				t.Fatal("status changed the historical journal")
 			}
 		})
+	}
+}
+
+func TestAutoStatusDoesNotReviewAContextScheduleFromTheBatteryAlone(t *testing.T) {
+	f := autoTerminalStatusFixture(t, "unresolved")
+	before := f.state(t)
+	plan := f.run.plan
+	plan.ContextPolicy = &contextquality.Policy{}
+	view, _ := describeAuto(plan, before, time.Now())
+	autoExplorationStatus(&view, plan, before, f.run.records, time.Now())
+	if view.Review != nil || !strings.Contains(view.Gap, "Exploration review unavailable") {
+		t.Fatalf("battery-only review hid a sealed context schedule: %+v", view)
+	}
+	if !reflect.DeepEqual(before, f.state(t)) {
+		t.Fatal("status changed the historical journal")
 	}
 }
 

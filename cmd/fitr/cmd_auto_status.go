@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"time"
 
 	"github.com/blisspixel/fitr/internal/automation"
@@ -105,10 +106,46 @@ func autoExplorationStatus(view *render.AutoStatus, plan automation.Plan, state 
 	for index, candidate := range plan.Candidates {
 		models[index] = candidate.Model
 	}
-	review, err := role.ReviewManaged(plan.Spec, records, *state.ExplorationStore, models, now)
+	contextRef, err := autoExplorationContext(plan, state, records)
+	if err != nil {
+		view.Gap = unavailable
+		return
+	}
+	review, err := role.ReviewManagedWithContext(plan.Spec, records, *state.ExplorationStore, contextRef, models, now)
 	if err != nil {
 		view.Gap = unavailable
 		return
 	}
 	view.Review = &review
+}
+
+// autoExplorationContext reopens the sibling document store when the session
+// sealed one. A missing sibling is not an unmeasured floor: the battery review
+// would hide the schedule that decided the outcome.
+func autoExplorationContext(plan automation.Plan, state automation.State, records record.Store) (*record.ManagedStoreRef, error) {
+	if plan.ContextPolicy == nil {
+		return nil, nil
+	}
+	id, err := automation.ContextStoreID(plan, "exploration")
+	if err != nil {
+		return nil, err
+	}
+	store, err := record.OpenManagedStore(records, id)
+	if err != nil {
+		return nil, err
+	}
+	ref, err := store.Ref()
+	if err != nil {
+		return nil, err
+	}
+	if len(state.CompletedExploration) != len(plan.Candidates) {
+		return nil, errors.New("context evidence does not cover the sealed schedule")
+	}
+	for index, event := range state.CompletedExploration {
+		point, err := store.Read(plan.Candidates[index].Model)
+		if err != nil || point.Completion == nil || point.Completion.EvidenceSHA256 != event.ContextEvidenceSHA256 {
+			return nil, errors.New("stored context evidence differs from the sealed point")
+		}
+	}
+	return &ref, nil
 }

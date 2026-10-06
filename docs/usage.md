@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.11.0" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.11.0" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.11.0" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.11.0" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.11.1" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.11.1" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.11.1" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.11.1" alt="fitr top (demo data)" width="820">
 
 ### Bounded fitting
 
@@ -946,10 +946,11 @@ protocol fails plan validation. The CLI seals provider `local`. Provider
 `fake` can still pass the file checks in a fixture, and analysis then forces
 coverage `not_established` and withholds the median and the accepted-outcome
 rate. Provider `local` reaches `established` only after at least three
-accepted trials. Plain text projects the sealed proof class. A reopened
-pi-workspace bundle names the independent verifier, the forced split-summary
-schedule, the pinned package, commit, and adapter, and says this process does
-not launch Pi. Stderr during a live run says the same.
+accepted trials. Plain text projects the sealed proof class in the experiment
+header, and long lines wrap to the terminal width. A reopened pi-workspace
+bundle names the independent verifier, the forced split-summary schedule, the
+pinned package, commit, and adapter, and says this process does not launch Pi.
+Stderr during a live run says the same.
 
 A recorded run of the pinned Pi process, and a recorded native local-model
 trial of this session, are still open. The adapter does not establish Pi

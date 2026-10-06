@@ -62,6 +62,7 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.14 | Context-quality HTML and TUI surfaces, ordered source screening, complete-header component projections, runtime provenance and current MCP package validation |
 | Shipped | 0.10.15 | Source screening persistence, 1-command installer onboarding, usable-context role scorecards, runtime support profiles, component & download plans, boolean recurrent projections, generalized workflow evidence, and serving concurrency experiments |
 | Shipped | 0.11.0 | Owned fitting collects and freshly confirms the document-context scorecard. The pinned pi-workspace session seals an independent file receipt. Live oversized-prompt, Pi-process, and native local-model checks remain open. |
+| Shipped | 0.11.1 | Workload plain text keeps the sealed contract in the header and inside the terminal width. Auto status reads a sealed document schedule from its sibling store. |
 | Now | 0.11 | Rows 7 and 8 stay open for those live checks. The next build is the model-set experiment. |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Later | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -1507,6 +1508,7 @@ These features must preserve the evidence contract.
 | 0.10.14 | Ordered source screening, complete-header component projections, GGUF metadata corrections, context-quality HTML/TUI surfaces, precise comparison gaps and current MCP/package acceptance |
 | 0.10.15 | Source screening persistence, 1-command installer onboarding, usable-context role scorecards, runtime support profiles, component & download plans, boolean recurrent projections, generalized workflow evidence, and serving concurrency experiments |
 | 0.11.0 | Owned document-context collection and fresh confirmation inside fitting, and the pinned pi-workspace session. Live oversized-prompt, Pi-process, and native local-model checks remain open. |
+| 0.11.1 | Workload plain text keeps the sealed contract in the header and inside the terminal width. Auto status reads a sealed document schedule from its sibling store. |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

@@ -121,10 +121,13 @@ no progress in `none` mode. Errors remain diagnostics on stderr.
 
 Unresolved, overlapping and unqualified terminal outcomes include a fresh
 review of the original exploration evidence: each candidate's state, exact
-gaps and available preference bounds. JSON retains the full review and its
-evaluation time. Missing or changed evidence is explicitly unavailable. This
-inspection preserves the recorded session outcome. Review the gaps before
-declaring a new task schedule or shortlist for another investigation.
+gaps and available preference bounds. When the session sealed a document
+schedule, that review reads the sibling context store. A missing or changed
+sibling makes the review unavailable. It does not describe the usable-context
+floor as unmeasured. JSON retains the full review and its evaluation time.
+Missing or changed evidence is explicitly unavailable. This inspection
+preserves the recorded session outcome. Review the gaps before declaring a
+new task schedule or shortlist for another investigation.
 
 Exploration resumes only at completed point boundaries. A fully saved,
 integrity-checked signed point can reconcile a crash before its journal event;

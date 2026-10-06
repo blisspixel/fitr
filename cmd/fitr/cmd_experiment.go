@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -348,9 +349,8 @@ func runWorkloadExperiment(ctx context.Context, model string, command workloadCo
 	}
 	fmt.Fprintf(os.Stderr, "  workload  %s v%d, %d predeclared trial(s)\n",
 		sealed.Plan.Workflow, sealed.Plan.WorkflowVersion, command.trials)
-	if sealed.Plan.Driver != nil {
-		fmt.Fprintf(os.Stderr, "  driver    %s %s via %s; this process does not launch Pi\n",
-			sealed.Plan.Driver.Package, sealed.Plan.Driver.Commit, sealed.Plan.Driver.Adapter)
+	if sealed.Plan.Driver != nil && sealed.Plan.Driver.Adapter == workload.PiDriverAdapter {
+		writeWorkloadField(os.Stderr, "driver", workloadDriverText(sealed.Plan.Driver))
 	}
 	bundle, err := sealed.Run(ctx, backend)
 	if err != nil {
@@ -875,56 +875,82 @@ func renderWorkloadExperiment(bundle workload.Bundle, mode string) int {
 func writeWorkloadExperimentText(bundle workload.Bundle) {
 	report := bundle.Report
 	fmt.Fprintln(os.Stdout, "VALIDATED WORK EXPERIMENT")
-	fmt.Fprintf(os.Stdout, "  %-12s %s v%d\n", "workflow", terminalText(bundle.Plan.Workflow), bundle.Plan.WorkflowVersion)
-	fmt.Fprintf(os.Stdout, "  %-12s %s\n", "coverage", strings.ToUpper(report.Coverage))
-	fmt.Fprintf(os.Stdout, "  %-12s %d planned, %d accepted, %d rejected, %d timed out, %d infrastructure\n",
-		"outcomes", report.Counts.Planned, report.Counts.Accepted, report.Counts.Rejected,
-		report.Counts.TimedOut, report.Counts.InfrastructureFault)
+	writeWorkloadField(os.Stdout, "workflow", fmt.Sprintf("%s v%d", bundle.Plan.Workflow, bundle.Plan.WorkflowVersion))
+	writeWorkloadField(os.Stdout, "coverage", strings.ToUpper(report.Coverage))
+	writeWorkloadField(os.Stdout, "outcomes", fmt.Sprintf("%d planned, %d accepted, %d rejected, %d timed out, %d infrastructure",
+		report.Counts.Planned, report.Counts.Accepted, report.Counts.Rejected,
+		report.Counts.TimedOut, report.Counts.InfrastructureFault))
 	if report.MedianAcceptedMillis != nil {
-		fmt.Fprintf(os.Stdout, "  %-12s %.3fs\n", "median", *report.MedianAcceptedMillis/1000)
+		writeWorkloadField(os.Stdout, "median", fmt.Sprintf("%.3fs", *report.MedianAcceptedMillis/1000))
 	}
 	if report.AcceptedOutcomesPerHour.Estimate != nil {
-		fmt.Fprintf(os.Stdout, "  %-12s %.3f accepted outcomes/hour\n", "rate",
-			*report.AcceptedOutcomesPerHour.Estimate)
+		writeWorkloadField(os.Stdout, "rate", fmt.Sprintf("%.3f accepted outcomes/hour",
+			*report.AcceptedOutcomesPerHour.Estimate))
 	}
+	writeWorkloadContractText(os.Stdout, bundle)
 	fmt.Fprintln(os.Stdout, "\nTRIALS")
+	writeWorkloadTrials(bundle)
+	if len(report.Gaps) > 0 {
+		fmt.Fprintln(os.Stdout, "\nGAPS")
+		for _, gap := range report.Gaps {
+			render.Field(os.Stdout, "  ", 2, gap, render.Width())
+		}
+	}
+}
+
+// writeWorkloadField keeps one label column and wraps the value to the
+// resolved width. An empty value still prints the label, because a missing
+// observation is a row, not a deleted row.
+func writeWorkloadField(w io.Writer, label, value string) {
+	if strings.TrimSpace(value) == "" {
+		fmt.Fprintf(w, "  %-12s\n", label)
+		return
+	}
+	render.Field(w, "  "+label, 15, value, render.Width())
+}
+
+func writeWorkloadTrials(bundle workload.Bundle) {
+	timing := make(map[string]*workload.TrialTiming, len(bundle.Report.TrialAnalysis))
+	for _, item := range bundle.Report.TrialAnalysis {
+		if item.Timing != nil {
+			timing[item.TrialID] = item.Timing
+		}
+	}
 	for _, trial := range bundle.Trials {
 		fmt.Fprintf(os.Stdout, "  %-3d %-20s %8.3fs  %2d turns  %2d tools  %2d authority violations\n",
 			trial.Index, strings.ToUpper(string(trial.Outcome)), float64(trial.ElapsedMillis)/1000,
 			trial.Turns, trial.ToolCalls, trial.AuthorityViolations)
-	}
-	for _, trial := range report.TrialAnalysis {
-		if timing := trial.Timing; timing != nil {
-			fmt.Fprintf(os.Stdout, "  timing       worker %.3fs (model %.3fs, tools %.3fs), queue %.3fs, verifier %.3fs\n",
-				float64(timing.WorkerMillis)/1000, float64(timing.ModelMillis)/1000,
-				float64(timing.ToolMillis)/1000, float64(timing.VerifierQueueMillis)/1000,
-				float64(timing.VerifierMillis)/1000)
+		item := timing[trial.TrialID]
+		if item == nil {
+			continue
 		}
-	}
-	writeWorkloadContractText(bundle)
-	if len(report.Gaps) > 0 {
-		fmt.Fprintln(os.Stdout, "\nGAPS")
-		for _, gap := range report.Gaps {
-			fmt.Fprintln(os.Stdout, "  "+terminalText(gap))
-		}
+		writeWorkloadField(os.Stdout, "timing", fmt.Sprintf(
+			"worker %.3fs (model %.3fs, tools %.3fs), queue %.3fs, verifier %.3fs",
+			float64(item.WorkerMillis)/1000, float64(item.ModelMillis)/1000,
+			float64(item.ToolMillis)/1000, float64(item.VerifierQueueMillis)/1000,
+			float64(item.VerifierMillis)/1000))
 	}
 }
 
 // writeWorkloadContractText projects the sealed contract. It does not decide
 // whether a trial passed, and it does not relabel one workflow as another.
-func writeWorkloadContractText(bundle workload.Bundle) {
+func writeWorkloadContractText(w io.Writer, bundle workload.Bundle) {
 	contract := bundle.Plan.Contract
 	if contract == nil {
 		return
 	}
-	fmt.Fprintf(os.Stdout, "  %-12s %s\n", "proof", workloadProofText(contract))
-	fmt.Fprintf(os.Stdout, "  %-12s %s\n", "context", workloadContextText(contract))
+	writeWorkloadField(w, "proof", workloadProofText(contract))
+	writeWorkloadField(w, "context", workloadContextText(contract))
 	driver := bundle.Plan.Driver
 	if driver == nil || driver.Adapter != workload.PiDriverAdapter {
 		return
 	}
-	fmt.Fprintf(os.Stdout, "  %-12s %s %s via %s; this process does not launch Pi\n",
-		"driver", terminalText(driver.Package), terminalText(driver.Commit), terminalText(driver.Adapter))
+	writeWorkloadField(w, "driver", workloadDriverText(driver))
+}
+
+func workloadDriverText(driver *workload.SessionDriver) string {
+	return fmt.Sprintf("%s %s via %s; this process does not launch Pi",
+		driver.Package, driver.Commit, driver.Adapter)
 }
 
 func workloadProofText(contract *workload.WorkflowContract) string {
