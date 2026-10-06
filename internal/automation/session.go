@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/autoruntime"
+	"github.com/blisspixel/fitr/internal/contextquality"
 	"github.com/blisspixel/fitr/internal/modelref"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/record"
@@ -72,9 +73,14 @@ type Plan struct {
 	EnvelopeSHA256             string               `json:"envelope_sha256"`
 	PointRequests              int64                `json:"point_requests"`
 	PointRequestedOutputTokens int64                `json:"point_requested_output_tokens"`
-	Limits                     Limits               `json:"limits"`
-	CreatedAt                  string               `json:"created_at"`
-	ExpiresAt                  string               `json:"expires_at"`
+	// ContextPolicy is the document-context schedule shared by every candidate.
+	// Empty fields stay omitted so a battery-only plan keeps its exact bytes.
+	ContextPolicy     *contextquality.Policy `json:"context_policy,omitempty"`
+	ContextPlanSHA256 string                 `json:"context_plan_sha256,omitempty"`
+	ContextCells      int                    `json:"context_cells,omitempty"`
+	Limits            Limits                 `json:"limits"`
+	CreatedAt         string                 `json:"created_at"`
+	ExpiresAt         string                 `json:"expires_at"`
 }
 
 func NewID() (string, error) {
@@ -159,6 +165,9 @@ func (plan Plan) Validate() error {
 	if err := plan.validateLimits(); err != nil {
 		return err
 	}
+	if err := plan.validateContextSchedule(); err != nil {
+		return err
+	}
 	expected := plan.SHA256
 	plan.SHA256 = ""
 	actual, err := digest(plan)
@@ -183,6 +192,7 @@ type Event struct {
 	Kind                  string                  `json:"kind,omitempty"`
 	RequestedOutputTokens int64                   `json:"requested_output_tokens,omitempty"`
 	EvidenceSHA256        string                  `json:"evidence_sha256,omitempty"`
+	ContextEvidenceSHA256 string                  `json:"context_evidence_sha256,omitempty"`
 	StoreRef              *record.ManagedStoreRef `json:"store_ref,omitempty"`
 	Confirmation          *role.ConfirmationPlan  `json:"confirmation,omitempty"`
 	Outcome               string                  `json:"outcome,omitempty"`
@@ -336,6 +346,13 @@ func (state *State) completePoint(plan Plan, event Event, at time.Time) error {
 	if state.ActivePoint == 0 || state.PointRequests == 0 || event.Point != state.ActivePoint || event.Phase != state.Phase || event.RunID != state.ActiveRunID || !validDigest(event.EvidenceSHA256) {
 		return errors.New("completion does not match an active measured point")
 	}
+	if plan.ContextPlanSHA256 == "" {
+		if event.ContextEvidenceSHA256 != "" {
+			return errors.New("completion names context evidence the plan did not seal")
+		}
+	} else if !validDigest(event.ContextEvidenceSHA256) {
+		return errors.New("completion is missing the sealed context evidence")
+	}
 	if state.Phase == "exploration" {
 		state.CompletedExploration = append(state.CompletedExploration, event)
 	} else {
@@ -426,7 +443,7 @@ func (state State) validateConfirmation(plan Plan, confirmation role.Confirmatio
 			return errors.New("confirmation changed the owned runtime or model configuration")
 		}
 	}
-	return nil
+	return plan.matchesConfirmationContext(confirmation, state.CompletedExploration)
 }
 
 func storeRefValid(ref *record.ManagedStoreRef) bool { return ref != nil && ref.Validate() == nil }
@@ -439,7 +456,7 @@ func validateEventShape(event Event) error {
 	case "request_reserved":
 		clean.Phase, clean.Point, clean.RunID, clean.Kind, clean.RequestedOutputTokens = event.Phase, event.Point, event.RunID, event.Kind, event.RequestedOutputTokens
 	case "point_completed":
-		clean.Phase, clean.Point, clean.RunID, clean.EvidenceSHA256 = event.Phase, event.Point, event.RunID, event.EvidenceSHA256
+		clean.Phase, clean.Point, clean.RunID, clean.EvidenceSHA256, clean.ContextEvidenceSHA256 = event.Phase, event.Point, event.RunID, event.EvidenceSHA256, event.ContextEvidenceSHA256
 	case "exploration_closed", "confirmation_closed":
 		clean.StoreRef = event.StoreRef
 	case "confirmation_started":

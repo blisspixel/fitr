@@ -18,13 +18,21 @@ import (
 // or profile-specific categorical gates. Those still require prepared runtime
 // checks and complete, qualified evidence under the unchanged role policy.
 func ValidateFeasibility(spec role.Spec, tasks *eval.Spec, repeats, context int) error {
+	return ValidateFeasibilitySchedule(spec, tasks, repeats, context, FeasibilitySchedule{})
+}
+
+// ValidateFeasibilitySchedule applies ValidateFeasibility and, when the role
+// declares a usable-context floor, requires the operator's tiers to be able
+// to reach that floor and the allowance to fund both phases. Tiers are not
+// invented. Success still does not establish quality.
+func ValidateFeasibilitySchedule(spec role.Spec, tasks *eval.Spec, repeats, context int, schedule FeasibilitySchedule) error {
 	if err := spec.Validate(); err != nil {
 		return err
 	}
 	if repeats < 3 || repeats > 20 || context <= 0 {
 		return errors.New("auto feasibility requires three to twenty repeats and a positive fixed context")
 	}
-	_, err := eval.PlanRequestEnvelope(tasks, eval.RequestEnvelopeOptions{
+	envelope, err := eval.PlanRequestEnvelope(tasks, eval.RequestEnvelopeOptions{
 		Backend: "ollama", Level: "full", Repeats: repeats, CheckRepeats: repeats, ContextProbe: true,
 	})
 	if err != nil {
@@ -35,7 +43,7 @@ func ValidateFeasibility(spec role.Spec, tasks *eval.Spec, repeats, context int)
 			return fmt.Errorf("auto requirement %q: %w", requirement.ID, err)
 		}
 	}
-	return nil
+	return feasibleContextSchedule(spec, context, envelope, schedule)
 }
 
 func feasibleRequirement(requirement decision.Requirement, tasks *eval.Spec, repeats, context int) error {

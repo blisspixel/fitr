@@ -60,6 +60,14 @@ func Analyze(plan Plan, trials []Trial) Report {
 			report.TrialAnalysis = append(report.TrialAnalysis, analyzeTrial(trial))
 		}
 	}
+	if plan.Provider == PiProviderFake {
+		report.Coverage = "not_established"
+		report.MedianAcceptedMillis = nil
+		report.AcceptedOutcomesPerHour = RateObservation{
+			Unit: "accepted_outcomes_per_hour", Status: "unavailable", Reason: piFakeProviderGap,
+		}
+		report.Gaps = append(report.Gaps, piFakeProviderGap)
+	}
 	return report
 }
 
@@ -111,7 +119,11 @@ func validateTrialSemantics(trial Trial, plan Plan, stats eventStats) error {
 	if trial.AuthorityViolations < 0 {
 		return errors.New("workload trial authority count is invalid")
 	}
-	if err := validateVerifier(trial.Verifier, trial.AuthorityViolations); err != nil {
+	if plan.Workflow == PiWorkflowID {
+		if err := validatePiTrial(trial, stats); err != nil {
+			return err
+		}
+	} else if err := validateVerifier(trial.Verifier, trial.AuthorityViolations); err != nil {
 		return err
 	}
 	return validateOutcomeSemantics(trial, stats.workerStatus)
@@ -161,6 +173,7 @@ type eventStats struct {
 	turns, toolCalls, duplicateCalls              int
 	approvalsGranted, approvalsDenied             int
 	escalations, humanWaits, compactions, retries int
+	summaryCalls, resumes                         int
 	terminalElapsed                               int64
 	workerStatus, lastModelStatus                 string
 }
@@ -197,6 +210,9 @@ func validateEventOrdering(events []Event) error {
 		if event.Sequence != index+1 || event.ElapsedMillis < priorElapsed ||
 			event.ElapsedMillis < 0 || event.Attempt < 1 {
 			return errors.New("workload trial events are out of order")
+		}
+		if err := validateEventClass(event); err != nil {
+			return err
 		}
 		if eventRequiresEvidence(event.Type) && !validSHA256(event.EvidenceSHA256) {
 			return errors.New("workload trial event evidence digest is missing or invalid")
@@ -260,6 +276,9 @@ func validateModelTurn(events []Event, cursor *int, seenCalls map[string]int, st
 	}
 	stats.turns++
 	stats.lastModelStatus = events[c+1].Status
+	if err := noteSummaryClass(events[c], events[c+1], stats); err != nil {
+		return err
+	}
 	*cursor += 2
 	c = *cursor
 	if stats.lastModelStatus != "completed" && c < len(events) &&
@@ -339,6 +358,7 @@ func consumeWorkerControlEvent(events []Event, cursor *int, stats *eventStats) (
 		stats.compactions++
 		*cursor += 2
 		if *cursor < len(events) && events[*cursor].Type == EventCheckpointResumed {
+			stats.resumes++
 			*cursor++
 		}
 		return true, nil
@@ -415,6 +435,143 @@ func validWorkerCompletionStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func validateEventClass(event Event) error {
+	if event.Class == "" {
+		return nil
+	}
+	if event.Class != piSummaryClass || (event.Type != EventModelStarted && event.Type != EventModelCompleted) {
+		return errors.New("workload trial event class is invalid")
+	}
+	return nil
+}
+
+func noteSummaryClass(started, completed Event, stats *eventStats) error {
+	if started.Class != completed.Class {
+		return errors.New("workload trial summary request is not paired")
+	}
+	if started.Class == piSummaryClass {
+		stats.summaryCalls++
+	}
+	return nil
+}
+
+func validatePiTrial(trial Trial, stats eventStats) error {
+	if trial.SummaryCalls != stats.summaryCalls || stats.turns > piRequestBudget || stats.summaryCalls > piSummaryCalls {
+		return errors.New("pi-workspace summary accounting does not match the sealed budget")
+	}
+	if err := validatePiChecks(trial); err != nil {
+		return err
+	}
+	if err := validatePiObservations(trial, stats); err != nil {
+		return err
+	}
+	if trial.Outcome != OutcomeAccepted {
+		return nil
+	}
+	if stats.summaryCalls != piSummaryCalls || stats.compactions != 1 || stats.resumes != 1 || trial.Effects != 1 {
+		return errors.New("accepted pi-workspace trial is missing a split summary or the checkpoint reopen")
+	}
+	return nil
+}
+
+// validatePiObservations binds counters to the event log. A receipt must not
+// claim one write, or a reopened checkpoint, when the recorded events deny it.
+func validatePiObservations(trial Trial, stats eventStats) error {
+	if trial.Effects != piObservedWrites(trial.Events) {
+		return errors.New("pi-workspace effect count conflicts with its write events")
+	}
+	if piCheckPassed(trial, "checkpoint") != (stats.resumes == 1) {
+		return errors.New("pi-workspace checkpoint conflicts with its resume")
+	}
+	return nil
+}
+
+func piObservedWrites(events []Event) int {
+	writes := 0
+	for index := 0; index+1 < len(events); index++ {
+		started, completed := events[index], events[index+1]
+		if started.Type != EventToolStarted || completed.Type != EventToolCompleted {
+			continue
+		}
+		if started.Tool == "write_file" && completed.Tool == "write_file" && completed.Status == "ok" {
+			writes++
+		}
+	}
+	return writes
+}
+
+func piCheckPassed(trial Trial, code string) bool {
+	for _, item := range trial.Verifier.Checks {
+		if item.Code == code {
+			return item.Passed
+		}
+	}
+	return false
+}
+
+func validatePiChecks(trial Trial) error {
+	if trial.Verifier.EvidenceClass != EvidenceIndependent || !validSHA256(trial.Verifier.PolicySHA256) ||
+		!validSHA256(trial.Verifier.ProtectedStateSHA256) {
+		return errors.New("pi-workspace verifier identity is invalid")
+	}
+	expected := map[string]bool{
+		"task_file": false, "protected_note": false, "single_effect": false,
+		"authority": false, "checkpoint": false, "summaries": false,
+	}
+	accepted := true
+	for _, item := range trial.Verifier.Checks {
+		if _, ok := expected[item.Code]; !ok || expected[item.Code] {
+			return errors.New("pi-workspace verifier checks are incomplete or repeated")
+		}
+		expected[item.Code] = true
+		accepted = accepted && item.Passed
+		if err := validatePiCheck(item, trial); err != nil {
+			return err
+		}
+	}
+	for _, present := range expected {
+		if !present {
+			return errors.New("pi-workspace verifier checks are incomplete or repeated")
+		}
+	}
+	if trial.Verifier.Accepted != accepted {
+		return errors.New("pi-workspace verifier result conflicts with its checks")
+	}
+	return nil
+}
+
+func validatePiCheck(item VerificationCheck, trial Trial) error {
+	switch item.Code {
+	case "task_file":
+		expected, err := hashValue("fitr.workload.policy.v1", piTaskDone)
+		if err != nil || item.Passed != (trial.Verifier.PolicySHA256 == expected) {
+			return errors.New("pi-workspace task file conflicts with its verifier")
+		}
+	case "authority":
+		if item.Passed != (trial.AuthorityViolations == 0) {
+			return errors.New("pi-workspace authority count conflicts with its verifier")
+		}
+	case "single_effect":
+		if item.Passed != (trial.Effects == 1) {
+			return errors.New("pi-workspace effect count conflicts with its verifier")
+		}
+	case "checkpoint":
+		if item.Passed != validSHA256(trial.Verifier.CheckpointSHA256) {
+			return errors.New("pi-workspace checkpoint conflicts with its verifier")
+		}
+	case "summaries":
+		if item.Passed != piSummariesEstablished(trial.Verifier.SummarySHA256) {
+			return errors.New("pi-workspace summaries conflict with its verifier")
+		}
+	case "protected_note":
+		expected, err := hashValue("fitr.workload.protected.v1", piNoteBody)
+		if err != nil || item.Passed != (trial.Verifier.ProtectedStateSHA256 == expected) {
+			return errors.New("pi-workspace protected note conflicts with its verifier")
+		}
+	}
+	return nil
 }
 
 func validateVerifier(verifier VerifierReceipt, authorityViolations int) error {

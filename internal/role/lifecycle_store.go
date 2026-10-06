@@ -234,10 +234,10 @@ func (store Store) BeginConfirmation(name, planSHA256, expected string, now time
 // FinishConfirmation records a terminal outcome. Interrupted work stays started
 // until explicitly failed or cancelled; it never gains a second attempt.
 func (store Store) FinishConfirmation(name, planSHA256, status string, bundle *ConfirmationBundle, records record.Store, expected string, now time.Time) (Lifecycle, error) {
-	return store.finishConfirmation(name, planSHA256, status, bundle, records, nil, expected, now)
+	return store.finishConfirmation(name, planSHA256, status, bundle, records, nil, nil, expected, now)
 }
 
-func (store Store) finishConfirmation(name, planSHA256, status string, bundle *ConfirmationBundle, records record.Store, ref *record.ManagedStoreRef, expected string, now time.Time) (Lifecycle, error) {
+func (store Store) finishConfirmation(name, planSHA256, status string, bundle *ConfirmationBundle, records record.Store, ref, contextRef *record.ManagedStoreRef, expected string, now time.Time) (Lifecycle, error) {
 	if status != "completed" && status != "cancelled" && status != "failed" {
 		return Lifecycle{}, errors.New("confirmation outcome must be completed, cancelled or failed")
 	}
@@ -246,7 +246,7 @@ func (store Store) finishConfirmation(name, planSHA256, status string, bundle *C
 		if bundle == nil || bundle.Plan.PlanSHA256 != planSHA256 {
 			return Lifecycle{}, errors.New("completed attempt requires its exact confirmation bundle")
 		}
-		receipt, err := confirmationAttemptWithStore(*bundle, records, ref, now)
+		receipt, err := confirmationAttemptWithStores(*bundle, records, ref, contextRef, now)
 		if err != nil {
 			return Lifecycle{}, err
 		}
@@ -267,10 +267,14 @@ func (store Store) finishConfirmation(name, planSHA256, status string, bundle *C
 }
 
 func confirmationAttempt(bundle ConfirmationBundle, records record.Store, now time.Time) (ConfirmationAttemptReceipt, error) {
-	return confirmationAttemptWithStore(bundle, records, nil, now)
+	return confirmationAttemptWithStores(bundle, records, nil, nil, now)
 }
 
 func confirmationAttemptWithStore(bundle ConfirmationBundle, records record.Store, ref *record.ManagedStoreRef, now time.Time) (ConfirmationAttemptReceipt, error) {
+	return confirmationAttemptWithStores(bundle, records, ref, nil, now)
+}
+
+func confirmationAttemptWithStores(bundle ConfirmationBundle, records record.Store, ref, contextRef *record.ManagedStoreRef, now time.Time) (ConfirmationAttemptReceipt, error) {
 	report, err := bundle.Validate()
 	if err != nil {
 		return ConfirmationAttemptReceipt{}, err
@@ -286,30 +290,70 @@ func confirmationAttemptWithStore(bundle ConfirmationBundle, records record.Stor
 		return ConfirmationAttemptReceipt{}, err
 	}
 	receipt := ConfirmationAttemptReceipt{BundleSHA256: digest, State: report.State, ChosenEvidenceSHA256: report.ChosenEvidenceSHA256, EvaluatedAt: report.EvaluatedAt}
-	var expiry time.Time
-	for _, point := range bundle.PointRecords {
+	points, expiry, err := confirmationPoints(bundle.PointRecords, records, ref, now, bundle.Plan.Spec.MaxAgeDays, time.Time{}, confirmationPointErrors{
+		incomplete: "completed confirmation requires all sealed point records",
+		twin:       "confirmation requires exact canonical current twins",
+		timestamp:  "confirmation point has an invalid live timestamp",
+	})
+	if err != nil {
+		return ConfirmationAttemptReceipt{}, err
+	}
+	receipt.Points = points
+	if bundle.Plan.ContextPolicy == nil {
+		if len(bundle.ContextRecords) != 0 {
+			return ConfirmationAttemptReceipt{}, errors.New("confirmation bundle added context evidence the plan did not seal")
+		}
+		receipt.ExpiresAt = expiry.UTC().Format(time.RFC3339Nano)
+		return receipt, nil
+	}
+	if contextRef == nil || len(bundle.ContextRecords) != len(bundle.Plan.Candidates) {
+		return ConfirmationAttemptReceipt{}, errors.New("usable-context confirmation requires its sealed context evidence")
+	}
+	receipt.ContextPoints, expiry, err = confirmationPoints(bundle.ContextRecords, records, contextRef, now, bundle.Plan.Spec.MaxAgeDays, expiry, confirmationPointErrors{
+		incomplete: "completed confirmation requires all sealed context records",
+		twin:       "confirmation context evidence requires exact canonical current twins",
+		timestamp:  "confirmation context point has an invalid live timestamp",
+	})
+	if err != nil {
+		return ConfirmationAttemptReceipt{}, err
+	}
+	receipt.ExpiresAt = expiry.UTC().Format(time.RFC3339Nano)
+	return receipt, nil
+}
+
+type confirmationPointErrors struct {
+	incomplete string
+	twin       string
+	timestamp  string
+}
+
+func confirmationPoints(points []*record.Record, records record.Store, ref *record.ManagedStoreRef, now time.Time, maxAgeDays int, expiry time.Time, messages confirmationPointErrors) ([]ConfirmationPoint, time.Time, error) {
+	collected := make([]ConfirmationPoint, 0, len(points))
+	for _, point := range points {
 		if point == nil || point.Completion == nil || point.Manifest == nil || point.EvidenceIntegrityIssue() != "" {
-			return ConfirmationAttemptReceipt{}, errors.New("completed confirmation requires all sealed point records")
+			return nil, time.Time{}, errors.New(messages.incomplete)
 		}
 		attachment, err := confirmationAttachment(point, records, ref)
 		if err != nil {
-			return ConfirmationAttemptReceipt{}, err
+			return nil, time.Time{}, err
 		}
 		if attachment.EvidenceSHA256 != point.Completion.EvidenceSHA256 || attachment.RunID != point.StableRunID() {
-			return ConfirmationAttemptReceipt{}, errors.New("confirmation requires exact canonical current twins")
+			return nil, time.Time{}, errors.New(messages.twin)
 		}
-		receipt.Points = append(receipt.Points, ConfirmationPoint{Attachment: attachment, Model: point.Manifest.Model, StartedAt: point.StartedAt, StoreRef: cloneManagedStoreRef(ref), RuntimeBinding: record.CloneRuntimeBinding(point.RuntimeBinding)})
+		collected = append(collected, ConfirmationPoint{Attachment: attachment, Model: point.Manifest.Model, StartedAt: point.StartedAt, StoreRef: cloneManagedStoreRef(ref), RuntimeBinding: record.CloneRuntimeBinding(point.RuntimeBinding)})
 		started, err := time.Parse(time.RFC3339Nano, point.StartedAt)
 		if err != nil || started.After(now) {
-			return ConfirmationAttemptReceipt{}, errors.New("confirmation point has an invalid live timestamp")
+			return nil, time.Time{}, errors.New(messages.timestamp)
 		}
-		pointExpiry := started.Add(time.Duration(bundle.Plan.Spec.MaxAgeDays) * 24 * time.Hour)
+		pointExpiry := started.Add(time.Duration(maxAgeDays) * 24 * time.Hour)
 		if expiry.IsZero() || pointExpiry.Before(expiry) {
 			expiry = pointExpiry
 		}
 	}
-	receipt.ExpiresAt = expiry.UTC().Format(time.RFC3339Nano)
-	return receipt, nil
+	if len(collected) == 0 {
+		return nil, expiry, nil
+	}
+	return collected, expiry, nil
 }
 
 func (store Store) AdoptConfirmation(name, planSHA256 string, bundle ConfirmationBundle, records record.Store, expected string, now time.Time) (Lifecycle, error) {
@@ -332,7 +376,7 @@ func (store Store) adoptConfirmationAdmitted(name, planSHA256 string, bundle Con
 	if err != nil {
 		return Lifecycle{}, err
 	}
-	selection := SelectionReceipt{SpecSHA256: bundle.Plan.SpecSHA256, PlanSHA256: planSHA256, BundleSHA256: attempt.BundleSHA256, ChosenEvidenceSHA256: bundle.Plan.ChosenEvidenceSHA256, Selected: selected, Points: attempt.Points, ExpiresAt: attempt.ExpiresAt, EvaluatedAt: attempt.EvaluatedAt}
+	selection := SelectionReceipt{SpecSHA256: bundle.Plan.SpecSHA256, PlanSHA256: planSHA256, BundleSHA256: attempt.BundleSHA256, ChosenEvidenceSHA256: bundle.Plan.ChosenEvidenceSHA256, Selected: selected, Points: attempt.Points, ContextPoints: attempt.ContextPoints, ExpiresAt: attempt.ExpiresAt, EvaluatedAt: attempt.EvaluatedAt}
 	event := LifecycleEvent{Action: "adopted", PlanSHA256: planSHA256, Selection: &selection}
 	return store.transitionAdmitted(name, expected, event, now, func(library Library, _ Lifecycle, _ *LifecycleEvent) error {
 		return currentSelection(selection, bundle.Plan, library, records, now)
@@ -358,11 +402,15 @@ func currentSelection(selection SelectionReceipt, plan ConfirmationPlan, library
 		}
 		points = append(points, current)
 	}
+	contextRecords, err := reloadConfirmationPoints(selection.ContextPoints, records)
+	if err != nil {
+		return err
+	}
 	evaluated, err := time.Parse(time.RFC3339Nano, selection.EvaluatedAt)
 	if err != nil {
 		return err
 	}
-	bundle, err := NewConfirmationBundle(plan, points, evaluated)
+	bundle, err := NewConfirmationBundleWithContext(plan, points, contextRecords, evaluated)
 	if err != nil || bundle.Report.State != "confirmed" {
 		return errors.New("current evidence does not reestablish the original confirmation")
 	}

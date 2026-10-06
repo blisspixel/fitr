@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -125,43 +126,81 @@ func (run *autoExecution) preparePlan(command autoCommand, prepared autoruntime.
 	}
 	plan := automation.Plan{ID: id, Mode: command.mode, Adoption: command.adoption, Spec: spec, RoleRevision: selectionRevision(spec), IncumbentSHA256: selection.ReceiptSHA256, LifecycleSHA256: selection.LifecycleDigest,
 		Runtime: prepared.Spec, Profile: command.profile, Repeats: command.repeats, SeedSet: seed, EnvelopeSHA256: envelopeSHA, PointRequests: envelope.MaxRequests, PointRequestedOutputTokens: envelope.MaxRequestedOutputTokens, Limits: command.limits}
-	for index, model := range command.candidates {
-		point := &runExecution{ctx: run.ctx, backend: run.backend, model: model, opts: autoRunOptions(plan), display: render.New("none")}
-		if err := point.prepare(); err != nil {
-			return plan, err
-		}
-		candidate, err := run.preparedCandidate(index, point)
-		if err != nil {
-			return plan, err
-		}
-		plan.Candidates = append(plan.Candidates, candidate)
-		if index == 0 {
-			plan.Provenance = point.provenance
-			plan.Profile = point.profile.Name
-			plan.SoftwareSHA256 = point.provenance.SoftwareBuildSHA256
-			plan.TaskSetSHA256 = point.provenance.TaskSetSHA256
-			plan.SpecSHA256 = point.provenance.SpecSHA256
-			plan.DeviceSHA256, err = autoDeviceDigest(point.result.Device)
-			if err != nil {
-				return plan, err
-			}
-		} else if err := validateAutoDefinition(plan, point); err != nil {
-			return plan, err
-		}
-		if err := point.prepareCapacityPlan(); err != nil {
-			return plan, err
-		}
-		if err := validateAutoProjection(point); err != nil {
-			return plan, err
-		}
+	servedByMLX, err := run.admitCandidates(&plan, command.candidates)
+	if err != nil {
+		return plan, err
 	}
 	if err := autoIncumbentIncluded(plan, prepared, selection); err != nil {
 		return plan, err
 	}
-	if err := plan.Seal(created); err != nil {
+	if err := reserveContextSchedule(&plan, command.contextTiers, servedByMLX, created); err != nil {
 		return plan, err
 	}
 	return plan, nil
+}
+
+// admitCandidates records each shortlist model before any load. The first
+// candidate freezes provenance; every later one must match that definition.
+func (run *autoExecution) admitCandidates(plan *automation.Plan, models []string) (bool, error) {
+	servedByMLX := false
+	for index, model := range models {
+		point := &runExecution{ctx: run.ctx, backend: run.backend, model: model, opts: autoRunOptions(*plan), display: render.New("none")}
+		if err := point.prepare(); err != nil {
+			return false, err
+		}
+		if point.resolved.Info.ServedByMLX() {
+			servedByMLX = true
+		}
+		candidate, err := run.preparedCandidate(index, point)
+		if err != nil {
+			return false, err
+		}
+		plan.Candidates = append(plan.Candidates, candidate)
+		if index == 0 {
+			if err := freezeAutoDefinition(plan, point); err != nil {
+				return false, err
+			}
+		} else if err := validateAutoDefinition(*plan, point); err != nil {
+			return false, err
+		}
+		if err := point.prepareCapacityPlan(); err != nil {
+			return false, err
+		}
+		if err := validateAutoProjection(point); err != nil {
+			return false, err
+		}
+	}
+	return servedByMLX, nil
+}
+
+func freezeAutoDefinition(plan *automation.Plan, point *runExecution) error {
+	plan.Provenance = point.provenance
+	plan.Profile = point.profile.Name
+	plan.SoftwareSHA256 = point.provenance.SoftwareBuildSHA256
+	plan.TaskSetSHA256 = point.provenance.TaskSetSHA256
+	plan.SpecSHA256 = point.provenance.SpecSHA256
+	digest, err := autoDeviceDigest(point.result.Device)
+	if err != nil {
+		return err
+	}
+	plan.DeviceSHA256 = digest
+	return nil
+}
+
+func reserveContextSchedule(plan *automation.Plan, tiers []int, servedByMLX bool, created time.Time) error {
+	requests, tokens, err := automation.ContextPointBudget(tiers)
+	if err != nil {
+		return err
+	}
+	if plan.PointRequests > math.MaxInt64-requests || plan.PointRequestedOutputTokens > math.MaxInt64-tokens {
+		return errors.New("context schedule reservation overflows")
+	}
+	plan.PointRequests += requests
+	plan.PointRequestedOutputTokens += tokens
+	if err := bindAutoContextSchedule(plan, tiers, servedByMLX); err != nil {
+		return err
+	}
+	return plan.Seal(created)
 }
 
 func selectionRevision(spec role.Spec) string { digest, _ := spec.Digest(); return digest }
@@ -422,7 +461,9 @@ func loadAutoStart(command autoCommand, roles role.Store, records record.Store, 
 	if err != nil {
 		return autoStartInputs{}, err
 	}
-	if err := automation.ValidateFeasibility(spec, tasks, command.repeats, runtimeSpec.NumCtx); err != nil {
+	if err := automation.ValidateFeasibilitySchedule(spec, tasks, command.repeats, runtimeSpec.NumCtx, automation.FeasibilitySchedule{
+		Tiers: command.contextTiers, Candidates: len(command.candidates), Limits: command.limits,
+	}); err != nil {
 		return autoStartInputs{}, err
 	}
 	selection, err := roles.ReviewSelection(command.role, records, created)

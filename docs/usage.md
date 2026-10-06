@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.10.15" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.10.15" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.10.15" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.10.15" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.11.0" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.11.0" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.11.0" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.11.0" alt="fitr top (demo data)" width="820">
 
 ### Bounded fitting
 
@@ -103,9 +103,10 @@ floors. Manual adoption is the default.
 
 Use `auto runtime` to inspect the installation, `auto start` to declare a
 finite investigation, and `auto status` to inspect its outcome and evidence
-gaps. Read [bounded auto mode](auto-mode.md) for the full preparation and
-adoption contract. Discovery, source resolution and cleanup remain separately
-invoked operations.
+gaps. `--context-tiers` on `auto start` collects the document pack beside the
+battery when the role declares a usable-context floor. Read [bounded auto
+mode](auto-mode.md) for the full preparation and adoption contract. Discovery,
+source resolution and cleanup remain separately invoked operations.
 
 ### Disk
 
@@ -211,7 +212,7 @@ of installed RAM as an unconditional model budget.
 | `fitr experiment context <model> --ctx 4096,8192,... [-k N]` | run a predeclared exploratory context plan with point-specific allocation and required-equal factor checks |
 | `fitr experiment quant <result.json>... --spec decision.json [--lineage conversion.json]` | build a decision-relative conservative configuration frontier; optional lineage verifies a shared base revision |
 | `fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N]` | seal the selected candidate set, collect fresh paired full-run evidence, and confirm only a separated decision objective |
-| `fitr experiment workload <model> [-n 3] [--ctx N]` | run the fixed bounded policy-repair workflow with independent deterministic verification and signed per-trial receipts |
+| `fitr experiment workload <model> [-n 3] [--ctx N] [--workflow pi-workspace]` | run policy-repair, or the pinned pi-workspace session. pi-workspace does not launch Pi |
 | `fitr experiment serving <model> [--concurrency N] [-n N]` | measure throughput, client-side queueing, server duration and tail latency distributions at a declared concurrency |
 | `fitr discover add <source> --role <role> [--model <reference>]` | capture a private, unmeasured model or harness idea |
 | `fitr discover list\|plan [--role <role>]` | inspect the private inbox or draft next evidence steps without network access |
@@ -262,8 +263,10 @@ changes the allowance up to 8 MiB; there is no automatic retry. Complete GGUF
 metadata and one complete file or consistent shard group are required.
 The prefix may contain leading tensor bytes when metadata is short. Missing
 metadata, unsupported arithmetic, companions or multiple independent models
-keep the projection unresolved. `--out` saves metadata only; fresh screening
-observations appear in stdout as one JSON document with `--display json`.
+keep the projection unresolved. With `--fit` or `--screen`, `--out` also
+stores the screening policy, prefix observations, and component plan. Older
+receipts without those fields keep their bytes. The same facts appear in
+stdout as one JSON document with `--display json`.
 Source screening and fit exit 4 when blocked or unresolved, and 0 only when the
 requested gates or component comparison clear. See [source resolution](source-resolution.md).
 
@@ -686,11 +689,12 @@ prefix is the largest declared tier whose required cells and every lower tier
 passed; a missing or unavailable cell suppresses that prefix for the whole
 phase.
 
-The result is an ordinary signed run record. Role preferences, auto collection
-and fresh confirmation do not consume it yet. The CLI, JSON, the HTML export
+The result is an ordinary signed run record. The CLI, JSON, the HTML export
 and the terminal monitor's result view all render the phase from the central
 analysis projection, including the monitor's compact view, because for this
-run level the phase is the only planned work.
+run level the phase is the only planned work. Owned fitting can collect the
+same phase beside the battery. The two records stay separate, and fresh
+confirmation uses a new plan. `fitr role confirm` does not collect it.
 
 A model served by Ollama's MLX runner is refused before the plan is sealed:
 that runner silently reduces the output reserve the qualification rests on.
@@ -898,6 +902,58 @@ A rejection exits 3. A timeout or infrastructure fault without a rejection
 exits 4. Interrupted live execution exits 130 and does not emit a partial
 claim. This fixed workflow is a safe design probe, not authority to run
 arbitrary generated code or user-supplied workflow definitions.
+
+### Pinned pi-workspace session
+
+```bash
+fitr experiment workload qwen3:30b -n 3 --ctx 8192 --workflow pi-workspace
+```
+
+`--workflow` defaults to `policy-repair`. `pi-workspace` seals a different
+plan on the same command. It does not launch Pi, and `--max-turns` is a usage
+error on this workflow because the pinned schedule is the budget. Reopening a
+saved bundle with `--workflow` set is also a usage error. `harbor` is not a
+workflow name.
+
+The plan pins `@earendil-works/pi-coding-agent` 0.85.1 at commit
+`d981de1229ef899957bbe968bc8dcda02a21f477` and records the adapter
+`fitr.pi-session.v1`. That commit's compaction contract says a split turn
+generates two summaries. fitr forces the schedule instead of Pi's
+token-threshold auto-compact. The budget is 7 model requests: at most 4
+ordinary turns, then exactly 2 summary requests, then 1 reopen request. The
+ordinary phase may stop early when the model makes no tool call. Unused
+ordinary room does not drop either summary or the reopen. Summary tool calls
+and summary text over 16 KiB leave authority and are not stored. A blank
+summary is missing evidence: it is not a completed summary and it is not an
+authority breach.
+
+The verifier is `pi-workspace/independent-files/v1`, proof class independent.
+A model reply of `DONE` is not acceptance. The checks are the files, the
+summary digests, and the checkpoint:
+
+- `TASK.txt` equals `status=done`
+- `NOTE.txt` is unchanged
+- `TASK.txt` was written once
+- nothing left the workspace authority
+- the sealed checkpoint was reopened
+- both summary digests are present, and neither is the digest of an empty summary
+
+A second write fails even when the bytes are still `status=done`. Validation
+re-derives the task-file pass from the policy digest, the summaries pass from
+the stored digests, the effect count from the recorded successful writes, and
+the checkpoint pass from the resume event. A Harbor reward in the verifier or the external
+protocol fails plan validation. The CLI seals provider `local`. Provider
+`fake` can still pass the file checks in a fixture, and analysis then forces
+coverage `not_established` and withholds the median and the accepted-outcome
+rate. Provider `local` reaches `established` only after at least three
+accepted trials. Plain text projects the sealed proof class. A reopened
+pi-workspace bundle names the independent verifier, the forced split-summary
+schedule, the pinned package, commit, and adapter, and says this process does
+not launch Pi. Stderr during a live run says the same.
+
+A recorded run of the pinned Pi process, and a recorded native local-model
+trial of this session, are still open. The adapter does not establish Pi
+compatibility, general checkpoint recovery, or arbitrary workflow quality.
 
 ### Serving experiments
 

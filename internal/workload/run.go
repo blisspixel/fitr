@@ -60,7 +60,13 @@ func (sealed *SealedPlan) Run(ctx context.Context, backend llm.Backend) (Bundle,
 		if err := ctx.Err(); err != nil {
 			return Bundle{}, err
 		}
-		trial, err := sealed.runTrial(ctx, backend, index)
+		var trial Trial
+		var err error
+		if sealed.Plan.Workflow == PiWorkflowID {
+			trial, err = sealed.runPiTrial(ctx, backend, index)
+		} else {
+			trial, err = sealed.runTrial(ctx, backend, index)
+		}
 		if err != nil {
 			return Bundle{}, err
 		}

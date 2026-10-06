@@ -56,9 +56,12 @@ func NewPlan(model record.ModelIdentity, deviceKey string, trials, maxTurns,
 
 func (plan Plan) Validate() error {
 	if (plan.Schema != PlanSchema && plan.Schema != LegacyPlanSchema) ||
-		(plan.Workflow != WorkflowID && plan.Workflow != "generalized" && plan.Workflow != "pi-workspace") ||
+		(plan.Workflow != WorkflowID && plan.Workflow != "generalized" && plan.Workflow != PiWorkflowID) ||
 		plan.WorkflowVersion != WorkflowVersion {
 		return errors.New("unsupported workload plan schema or workflow")
+	}
+	if err := validateWorkflowIdentity(plan); err != nil {
+		return err
 	}
 	if plan.Schema == PlanSchema {
 		if plan.Contract == nil || !plan.Contract.SupportedForWorkflow(plan.Workflow) {
@@ -88,6 +91,13 @@ func (plan Plan) Validate() error {
 		return errors.New("workload plan digest does not match")
 	}
 	return nil
+}
+
+func validateWorkflowIdentity(plan Plan) error {
+	if plan.Workflow == PiWorkflowID {
+		return validatePiPlan(plan)
+	}
+	return validateForeignPiFields(plan)
 }
 
 func ValidatePlanBounds(trials, maxTurns, timeoutSeconds, requestedContext int) error {

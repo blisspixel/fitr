@@ -108,6 +108,10 @@ not a full peak-memory prediction or a guarantee that loading will succeed.
 
 Quality, context and capacity floors are evaluated before preferences. A
 candidate cannot compensate for a failed floor with a higher utility value.
+A usable-context floor is not established by the battery record. Owned fitting
+confirms it from a fresh document-context plan collected in the same attempt.
+`fitr role confirm` does not collect that plan. A context prefix cannot repair
+a failed behavior, capacity, or effective-window floor.
 Preference bounds must establish the preselected choice across the sealed
 weight sensitivity. A different fresh winner is reported without replacing
 the preselected candidate after seeing the results.

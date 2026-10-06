@@ -12,11 +12,14 @@ missing observations, uncertainty and freshness checks. [Role confirmation](role
 seals the policy and preselected choice before collecting fresh battery
 evidence; adoption records a selection in fitr.
 
-The [connected auto cycle](auto-mode.md) adds bounded owned-runtime fitting in
-0.10.11. Public catalog
-shortlisting, usable-context attributes, compaction evaluation and named-harness
-task scorecards remain future work. The design below does not imply an
-OpenRouter, Artificial Analysis or Hugging Face ranking import already exists.
+The [connected auto cycle](auto-mode.md) adds bounded owned-runtime fitting.
+Public catalog shortlisting, compaction evaluation, and named-harness task
+scorecards remain later work. Usable-context floors and preferences evaluate
+a document scorecard. Owned fitting collects that scorecard beside the battery
+when the role declares `minimum_usable_context_bytes` and the operator passes
+`--context-tiers`, then confirms it from a fresh plan. `fitr role confirm`
+does not collect the pack. The design below does not imply an OpenRouter,
+Artificial Analysis, or Hugging Face ranking import already exists.
 
 ## Use public signals for discovery
 
@@ -75,9 +78,11 @@ that actually served a comparison. [Provider routing](https://openrouter.ai/docs
 A declared context window is a capacity limit. Input and output share it, so
 tool instructions and output reserve reduce the available task payload.
 [Context fields](https://openrouter.ai/docs/guides/overview/models)
-The shipped context requirement checks the runtime window. `fitr run --context-tiers`
-collects a document-task scorecard at one window; it is not yet a role
-attribute, a preference weight or a confirmation input.
+The shipped context requirement checks the runtime window. A separate
+usable-context floor reads the verified prefix from a document-context record.
+Owned fitting collects that record when `--context-tiers` is declared with the
+floor. `fitr role confirm` does not collect the pack. An attached
+`fitr run --context-tiers` record can still supply the prefix to a decision.
 
 Test fixed payload tiers and required distant dependencies, then expose the
 largest tested tier that passes every required family. Untested lengths remain

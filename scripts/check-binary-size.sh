@@ -1,17 +1,14 @@
 #!/bin/sh
 set -eu
 
-# Measured with CI's Go 1.27.0, CGO_ENABLED=0 and release flags on
-# all six targets. Serving experiments, owned download planning,
-# generalized workload evidence classes, boolean recurrent layer
-# detection, runtime support profiles, and usable-context scorecards
-# added 247,296 bytes to windows/amd64 compared with 0.10.14:
-# 15,418,880 -> 15,666,176. No new Go dependency was added.
-# At that measurement Windows amd64 was largest. This cap retains
-# 38,824 bytes of headroom, close to the preceding cap's 36,120.
+# Measured with Go 1.27.0, CGO_ENABLED=0, -trimpath and -ldflags="-s -w"
+# on windows/amd64, the largest target at 0.10.15. Owned document-context
+# collection and the pinned pi-workspace session added 149,504 bytes:
+# 15,666,176 -> 15,815,680. No new Go dependency was added. This cap
+# retains 38,824 bytes of headroom, the same margin as the 0.10.15 cap.
 # CI and releases use this single gate so a measured update cannot
 # leave a stale release cap behind.
-max_bytes=15705000
+max_bytes=15854504
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"

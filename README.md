@@ -35,7 +35,7 @@ first; speed and resource preferences help choose among models that meet them.
 See the [personal fitting direction](docs/personal-fitting.md) for the proposed
 Fit and Extended fit scopes, usable context, compaction and harness scorecards.
 
-<img src="docs/assets/top.svg?v=0.10.15" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
+<img src="docs/assets/top.svg?v=0.11.0" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
 The wide Board keeps the comparable configurations, selected evidence, exact
 measurements, unresolved requirements, and one next action on one screen. The
@@ -88,7 +88,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.10.15" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.11.0" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 
@@ -113,7 +113,7 @@ fitr discover attach-source <idea-id> candidate.json
 fitr discover plan <idea-id>
 ```
 
-<img src="docs/assets/source.svg?v=0.10.15" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
+<img src="docs/assets/source.svg?v=0.11.0" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
 
 The receipt pins a commit, preserves declared file sizes and hashes, and
 surfaces publisher lineage, declared license and dependency gaps. An optional
@@ -132,8 +132,10 @@ Screening reads at most 32 KiB per selected file by default. A complete metadata
 header is required; explicitly set `--header-bytes` up to 8 MiB when that bound
 is insufficient. The memory ceiling excludes runtime overhead and companions;
 clearing it does not establish runtime support, legal permission or measured
-fit. `--out` saves the metadata receipt; fresh screening and prefix observations
-appear in command output. The model remains unqualified for a role.
+fit. With `--fit` or `--screen`, `--out` also stores the screening policy,
+prefix observations, and component plan. Older receipts without those fields
+keep their bytes. The same facts appear in command output. The model remains
+unqualified for a role.
 See [source resolution](docs/source-resolution.md),
 [source attachments and investigation plans](docs/source-attachments.md),
 [discovery and the model library](docs/discovery.md) for the
@@ -141,7 +143,7 @@ flow, and [agent interoperability](docs/agent-interop.md) for the portable
 Agent Plugins package, read-only MCP tools, and the researched A2A, Hermes,
 Pi and OpenClaw integration boundaries.
 
-<img src="docs/assets/discovery.svg?v=0.10.15" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
+<img src="docs/assets/discovery.svg?v=0.11.0" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
 
 For files already on disk, an explicit mapping can compare their local hashes
 with the pinned receipt before any runtime experiment:
@@ -152,7 +154,7 @@ fitr artifact bind --source candidate.json --mapping local-files.json --max-byte
 
 Read [artifact binding](docs/artifact-binding.md) for the mapping and I/O bounds.
 
-<img src="docs/assets/artifact.svg?v=0.10.15" alt="Local artifact fixture with a whole-file hash match and separate unverified dependencies, unbound runtime and unmeasured quality" width="820">
+<img src="docs/assets/artifact.svg?v=0.11.0" alt="Local artifact fixture with a whole-file hash match and separate unverified dependencies, unbound runtime and unmeasured quality" width="820">
 
 Matching local bytes still leaves runtime unbound, and capacity and quality
 unmeasured.
@@ -168,7 +170,7 @@ fitr role attach coding /path/to/canonical-result.json
 fitr role review coding
 ```
 
-<img src="docs/assets/roles.svg?v=0.10.15" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
+<img src="docs/assets/roles.svg?v=0.11.0" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
 
 A candidate must clear every floor before preferences matter. Comparisons
 retain uncertainty and check sensitivity to weight changes; missing evidence
@@ -196,7 +198,7 @@ each request, and collects comparable evidence. A preselected choice gets one
 fresh confirmation attempt before adoption. Quality floors stay fixed, and
 an uncertain result stays unresolved. Status explains each candidate's gaps.
 
-<img src="docs/assets/auto.svg?v=0.10.15" alt="Auto fitting fixture with a confirmed preselected model, separate evidence progress and consumed allowances, and explicit adoption" width="820">
+<img src="docs/assets/auto.svg?v=0.11.0" alt="Auto fitting fixture with a confirmed preselected model, separate evidence progress and consumed allowances, and explicit adoption" width="820">
 
 Manual adoption is the default. `--adoption confirmed-only` can authorize
 selection in fitr after confirmation and runtime cleanup. The first owner is
@@ -229,11 +231,11 @@ unresolved dependencies remain explicit. See [cleanup planning](docs/cleanup.md)
 | Local artifact observations | Bounded whole-file hashes for explicit mappings, source comparisons and change detection without runtime promotion | [Artifact binding](docs/artifact-binding.md) |
 | Agent interoperability | Read-only MCP 2026-07-28 candidate review and selected status, official SDK acceptance and an Agent Plugins 1.0.0 package | [Protocol and client limits](docs/agent-interop.md) |
 | Cleanup planning | Read-only bounded storage inventory and aged partial-download review candidates, with no inferred deletion authority | [Cleanup](docs/cleanup.md) |
-| Document context tasks | A sealed document pack at one operating window, collected with `fitr run --context-tiers`; not a role floor | [Context quality](docs/context-quality.md), [usage](docs/usage.md#document-context-tasks) |
+| Document context tasks | A sealed document pack at one operating window. `fitr run --context-tiers` collects it directly. Owned fitting collects it beside the battery and confirms it from a fresh plan when the role declares a usable-context floor. A battery record alone cannot clear that floor. The live oversized-prompt refusal is not yet recorded | [Context quality](docs/context-quality.md), [usage](docs/usage.md#document-context-tasks) |
 | Context experiments | A predeclared exploratory context plan with shared task seeds, point-specific allocation, required-equal factors, and replayable bundles | [Context experiment](docs/usage.md#context-experiment) |
 | Configuration tradeoffs | Conservative frontiers across sealed candidates, optional same-base conversion lineage, and no point-estimate winner when intervals overlap | [Quant experiment](docs/usage.md#quant-configuration-experiment), [calibration](docs/calibration.md) |
 | Fresh confirmation | A sealed candidate set, a fresh shared task seed, full paired runs, and confirmation only when requirements resolve and the objective separates | [Confirmation](docs/usage.md#fresh-configuration-confirmation) |
-| Validated work | A sealed workflow contract, typed proof classes, per-trial timing partitions, fixed policy-repair tools, independent verification, and signed terminal outcomes | [Validated work](docs/usage.md#validated-work-experiment), [workload evidence](docs/workload-evidence.md) |
+| Validated work | Sealed workflow contracts, typed proof classes, per-trial timing, fixed policy-repair tools, and one pinned `pi-workspace` session with an independent file verifier. The session does not launch Pi. A Harbor reward is not the receipt | [Validated work](docs/usage.md#validated-work-experiment), [workload evidence](docs/workload-evidence.md) |
 
 The broader 1.0 thesis has seven evidence layers:
 
@@ -250,10 +252,13 @@ COVERAGE     Which declared workloads have earned local trust or need fallback?
 
 FIT, behavior, burst performance, typed capacity policy, direct receipt
 diagnoses, typed context and configuration experiments, a collectable
-document-task scorecard, fresh confirmation, and one bounded validated-work
-contract are implemented. Broader causal explanation, operational experiments,
-and declared workload coverage remain pre-1.0 work. The
-[roadmap](ROADMAP.md) distinguishes shipped slices from planned contracts.
+document-task scorecard, fresh confirmation, one bounded validated-work
+contract, a pinned pi-workspace session adapter, and a serving-concurrency
+experiment are implemented. The serving result stays outside ordinary rankings.
+The pi-workspace adapter does not launch Pi. A recorded Pi process and a
+recorded native local-model trial of that session remain open. Broader causal
+explanation, model-set and soak experiments, and declared workload coverage
+remain pre-1.0 work. The [roadmap](ROADMAP.md) is the dependency order.
 
 README screenshots are deterministic fixtures rendered through the real
 presentation paths with `make screenshots`. Host identity and local paths are
@@ -327,7 +332,7 @@ see [execution provenance](docs/local-execution.md) for the checks and limits.
 Results remain on your machine unless you explicitly export them. The HTML
 export omits raw model output, hostnames, local paths, the raw device
 fingerprint key, and arbitrary runtime configuration. Private workload bundles
-retain hashes and deterministic verifier output rather than raw prompts,
+retain hashes and the verifier receipt rather than raw prompts,
 replies, or tool contents. The resulting integrity receipt is intentionally
 not described as full replayability.
 

@@ -30,7 +30,7 @@ const experimentUsage = `usage:
   fitr experiment quant <result.json> <result.json>... --spec decision.json [--lineage conversion.json]
   fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N]
   fitr experiment confirm <confirmation-bundle.json> [--display MODE]
-  fitr experiment workload <model> [-n 3] [--ctx N] [--backend B]
+  fitr experiment workload <model> [-n 3] [--ctx N] [--workflow pi-workspace] [--backend B]
   fitr experiment workload <workload-bundle.json> [--display MODE]
   fitr experiment serving <model> [--concurrency N] [-n N] [--warmup N] [--ctx N] [--backend B]
   fitr experiment serving <serving-bundle.json> [--display MODE]
@@ -219,11 +219,11 @@ func executeConfirmationPlan(ctx context.Context, backend llm.Backend, plan expe
 }
 
 type workloadCommand struct {
-	mode, backend string
-	trials, turns int
-	timeout, ctx  int
-	pull          bool
-	positional    []string
+	mode, backend, workflow string
+	trials, turns           int
+	timeout, ctx            int
+	pull                    bool
+	positional              []string
 }
 
 func cmdExperimentWorkload(ctx context.Context, args []string) int {
@@ -235,6 +235,9 @@ func cmdExperimentWorkload(ctx context.Context, args []string) int {
 		errPrint("workload experiment needs exactly one model or bundle", "",
 			"fitr experiment workload <model> -n 3")
 		return exitUsage
+	}
+	if code, ok := rejectWorkloadSelection(command); !ok {
+		return code
 	}
 	input := command.positional[0]
 	if workloadBundlePath(input) {
@@ -270,6 +273,7 @@ func parseWorkloadCommand(args []string) (workloadCommand, int, bool) {
 	turns := fs.Int("max-turns", 12, "maximum model turns per trial")
 	timeout := fs.Int("timeout", 180, "timeout in seconds per trial")
 	requestedContext := fs.Int("ctx", 8192, "requested context tokens")
+	workflow := fs.String("workflow", "", "policy-repair (default) or pi-workspace; pi-workspace does not launch Pi")
 	pull := fs.Bool("pull", false, "pull a missing Ollama model before the experiment")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return workloadCommand{}, code, false
@@ -279,14 +283,30 @@ func parseWorkloadCommand(args []string) (workloadCommand, int, bool) {
 		return workloadCommand{}, exitUsage, false
 	}
 	return workloadCommand{
-		mode: *mode, backend: *backend, trials: *trials, turns: *turns,
+		mode: *mode, backend: *backend, workflow: *workflow, trials: *trials, turns: *turns,
 		timeout: *timeout, ctx: *requestedContext, pull: *pull,
 		positional: append([]string(nil), fs.Args()...),
 	}, exitOK, true
 }
 
+func rejectWorkloadSelection(command workloadCommand) (int, bool) {
+	switch command.workflow {
+	case "", workload.WorkflowID, workload.PiWorkflowID:
+	default:
+		errPrint("unknown workload", command.workflow,
+			"use policy-repair or pi-workspace; a Harbor reward is not a fitr workflow")
+		return exitUsage, false
+	}
+	if command.workflow == workload.PiWorkflowID && command.turns != 12 {
+		errPrint("the pinned session seals its own request budget", "",
+			"remove --max-turns; the budget already includes both split-compaction summaries and the reopen turn")
+		return exitUsage, false
+	}
+	return exitOK, true
+}
+
 func reopenWorkloadBundle(path string, command workloadCommand) int {
-	if command.trials != 3 || command.turns != 12 || command.timeout != 180 ||
+	if command.workflow != "" || command.trials != 3 || command.turns != 12 || command.timeout != 180 ||
 		command.ctx != 8192 || command.backend != "auto" || command.pull {
 		errPrint("live workload flags cannot be applied to a saved bundle", path,
 			"remove live flags or run a new workload experiment")
@@ -299,6 +319,13 @@ func reopenWorkloadBundle(path string, command workloadCommand) int {
 		return exitError
 	}
 	return renderWorkloadExperiment(bundle, command.mode)
+}
+
+func newWorkloadPlan(model record.ModelIdentity, deviceKey string, command workloadCommand) (*workload.SealedPlan, error) {
+	if command.workflow == workload.PiWorkflowID {
+		return workload.NewPiPlan(model, deviceKey, command.trials, command.timeout, command.ctx, workload.PiProviderLocal)
+	}
+	return workload.NewPlan(model, deviceKey, command.trials, command.turns, command.timeout, command.ctx)
 }
 
 func runWorkloadExperiment(ctx context.Context, model string, command workloadCommand) int {
@@ -314,14 +341,17 @@ func runWorkloadExperiment(ctx context.Context, model string, command workloadCo
 		return exitError
 	}
 	fingerprint := device.Detect(ctx, backend)
-	sealed, err := workload.NewPlan(resolved.Identity, fingerprint.Key(), command.trials,
-		command.turns, command.timeout, command.ctx)
+	sealed, err := newWorkloadPlan(resolved.Identity, fingerprint.Key(), command)
 	if err != nil {
 		errPrint("could not create workload plan: "+err.Error(), "", "fix the declared bounds and retry")
 		return exitUsage
 	}
 	fmt.Fprintf(os.Stderr, "  workload  %s v%d, %d predeclared trial(s)\n",
-		workload.WorkflowID, workload.WorkflowVersion, command.trials)
+		sealed.Plan.Workflow, sealed.Plan.WorkflowVersion, command.trials)
+	if sealed.Plan.Driver != nil {
+		fmt.Fprintf(os.Stderr, "  driver    %s %s via %s; this process does not launch Pi\n",
+			sealed.Plan.Driver.Package, sealed.Plan.Driver.Commit, sealed.Plan.Driver.Adapter)
+	}
 	bundle, err := sealed.Run(ctx, backend)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -871,16 +901,98 @@ func writeWorkloadExperimentText(bundle workload.Bundle) {
 				float64(timing.VerifierMillis)/1000)
 		}
 	}
-	if bundle.Plan.Contract != nil {
-		fmt.Fprintln(os.Stdout, "  proof        deterministic assertion; retries not permitted; human wait and escalation unsupported")
-		fmt.Fprintln(os.Stdout, "  context      requested only; effective context is not established")
-	}
+	writeWorkloadContractText(bundle)
 	if len(report.Gaps) > 0 {
 		fmt.Fprintln(os.Stdout, "\nGAPS")
 		for _, gap := range report.Gaps {
 			fmt.Fprintln(os.Stdout, "  "+terminalText(gap))
 		}
 	}
+}
+
+// writeWorkloadContractText projects the sealed contract. It does not decide
+// whether a trial passed, and it does not relabel one workflow as another.
+func writeWorkloadContractText(bundle workload.Bundle) {
+	contract := bundle.Plan.Contract
+	if contract == nil {
+		return
+	}
+	fmt.Fprintf(os.Stdout, "  %-12s %s\n", "proof", workloadProofText(contract))
+	fmt.Fprintf(os.Stdout, "  %-12s %s\n", "context", workloadContextText(contract))
+	driver := bundle.Plan.Driver
+	if driver == nil || driver.Adapter != workload.PiDriverAdapter {
+		return
+	}
+	fmt.Fprintf(os.Stdout, "  %-12s %s %s via %s; this process does not launch Pi\n",
+		"driver", terminalText(driver.Package), terminalText(driver.Commit), terminalText(driver.Adapter))
+}
+
+func workloadProofText(contract *workload.WorkflowContract) string {
+	parts := []string{
+		workloadProofLabel(contract.Proof),
+		workloadRetryText(contract.RetryPolicy),
+		workloadApprovalText(contract.ApprovalPolicy),
+	}
+	if contract.CompactionPolicy != "" {
+		parts = append(parts, "compaction "+terminalText(contract.CompactionPolicy))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func workloadProofLabel(class workload.EvidenceClass) string {
+	switch class {
+	case workload.EvidenceDeterministic:
+		return "deterministic assertion"
+	case workload.EvidenceExternalState:
+		return "external system state"
+	case workload.EvidenceIndependent:
+		return "independent verifier"
+	case workload.EvidenceHarness:
+		return "harness state machine"
+	case workload.EvidenceHeuristic:
+		return "heuristic"
+	case workload.EvidenceModelJudged:
+		return "model judged"
+	case workload.EvidenceSelfReported:
+		return "self reported"
+	case workload.EvidenceExternalProtocol:
+		return "external protocol receipt"
+	case workload.EvidenceNone:
+		return "none"
+	default:
+		return terminalText(string(class))
+	}
+}
+
+func workloadRetryText(policy string) string {
+	if policy == "one-attempt-no-retry" {
+		return "retries not permitted"
+	}
+	if policy == "" {
+		return "retry policy not declared"
+	}
+	return "retry " + terminalText(policy)
+}
+
+func workloadApprovalText(policy string) string {
+	if policy == "unsupported" {
+		return "human wait and escalation unsupported"
+	}
+	if policy == "" {
+		return "approval policy not declared"
+	}
+	return "approval " + terminalText(policy)
+}
+
+func workloadContextText(contract *workload.WorkflowContract) string {
+	policy := "requested only"
+	if contract.ContextPolicy != "requested-only" {
+		policy = terminalText(contract.ContextPolicy)
+		if policy == "" {
+			policy = "context policy not declared"
+		}
+	}
+	return policy + "; effective context is not established"
 }
 
 func workloadExitCode(counts workload.OutcomeCounts) int {

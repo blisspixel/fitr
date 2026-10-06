@@ -61,14 +61,16 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.13 | A collectable context-quality scorecard, plus lock, interrupt and evidence corrections |
 | Shipped | 0.10.14 | Context-quality HTML and TUI surfaces, ordered source screening, complete-header component projections, runtime provenance and current MCP package validation |
 | Shipped | 0.10.15 | Source screening persistence, 1-command installer onboarding, usable-context role scorecards, runtime support profiles, component & download plans, boolean recurrent projections, generalized workflow evidence, and serving concurrency experiments |
-| Now | 0.11 | Remaining context-quality surfaces and role connection, plus one pinned model-plus-harness workflow |
+| Shipped | 0.11.0 | Owned fitting collects and freshly confirms the document-context scorecard. The pinned pi-workspace session seals an independent file receipt. Live oversized-prompt, Pi-process, and native local-model checks remain open. |
+| Now | 0.11 | Rows 7 and 8 stay open for those live checks. The next build is the model-set experiment. |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
-| Next | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
-| Active | Candidate discovery | Capture, pin and screen candidates now; next persist source projections, establish runtime and dependency support, then plan bounded local evidence |
+| Later | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
+| Later | Discovery and disk ownership | Research citations and a pull-ownership record, then a non-ranked catalog. A delete path waits on that record. Download plans, screening, and runtime profiles already ship. |
 
-Progress is counted in releases, not dates. Each pre-1.0 release below states
-its own exit criterion. 1.0 ships when those criteria are met and not before:
-the point of the version is that it is trustworthy, not that it is reached.
+Progress is counted in releases, not dates. The immediate build order is a
+dependency order, not a schedule. Each pre-1.0 release below states its own
+exit criterion. 1.0 ships when those criteria are met and not before: the
+point of the version is that it is trustworthy, not that it is reached.
 
 ## Immediate build order
 
@@ -84,7 +86,13 @@ evidence paths.
 | 3 | complete | Decision-relative master-detail views and `why not?` explanations | Evidence volume now exceeds what a flat Board can communicate. The selected workload should promote the relevant requirements while detail remains available without inventing a global score. |
 | 4 | complete | Generalized validated-work receipts and explicit evidence classes | Multi-attempt, approval, escalation, human wait, compaction, and external protocol receipts are sealed with explicit evidence classes and partitioned timing. |
 | 5 | complete | Source ideas into a personal role library and bounded fitting | Source receipts, screening policies, runtime support profiles, component plans, boolean recurrent projections, and owned download plans (`fitr.discovery.download-plan.v1`) with bounded artifact mappings (`artifact.Spec`) are explicit before local execution. See [source resolution](docs/source-resolution.md), [auto mode](docs/auto-mode.md) and [roles](docs/roles.md). |
-| 6 | active | Model-set, soak, and serving experiments | Serving is complete: client-side queueing is reported beside server timing, declared concurrency is verified via slot state where supported, warmup is excluded, and tail percentiles require sample size >= 20. Model-set and soak follow. See [experiment families](#model-set-soak-and-serving-experiments). |
+| 6 | complete | Serving concurrency experiments | Client-side queueing sits beside server timing, declared concurrency is checked against slot state where the runtime exposes it, warmup is excluded, and a tail percentile needs at least 20 samples. The result stays out of the single-model Board. |
+| 7 | now | Collect and freshly confirm the document-context scorecard inside the owned fitting | Owned fitting seals one document schedule for every candidate, collects it beside the battery, and confirms the byte floor from a fresh plan. A battery record alone cannot clear the floor. `fitr role confirm` still does not collect the pack. The live check that an oversized prompt is refused, on both a legacy Go template and a Jinja template, is still open. |
+| 8 | now | One pinned local model-plus-harness workflow | `fitr experiment workload --workflow pi-workspace` seals `fitr.pi-session.v1`. One request budget funds the ordinary cap, both split-compaction summaries, and the reopen turn. The independent file verifier accepts a trial only from the files, the summary digests, and a reopened checkpoint. A blank summary stays missing. A fake provider cannot establish coverage or a rate. The schedule was checked against `@earendil-works/pi-coding-agent` 0.85.1 at `d981de1229ef899957bbe968bc8dcda02a21f477`; this process does not launch Pi. A Harbor reward is not this receipt. A recorded Pi process and a recorded native local-model trial remain open. Coverage and validated-outcome soak both wait on this receipt. |
+| 9 | next | Model-set experiment | One model's concurrency is not co-residency. Ollama's list cannot discharge it: membership is copied under a lock that is then released, and each runner's bytes are read afterward. A llama-server router response is only a candidate until that response is shown to be one observation of membership and bytes together. |
+| 10 | next | Soak | Speed drift is a trajectory of ordered windows. Validated-outcome drift waits until the workflow from step 8 is part of the experiment. Throughput alone has stayed healthy in a run whose tool calls collapsed. |
+| 11 | then | Declared workload coverage for that one workflow | Say whether the configuration is proven, unproven, blocked, inconclusive, or capacity-limited, and what still needs a fallback. This is the COVERAGE layer in the 1.0 acceptance outcome. |
+| 12 | then | Clean-machine acceptance and the 1.0 candidate | Windows, macOS, and Linux installs of the core loop, including the workload and coverage contracts that have graduated. Open experiment commands need not all graduate. |
 
 Automatic selection must pass programmatic resource preflight and a separate
 role quality floor. Speed cannot compensate for failed task outcomes. A
@@ -93,27 +101,35 @@ equivalent. Preserve `no-qualified-candidate` when none earns the role, and
 evaluate retries, human corrections and verified completion cost before
 throughput. The bounded auto-mode contract is in [discovery](docs/discovery.md).
 
-The next fitting adds typed usable-context quality and one pinned Pi
-model-plus-harness workflow. The proposed Fit scope retains today's behavioral
-screening; Extended fit adds named, independently verified workload scorecards.
-Personal preference weights should express what
-the person values, including longer demonstrated context, while mandatory
-floors remain independent. Compaction and restart must preserve decisions,
-constraints and completed effects under external verification. The
-[personal fitting design](docs/personal-fitting.md) separates this future
-measurement work from today's runtime-window requirement. The
-[context task foundation](docs/context-quality.md) now supplies a deterministic
-document pack, independent verifier, opt-in nontruncating request accounting,
-the execution adapter that submits one sealed plan, the signed run evidence that
-persists it, and `fitr run --context-tiers`, which collects one phase as its own
-run level and projects it through the central analysis contract. A model served
-by Ollama's MLX runner is refused, because that runner silently reduces the
-output reserve the qualification rests on. Personal roles and decision
-specifications now evaluate usable-context floors and preferences. Owned auto
-collection, selection across run levels and the remaining result surfaces are
-still to be connected.
-The [host compatibility matrix](docs/agent-interop.md) records current protocol
+Fit keeps today's behavioral screening. Extended fit adds the document
+scorecard and one named harness scorecard, each independently verified.
+Preference weights apply only after every floor passes. Compaction and restart
+must preserve decisions, constraints, and completed effects under external
+verification. The [personal fitting design](docs/personal-fitting.md) separates
+that measurement from today's runtime-window requirement. The
+[context task foundation](docs/context-quality.md) already supplies the
+document pack, the verifier, the sealed phase, and `fitr run --context-tiers`.
+A model served by Ollama's MLX runner is refused, because that runner silently
+reduces the output reserve the qualification rests on. The
+[host compatibility matrix](docs/agent-interop.md) records current protocol
 gaps before any named-harness support is claimed.
+
+### Where the older open boxes wait
+
+Unchecked boxes in the 0.10 and 0.11 sections below are not a second queue.
+A checked box shipped. An unchecked box waits in this order:
+
+| Wait until | Open contract |
+|---|---|
+| Step 7's exit check | An oversized document prompt is refused without shrinking the document, window, or output reserve, on both a legacy Go template and a Jinja template. |
+| Step 8's exit check | A recorded trial through the pinned Pi process, and a recorded native local-model trial of `pi-workspace`. The in-process adapter does not discharge either. |
+| Before another configuration search | A confirmation preflight that refuses a repeat budget which cannot separate the declared difference, a sealed point order so thermal drift is not loaded onto one candidate, and a nonzero cached-token count failing any timing that claims to be uncached. A ranked-alternative margin waits until the native chat schema in use actually returns one. Ollama's OpenAI-compatible route documents logprobs as unsupported. Perplexity and true KL stay refused. |
+| After step 8 | Further checkpoint, resume, and bounded-authority prototypes. They generalize the one harness workflow. Arbitrary executable tasks stay SKIP until Trust C. |
+| Step 9 | The model-set projection. Exact-context `OTHER` is learned from matched allocation receipts and is never a guessed percentage. |
+| Beside the fitting, before any server restart | Read-only tune steps: listener inspection separate from ownership, per-key configuration provenance, an ownership report, then `--no-mutate`, then `tune --scratch` on a fitr-owned instance. |
+| After a measured candidate can be promoted | Source-claim extraction, a research citation that cannot become a floor, a pull-ownership record written before any fetch, then a non-ranked catalog. The deleter waits on that record. See [keeping a machine current](#later-keeping-a-machine-current). |
+| After 1.0 | Trust C confinement, release signing, and calibrated profile provenance. |
+| When its own receipt exists | Intervention-supported limiter diagnoses, scoring fitr's own capacity predictions, stable selectors before `compare --ctx`, a device requirement brief, and resolved llama.cpp offload evidence. None of these enters a verdict early, and none jumps the fitting queue. |
 
 Tracked implementation work: [quality-first role library](https://github.com/blisspixel/fitr/issues/1),
 [bounded auto mode](https://github.com/blisspixel/fitr/issues/2), and
@@ -570,6 +586,9 @@ stable release on Windows without leaving a staged candidate behind.
 
 ### 0.10 - explain and choose
 
+Unchecked items in this section are not the current queue. Their place is
+[where the older open boxes wait](#where-the-older-open-boxes-wait).
+
 The first two questions in a hardware decision are different: can the model
 fit, and how does it perform once it does? This release makes that separation
 structural and adds cautious explanation without turning vendor specifications
@@ -729,6 +748,10 @@ without turning specifications into measurements. Context and quant prototypes
 either earn a versioned command contract or remain clearly named experiments.
 
 ### 0.11 - validated workload evidence
+
+Unchecked items in this section are not the current queue. The order is the
+[immediate build order](#immediate-build-order). Checked boxes shipped in
+earlier releases.
 
 The model is not always the largest useful evaluation unit. A bounded workflow
 can be measured when its authority, state, definition of done, and independent
@@ -1004,9 +1027,9 @@ with researched protocol and harness profiles in [agent interoperability](docs/a
 - [x] Resolve explicit public HF file metadata at an immutable commit through a bounded adapter.
 - [x] Link resolution receipts to inbox ideas and report dependency, runtime and quality gaps.
 - [x] Screen publisher, declared license, accepted architecture and projected components in order under explicit operator policy.
-- [x] [Persist bounded header observations and screening policy](https://github.com/blisspixel/fitr/issues/25), then rederive source projections on reopen; current `--out` saves metadata only.
+- [x] [Persist bounded header observations and screening policy](https://github.com/blisspixel/fitr/issues/25), then rederive source projections on reopen. With `--fit` or `--screen`, `--out` stores the policy, prefix observations, and component plan. Older receipts without those fields keep their bytes.
 - [x] Define versioned runtime support profiles and establish complete dependency and component plans before download ownership.
-- [ ] Project [explicit boolean recurrent-layer patterns](https://github.com/blisspixel/fitr/issues/21) only when complete artifact metadata determines both cache components; unsupported patterns remain unresolved.
+- [x] Project [explicit boolean recurrent-layer patterns](https://github.com/blisspixel/fitr/issues/21) only when complete artifact metadata determines both cache components; unsupported patterns remain unresolved.
 - [ ] Extract source claims without converting them into evidence.
 - [x] Attach role-specific battery evidence; bind model and runtime changes.
 - [ ] Bind independently validated external harness evidence to role qualification.
@@ -1044,10 +1067,11 @@ Completed source increments:
 | Plan owned downloads and bounded local evidence | Bounded download plans (`fitr.discovery.download-plan.v1`) with provider SHA-256 verification bounds and artifact mapping templates (`artifact.Spec`). | Required download files, byte sums, and local artifact binding are explicit before network fetch or disk allocation. |
 
 Current screening establishes neither runtime support nor legal permission.
-Download ownership and source-driven experiments follow these boundaries.
-The shipped 0.10.14 screen is not a 0.11 completion claim or a role
-qualification receipt. Its exact public-binary checks are recorded in
+A download plan is not a pull, and it is not a role qualification. The
+0.10.14 public-binary checks are recorded in
 [release acceptance](docs/release-acceptance.md#01014-release-receipt).
+Claim extraction, a research citation, and a pull-ownership record wait until
+a measured candidate can be promoted.
 
 Today fitr answers "is what I already have any good here?" The larger question
 is "what should I get?" fitr is positioned to answer it with the same local
@@ -1285,14 +1309,13 @@ it, under the existing rule against implying a rate from a finite set.
 Serving is implemented via `fitr experiment serving` (`fitr.experiment.serving.plan.v1`, `fitr.experiment.serving.analysis.v1`, `fitr.experiment.serving.bundle.v1`).
 
 **Model sets.** The refusal stands: isolated measurements are never summed into
-a co-residency claim. What changes is that one runtime can now discharge it.
-llama-server's router builds its whole model list under a single lock, so that
-response is one observation of several models at one instant. Ollama's is not:
-membership is snapshotted under a lock that is then released, and each row's
-byte figures are read afterwards from the live runner. That is exactly the
-racing pair fitr refuses, arriving inside one HTTP response, so the sum is
-still not a receipt. A sleeping or offloaded model is spill, not residency, and
-must be recorded as such rather than counted as loaded.
+a co-residency claim. Ollama cannot discharge it. `loadedModels` copies runner
+pointers under `loadedMu`, releases that lock, and then reads each runner's
+memory under a separate lock. That is the racing pair fitr refuses, inside one
+HTTP response, so the sum is still not a receipt. A llama-server router list
+is a candidate observation only after its handler is shown to read membership
+and byte figures as one observation. A sleeping or offloaded model is spill,
+not residency, and must be recorded as such rather than counted as loaded.
 
 Byte figures from either runtime are the runner's own allocation accounting
 rather than an independent residency reading, and per-process accelerator
@@ -1385,14 +1408,17 @@ stay refused rather than approximated, and fitr will not shell out to a
 separate binary to obtain them, because a single static binary is a product
 property rather than a packaging convenience.
 
-**What the wire does give, verified on this machine.** Ollama returns per-token
-logprobs with ranked alternatives, forwarded from its embedded runner, and
-llama-server exposes the same. A single-token forced-prefix probe at a fixed
-seed therefore yields an exact ranked distribution at a chosen position. That
-supports three honest measures: the margin between the first and second
-choice, the rate at which two configurations choose the same token at the same
-position, and a divergence over the returned alternatives, named as the
-truncated quantity it is rather than as KL.
+**What the wire does give.** Native Ollama `POST /api/chat` documents
+`logprobs` and `top_logprobs`. llama-server documents capped alternatives on
+`/completion` when `n_probs` is set. Ollama's OpenAI-compatible chat route
+documents logprobs as unsupported, so that route cannot feed the probe. A
+single-token forced-prefix probe at a fixed seed can then report three finite
+observations: the margin between the first and second returned choice, the
+rate at which two configurations choose the same token at the same position,
+and a divergence over the returned alternatives, named as the truncated
+quantity it is rather than as KL. The probe waits until the confirmation
+preflight, sealed point order, and cache seal in the immediate build order
+exist.
 
 **What it must compare against.** A margin distribution alone says nothing.
 The comparison is a sibling artifact of the same base at higher precision,
@@ -1480,6 +1506,7 @@ These features must preserve the evidence contract.
 | 0.10.13 | Collectable context-quality scorecards and lock, interrupt and evidence corrections |
 | 0.10.14 | Ordered source screening, complete-header component projections, GGUF metadata corrections, context-quality HTML/TUI surfaces, precise comparison gaps and current MCP/package acceptance |
 | 0.10.15 | Source screening persistence, 1-command installer onboarding, usable-context role scorecards, runtime support profiles, component & download plans, boolean recurrent projections, generalized workflow evidence, and serving concurrency experiments |
+| 0.11.0 | Owned document-context collection and fresh confirmation inside fitting, and the pinned pi-workspace session. Live oversized-prompt, Pi-process, and native local-model checks remain open. |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

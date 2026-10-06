@@ -11,7 +11,13 @@ import (
 // FinishManagedConfirmation pins one closed confirmation group within results.
 // Failed and cancelled attempts use FinishConfirmation without a store receipt.
 func (store Store) FinishManagedConfirmation(name, planSHA256 string, bundle ConfirmationBundle, results record.Store, ref record.ManagedStoreRef, expected string, now time.Time) (Lifecycle, error) {
-	return store.finishConfirmation(name, planSHA256, "completed", &bundle, results, &ref, expected, now)
+	return store.finishConfirmation(name, planSHA256, "completed", &bundle, results, &ref, nil, expected, now)
+}
+
+// FinishManagedConfirmationWithContext pins the battery group and the sibling
+// context group. The context ref is omitted when the role has no byte floor.
+func (store Store) FinishManagedConfirmationWithContext(name, planSHA256 string, bundle ConfirmationBundle, results record.Store, ref, contextRef record.ManagedStoreRef, expected string, now time.Time) (Lifecycle, error) {
+	return store.finishConfirmation(name, planSHA256, "completed", &bundle, results, &ref, &contextRef, expected, now)
 }
 
 func (store Store) AdoptManagedConfirmation(name, planSHA256 string, bundle ConfirmationBundle, results record.Store, ref record.ManagedStoreRef, expected string, now time.Time) (Lifecycle, error) {
@@ -102,6 +108,24 @@ func confirmationAttachment(point *record.Record, results record.Store, ref *rec
 		return Attachment{}, errors.New("managed confirmation lacks valid signed current evidence")
 	}
 	return Attachment{Path: store.CanonicalPath(point.Model), EvidenceSHA256: current.Completion.EvidenceSHA256, RunID: current.StableRunID()}, nil
+}
+
+func reloadConfirmationPoints(points []ConfirmationPoint, records record.Store) ([]*record.Record, error) {
+	if len(points) == 0 {
+		return nil, nil
+	}
+	loaded := make([]*record.Record, 0, len(points))
+	for _, point := range points {
+		current, canonical, err := readLifecyclePoint(point, records)
+		if err != nil || current.Completion == nil || current.Manifest == nil || current.Completion.EvidenceSHA256 != point.Attachment.EvidenceSHA256 || current.StableRunID() != point.Attachment.RunID || canonical != point.Attachment.Path || current.StartedAt != point.StartedAt || current.Manifest.Model != point.Model {
+			return nil, errors.New("confirmation context evidence no longer has exact canonical current twins")
+		}
+		if !sameLifecycleValue(current.RuntimeBinding, point.RuntimeBinding) {
+			return nil, errors.New("confirmation context runtime binding changed")
+		}
+		loaded = append(loaded, current)
+	}
+	return loaded, nil
 }
 
 func readLifecyclePoint(point ConfirmationPoint, results record.Store) (*record.Record, string, error) {

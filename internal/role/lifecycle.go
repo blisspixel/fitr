@@ -54,6 +54,7 @@ type ConfirmationAttemptReceipt struct {
 	State                string              `json:"state"`
 	ChosenEvidenceSHA256 string              `json:"chosen_evidence_sha256"`
 	Points               []ConfirmationPoint `json:"points"`
+	ContextPoints        []ConfirmationPoint `json:"context_points,omitempty"`
 	ExpiresAt            string              `json:"expires_at"`
 	EvaluatedAt          string              `json:"evaluated_at"`
 }
@@ -65,6 +66,7 @@ type SelectionReceipt struct {
 	ChosenEvidenceSHA256 string              `json:"chosen_evidence_sha256"`
 	Selected             ConfirmationPoint   `json:"selected"`
 	Points               []ConfirmationPoint `json:"points"`
+	ContextPoints        []ConfirmationPoint `json:"context_points,omitempty"`
 	ExpiresAt            string              `json:"expires_at"`
 	RollbackOf           string              `json:"rollback_of,omitempty"`
 	EvaluatedAt          string              `json:"evaluated_at"`
@@ -284,29 +286,49 @@ func validateAttemptReceipt(receipt ConfirmationAttemptReceipt, plan Confirmatio
 		return errors.New("invalid confirmation evaluation time")
 	}
 	seen := map[string]bool{}
-	for index, point := range receipt.Points {
+	wantExpiry, err = validateIssuedPoints(receipt.Points, plan, started, ended, seen, wantExpiry, false)
+	if err != nil {
+		return err
+	}
+	if plan.ContextPolicy == nil && len(receipt.ContextPoints) != 0 {
+		return errors.New("confirmation receipt added context evidence the plan did not seal")
+	}
+	if plan.ContextPolicy != nil && len(receipt.ContextPoints) != len(plan.Candidates) {
+		return errors.New("usable-context confirmation receipt is missing its context evidence")
+	}
+	wantExpiry, err = validateIssuedPoints(receipt.ContextPoints, plan, started, ended, seen, wantExpiry, true)
+	if err != nil {
+		return err
+	}
+	if !expiry.Equal(wantExpiry) {
+		return errors.New("confirmation expiry does not match its evidence")
+	}
+	return nil
+}
+
+func validateIssuedPoints(points []ConfirmationPoint, plan ConfirmationPlan, started, ended time.Time, seen map[string]bool, wantExpiry time.Time, context bool) (time.Time, error) {
+	for index, point := range points {
 		if !record.SameRuntimeConfiguration(point.RuntimeBinding, plan.Candidates[index].RuntimeBinding) {
-			return errors.New("confirmation receipt changed the planned runtime configuration")
-		}
-		if point.RuntimeBinding != nil {
-			if err := point.RuntimeBinding.ValidateFor(point.Model); err != nil {
-				return err
+			if context {
+				return time.Time{}, errors.New("confirmation context receipt changed the planned runtime configuration")
 			}
+			return time.Time{}, errors.New("confirmation receipt changed the planned runtime configuration")
 		}
-		if point.StoreRef != nil {
-			if err := point.StoreRef.Validate(); err != nil {
-				return err
-			}
+		if err := validateIssuedPointIdentity(point); err != nil {
+			return time.Time{}, err
 		}
-		if index > 0 && !sameLifecycleValue(point.StoreRef, receipt.Points[0].StoreRef) {
-			return errors.New("confirmation points mix evidence store references")
+		if err := validateIssuedPointStore(point, index, points, context); err != nil {
+			return time.Time{}, err
 		}
 		if err := validateAttachment(point.Attachment); err != nil {
-			return err
+			return time.Time{}, err
 		}
 		pointTime, err := time.Parse(time.RFC3339Nano, point.StartedAt)
 		if err != nil || pointTime.Before(started.Truncate(time.Second)) || pointTime.After(ended) || !sameConfirmationModel(point.Model, plan.Candidates[index].Model) || seen[point.Attachment.EvidenceSHA256] {
-			return errors.New("confirmation point does not match its issued attempt")
+			if context {
+				return time.Time{}, errors.New("confirmation context point does not match its issued attempt")
+			}
+			return time.Time{}, errors.New("confirmation point does not match its issued attempt")
 		}
 		seen[point.Attachment.EvidenceSHA256] = true
 		pointExpiry := pointTime.Add(time.Duration(plan.Spec.MaxAgeDays) * 24 * time.Hour)
@@ -314,8 +336,33 @@ func validateAttemptReceipt(receipt ConfirmationAttemptReceipt, plan Confirmatio
 			wantExpiry = pointExpiry
 		}
 	}
-	if !expiry.Equal(wantExpiry) {
-		return errors.New("confirmation expiry does not match its evidence")
+	return wantExpiry, nil
+}
+
+func validateIssuedPointIdentity(point ConfirmationPoint) error {
+	if point.RuntimeBinding == nil {
+		return nil
+	}
+	return point.RuntimeBinding.ValidateFor(point.Model)
+}
+
+func validateIssuedPointStore(point ConfirmationPoint, index int, points []ConfirmationPoint, context bool) error {
+	if context {
+		if point.StoreRef == nil || point.StoreRef.Validate() != nil {
+			return errors.New("confirmation context evidence has no sealed store")
+		}
+		if index > 0 && !sameLifecycleValue(point.StoreRef, points[0].StoreRef) {
+			return errors.New("confirmation context points mix evidence store references")
+		}
+		return nil
+	}
+	if point.StoreRef != nil {
+		if err := point.StoreRef.Validate(); err != nil {
+			return err
+		}
+	}
+	if index > 0 && !sameLifecycleValue(point.StoreRef, points[0].StoreRef) {
+		return errors.New("confirmation points mix evidence store references")
 	}
 	return nil
 }
@@ -330,7 +377,7 @@ func selectedConfirmationPoint(plan ConfirmationPlan, points []ConfirmationPoint
 }
 
 func validateSelectionReceipt(selection SelectionReceipt, plan ConfirmationPlan, attempt *ConfirmationAttemptReceipt, at string) error {
-	if attempt == nil || attempt.State != "confirmed" || selection.SpecSHA256 != plan.SpecSHA256 || selection.PlanSHA256 != plan.PlanSHA256 || selection.BundleSHA256 != attempt.BundleSHA256 || selection.ChosenEvidenceSHA256 != plan.ChosenEvidenceSHA256 || selection.ExpiresAt != attempt.ExpiresAt || selection.EvaluatedAt != attempt.EvaluatedAt || !sameLifecycleValue(selection.Points, attempt.Points) {
+	if attempt == nil || attempt.State != "confirmed" || selection.SpecSHA256 != plan.SpecSHA256 || selection.PlanSHA256 != plan.PlanSHA256 || selection.BundleSHA256 != attempt.BundleSHA256 || selection.ChosenEvidenceSHA256 != plan.ChosenEvidenceSHA256 || selection.ExpiresAt != attempt.ExpiresAt || selection.EvaluatedAt != attempt.EvaluatedAt || !sameLifecycleValue(selection.Points, attempt.Points) || !sameLifecycleValue(selection.ContextPoints, attempt.ContextPoints) {
 		return errors.New("selection is not backed by the confirmed original choice")
 	}
 	selected, err := selectedConfirmationPoint(plan, attempt.Points)

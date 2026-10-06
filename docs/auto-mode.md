@@ -30,7 +30,18 @@ Start with two distinct installed artifacts and the fixed configuration:
 
 ```powershell
 fitr auto start daily --mode establish --runtime runtime.json --candidate first:tag --candidate second:tag
+fitr auto start daily --mode establish --runtime runtime.json --candidate first:tag --candidate second:tag --context-tiers 2048,8192
 ```
+
+`--context-tiers` is required when the role declares
+`minimum_usable_context_bytes`, and it is rejected when the role does not.
+The sizes are payload bytes, two to four strictly increasing values from
+2048 to 65536. The largest must reach the floor. One schedule is sealed from
+the session seed before inference and is shared by every candidate. The
+document pack is a separate record from the battery. Fresh confirmation seals
+a new schedule from the confirmation seed. A model served by Ollama's MLX
+runner is refused before that schedule exists, because the runner silently
+reduces the output reserve.
 
 `establish` requires an unselected role. `improve` requires a currently
 qualified incumbent with the same owned runtime profile and includes its
@@ -53,10 +64,14 @@ and `--confirmation-wall` to declare different finite limits. `-k` fixes both
 noisy-task and generated-check repeats, from 3 to 20.
 
 The preflight calculates the complete request envelope from the actual task
-set and retry policy. The defaults fund two candidates at the default battery
-size; a larger shortlist or additional tasks can require larger declared caps.
-If the complete exploration and confirmation schedule cannot be funded, the
-session does not begin inference.
+set and retry policy. With the current full battery at three repeats, the
+defaults fund two candidates. They also fund a two-tier document pack for
+those two candidates (572 requests and 188984 reserved output tokens). A third
+tier needs 608 requests, and a third candidate needs both a larger request cap
+and a larger output-token cap. The defaults are not raised to hide that. If
+the complete exploration and confirmation schedule cannot be funded, the
+session does not begin inference. The preflight is the authority when the task
+set changes.
 
 Every actual inference attempt, including internal retries and load probes,
 is durably charged before dispatch. Requested output caps measure admission
@@ -155,5 +170,7 @@ writer who replaces the entire local state. No model deletion is part of auto.
 
 Static specification validation and saved status are portable. Starting or
 resuming this first runtime owner is Windows-only. Additional platforms,
-continuous scheduling, source-driven downloads, context-quality preferences,
-named-harness task evaluation and A2A execution remain separate work.
+continuous scheduling, source-driven downloads, automatic context-size search,
+named-harness task evaluation and A2A execution remain separate work. A
+declared document pack is collected with the fitting. It is not a search over
+context sizes.

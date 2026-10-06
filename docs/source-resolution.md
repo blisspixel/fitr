@@ -244,6 +244,9 @@ requiring network access.
 Resolution does not download weights, execute repository code, alter a role,
 grant adoption authority or delete files. Attach a receipt to a discovery idea
 with [source attachments](source-attachments.md); the idea remains unmeasured.
-Source extraction, download ownership, complete dependency graphs, runtime
-support profiles and the larger automation loop remain separate work. The next
-connected boundary is described in the [artifact/runtime plan](artifact-runtime-plan.md).
+Runtime support profiles, component plans, and download plans are already
+sealed before execution. Source extraction, an executed owned download, and
+binding configuration to a process that is already listening remain separate
+work. That researched boundary is the
+[artifact and runtime plan](artifact-runtime-plan.md). The sequence that
+contains it is the [roadmap](../ROADMAP.md#immediate-build-order).

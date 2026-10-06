@@ -73,6 +73,17 @@ func (run *autoExecution) collectPhaseUnderDeadline(state automation.State) erro
 	if err != nil {
 		return err
 	}
+	// The sibling is opened before any point starts so a crash can still see
+	// it. It stays open until every point has both records: the admission
+	// hook charges the active battery point, and that point cannot complete
+	// without the context evidence digest.
+	var contextStore record.ManagedStore
+	if run.plan.ContextPolicy != nil {
+		contextStore, err = run.contextGroup(state.Phase)
+		if err != nil {
+			return err
+		}
+	}
 	completed := state.CompletedExploration
 	if state.Phase == "confirmation" {
 		completed = state.CompletedConfirmation
@@ -80,35 +91,11 @@ func (run *autoExecution) collectPhaseUnderDeadline(state automation.State) erro
 	if state.ActivePoint != 0 {
 		return errors.New("an interrupted point must be resolved before collection")
 	}
-	for index := len(completed); index < len(run.plan.Candidates); index++ {
-		if _, err := run.currentRole(); err != nil {
-			return err
-		}
-		runID, err := record.NewRunID()
-		if err != nil {
-			return err
-		}
-		if err := run.session.Append(automation.Event{Action: "point_started", Phase: state.Phase, Point: index + 1, RunID: runID}, time.Now()); err != nil {
-			return err
-		}
-		_, state, err = run.session.Snapshot()
-		if err != nil {
-			return err
-		}
-		candidate := run.plan.Candidates[index]
-		run.runtime.BeginLoadObservation()
-		run.display.Phase(state.Phase, fmt.Sprintf("%d/%d  %s", index+1, len(run.plan.Candidates), candidate.Model))
-		point, err := executeUnderLease(run.ctx, run.backend, candidate.Model, run.pointOptions(index, state), run.display, run.lease)
-		if err != nil {
-			return err
-		}
-		if err := run.recheckPoint(candidate, point); err != nil {
-			return err
-		}
-		if _, err := group.Save(point); err != nil {
-			return err
-		}
-		if err := run.session.Append(automation.Event{Action: "point_completed", Phase: state.Phase, Point: index + 1, RunID: point.StableRunID(), EvidenceSHA256: point.Completion.EvidenceSHA256}, time.Now()); err != nil {
+	if err := run.collectRemainingPoints(state, completed, group, contextStore); err != nil {
+		return err
+	}
+	if run.plan.ContextPolicy != nil {
+		if _, err := contextStore.Close(); err != nil {
 			return err
 		}
 	}
@@ -120,6 +107,73 @@ func (run *autoExecution) collectPhaseUnderDeadline(state automation.State) erro
 		return run.session.Append(automation.Event{Action: "exploration_closed", StoreRef: &ref}, time.Now())
 	}
 	return run.finishConfirmation(ref)
+}
+
+func (run *autoExecution) collectRemainingPoints(state automation.State, completed []automation.Event, group, contextStore record.ManagedStore) error {
+	for index := len(completed); index < len(run.plan.Candidates); index++ {
+		if err := run.collectCandidatePoint(state, index, group, contextStore); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (run *autoExecution) collectCandidatePoint(state automation.State, index int, group, contextStore record.ManagedStore) error {
+	if _, err := run.currentRole(); err != nil {
+		return err
+	}
+	runID, err := record.NewRunID()
+	if err != nil {
+		return err
+	}
+	if err := run.session.Append(automation.Event{Action: "point_started", Phase: state.Phase, Point: index + 1, RunID: runID}, time.Now()); err != nil {
+		return err
+	}
+	if _, state, err = run.session.Snapshot(); err != nil {
+		return err
+	}
+	candidate := run.plan.Candidates[index]
+	run.runtime.BeginLoadObservation()
+	run.display.Phase(state.Phase, fmt.Sprintf("%d/%d  %s", index+1, len(run.plan.Candidates), candidate.Model))
+	point, err := executeUnderLease(run.ctx, run.backend, candidate.Model, run.pointOptions(index, state), run.display, run.lease)
+	if err != nil {
+		return err
+	}
+	if err := run.recheckPoint(candidate, point); err != nil {
+		return err
+	}
+	if _, err := group.Save(point); err != nil {
+		return err
+	}
+	return run.completeCandidatePoint(state, index, point, contextStore)
+}
+
+func (run *autoExecution) completeCandidatePoint(state automation.State, index int, point *record.Record, contextStore record.ManagedStore) error {
+	finished := automation.Event{Action: "point_completed", Phase: state.Phase, Point: index + 1, RunID: point.StableRunID(), EvidenceSHA256: point.Completion.EvidenceSHA256}
+	if run.plan.ContextPolicy != nil {
+		contextPoint, err := run.collectContextPoint(index, state, run.plan.Candidates[index])
+		if err != nil {
+			return err
+		}
+		if err := saveContextBesideBattery(contextStore, contextPoint, point); err != nil {
+			return err
+		}
+		finished.ContextEvidenceSHA256 = contextPoint.Completion.EvidenceSHA256
+	}
+	return run.session.Append(finished, time.Now())
+}
+
+func saveContextBesideBattery(store record.ManagedStore, contextPoint, battery *record.Record) error {
+	if contextPoint.Completion == nil {
+		return errors.New("context point has no completion")
+	}
+	if _, err := store.Save(contextPoint); err != nil {
+		return err
+	}
+	if contextPoint.StableRunID() == battery.StableRunID() || contextPoint.Completion.EvidenceSHA256 == battery.Completion.EvidenceSHA256 {
+		return errors.New("context point reused the battery run")
+	}
+	return nil
 }
 
 func (run *autoExecution) recheckPoint(candidate automation.Candidate, point *record.Record) error {
@@ -203,10 +257,29 @@ func (run *autoExecution) compareExploration(state automation.State) error {
 	for index, candidate := range run.plan.Candidates {
 		models[index] = candidate.Model
 	}
-	review, err := role.ReviewManaged(run.plan.Spec, run.records, *state.ExplorationStore, models, time.Now())
+	contextRef, contextPoints, err := run.explorationContext(state)
 	if err != nil {
 		return err
 	}
+	review, err := role.ReviewManagedWithContext(run.plan.Spec, run.records, *state.ExplorationStore, contextRef, models, time.Now())
+	if err != nil {
+		return err
+	}
+	return run.issueExplorationConfirmation(points, contextPoints, review)
+}
+
+func (run *autoExecution) explorationContext(state automation.State) (*record.ManagedStoreRef, []*record.Record, error) {
+	if run.plan.ContextPolicy == nil {
+		return nil, nil, nil
+	}
+	ref, loaded, err := run.phaseContext("exploration", run.plan.SeedSet, run.plan.ContextPlanSHA256, state.CompletedExploration)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &ref, loaded, nil
+}
+
+func (run *autoExecution) issueExplorationConfirmation(points, contextPoints []*record.Record, review role.ReviewReport) error {
 	chosen := review.Lead
 	if review.State == "single-qualified" {
 		for _, candidate := range review.Candidates {
@@ -226,7 +299,13 @@ func (run *autoExecution) compareExploration(state automation.State) error {
 		run.display.Note(review.Next, "warn")
 		return run.session.Append(automation.Event{Action: "finished", Outcome: outcome}, time.Now())
 	}
-	plan, err := role.NewConfirmationPlan(run.plan.Spec, points, chosen, time.Now())
+	var plan role.ConfirmationPlan
+	var err error
+	if run.plan.ContextPolicy != nil {
+		plan, err = role.NewConfirmationPlanWithContext(run.plan.Spec, points, contextPoints, chosen, time.Now())
+	} else {
+		plan, err = role.NewConfirmationPlan(run.plan.Spec, points, chosen, time.Now())
+	}
 	if err != nil {
 		return err
 	}
@@ -256,7 +335,18 @@ func (run *autoExecution) finishConfirmation(ref record.ManagedStoreRef) error {
 	if err != nil {
 		return err
 	}
-	bundle, err := role.NewConfirmationBundle(*state.Confirmation, points, time.Now())
+	var contextPoints []*record.Record
+	var contextRef record.ManagedStoreRef
+	if run.plan.ContextPolicy != nil {
+		if state.Confirmation == nil {
+			return errors.New("context confirmation has no sealed plan")
+		}
+		contextRef, contextPoints, err = run.phaseContext("confirmation", state.Confirmation.SeedSet, state.Confirmation.ContextPlanSHA256, state.CompletedConfirmation)
+		if err != nil {
+			return err
+		}
+	}
+	bundle, err := role.NewConfirmationBundleWithContext(*state.Confirmation, points, contextPoints, time.Now())
 	if err != nil {
 		return err
 	}
@@ -267,7 +357,12 @@ func (run *autoExecution) finishConfirmation(ref record.ManagedStoreRef) error {
 	if _, err := run.roles.SaveConfirmationBundle(bundle); err != nil {
 		return err
 	}
-	if _, err := run.roles.FinishManagedConfirmation(run.plan.Spec.Name, bundle.Plan.PlanSHA256, bundle, run.records, ref, life.Digest, time.Now()); err != nil {
+	if run.plan.ContextPolicy != nil {
+		_, err = run.roles.FinishManagedConfirmationWithContext(run.plan.Spec.Name, bundle.Plan.PlanSHA256, bundle, run.records, ref, contextRef, life.Digest, time.Now())
+	} else {
+		_, err = run.roles.FinishManagedConfirmation(run.plan.Spec.Name, bundle.Plan.PlanSHA256, bundle, run.records, ref, life.Digest, time.Now())
+	}
+	if err != nil {
 		return err
 	}
 	if err := run.session.Append(automation.Event{Action: "confirmation_closed", StoreRef: &ref}, time.Now()); err != nil {
@@ -352,7 +447,15 @@ func (run *autoExecution) recoverSavedExploration(state automation.State) error 
 	if err := validateAutoSavedPoint(run.plan, point, run.plan.SeedSet); err != nil {
 		return err
 	}
-	return run.session.Append(automation.Event{Action: "point_completed", Phase: "exploration", Point: state.ActivePoint, RunID: point.StableRunID(), EvidenceSHA256: point.Completion.EvidenceSHA256}, time.Now())
+	event := automation.Event{Action: "point_completed", Phase: "exploration", Point: state.ActivePoint, RunID: point.StableRunID(), EvidenceSHA256: point.Completion.EvidenceSHA256}
+	if run.plan.ContextPolicy != nil {
+		evidence, err := run.savedExplorationContext(candidate, point)
+		if err != nil {
+			return err
+		}
+		event.ContextEvidenceSHA256 = evidence
+	}
+	return run.session.Append(event, time.Now())
 }
 
 func validateAutoSavedPoint(plan automation.Plan, point *record.Record, seed string) error {

@@ -4,7 +4,9 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-09-13.
+Last updated: 2026-09-13 for the 0.10.14 receipt. Later source-receipt
+behavior is in [source resolution](source-resolution.md). Sentences in the
+0.10.14 section that say `--out` saves metadata only describe that candidate.
 
 ### 0.10.14 release receipt
 

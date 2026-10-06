@@ -14,14 +14,47 @@ an authority envelope, and independent proof.
 ## What exists today
 
 The separate `experiment workload` path ships a fixed policy-repair contract
-as well as generalized workflow contracts, signed per-trial events and
-independent deterministic verification. In 0.10.4+, plan v2 binds scenario/tool
+as well as generalized workflow contracts and signed per-trial events. The
+proof class is sealed on the plan. Policy-repair's proof is a deterministic
+assertion. pi-workspace's proof is an independent file verifier. Plain text
+projects that sealed class, including the forced split-summary schedule. In 0.10.4+, plan v2 binds scenario/tool
 digests and authority/proof policies, and analysis v2 reconstructs timing
 partitions including human wait, escalation, and compaction segregated from
 worker overhead. Multi-attempt retries, approval requests and grants/denials,
 human wait periods, escalation intervals, compaction/checkpoint resumption, and
 typed external protocol receipts are explicit before execution. See
 [usage](usage.md#validated-work-experiment) for the exact supported fields.
+
+`fitr experiment workload --workflow pi-workspace` seals one additional
+contract on that same command: `fitr.pi-session.v1`. The schedule was checked
+against `@earendil-works/pi-coding-agent` 0.85.1
+(`d981de1229ef899957bbe968bc8dcda02a21f477`), whose compaction document says a
+split turn generates two summaries. fitr forces that schedule. It does not
+launch the Pi process, and it does not follow Pi's token-threshold
+auto-compact. One request budget covers at most four ordinary model requests,
+then exactly two summary requests, then one reopen request. An early ordinary
+stop does not cancel the summaries or the reopen. Summary calls are model
+requests inside the same budget. Their time stays on the model interval.
+Compaction time is only the checkpoint seal itself, so summary generation is
+not counted twice.
+
+The independent verifier reads the virtual workspace, not the model's `DONE`.
+Acceptance requires `TASK.txt` written once to `status=done`, an unchanged
+`NOTE.txt`, no authority breach, both summary digests, and a reopened
+checkpoint. A blank summary is absent evidence and is not hashed into a digest
+the check can accept. A digest of the empty string cannot pass validation.
+A second write fails `single_effect` even when the content is unchanged.
+Validation re-derives the
+task-file and summaries passes from those digests, the effect count from the
+recorded successful writes, and the checkpoint pass from the resume event, so
+a receipt cannot claim any of those checks its observations deny. A Harbor reward is not this receipt.
+Provider `fake` may exercise the files and still cannot establish coverage or
+an accepted-outcome rate. Provider `local` can reach `established` at three
+acceptances. The CLI seals `local` only.
+
+This receipt does not establish that the pinned Pi process ran, that a native
+local model completed the session, or that checkpoint recovery generalizes
+beyond this one schedule. Those remain the open exit for this step.
 
 The current task battery already provides strong foundations:
 

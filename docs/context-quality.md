@@ -1,6 +1,6 @@
 # Context task evidence
 
-The next Extended fit scorecard tests whether a model uses a long document
+The Extended fit scorecard tests whether a model uses a long document
 correctly at a fixed operating window.
 
 `fitr run <model> --context-tiers <bytes,bytes[,...]> [--ctx N]` collects one
@@ -13,7 +13,11 @@ states what was tested rather than inheriting an untested product choice.
 The result is an ordinary signed run record whose only planned work is the
 phase. Personal roles and decision specifications consume this scorecard via
 `minimum_usable_context_bytes` requirements and usable-context preferences.
-Auto collection and fresh confirmation remain separate planned work.
+Owned fitting collects the phase beside the battery and confirms the byte
+floor from a fresh plan when the role declares that floor and the operator
+passes `--context-tiers`. `fitr role confirm` does not collect the pack.
+The live oversized-prompt refusal remains open. See
+[Remaining connected acceptance](#remaining-connected-acceptance).
 
 ## What the document pack measures
 
@@ -194,10 +198,16 @@ same phase differently. The monitor renders the phase in its compact view as
 well, because for a context-level run the phase is the only planned work and a
 summary without it would describe a run in which nothing was measured.
 
-Before this scorecard can influence a personal role, fitr must collect it
-inside the owned runtime and existing budgeted fitting and obtain fresh
-confirmation. Missing accounting must block qualification, which the reserve
-gate already enforces.
+An attached scorecard feeds a role or decision usable-context floor. Owned
+fitting collects the same phase when `fitr auto start` is given
+`--context-tiers` and the role declares `minimum_usable_context_bytes`. The
+battery and the document pack stay separate records. Every candidate shares
+the exploration schedule. Fresh confirmation seals a new schedule from its own
+seed and will not reuse the exploration digest. A battery record alone cannot
+clear the floor. `fitr role confirm` does not collect the pack. Missing
+accounting blocks qualification, which the reserve gate already enforces.
+The live oversized-prompt check remains the open exit for this step. See the
+[roadmap](../ROADMAP.md#immediate-build-order).
 
 Native acceptance must show that an oversized prompt is refused without
 shrinking the document, window or reserve. Two runtime details shape that test.
@@ -210,6 +220,7 @@ depends on whether the model resolves to a legacy Go template or a Jinja one,
 so the test needs at least one model of each kind before the guarantee can be
 called verified.
 
-Pi-backed workspace, compaction and restart evidence remains a separate
-Extended fit scorecard. See [personal fitting](personal-fitting.md) and
-[agent interoperability](agent-interop.md) for that workflow and its limits.
+The pinned pi-workspace session is a separate scorecard from this document
+pack. It seals one forced split-summary schedule and an independent file
+verifier, and it does not launch Pi. See [workload evidence](workload-evidence.md)
+and [personal fitting](personal-fitting.md).

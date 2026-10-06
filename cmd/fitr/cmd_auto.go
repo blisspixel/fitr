@@ -34,6 +34,7 @@ func (v *autoCandidates) Set(value string) error {
 type autoCommand struct {
 	action, role, sessionID, runtimePath, mode, adoption, profile, display string
 	candidates                                                             autoCandidates
+	contextTiers                                                           []int
 	repeats                                                                int
 	wall, confirmationWall                                                 time.Duration
 	limits                                                                 automation.Limits
@@ -46,7 +47,7 @@ func cmdAuto(ctx context.Context, args []string) int {
   fitr auto runtime <ollama.exe> --models <directory> --out runtime.json
   fitr auto start <role> --mode establish|improve --runtime runtime.json
     --candidate <installed-model> --candidate <installed-model>
-    [--adoption manual|confirmed-only] [--max-wall 2h] [-k 3]
+    [--context-tiers 2048,8192] [--adoption manual|confirmed-only] [--max-wall 2h] [-k 3]
   fitr auto status <session-id>
   fitr auto resume <session-id>
   fitr auto adopt <session-id>
@@ -89,6 +90,7 @@ session's adoption path.`)
 
 func parseAutoCommand(args []string) (autoCommand, int, bool) {
 	c := autoCommand{action: args[0]}
+	var tierText string
 	if c.action != "start" && c.action != "status" && c.action != "resume" && c.action != "adopt" {
 		errPrint("unknown auto action", c.action, "fitr auto --help")
 		return c, exitUsage, false
@@ -107,6 +109,7 @@ func parseAutoCommand(args []string) (autoCommand, int, bool) {
 		fs.Int64Var(&c.limits.MaxRequests, "max-requests", 600, "actual inference attempts, including retries")
 		fs.Int64Var(&c.limits.MaxRequestedOutputTokens, "max-requested-output-tokens", 250000, "sum of reserved output caps")
 		fs.IntVar(&c.limits.MaxPoints, "max-points", 8, "candidate point attempt ceiling")
+		fs.StringVar(&tierText, "context-tiers", "", "two to four increasing document sizes in bytes; required with a usable-context floor")
 	}
 	if code, ok := parseCommandFlags(fs, args[1:]); !ok {
 		return c, code, false
@@ -117,16 +120,32 @@ func parseAutoCommand(args []string) (autoCommand, int, bool) {
 	}
 	if c.action == "start" {
 		c.role = fs.Arg(0)
-		if c.runtimePath == "" || len(c.candidates) < 2 || (c.mode != "establish" && c.mode != "improve") || (c.adoption != "manual" && c.adoption != "confirmed-only") || c.repeats < 3 || c.repeats > 20 || c.wall%time.Second != 0 || c.confirmationWall%time.Second != 0 {
-			errPrint("auto start needs an explicit mode, runtime, two to four candidates and bounded fixed repeats", "", "fitr auto --help")
-			return c, exitUsage, false
+		if code, ok := finishAutoStart(&c, tierText); !ok {
+			return c, code, false
 		}
-		c.limits.WallSeconds = int64(c.wall / time.Second)
-		c.limits.ConfirmationWallSeconds = int64(c.confirmationWall / time.Second)
 	} else {
 		c.sessionID = fs.Arg(0)
 	}
 	return c, exitOK, true
+}
+
+func finishAutoStart(command *autoCommand, tierText string) (int, bool) {
+	if command.runtimePath == "" || len(command.candidates) < 2 || (command.mode != "establish" && command.mode != "improve") || (command.adoption != "manual" && command.adoption != "confirmed-only") || command.repeats < 3 || command.repeats > 20 || command.wall%time.Second != 0 || command.confirmationWall%time.Second != 0 {
+		errPrint("auto start needs an explicit mode, runtime, two to four candidates and bounded fixed repeats", "", "fitr auto --help")
+		return exitUsage, false
+	}
+	command.limits.WallSeconds = int64(command.wall / time.Second)
+	command.limits.ConfirmationWallSeconds = int64(command.confirmationWall / time.Second)
+	if tierText == "" {
+		return exitOK, true
+	}
+	tiers, err := parseContextTiers(tierText)
+	if err != nil {
+		errPrint(err.Error(), "", "fitr auto --help")
+		return exitUsage, false
+	}
+	command.contextTiers = tiers
+	return exitOK, true
 }
 
 func cmdAutoRuntime(ctx context.Context, args []string) int {

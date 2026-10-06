@@ -51,8 +51,12 @@ When a source receipt and its component plan resolve, `fitr discover plan` build
 an explicit download plan (`fitr.discovery.download-plan.v1`) and artifact mapping
 template (`artifact.Spec`), defining required download files, byte footprints and
 provider SHA-256 bounds before network fetch or disk allocation.
-Exact runtime binding, source extraction, automatic fit
-planning and bounded automation remain work in the complete flow:
+Runtime support profiles and component plans bind architecture contracts and
+companions before that plan. What remains here is extracting source claims
+without turning them into evidence, executing an owned download, and binding
+the configuration of a daemon that is already listening. The fitting sequence
+that promotes a candidate is the
+[roadmap](../ROADMAP.md#immediate-build-order):
 
 ```text
 idea -> source check -> exact artifact -> fit plan -> bounded experiment

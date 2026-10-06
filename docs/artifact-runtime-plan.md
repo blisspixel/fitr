@@ -1,12 +1,19 @@
-# Next: bind the files to a runnable configuration
+# Bind files to a runnable configuration
 
-Status: local [artifact binding](artifact-binding.md) implements bounded byte
-observations in 0.10.9. Runtime binding remains a researched design.
-Reviewed 2026-09-05.
+Status: part of this boundary has shipped. Local
+[artifact binding](artifact-binding.md) hashes explicit mappings. Runtime
+support profiles and component plans name required, optional, disabled, and
+unresolved companions. Download plans state files and byte sums before a
+fetch. Those plans do not download weights, and they do not bind the
+configuration of a process that is already listening.
 
-Source attachments preserve a candidate investigation. The next step must
-establish what would actually be loaded before estimating fit or running a
-quality battery. A repository name and quantization label cannot establish this.
+This is not the current step. The sequence is the
+[roadmap](../ROADMAP.md#immediate-build-order). The acceptance list below is
+still the contract for the unbound remainder.
+
+Source attachments preserve a candidate investigation. Before a download or a
+quality battery, the record has to say what would actually be loaded. A
+repository name and quantization label cannot establish this.
 
 GGUF contains structured metadata as well as tensors. Hugging Face provides a
 metadata viewer and documents remote GGUF parsing. This offers a bounded metadata

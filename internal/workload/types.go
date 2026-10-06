@@ -13,7 +13,19 @@ const (
 	LegacyReportSchema = "fitr.workload.analysis.v1"
 	BundleSchema       = "fitr.workload.bundle.v1"
 	WorkflowID         = "policy-repair"
+	PiWorkflowID       = "pi-workspace"
 	WorkflowVersion    = 1
+
+	// Checked against packages/coding-agent/package.json and
+	// docs/compaction.md at commit d981de1229ef899957bbe968bc8dcda02a21f477,
+	// published as @earendil-works/pi-coding-agent 0.85.1. A split turn
+	// generates two summaries. fitr seals that schedule; it does not launch Pi.
+	PiDriverPackage = "@earendil-works/pi-coding-agent"
+	PiDriverCommit  = "d981de1229ef899957bbe968bc8dcda02a21f477"
+	PiDriverRelease = "0.85.1"
+	PiDriverAdapter = "fitr.pi-session.v1"
+	PiProviderLocal = "local"
+	PiProviderFake  = "fake"
 )
 
 type RetentionPolicy string
@@ -35,6 +47,29 @@ type Plan struct {
 	MaxAttempts      int                  `json:"max_attempts,omitempty"`
 	Retention        RetentionPolicy      `json:"retention"`
 	Contract         *WorkflowContract    `json:"contract,omitempty"`
+	// Pi-workspace fields stay empty on every other workflow so older plans
+	// keep their exact bytes.
+	Driver        *SessionDriver   `json:"driver,omitempty"`
+	Provider      string           `json:"provider,omitempty"`
+	RequestBudget int              `json:"request_budget,omitempty"`
+	PiSchedule    *SessionSchedule `json:"pi_schedule,omitempty"`
+}
+
+// SessionDriver is the harness identity a pi-workspace plan seals before any
+// model request. Adapter is fitr's session, not a claim that the Pi process ran.
+type SessionDriver struct {
+	Package string `json:"package"`
+	Commit  string `json:"commit"`
+	Release string `json:"release"`
+	Adapter string `json:"adapter"`
+}
+
+// SessionSchedule is the forced split compaction. OrdinaryCap is a ceiling.
+// Summary calls and the reopen turn are spent on every accepted trial.
+type SessionSchedule struct {
+	OrdinaryCap  int `json:"ordinary_cap"`
+	SummaryCalls int `json:"summary_calls"`
+	ReopenTurns  int `json:"reopen_turns"`
 }
 
 type EventType string
@@ -76,6 +111,9 @@ type Event struct {
 	Tool           string    `json:"tool,omitempty"`
 	Status         string    `json:"status,omitempty"`
 	EvidenceSHA256 string    `json:"evidence_sha256,omitempty"`
+	// Class distinguishes a split-compaction summary from an ordinary turn.
+	// Empty on every existing event, so signed trials keep their bytes.
+	Class string `json:"class,omitempty"`
 }
 
 type Outcome string
@@ -99,6 +137,10 @@ type VerifierReceipt struct {
 	ProtectedStateSHA256 string              `json:"protected_state_sha256"`
 	Checks               []VerificationCheck `json:"checks"`
 	Accepted             bool                `json:"accepted"`
+	CheckpointSHA256     string              `json:"checkpoint_sha256,omitempty"`
+	// Summary digests are the observation behind the summaries check.
+	// Empty on policy-repair receipts, so those signed bytes stay stable.
+	SummarySHA256 []string `json:"summary_sha256,omitempty"`
 }
 
 type Trial struct {
@@ -115,6 +157,8 @@ type Trial struct {
 	DuplicateCalls      int             `json:"duplicate_calls"`
 	AuthorityViolations int             `json:"authority_violations"`
 	Verifier            VerifierReceipt `json:"verifier"`
+	SummaryCalls        int             `json:"summary_calls,omitempty"`
+	Effects             int             `json:"effects,omitempty"`
 	EvidenceSHA256      string          `json:"evidence_sha256"`
 	Signature           string          `json:"signature"`
 }

@@ -132,6 +132,15 @@ The research went through three rounds of self-correction. Where this section
 disagrees with anything above, this section is right. The earlier text is kept
 because the corrections are more informative than a clean answer would be.
 
+Two sentences in the moat section were rechecked after that pass. Harbor's
+default compose file still has no `extra_hosts`, so an in-container agent
+still has no default route to a host listener on Linux. The GPU sentence is
+stale: current Harbor Docker code can request GPUs on Linux. BFCL now
+documents an existing OpenAI-compatible endpoint, and an unlisted local model
+still needs a registered handler. Neither fact makes a Harbor reward or a
+BFCL score into a fitr verdict. The one pinned local workflow is the
+[roadmap](../ROADMAP.md#immediate-build-order) step, not a shell-out.
+
 ### Further corrections
 
 #### Plumbing-vs-capability has more prior art than stated above

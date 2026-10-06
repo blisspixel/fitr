@@ -143,6 +143,24 @@ func validatePreference(preference Preference, requirement decision.Requirement)
 	return nil
 }
 
+// UsableContextFloor returns the role's single document-context byte floor.
+// A runtime window alone is not that floor. Two byte floors are ambiguous,
+// so the caller must refuse them rather than pick one.
+func UsableContextFloor(spec Spec) (*int, error) {
+	var floor *int
+	for _, requirement := range spec.Decision.Requirements {
+		if requirement.Context == nil || requirement.Context.MinimumUsableContextBytes == nil {
+			continue
+		}
+		if floor != nil {
+			return nil, errors.New("a role admits one usable-context floor")
+		}
+		value := *requirement.Context.MinimumUsableContextBytes
+		floor = &value
+	}
+	return floor, nil
+}
+
 func (spec Spec) Digest() (string, error) {
 	if err := spec.Validate(); err != nil {
 		return "", err

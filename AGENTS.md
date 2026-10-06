@@ -64,7 +64,8 @@ itself.
 | Untrusted JSON | `internal/strictjson` | Duplicate-key rejection runs before any typed decode. |
 | MCP and portable agent package | `internal/mcp`, `plugins/fitr` | `docs/agent-interop.md` owns protocol, package and named-host boundaries; SDK acceptance lives in `scripts/mcp_sdk_acceptance.py`. |
 | Files and exclusion | `internal/atomicfile`, `internal/boundedio`, `internal/lock` | One way to write, one way to bound a read, one way to lock. |
-| Long-context document pack | `internal/contextquality` (pure plan, generate, verify, analyze), `internal/eval/contexttask.go` (submission), `internal/record/context_quality.go` (sealing), `fitr run --context-tiers` (collection) | CLI, JSON, HTML and the TUI project the sealed phase; its wording is derived once in `internal/analysis`. Role preferences and auto collection remain unconnected. See `docs/context-quality.md`. |
+| Long-context document pack | `internal/contextquality` (pure plan, generate, verify, analyze), `internal/eval/contexttask.go` (submission), `internal/record/context_quality.go` (sealing), `fitr run --context-tiers` (direct collection), owned fitting in `cmd/fitr` | CLI, JSON, HTML and the TUI project the sealed phase; its wording is derived once in `internal/analysis`. Owned fitting seals one schedule for every candidate and confirms the byte floor from a fresh plan. The battery and the document pack stay separate records. See `docs/context-quality.md`. |
+| Bounded validated work | `internal/workload`, `fitr experiment workload` | `policy-repair` is the default contract. `--workflow pi-workspace` seals `fitr.pi-session.v1` against the pinned Pi 0.85.1 split-summary schedule and does not launch Pi. A Harbor reward is not the receipt. See `docs/workload-evidence.md`. |
 
 New value-taking CLI flags also belong in `takesValue` in `cmd/fitr/main.go`.
 Exercise the documented space-separated form; `--flag=value` alone can hide

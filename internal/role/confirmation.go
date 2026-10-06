@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blisspixel/fitr/internal/contextquality"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/record"
 )
@@ -25,14 +26,15 @@ const (
 // ConfirmationCandidate retains exploration identity. Fresh records occupy
 // the same ordered position, but have different run and evidence identities.
 type ConfirmationCandidate struct {
-	Model          record.ModelIdentity      `json:"model"`
-	Capacity       ConfirmationCapacity      `json:"capacity"`
-	Experiment     *record.ExperimentBinding `json:"experiment,omitempty"`
-	RuntimeBinding *record.RuntimeBinding    `json:"runtime_binding,omitempty"`
-	EvidenceSHA256 string                    `json:"evidence_sha256"`
-	RunID          string                    `json:"run_id"`
-	SeedSet        string                    `json:"seedset"`
-	StartedAt      string                    `json:"started_at"`
+	Model                 record.ModelIdentity      `json:"model"`
+	Capacity              ConfirmationCapacity      `json:"capacity"`
+	Experiment            *record.ExperimentBinding `json:"experiment,omitempty"`
+	RuntimeBinding        *record.RuntimeBinding    `json:"runtime_binding,omitempty"`
+	EvidenceSHA256        string                    `json:"evidence_sha256"`
+	ContextEvidenceSHA256 string                    `json:"context_evidence_sha256,omitempty"`
+	RunID                 string                    `json:"run_id"`
+	SeedSet               string                    `json:"seedset"`
+	StartedAt             string                    `json:"started_at"`
 }
 
 type ConfirmationCheck struct {
@@ -74,6 +76,11 @@ type ConfirmationPlan struct {
 	Protocol                  ConfirmationProtocol    `json:"protocol"`
 	PreferencePolicy          string                  `json:"preference_policy"`
 	RelativeWeightSensitivity float64                 `json:"relative_weight_sensitivity"`
+	// ContextPolicy is the fresh document-context schedule. It is empty for a
+	// battery-only role, and its digest is never the exploration schedule.
+	ContextPolicy     *contextquality.Policy `json:"context_policy,omitempty"`
+	ContextPlanSHA256 string                 `json:"context_plan_sha256,omitempty"`
+	ContextCells      int                    `json:"context_cells,omitempty"`
 }
 
 // NewConfirmationPlan accepts validated canonical exploration records from
@@ -81,12 +88,34 @@ type ConfirmationPlan struct {
 // paired seed. The caller must persist issuance before collecting evidence.
 // This establishes fresh generated instances, not held-out task families.
 func NewConfirmationPlan(spec Spec, exploration []*record.Record, chosenEvidenceSHA256 string, now time.Time) (ConfirmationPlan, error) {
+	return newConfirmationPlan(spec, exploration, nil, chosenEvidenceSHA256, now)
+}
+
+// NewConfirmationPlanWithContext freezes a fresh document-context schedule
+// beside the battery protocol. The exploration context records screen the
+// floor; they are not the confirmation plan, and a battery record alone
+// cannot stand in for them.
+func NewConfirmationPlanWithContext(spec Spec, exploration, contextPoints []*record.Record, chosenEvidenceSHA256 string, now time.Time) (ConfirmationPlan, error) {
+	return newConfirmationPlan(spec, exploration, contextPoints, chosenEvidenceSHA256, now)
+}
+
+func newConfirmationPlan(spec Spec, exploration, contextPoints []*record.Record, chosenEvidenceSHA256 string, now time.Time) (ConfirmationPlan, error) {
 	digest, err := spec.Digest()
 	if err != nil {
 		return ConfirmationPlan{}, err
 	}
 	if now.IsZero() || len(exploration) < 2 || len(exploration) > 4 {
 		return ConfirmationPlan{}, errors.New("role confirmation requires a current time and two to four exploration records")
+	}
+	floor, err := UsableContextFloor(spec)
+	if err != nil {
+		return ConfirmationPlan{}, err
+	}
+	if floor != nil && len(contextPoints) == 0 {
+		return ConfirmationPlan{}, errors.New("usable-context confirmation requires exploration context evidence from the owned fitting; a battery record alone cannot confirm the floor")
+	}
+	if floor == nil && len(contextPoints) != 0 {
+		return ConfirmationPlan{}, errors.New("context evidence requires a usable-context floor")
 	}
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
@@ -101,12 +130,25 @@ func NewConfirmationPlan(spec Spec, exploration []*record.Record, chosenEvidence
 	if err := plan.setExploration(exploration); err != nil {
 		return ConfirmationPlan{}, err
 	}
-	review, err := evaluateConfirmationRecords(plan, exploration, now)
+	var explorationContext string
+	var policy contextquality.Policy
+	if floor != nil {
+		policy, explorationContext, err = explorationContextSchedule(plan, exploration, contextPoints)
+		if err != nil {
+			return ConfirmationPlan{}, err
+		}
+	}
+	review, err := evaluateConfirmationRecords(plan, exploration, contextPoints, explorationContext, now)
 	if err != nil {
 		return ConfirmationPlan{}, err
 	}
 	if review.State != "confirmed" {
 		return ConfirmationPlan{}, errors.New("preselected candidate is not a conclusive exploration lead")
+	}
+	if floor != nil {
+		if err := plan.bindFreshContext(policy, explorationContext, contextPoints); err != nil {
+			return ConfirmationPlan{}, err
+		}
 	}
 	plan.PlanSHA256, err = confirmationDigest(ConfirmationPlanSchema, plan)
 	if err != nil {
@@ -116,6 +158,22 @@ func NewConfirmationPlan(spec Spec, exploration []*record.Record, chosenEvidence
 		return ConfirmationPlan{}, err
 	}
 	return cloneConfirmation(plan)
+}
+
+func (plan *ConfirmationPlan) bindFreshContext(policy contextquality.Policy, explorationContext string, contextPoints []*record.Record) error {
+	if err := plan.sealFreshContext(policy); err != nil {
+		return err
+	}
+	if plan.ContextPlanSHA256 == explorationContext {
+		return errors.New("confirmation context plan reused the exploration schedule")
+	}
+	for index := range plan.Candidates {
+		if contextPoints[index] == nil || contextPoints[index].Completion == nil {
+			return errors.New("exploration context evidence is incomplete")
+		}
+		plan.Candidates[index].ContextEvidenceSHA256 = contextPoints[index].Completion.EvidenceSHA256
+	}
+	return nil
 }
 
 func (plan *ConfirmationPlan) setExploration(results []*record.Record) error {
@@ -159,6 +217,11 @@ func confirmationProtocolFrom(result *record.Record, seedSet string) (Confirmati
 		EffectiveContext: *result.DeviceV2.Context.EffectiveTokens, Repeats: result.Repeats,
 		Provenance: *result.Manifest.Provenance, TaskPlan: result.TaskPlan,
 	}
+	// A battery that already carried a context phase must not become the
+	// confirmation schedule. That phase is collected again from a fresh seed.
+	if protocol.TaskPlan.ContextCells != 0 || protocol.TaskPlan.ContextPlanSHA256 != "" {
+		return ConfirmationProtocol{}, errors.New("exploration battery carries a context schedule; confirmation collects that phase as its own fresh plan")
+	}
 	counts := make(map[string]int)
 	for _, check := range result.Checks {
 		round := counts[check.TaskID]
@@ -198,6 +261,9 @@ func (plan ConfirmationPlan) Validate() error {
 		return err
 	}
 	if err := plan.validateCandidates(created); err != nil {
+		return err
+	}
+	if err := plan.validateDocumentContext(); err != nil {
 		return err
 	}
 	if err := plan.Protocol.validate(plan.SeedSet); err != nil {

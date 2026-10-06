@@ -145,12 +145,14 @@ ports: Lemonade moved to **13305**, Foundry Local is dynamic by design.
 
 ## Do not rebuild what exists
 
-- **Harbor** (`uv tool install harbor`) is the official Terminal-Bench 2.0
-  runner and carries a 75-dataset registry that is a ready-made cost ladder:
-  `hello-world` (1) -> `terminal-bench-sample` (10) -> `compilebench` (15) ->
-  `bfcl_parity` (123) -> `strongreject` (150) -> `swebench-verified` (500).
-  Shell out to it; reserve our own tests for the plumbing and config failures
-  Harbor does not look at -- which is exactly where we differentiate.
+- **Harbor** (`uv tool install harbor`) is the official Terminal-Bench runner.
+  The repository is now `harbor-framework/harbor`. Do not reimplement its task
+  registry. A Harbor reward is also not a fitr verdict: the default Docker
+  compose file still has no route from an in-container agent to a host
+  listener on Linux, and the reward does not bind fitr's runtime artifact.
+  The pinned local workflow in the roadmap seals its own receipt and drives
+  one pinned Pi session. It does not vendor Harbor. The August dataset ladder
+  is not in the current Harbor README.
 - **`llama-fit-params`** already prints the optimal `-ngl` / `-c` / `-ot` for a
   host free memory. Call it or replicate it, then benchmark *that* config.
 - **`llama-results --check`** gives NMSE-based regression detection at 1e-6 when

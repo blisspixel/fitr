@@ -285,16 +285,18 @@ blocked. No model requests were made. This is a bounded client compatibility
 finding, not complete Hermes acceptance or an OS network-confinement claim.
 
 The proposed [Fit and Extended fit scopes](personal-fitting.md#fit-and-extended-fit)
-separate connector acceptance from model-plus-harness task evaluation. A Pi
-SDK workflow with externally verified state, actual compaction and exact
-checkpoint restart is being prototyped with fake model responses first.
-The pinned Pi 0.85.1 prototype passed nine separate process cases covering
-normal tool state, built-in compaction, exact reopening, four checkpoint-tamper
-rejections, cancellation and provider errors. It uses restricted resources and
-tools with a fake provider; this proves harness wiring, not model retention or
-task quality. A native fitr adapter must still account for all requests: a
-split compaction can make two summary calls, ordinary turns may omit an output
-cap, and a canceled callback can arrive already aborted before admission.
+separate connector acceptance from model-plus-harness task evaluation. fitr
+now seals that second scope as an in-process session, `fitr.pi-session.v1`,
+on `fitr experiment workload --workflow pi-workspace`. The schedule was
+checked against Pi 0.85.1 at
+`d981de1229ef899957bbe968bc8dcda02a21f477`: a split turn generates two
+summaries, both count against one request budget, and the reopen turn is
+mandatory. The verifier reads the workspace files and the summary digests. A
+fake provider cannot establish the measurement. This process does not launch
+Pi, and the MCP extension row above stays unaccepted. A recorded Pi process
+and a recorded native local-model trial remain open. The earlier private
+prototype of nine fake-response process cases is not this receipt and is not
+replayed here.
 
 The legacy SDK [initialization path](https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.29.0/src/client/index.ts)
 is incompatible with fitr's modern-only server. Hermes now has the negative
@@ -309,13 +311,11 @@ tested.
    must accept read-only annotations without relaxing trust and pass an explicit
    three-tool allowlist. Exercise canonical and managed evidence, invalid
    arguments, idle keepalive, cancellation and bounded shutdown without an LLM.
-2. **Prototype one Pi Extended fit workflow.** Use the pinned SDK with
-   explicit resources, restricted tools and a native fitr model adapter.
-   First prove normal turns, built-in compaction and exact session reopening
-   with deterministic fake responses. Then evaluate a constrained workspace
-   task through the owned local runtime, with an independent verifier and one
-   budget across turns, summaries and restart. This is a model-plus-adapter
-   workflow, separate from Pi's default provider or MCP-extension support.
+2. **Keep the pinned session separate from Pi itself.** `fitr.pi-session.v1`
+   already seals one budget, both split summaries, the checkpoint reopen, and
+   the independent file verifier. Do not treat that adapter as Pi MCP
+   acceptance or as a recorded Pi process. The open exit is a recorded trial
+   through the pinned Pi process and a recorded native local-model trial.
 3. **Explain the remaining host gaps.** Record OpenClaw and DeepSeek protocol
    failures honestly. Consider an explicit CLI integration while awaiting a
    compatible client, with a fixed redacted projection or explicit disclosure
@@ -326,12 +326,11 @@ tested.
    cannot establish local fit or justify starting a sandbox.
    A Pi MCP extension can separately expose the bounded read-only tools when
    that connector is needed; it requires its own binary acceptance.
-4. **Evaluate one bounded model-plus-harness workflow.** Seal the harness
-   build, effective provider configuration, tool surface, task/verifier,
-   context and runtime/artifact identity. Count auxiliary requests and every
-   retry, verify final effects independently, and test interruption and
-   compaction. A tool connection, successful exit or model claim cannot earn
-   workflow quality. Require fresh role confirmation before selection.
+4. **Record the native trial before any role floor.** The sealed session
+   already counts both summary requests, rejects a repeated write, and refuses
+   a Harbor reward. A tool connection, a model `DONE`, or this adapter cannot
+   earn workflow quality for a role. Require a recorded native local-model
+   trial, then fresh role confirmation, before selection.
 5. **Add deployment or A2A only for a demonstrated need.** HTTP service
    exposure, credentials, shared-route changes and abort semantics introduce
    separate authority boundaries. Keep them outside the read-only profile.

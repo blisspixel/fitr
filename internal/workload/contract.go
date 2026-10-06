@@ -57,11 +57,13 @@ func (contract *WorkflowContract) SupportedForWorkflow(workflow string) bool {
 	switch workflow {
 	case WorkflowID:
 		return *contract == policyRepairContract()
-	case "generalized", "pi-workspace":
+	case "generalized":
 		return contract.Schema == "fitr.workload.contract.v1" &&
 			contract.ScenarioSHA256 != "" && contract.ToolsSHA256 != "" &&
 			contract.Verifier != "" && contract.Proof.Valid() &&
 			contract.Authority != "" && contract.Isolation != ""
+	case PiWorkflowID:
+		return piContractSupported(contract)
 	default:
 		return false
 	}

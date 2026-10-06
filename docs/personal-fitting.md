@@ -2,11 +2,14 @@
 
 fitr is a tailor for local AI: it turns a general-purpose model into a tested
 choice for a person's work and machine. This document describes the next
-product direction. Harness task scorecards and the guided fitting flow below
-are not yet available. Usable-context floors and preferences are supported in
-roles and decisions. `fitr run --context-tiers` collects the document scorecard
-as its own run; see [context task evidence](context-quality.md) for what that
-measurement does and does not establish.
+product direction. The guided fitting flow below is not yet available.
+Usable-context floors and preferences are supported in roles and decisions.
+`fitr run --context-tiers` collects the document scorecard as its own run, and
+owned fitting can collect it beside the battery. `fitr experiment workload
+--workflow pi-workspace` seals the pinned harness session. Neither scorecard
+is a role floor by itself. See [context task evidence](context-quality.md) and
+[workload evidence](workload-evidence.md) for what each measurement does and
+does not establish.
 
 ## From an idea to an earned choice
 
@@ -39,22 +42,24 @@ The proposed interface offers two scopes within the same fitting:
 | Extended fit | Named document and harness workload scorecards, independently verified, with an explicit recovery policy for work spanning compaction or restart |
 
 Fit keeps the behavioral checks already present today. Capacity advice alone
-does not establish that full scope. Extended fit is proposed work and does not
-automatically qualify a model for unattended use. Each role can eventually
-require the scorecards relevant to its work, then apply preferences only after
-every mandatory floor passes.
+does not establish that full scope. The document scorecard and the pinned
+pi-workspace session can be collected. Neither automatically qualifies a
+model for unattended use. Each role can eventually require the scorecards
+relevant to its work, then apply preferences only after every mandatory floor
+passes.
 
-Pi is a useful first candidate for an Extended fit workflow: a constrained
-workspace change, verified resulting files, a real compaction, and reopening
-the exact saved session without repeating a completed effect. The evidence
-must identify Pi, its model adapter, tools, task pack and settings. The pinned
-[Pi SDK](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/sdk.md)
-and [compaction contract](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/compaction.md)
-provide integration points; they do not establish fitr compatibility or model
-quality before actual acceptance. The private deterministic prototype now
-passes real compaction and exact checkpoint reopening, including tamper and
-cancellation cases. Fake responses establish those mechanics; local-model
-evaluation and independently verified task quality remain work. See the
+Pi is the first named harness behind an Extended fit workflow: a constrained
+workspace change, verified resulting files, forced split compaction, and
+reopening the exact saved session without repeating a completed effect.
+`fitr experiment workload --workflow pi-workspace` seals that session as
+`fitr.pi-session.v1`. The pin is
+[@earendil-works/pi-coding-agent 0.85.1](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/package.json)
+and its [compaction contract](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/docs/compaction.md).
+fitr checked the split-summary rule there and seals the schedule itself. The
+process does not launch Pi, so the pin is not a claim that Pi executed the
+trial. A fake provider can pass the file checks and still cannot establish
+coverage. A recorded Pi process and a recorded native local-model trial remain
+open. See [workload evidence](workload-evidence.md) and the
 [recorded boundaries](agent-interop.md#named-host-compatibility).
 
 Show separate outcomes for local screening, document context checks and each
@@ -127,10 +132,13 @@ the same charged budget; a repeated external effect fails the verifier.
 
 ## Build order and acceptance
 
-Build on the connected auto cycle with typed context-quality evidence
-and one pinned named-harness workflow. Build the guided fitting interface on
-those measurements. See [agent interoperability](agent-interop.md) for current
-host boundaries and [auto mode](auto-mode.md) for the bounded execution contract.
+The sequence is the [roadmap](../ROADMAP.md#immediate-build-order). Owned
+fitting already collects the document scorecard and confirms it from a fresh
+plan. The pinned pi-workspace session is sealed and still lacks a recorded Pi
+process and a recorded native local-model trial. Build the guided fitting
+interface on those measurements after that exit. See
+[agent interoperability](agent-interop.md) for current host boundaries and
+[auto mode](auto-mode.md) for the bounded execution contract.
 
 The extension must reject a large-window model that loses required facts, a
 fast model below any mandatory floor, changed harness evidence, lost state

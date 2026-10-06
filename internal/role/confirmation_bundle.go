@@ -34,21 +34,33 @@ type ConfirmationReport struct {
 }
 
 type ConfirmationBundle struct {
-	Schema       string             `json:"schema"`
-	Plan         ConfirmationPlan   `json:"plan"`
-	PointRecords []*record.Record   `json:"point_records"`
-	Report       ConfirmationReport `json:"report"`
+	Schema         string             `json:"schema"`
+	Plan           ConfirmationPlan   `json:"plan"`
+	PointRecords   []*record.Record   `json:"point_records"`
+	ContextRecords []*record.Record   `json:"context_records,omitempty"`
+	Report         ConfirmationReport `json:"report"`
 }
 
 // AnalyzeConfirmation validates fresh evidence against its issued plan before
 // evaluating any preference. Missing positions produce incomplete, never a
 // smaller candidate set. Invalid or substituted evidence is an error.
 func AnalyzeConfirmation(plan ConfirmationPlan, points []*record.Record, now time.Time) (ConfirmationReport, error) {
+	return AnalyzeConfirmationContext(plan, points, nil, now)
+}
+
+// AnalyzeConfirmationContext evaluates fresh battery points and, when the
+// plan sealed a document-context schedule, the paired context runs. Context
+// dispositions stay out of the battery observation counts. Quant comparison
+// stays on the battery records.
+func AnalyzeConfirmationContext(plan ConfirmationPlan, points, contextPoints []*record.Record, now time.Time) (ConfirmationReport, error) {
 	if err := plan.Validate(); err != nil {
 		return ConfirmationReport{}, err
 	}
-	if now.IsZero() || len(points) > len(plan.Candidates) {
+	if now.IsZero() || len(points) > len(plan.Candidates) || len(contextPoints) > len(plan.Candidates) {
 		return ConfirmationReport{}, errors.New("invalid confirmation time or point count")
+	}
+	if plan.ContextPolicy == nil && len(contextPoints) != 0 {
+		return ConfirmationReport{}, errors.New("context evidence requires a usable-context floor")
 	}
 	created, _ := confirmationTime(plan.CreatedAt)
 	expires, _ := confirmationTime(plan.ExpiresAt)
@@ -70,7 +82,11 @@ func AnalyzeConfirmation(plan ConfirmationPlan, points []*record.Record, now tim
 			seen[key] = true
 		}
 	}
-	return evaluateConfirmationRecords(plan, points, now)
+	expected := ""
+	if plan.ContextPolicy != nil {
+		expected = plan.ContextPlanSHA256
+	}
+	return evaluateConfirmationRecords(plan, points, contextPoints, expected, now)
 }
 
 func validateConfirmationPoint(plan ConfirmationPlan, index int, result *record.Record, now time.Time) error {
@@ -111,7 +127,7 @@ func validateConfirmationPoint(plan ConfirmationPlan, index int, result *record.
 	return nil
 }
 
-func evaluateConfirmationRecords(plan ConfirmationPlan, points []*record.Record, now time.Time) (ConfirmationReport, error) {
+func evaluateConfirmationRecords(plan ConfirmationPlan, points, contextPoints []*record.Record, contextPlanSHA256 string, now time.Time) (ConfirmationReport, error) {
 	report := ConfirmationReport{
 		Schema: ConfirmationReportSchema, Scope: ConfirmationScope, State: "incomplete", PlanSHA256: plan.PlanSHA256,
 		ChosenEvidenceSHA256: plan.ChosenEvidenceSHA256, Candidates: []Candidate{}, EvaluatedAt: now.UTC().Format(time.RFC3339Nano),
@@ -126,6 +142,16 @@ func evaluateConfirmationRecords(plan ConfirmationPlan, points []*record.Record,
 		candidate, err := confirmationEvaluation(plan.Spec, points[index])
 		if err != nil {
 			return ConfirmationReport{}, err
+		}
+		if contextPlanSHA256 != "" {
+			var contextRecord *record.Record
+			if index < len(contextPoints) {
+				contextRecord = contextPoints[index]
+			}
+			candidate, err = overlayUsableContext(candidate, plan.Spec, points[index], contextRecord, contextPlanSHA256)
+			if err != nil {
+				return ConfirmationReport{}, err
+			}
 		}
 		report.Candidates = append(report.Candidates, candidate)
 	}
@@ -227,11 +253,15 @@ func confirmationLeads(candidate Candidate, others []Candidate, preferences []Pr
 }
 
 func NewConfirmationBundle(plan ConfirmationPlan, points []*record.Record, now time.Time) (ConfirmationBundle, error) {
-	report, err := AnalyzeConfirmation(plan, points, now)
+	return NewConfirmationBundleWithContext(plan, points, nil, now)
+}
+
+func NewConfirmationBundleWithContext(plan ConfirmationPlan, points, contextPoints []*record.Record, now time.Time) (ConfirmationBundle, error) {
+	report, err := AnalyzeConfirmationContext(plan, points, contextPoints, now)
 	if err != nil {
 		return ConfirmationBundle{}, err
 	}
-	bundle := ConfirmationBundle{Schema: ConfirmationBundleSchema, Plan: plan, PointRecords: points, Report: report}
+	bundle := ConfirmationBundle{Schema: ConfirmationBundleSchema, Plan: plan, PointRecords: points, ContextRecords: contextPoints, Report: report}
 	data, err := json.Marshal(bundle)
 	if err != nil {
 		return ConfirmationBundle{}, err
@@ -250,7 +280,7 @@ func (bundle ConfirmationBundle) Validate() (ConfirmationReport, error) {
 	if err != nil {
 		return ConfirmationReport{}, err
 	}
-	rebuilt, err := AnalyzeConfirmation(bundle.Plan, bundle.PointRecords, now)
+	rebuilt, err := AnalyzeConfirmationContext(bundle.Plan, bundle.PointRecords, bundle.ContextRecords, now)
 	if err != nil {
 		return ConfirmationReport{}, err
 	}

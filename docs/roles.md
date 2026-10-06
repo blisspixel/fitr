@@ -32,10 +32,20 @@ resident-allocation limit at the declared context, expressed in GiB by
 `--memory-gb`. It does not infer that several individually fitting models
 can stay resident together.
 
+A usable-context floor is separate from that runtime window. It reads the
+verified prefix of a document-context record, not the runtime's effective
+token count. Declaring `minimum_usable_context_bytes` makes owned fitting
+require `--context-tiers`. The fitting stores that phase beside the battery
+and confirms it from a fresh plan. `fitr role confirm` does not collect the
+pack, so a battery-only file cannot clear the floor. An attached
+`fitr run --context-tiers` record can still supply the prefix to a decision
+that reads that record.
+
 Roles evaluate the existing battery evidence contract. They do not
 establish broad coding competence, full agentic-workflow reliability or
-compatibility with a named external harness. Fixed policy-repair workload
-bundles remain separate evidence. [Role confirmation](role-confirmation.md)
+compatibility with a named external harness. Fixed policy-repair bundles and
+the pinned pi-workspace session remain separate evidence. The session is a
+fitr adapter, not a claim that the Pi process ran. [Role confirmation](role-confirmation.md)
 can establish a fresh selection under the declared battery policy; it does
 not turn those screens into workflow competence evidence.
 
@@ -123,7 +133,7 @@ fitr role status coding
 fitr role rollback coding
 ```
 
-<img src="assets/selection.svg?v=0.10.15" alt="Role status fixture with a qualified incumbent and a separate failed challenger attempt" width="900">
+<img src="assets/selection.svg?v=0.11.0" alt="Role status fixture with a qualified incumbent and a separate failed challenger attempt" width="900">
 
 An explicitly connected MCP host can use `fitr_role_status` for a bounded,
 redacted observation of this incumbent, including selections from auto-managed

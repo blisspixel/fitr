@@ -132,7 +132,7 @@ usage:
   fitr experiment quant <result.json> <result.json>... --spec decision.json [--lineage conversion.json]
   fitr experiment confirm <model-a> <model-b> --spec decision.json [--ctx N] [-k N]
   fitr experiment confirm <confirmation-bundle.json> [--display MODE]
-  fitr experiment workload <model> [-n N] [--ctx N] [--backend B]
+  fitr experiment workload <model> [-n N] [--ctx N] [--workflow pi-workspace] [--backend B]
   fitr experiment workload <workload-bundle.json> [--display MODE]
   fitr experiment serving <model> [--concurrency N] [-n N] [--warmup N] [--ctx N] [--backend B]
   fitr experiment serving <serving-bundle.json> [--display MODE]
@@ -328,6 +328,7 @@ func takesValue(flagArg string) bool {
 		"context-tiers", "fit-budget-gb", "allow-license", "allow-architecture", "header-bytes",
 		"capacity-budget-gb", "capacity-reserve-gb", "model", "role", "harness", "claim", "repo", "revision", "file", "source",
 		"quality", "minimum-rate", "memory-gb", "usable-context-bytes", "max-age-days", "min-age-days", "mapping", "max-bytes", "timeout",
+		"workflow", "max-turns",
 		"models", "runtime", "mode", "adoption", "candidate", "max-wall", "confirmation-wall", "max-requests", "max-requested-output-tokens", "max-points",
 		"concurrency", "warmup":
 		return true

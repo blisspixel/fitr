@@ -315,16 +315,19 @@ so Board does not compare across those presentation-contract changes.
   exploration winner. A separate
   configuration-confirmation plan seals exact runtime artifacts, device,
   context, protocol, decision spec, and a fresh shared task seed before the
-  full paired runs. Evidence-backed limiter diagnoses, context-specific
-  confirmation, soak runs, and serving tests remain pre-1.0 experiments.
+  full paired runs. Serving concurrency is its own experiment schema and does
+  not enter ordinary rankings. Evidence-backed limiter diagnoses beyond the
+  direct receipt patterns, context-experiment confirmation, model-set
+  projections, and soak runs remain pre-1.0 experiments.
 - **Validated work starts with one fixed contract.** The policy-repair
   experiment predeclares a runtime-bound plan, uses a harness-owned virtual
   filesystem and capability-scoped tools, records monotonic per-trial events,
   runs a deterministic verifier after worker completion, and signs every
   terminal receipt. It reports all accepted, rejected, timed-out, and
-  infrastructure outcomes. It does not yet establish general user workflows,
-  retries, approvals, escalation, checkpoint recovery, or arbitrary executable
-  work.
+  infrastructure outcomes. The pinned `pi-workspace` session adds one forced
+  split-summary schedule and one checkpoint reopen, verified from files and
+  summary digests. It does not launch Pi. Neither contract establishes general
+  user workflows, retries, approvals, escalation, or arbitrary executable work.
 - **Sharing is opt-in.** `fitr export` / `--html` write a self-contained
   page with an opaque device ID and allowlisted comparison configuration. It
   omits hostnames, local paths, raw model output, the raw fingerprint key, and
@@ -344,7 +347,9 @@ key is absent.
 
 The operator chooses a per-file read bound, 32 KiB by default and at most 8 MiB,
 without automatic retries. Prefix observations and digests appear beside the
-fresh projection, while the immutable `--out` receipt remains metadata only.
+fresh projection. With `--fit` or `--screen`, the immutable `--out` receipt
+also stores the screening policy, prefix observations, and component plan.
+Older receipts without those fields keep their bytes.
 Declared weights plus modeled f16 cache exclude runtime overhead, placement
 effects and required companions. Their comparison with a component ceiling is
 not a safe-budget fit verdict. Runtime binding, local allocation and role
