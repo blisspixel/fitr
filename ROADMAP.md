@@ -112,6 +112,21 @@ output reserve the qualification rests on. Personal roles and decision
 specifications now evaluate usable-context floors and preferences. Owned auto
 collection, selection across run levels and the remaining result surfaces are
 still to be connected.
+
+- [ ] Extend the document scorecard with opt-in, token-accounted long-context
+      qualification. The current 2--64 KiB byte tiers and fixed 128-token output
+      reserve do not establish usable context near a large operating window.
+      Seal the exact artifact, quant, runtime build, endpoint and applicable
+      tokenizer or native accounting source; include system/tool overhead and
+      an explicit output reserve. Keep declared, runtime-reported, enforced and
+      demonstrated usable context separate. Reuse capacity policy and allocation
+      receipts, with time, request and resource bounds fixed before collection.
+      Untested lengths and missing accounting stay unresolved; never shrink the
+      payload, window or reserve, or substitute a route to obtain a pass.
+      Build on [boundary probes](https://github.com/blisspixel/fitr/issues/16)
+      and keep [named-harness qualification](https://github.com/blisspixel/fitr/issues/3)
+      separate from the document scorecard.
+
 The [host compatibility matrix](docs/agent-interop.md) records current protocol
 gaps before any named-harness support is claimed.
 
