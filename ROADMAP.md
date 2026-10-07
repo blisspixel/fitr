@@ -63,7 +63,6 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.15 | Source screening persistence, 1-command installer onboarding, usable-context role scorecards, runtime support profiles, component & download plans, boolean recurrent projections, generalized workflow evidence, and serving concurrency experiments |
 | Shipped | 0.11.0 | Owned fitting collects and freshly confirms the document-context scorecard. The pinned pi-workspace session seals an independent file receipt. Live oversized-prompt, Pi-process, and native local-model checks remain open. |
 | Shipped | 0.11.1 | Workload plain text keeps the sealed contract in the header and inside the terminal width. Auto status reads a sealed document schedule from its sibling store. |
-| 0.11.2 | Guided fitting and evidence/privacy corrections; live oversized-prompt and Pi-process acceptance remain open. |
 | Shipped | 0.11.2 | Guided fitting previews fixed requirements and task definitions, reuses run or owned auto collection, and keeps endpoint assessments unresolved. Checked byte conversion, endpoint identity, private check diagnoses and exact-context memory probes. |
 | Now | 0.11 | Rows 7 and 8 stay open for those live checks. The next build is the model-set experiment. |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |

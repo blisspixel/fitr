@@ -4,10 +4,55 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-10-06. The 0.11.2 candidate adds guided fitting and
-boundary corrections; its final CI, native and public-asset receipts are
-recorded here after publication. Historical sections describe their exact
-candidates, including older metadata-only source receipts.
+Last updated: 2026-10-07. The 0.11.2 receipt below covers its exact tagged
+revision and independently downloaded assets. Historical sections retain their
+original candidates, including older metadata-only source receipts.
+
+### 0.11.2 release receipt
+
+Release [0.11.2](https://github.com/blisspixel/fitr/releases/tag/v0.11.2)
+is bound to commit `dbae4e261006d0e406faf8fa25bd86fb00f93e8b`.
+[Main CI 37580869299](https://github.com/blisspixel/fitr/actions/runs/37580869299)
+passed with **81.17% aggregate coverage**, race, lint, thirteen fuzz smoke
+targets, minimum-Go compatibility, six binary builds, deterministic rebuild,
+and all three SDK and installer platform jobs. Local Windows aggregate
+coverage passed at **80.69%**. These checks cover the tagged source, including
+the guided fitting and evidence/privacy corrections.
+
+[Native acceptance 37580870132](https://github.com/blisspixel/fitr/actions/runs/37580870132)
+passed the installed-binary loop on Linux amd64 and macOS arm64 against
+checksum-pinned llama-server b10700 and both pinned GGUF artifacts. The
+[release workflow 37581388359](https://github.com/blisspixel/fitr/actions/runs/37581388359)
+repeated the release gates and all three installer jobs before uploading ten
+verified assets to the owner-created draft. The owner published the release
+on October 7 UTC.
+
+All ten independently downloaded public assets matched the workflow artifact
+byte for byte, and every entry of the nine-file checksum manifest matched.
+The downloaded Windows amd64 executable reports `fitr 0.11.2`, embeds the
+tagged revision with `vcs.modified=false`, and is **16,065,536 bytes**, below the shared **16,104,360-byte** ceiling. Public Windows SHA-256:
+`2ece6821b611aaa576c27abe2d1ca583c1dad65c54fe9591a9aac7c31bd1db8f`.
+Manifest SHA-256:
+`ee4725db6dfcbdffd8f731d8305b6cdd928d0d50d7aa225288fdfd2089b541b9`.
+
+The public Windows binary passed the raw MCP smoke and all eight official SDK
+**2.2.0** cases with the portable package's arguments, environment and working
+directory. Independent verification matched the receipt to that binary and
+all source inputs, including the plugin, dependency lock and frozen schemas.
+Receipt SHA-256:
+`c41e2ea76880bfe937c977a1caed618f557c6633bc5dfa61f163011dcf5e0037`.
+The main and tag binaries have different module versions; each receipt remains
+bound to its own binary. SDK acceptance establishes the implemented protocol
+and package contract, not named-host compatibility or model qualification.
+
+Guided fitting seals settings and task identity before collection, and the
+session phase never establishes measured context or device identity. Endpoint
+recommendation and adoption remain unresolved until canonical observation
+projection is implemented; [issue 26](https://github.com/blisspixel/fitr/issues/26)
+tracks that boundary. The oversized-prompt refusal on legacy Go and Jinja
+templates, a recorded Pi process, and a recorded native local-model
+pi-workspace trial remain open. Neither this native workflow nor SDK acceptance
+discharges those separate checks.
 
 ### 0.11.1 release receipt
 
