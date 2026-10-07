@@ -63,6 +63,8 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.10.15 | Source screening persistence, 1-command installer onboarding, usable-context role scorecards, runtime support profiles, component & download plans, boolean recurrent projections, generalized workflow evidence, and serving concurrency experiments |
 | Shipped | 0.11.0 | Owned fitting collects and freshly confirms the document-context scorecard. The pinned pi-workspace session seals an independent file receipt. Live oversized-prompt, Pi-process, and native local-model checks remain open. |
 | Shipped | 0.11.1 | Workload plain text keeps the sealed contract in the header and inside the terminal width. Auto status reads a sealed document schedule from its sibling store. |
+| 0.11.2 | Guided fitting and evidence/privacy corrections; live oversized-prompt and Pi-process acceptance remain open. |
+| Shipped | 0.11.2 | Guided fitting previews fixed requirements and task definitions, reuses run or owned auto collection, and keeps endpoint assessments unresolved. Checked byte conversion, endpoint identity, private check diagnoses and exact-context memory probes. |
 | Now | 0.11 | Rows 7 and 8 stay open for those live checks. The next build is the model-set experiment. |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Later | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -107,9 +109,11 @@ scorecard and one named harness scorecard, each independently verified.
 Preference weights apply only after every floor passes. Compaction and restart
 must preserve decisions, constraints, and completed effects under external
 verification. The [personal fitting design](docs/personal-fitting.md) separates
-that measurement from today's runtime-window requirement. The
-[context task foundation](docs/context-quality.md) already supplies the
-document pack, the verifier, the sealed phase, and `fitr run --context-tiers`.
+that measurement from today's runtime-window requirement. `fitr tailor` is a
+front door over the current auto and run paths. It seals one plan and does
+not close the live checks in rows 7 and 8. Endpoint recommendation projection
+still leaves measured facts unresolved. The
+[context task foundation](docs/context-quality.md) already supplies the document pack, the verifier, the sealed phase, and `fitr run --context-tiers`.
 A model served by Ollama's MLX runner is refused, because that runner silently
 reduces the output reserve the qualification rests on. The
 [host compatibility matrix](docs/agent-interop.md) records current protocol
@@ -129,6 +133,7 @@ A checked box shipped. An unchecked box waits in this order:
 | Step 9 | The model-set projection. Exact-context `OTHER` is learned from matched allocation receipts and is never a guessed percentage. |
 | Beside the fitting, before any server restart | Read-only tune steps: listener inspection separate from ownership, per-key configuration provenance, an ownership report, then `--no-mutate`, then `tune --scratch` on a fitr-owned instance. |
 | After a measured candidate can be promoted | Source-claim extraction, a research citation that cannot become a floor, a pull-ownership record written before any fetch, then a non-ranked catalog. The deleter waits on that record. See [keeping a machine current](#later-keeping-a-machine-current). |
+| After the fixed-configuration tailor path | An optional local decision assistant. It may explain tradeoffs among options the plan already declared, ask which constraint the operator wants to change, or draft a finite search the operator approves. It is not a requirement. It does not close rows 7 and 8, and it does not enter rows 9 through 12. A suggestion is not a verdict, not fresh confirmation, and not a measurement. It cannot certify a winner, rewrite the sealed goal, walk context downward, or change the user's serving runtime. Component arithmetic still stands with no model in the loop. Shipping it needs its own receipt: why each drafted option was offered, which constraints stayed mandatory, and which operator approval changed a constraint. This is separate from the discovery small-model assist below. |
 | After 1.0 | Trust C confinement, release signing, and calibrated profile provenance. |
 | When its own receipt exists | Intervention-supported limiter diagnoses, scoring fitr's own capacity predictions, stable selectors before `compare --ctx`, a device requirement brief, and resolved llama.cpp offload evidence. None of these enters a verdict early, and none jumps the fitting queue. |
 
@@ -149,6 +154,20 @@ Optional OpenRouter validation can develop adversarial cases and grader
 calibration alongside this sequence. It remains experiment-scoped, explicitly
 invoked, spending-capped, and outside the local FIT and PERFORMANCE trust
 boundary. Normal use, offline tests, CI, and releases never depend on it.
+
+- [ ] Extend the document scorecard with opt-in, token-accounted long-context
+      qualification. The current 2--64 KiB byte tiers and fixed 128-token output
+      reserve do not establish usable context near a large operating window.
+      Seal the exact artifact, quant, runtime build, endpoint and applicable
+      tokenizer or native accounting source; include system/tool overhead and
+      an explicit output reserve. Keep declared, runtime-reported, enforced and
+      demonstrated usable context separate. Reuse capacity policy and allocation
+      receipts, with time, request and resource bounds fixed before collection.
+      Untested lengths and missing accounting stay unresolved; never shrink the
+      payload, window or reserve, or substitute a route to obtain a pass.
+      Build on [boundary probes](https://github.com/blisspixel/fitr/issues/16)
+      and keep [named-harness qualification](https://github.com/blisspixel/fitr/issues/3)
+      separate from the document scorecard.
 
 ## What the second machine changed
 
@@ -1144,7 +1163,20 @@ Design constraints, in priority order:
 - [ ] **Optional small-model assist.** Once any model is installed, use it to
       read fetched text and to turn a stated need into filters. Availability
       is an enhancement, never a requirement; it must work on a small machine
-      across Windows, macOS, and Linux.
+      across Windows, macOS, and Linux. This assist reads source text. It is
+      not the tailor decision assistant, which waits until the
+      fixed-configuration fitting path is sound and still cannot certify a
+      winner or change the serving runtime.
+- [ ] **Optional tailor decision assistant.** After that fixed path, a local
+      model may explain tradeoffs, ask which constraint to change, or draft a
+      predeclared finite search for the operator to approve. It does not close
+      the live checks in rows 7 and 8, and it does not enter the model-set,
+      soak, coverage, or clean-machine rows. The model does not certify a
+      winner, rewrite a sealed goal, invent a measurement, walk context
+      downward, or change the user's serving runtime. Before it can ship, a
+      receipt has to record why each drafted option was offered, which
+      constraints stayed mandatory, and which operator approval changed a
+      constraint. Fit arithmetic still runs with no model in the loop.
 
 ## Later: keeping a machine current
 
@@ -1509,6 +1541,7 @@ These features must preserve the evidence contract.
 | 0.10.15 | Source screening persistence, 1-command installer onboarding, usable-context role scorecards, runtime support profiles, component & download plans, boolean recurrent projections, generalized workflow evidence, and serving concurrency experiments |
 | 0.11.0 | Owned document-context collection and fresh confirmation inside fitting, and the pinned pi-workspace session. Live oversized-prompt, Pi-process, and native local-model checks remain open. |
 | 0.11.1 | Workload plain text keeps the sealed contract in the header and inside the terminal width. Auto status reads a sealed document schedule from its sibling store. |
+| 0.11.2 | Guided fitting and evidence/privacy corrections; live oversized-prompt and Pi-process acceptance remain open. |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).
