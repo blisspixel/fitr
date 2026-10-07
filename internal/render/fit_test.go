@@ -20,6 +20,7 @@ func TestWriteContextFitPlain(t *testing.T) {
 	for _, want := range []string{
 		"4096", "32768", "compatible", "incompatible", "n/a", "24.8",
 		"suggested", "other n/a", "budget 20.0 GB (--vram-gb)", "ROOM is derived",
+		"weights-plus-KV projection is not measured quality",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("plain fit table missing %q:\n%s", want, got)

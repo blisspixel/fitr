@@ -1,6 +1,15 @@
 package main
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
+
+func TestGiBBytesRejectsRoundedOverflow(t *testing.T) {
+	if value, err := gibBytes(float64(math.MaxInt64) / (1 << 30)); err == nil {
+		t.Fatalf("capacity conversion overflowed to %d", value)
+	}
+}
 
 func TestOptionalNonnegativeGiBBytesPreservesZeroReserve(t *testing.T) {
 	zero := 0.0

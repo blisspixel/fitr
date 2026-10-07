@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -191,9 +190,5 @@ func optionalNonnegativeGiBBytes(value *float64) (*int64, error) {
 }
 
 func gibBytes(gb float64) (int64, error) {
-	bytes := gb * advise.GiB
-	if gb <= 0 || math.IsNaN(bytes) || math.IsInf(bytes, 0) || bytes > math.MaxInt64 {
-		return 0, errors.New("capacity value is outside the supported byte range")
-	}
-	return int64(math.Round(bytes)), nil
+	return capacity.GiBBytes(gb, true)
 }

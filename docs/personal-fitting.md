@@ -1,8 +1,74 @@
 # A personal fitting for local AI
 
 fitr is a tailor for local AI: it turns a general-purpose model into a tested
-choice for a person's work and machine. This document describes the next
-product direction. The guided fitting flow below is not yet available.
+choice for a person's work and machine. The guided entry is `fitr tailor`.
+It seals one plan for the work, the candidates, the context, the effective
+task definitions and one capacity policy, then either measures that plan through an explicit local endpoint or,
+when the policy is a reserve and an owned runtime is approved, hands the same
+settings to `fitr auto`. It does not download models, stop an existing Ollama,
+or translate an absolute ceiling into the owned runtime's reserve. A single
+candidate stays a non-comparative assessment. The endpoint assessment measures
+resident allocation at the planned context. Start and resume refuse task
+changes after preview; draft a new plan to approve new task definitions.
+Session changes hold one lease for the whole command. The results root may
+have an operator-selected alias, while managed directories and session files
+must remain physical. Text and JSON status name the delegated auto session
+so its measured facts remain reachable.
+
+The workload is sealed before the settings are treated as an answer. A preset
+such as repository planning, agentic coding, code review, document research,
+or structured extraction expands into visible mandatory requirements,
+recommendations, and preferences. The preset name is not the requirement.
+Desired context stays the operator's number: a successful 32768-token run does
+not satisfy a 250000-token goal, and a 59392-token window is not eligible for
+a harness floor of 64000. Meeting a harness floor does not establish a larger
+desired workflow. Weight quantization, such as Q4_K_M, and KV-cache precision,
+such as q8_0, are separate fields. q8_0 reduces cache memory relative to f16
+and does not halve total model and runtime memory. `--kv q8_0` records that
+cache type and records flash attention as required on the plan. Quantized
+KV is refused without that request. The record does not enable flash
+attention on a server that is already running, and a client environment
+variable does not prove the server applied the cache type. A configured
+window with the short battery prompt is not populated-context qualification. Document
+tiers remain payload bytes. A predeclared search can reject rows, and it does
+not walk the context downward or adopt another row. No eligible configuration
+is a legitimate result. Cloud is not an automatic substitute.
+
+`fitr tailor` status, in text and JSON, carries one recommendation receipt,
+`fitr.recommendation.v1`. It currently describes the planned candidate names,
+endpoint, configuration and workload. It does not yet project canonical
+observations into the recommendation: device identity and tested context stay
+absent, and the recommendation stays unresolved even after collection. A
+completed point or delegated phase cannot establish those facts. Inspect the
+canonical measurements or the delegated `fitr auto status` for measured facts. Projected memory fit,
+loading, measured performance, behavioral reliability, and harness
+qualification stay separate. A model that loads and answers a simple prompt
+while failing a required tool or coding workflow stays unqualified. The
+recommendation policy keeps passed, failed and unresolved classes separate;
+the current status receipt leaves them unresolved until observations are wired
+into that projection.
+A weights-plus-KV projection is not tested long-context quality. Unknown
+runtime overhead, an unverified cache type, a skipped executable test, and a
+small sample stay on the receipt. Conflicting constraints are shown as
+tradeoffs. The requested context is not lowered, paid compute is not
+substituted, and a quality floor is not relaxed to produce a winner. No
+qualified candidate is a result.
+
+Qwen3.6-27B card figures, when the candidate or `--model-card qwen3.6-27b`
+names that card, stay labeled as card statements: 262144 native context,
+extension toward 1010000 tokens with the appropriate setup, and a vendor
+recommendation of at least 128K to preserve thinking. They are not proof that
+a quantized build on one GPU delivers them. The Hermes Ollama floor recorded
+here is the 64000-token minimum documented by
+[Hermes Agent](https://hermes-agent.nousresearch.com/docs/guides/local-ollama-setup)
+for agentic work. The card statements were checked against the
+[Qwen3.6-27B publisher card](https://huggingface.co/Qwen/Qwen3.6-27B) on
+2026-10-06.
+Hardware and the serving runtime are discovered for the machine under test.
+Context, weight precision, KV precision, and the capacity budget stay
+operator settings. A measurement from one GPU is a validation case, not a
+product default.
+
 Usable-context floors and preferences are supported in roles and decisions.
 `fitr run --context-tiers` collects the document scorecard as its own run, and
 owned fitting can collect it beside the battery. `fitr experiment workload
@@ -31,6 +97,16 @@ already support the beginning of this flow. The connected bounded auto cycle
 adds owned Windows runtime collection and confirmation in 0.10.11.
 Search-driven shortlisting, automatic discovery and
 scheduled reassessment remain future work.
+
+A local decision model is not part of the fitting that ships. After the
+fixed-configuration path, an optional assistant may explain tradeoffs among
+options the plan already declared, ask which constraint the operator wants
+to change, or draft a finite search for the operator to approve. A suggestion
+is not a quality verdict, not fresh confirmation, and not a substitute for
+the sealed plan. It does not certify a winner, rewrite the goal, walk the
+context downward, or change the serving runtime. Fit arithmetic still runs
+with no model in the loop. The assistant stays out of the open live checks
+and out of the model-set, soak, coverage, and clean-machine acceptance work.
 
 ## Fit and Extended fit
 
@@ -65,10 +141,12 @@ open. See [workload evidence](workload-evidence.md) and the
 Show separate outcomes for local screening, document context checks and each
 harness workload. A failed challenger preserves a qualified incumbent. A
 successful harness test cannot erase a failed capacity or behavioral floor.
-Before work starts, the fitting should preview the role, shortlist, required
-outcomes, allowed tools and complete allowance, including fresh confirmation.
-Existing auto status and the terminal's live/result views should carry this
-flow, rather than adding a second command tree.
+Before work starts, `fitr tailor` previews the role, candidates, required
+outcomes, context, capacity policy, schedule, repeats, retention, and
+permitted actions. It reuses the role schema, the auto journal when an owned
+runtime is approved, and the existing renderers. It is not a second
+measurement engine. Fresh confirmation stays a later seed, and resume does
+not mint one.
 
 See [model comparison](model-comparison.md) for how public discovery signals,
 personal quality gates, uncertainty and cost fit into this flow.
@@ -135,10 +213,10 @@ the same charged budget; a repeated external effect fails the verifier.
 The sequence is the [roadmap](../ROADMAP.md#immediate-build-order). Owned
 fitting already collects the document scorecard and confirms it from a fresh
 plan. The pinned pi-workspace session is sealed and still lacks a recorded Pi
-process and a recorded native local-model trial. Build the guided fitting
-interface on those measurements after that exit. See
-[agent interoperability](agent-interop.md) for current host boundaries and
-[auto mode](auto-mode.md) for the bounded execution contract.
+process and a recorded native local-model trial. `fitr tailor` is the guided
+front door over the fitting that exists today. It does not close those live
+checks. See [agent interoperability](agent-interop.md) for current host
+boundaries and [auto mode](auto-mode.md) for the bounded execution contract.
 
 The extension must reject a large-window model that loses required facts, a
 fast model below any mandatory floor, changed harness evidence, lost state

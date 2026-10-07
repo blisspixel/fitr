@@ -79,6 +79,7 @@ func WriteContextFit(w io.Writer, table ContextFit, mode string) {
 		fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, SingleLine(table.Note)))
 	}
 	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, "* suggested   > requested   ? unproven   other n/a without matched total"))
+	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, "weights-plus-KV projection is not measured quality"))
 	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, "decode/prefill only from a saved run at that exact window"+g.Dot+"never invented"))
 }
 

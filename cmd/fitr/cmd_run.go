@@ -18,6 +18,7 @@ import (
 	"github.com/blisspixel/fitr/internal/contextquality"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
+	"github.com/blisspixel/fitr/internal/fitting"
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/lock"
 	"github.com/blisspixel/fitr/internal/ollama"
@@ -475,9 +476,11 @@ func writeRunContextHint(ctx context.Context, c llm.Backend, command runCommand,
 	if fit <= 0 {
 		return
 	}
-	fmt.Fprintf(os.Stderr,
-		"         fitr run %s --ctx %d   this device fits a %d-token window; measured at %d\n",
-		terminalText(res.Model), fit, fit, requested)
+	sentence := fitting.UntestedContextProjection(fit, requested)
+	if sentence == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "         fitr run %s --ctx %d   %s\n", terminalText(res.Model), fit, sentence)
 }
 
 func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,

@@ -4,9 +4,26 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-09-13 for the 0.10.14 receipt. Later source-receipt
-behavior is in [source resolution](source-resolution.md). Sentences in the
-0.10.14 section that say `--out` saves metadata only describe that candidate.
+Last updated: 2026-10-06. The 0.11.2 candidate adds guided fitting and
+boundary corrections; its final CI, native and public-asset receipts are
+recorded here after publication. Historical sections describe their exact
+candidates, including older metadata-only source receipts.
+
+### 0.11.1 release receipt
+
+Release [0.11.1](https://github.com/blisspixel/fitr/releases/tag/v0.11.1)
+is bound to commit `d80a02228f567df378ee9cd41ea9e3d244b04592`.
+[Main CI 37479057731](https://github.com/blisspixel/fitr/actions/runs/37479057731)
+passed with **81.41% aggregate coverage**.
+[Native acceptance 37479761179](https://github.com/blisspixel/fitr/actions/runs/37479761179)
+passed, and [release workflow 37480416960](https://github.com/blisspixel/fitr/actions/runs/37480416960)
+passed before publication on October 6. These receipts cover that revision;
+they do not cover later guided-fitting edits.
+
+The live oversized-prompt refusal on legacy Go and Jinja templates, a
+recorded Pi process, and a recorded native local-model pi-workspace trial
+remain open. The native acceptance workflow's llama-server loop does not
+establish those separate checks.
 
 ### 0.10.14 release receipt
 

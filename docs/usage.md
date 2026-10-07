@@ -87,12 +87,58 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.11.1" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.11.1" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.11.1" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.11.1" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.11.2" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.11.2" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.11.2" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.11.2" alt="fitr top (demo data)" width="820">
 
 ### Bounded fitting
+
+`fitr tailor` is the guided entry. `tailor plan` records the role, the
+required outcomes, the installed candidates, the context window, and exactly
+one capacity policy. `tailor start --approve-plan` measures that sealed plan.
+Without `--approve-owned-runtime`, the assessment uses the selected Ollama endpoint and
+does not launch a private server. Two to four candidates, a reserve, and
+`--approve-owned-runtime` hand the same context and reserve to `fitr auto`.
+Start refuses an owned runtime file that still has the 8192 token and 2 GiB
+inspection defaults, and it does not rewrite that file.
+
+An absolute ceiling is not a reserve subtracted from free memory, and it is
+not written to `OLLAMA_GPU_OVERHEAD`. fitr uses `OLLAMA_BASE_URL`. The Ollama
+CLI uses `OLLAMA_HOST`. Pass `--endpoint` when they name different clients.
+Loopback is not proof that inference ran locally. An explicit endpoint does
+not depend on discovering another backend.
+
+The preview lists candidates, context, KV settings, the resource policy, the
+task schedule, repeats, the confirmation rule, retention, and permitted
+actions. `--workload` expands a preset into those visible requirements.
+`--desired-context` is the working context the operator asked for, and
+`--context-meaning` says whether that number is the total window or usable
+input. A smaller `--ctx` does not satisfy it. `--harness hermes` keeps the
+documented 64000-token Ollama floor; 59392 is not an eligible recommendation
+for that floor. `--weight-quant` is the declared weight quantization.
+`--kv` is the requested cache precision. `--kv q8_0` also records flash
+attention as required on the sealed plan, because quantized KV is refused
+without that request. The flag does not enable flash attention on a server
+that is already running, and it does not prove the server applied either
+setting. `--scope screen` collects screening and does
+not qualify a coder or a populated long-context workload.
+A rate floor the repeats cannot establish, even if every check passed, stops
+the plan before inference and is not lowered. Document tiers are payload
+bytes, not a token-window search.
+
+`tailor status` and `tailor resume` show the phase, completed evidence
+points, and the remaining decision. Resume does not mint a confirmation seed
+or rerun a finished point. `tailor adopt --approve-adoption` records a fitr
+role selection only, and only for a finished owned fitting. It does not
+change an Ollama alias, configure an external agent, or restart a runtime.
+A finished endpoint assessment stays unresolved. The current recommendation
+receipt does not yet project canonical measurements, and leaves device identity
+and tested context absent. A session phase cannot supply them. Use the canonical
+records or the delegated `fitr auto status` for measured facts. The memory
+probe uses the planned context. Changing task definitions after preview
+requires a new plan before start or resume. Failed checks keep the task, seed, parser, field, verifier,
+and hashes. The response is not retained and is not reconstructed.
 
 `fitr auto` collects an explicit installed shortlist for one role under a fixed
 runtime configuration. The first runtime owner supports Windows CPU-only
@@ -192,6 +238,7 @@ of installed RAM as an unconditional model budget.
 | Command | Does |
 |---|---|
 | `fitr` | installed inventory: measured / unproven / incompatible / stale, fit windows, and the one thing to do next on each row |
+| `fitr tailor plan\|start\|status\|resume\|adopt` | one resumable fitting for this machine and this work; see [personal fitting](personal-fitting.md) |
 | `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N] [--capacity-budget-gb N\|--capacity-reserve-gb N]` | measure a model; optionally seal an explicit safe-capacity policy before loading; checks-only runs the generated battery for calibration |
 | `fitr run <model> --context-tiers <bytes,bytes[,...]> [--ctx N]` | collect one document-task phase at a fixed window instead of the ordinary battery; Ollama only; see [context quality](context-quality.md) |
 | `fitr [model]` / `fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]` | no model: inventory. With a model: does it fit, and if not, which flag to try |

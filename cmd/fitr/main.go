@@ -145,6 +145,8 @@ usage:
   fitr auto runtime <ollama.exe> --models <directory> --out runtime.json
   fitr auto start <role> --mode establish|improve --runtime runtime.json --candidate <model> --candidate <model>
   fitr auto status|resume|adopt <session-id>
+  fitr tailor plan --role <name> --outcome <need> --candidate <model> --ctx N (--capacity-budget-gb N | --capacity-reserve-gb N)
+  fitr tailor start|status|resume|adopt <session-id>
   fitr mcp serve
   fitr source resolve hf --repo <owner/model> --revision <revision> --file <path> --out <receipt.json>
   fitr source show <receipt.json> [--display MODE]
@@ -264,7 +266,7 @@ func commandHandler(name string) commandFunc {
 		return cmdCalibrate
 	case "compare":
 		return cmdCompare
-	case "decide", "discover", "role", "experiment", "cleanup", "mcp", "source", "artifact", "auto":
+	case "decide", "discover", "role", "experiment", "cleanup", "mcp", "source", "artifact", "auto", "tailor":
 		return planningCommandHandler(name)
 	case "screenshots": // dev-only: regenerate docs/assets from mock data
 		return cmdScreenshots
@@ -282,6 +284,8 @@ func planningCommandHandler(name string) commandFunc {
 		return cmdRole
 	case "auto":
 		return cmdAuto
+	case "tailor":
+		return cmdTailor
 	case "mcp":
 		return cmdMCP
 	case "source":
@@ -330,7 +334,12 @@ func takesValue(flagArg string) bool {
 		"quality", "minimum-rate", "memory-gb", "usable-context-bytes", "max-age-days", "min-age-days", "mapping", "max-bytes", "timeout",
 		"workflow", "max-turns",
 		"models", "runtime", "mode", "adoption", "candidate", "max-wall", "confirmation-wall", "max-requests", "max-requested-output-tokens", "max-points",
-		"concurrency", "warmup":
+		"endpoint", "outcome", "scope", "kv",
+		"desired-context", "minimum-context", "context-meaning", "harness-version", "harness-min-context",
+		"weight-quant", "weight-preference", "weight-minimum", "workload", "model-card",
+		"reserve-system-tokens", "reserve-output-tokens", "reserve-reasoning-tokens",
+		"projected-resident-gb", "concurrency", "alternative-ctx", "kv-permitted",
+		"warmup":
 		return true
 	}
 	return false

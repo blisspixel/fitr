@@ -87,6 +87,7 @@ type Run struct {
 	Warnings        []string         `json:"warnings"`
 	Verdicts        []Verdict        `json:"verdicts"`
 	NextCommand     string           `json:"next_command"`
+	Claims          []string         `json:"-" presentation:"local"`
 }
 
 // Comparison is an exact-value preview between two saved runs. It never

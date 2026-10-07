@@ -32,10 +32,11 @@ missing. An unmeasured model stays a candidate, not a recommendation.
 Each role has its own requirements and preferences. A coding agent, daily
 driver and classifier need different fittings. Quality requirements come
 first; speed and resource preferences help choose among models that meet them.
-See the [personal fitting direction](docs/personal-fitting.md) for the proposed
-Fit and Extended fit scopes, usable context, compaction and harness scorecards.
+See [personal fitting](docs/personal-fitting.md) for `fitr tailor`, usable
+context, compaction, and harness scorecards. The live oversized-prompt, Pi
+process, and native local-model checks remain open.
 
-<img src="docs/assets/top.svg?v=0.11.1" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
+<img src="docs/assets/top.svg?v=0.11.2" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
 The wide Board keeps the comparable configurations, selected evidence, exact
 measurements, unresolved requirements, and one next action on one screen. The
@@ -88,7 +89,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.11.1" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.11.2" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 
@@ -113,7 +114,7 @@ fitr discover attach-source <idea-id> candidate.json
 fitr discover plan <idea-id>
 ```
 
-<img src="docs/assets/source.svg?v=0.11.1" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
+<img src="docs/assets/source.svg?v=0.11.2" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
 
 The receipt pins a commit, preserves declared file sizes and hashes, and
 surfaces publisher lineage, declared license and dependency gaps. An optional
@@ -143,7 +144,7 @@ flow, and [agent interoperability](docs/agent-interop.md) for the portable
 Agent Plugins package, read-only MCP tools, and the researched A2A, Hermes,
 Pi and OpenClaw integration boundaries.
 
-<img src="docs/assets/discovery.svg?v=0.11.1" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
+<img src="docs/assets/discovery.svg?v=0.11.2" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
 
 For files already on disk, an explicit mapping can compare their local hashes
 with the pinned receipt before any runtime experiment:
@@ -154,7 +155,7 @@ fitr artifact bind --source candidate.json --mapping local-files.json --max-byte
 
 Read [artifact binding](docs/artifact-binding.md) for the mapping and I/O bounds.
 
-<img src="docs/assets/artifact.svg?v=0.11.1" alt="Local artifact fixture with a whole-file hash match and separate unverified dependencies, unbound runtime and unmeasured quality" width="820">
+<img src="docs/assets/artifact.svg?v=0.11.2" alt="Local artifact fixture with a whole-file hash match and separate unverified dependencies, unbound runtime and unmeasured quality" width="820">
 
 Matching local bytes still leaves runtime unbound, and capacity and quality
 unmeasured.
@@ -170,7 +171,7 @@ fitr role attach coding /path/to/canonical-result.json
 fitr role review coding
 ```
 
-<img src="docs/assets/roles.svg?v=0.11.1" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
+<img src="docs/assets/roles.svg?v=0.11.2" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
 
 A candidate must clear every floor before preferences matter. Comparisons
 retain uncertainty and check sensitivity to weight changes; missing evidence
@@ -180,6 +181,38 @@ evidence after runtime and memory preflight. Explicit `role adopt` records the
 selection; `role status` rechecks its evidence and expiry. A failed challenger
 keeps the incumbent reference. See [roles](docs/roles.md) for the battery
 screening scope and rollback limits. Automatic serving changes remain future work.
+
+## Start with one fitting
+
+`fitr tailor` guides one machine and one piece of work. It seals the role,
+the required outcomes, task definitions, installed candidates, context
+window, and one capacity policy, then measures that plan. One model stays a non-comparative
+assessment. Two to four models, with a reserve and an approved owned runtime,
+use the bounded auto lifecycle. An absolute ceiling is not rewritten into
+that reserve.
+
+```powershell
+fitr tailor plan --role daily --outcome structured_output --candidate qwen3:30b --ctx 32768 --capacity-budget-gb 20
+fitr tailor start fit-<id> --approve-plan
+fitr tailor status fit-<id>
+```
+
+Nothing is downloaded, and an existing Ollama process is not stopped. A
+coding qualification stops before inference while code execution is disabled.
+A success-rate floor the sample cannot support is left unresolved. A
+weights-plus-KV window larger than the measured one stays an untested
+projection. A desired context is not rewritten down to the window that was
+measured, weight quantization stays separate from KV-cache precision, and
+`--kv q8_0` records the requested cache type plus a plan-level flash-attention
+requirement. That record does not enable flash attention on a server that is
+already running, and a client environment variable does not prove the server
+applied the cache type.
+Endpoint assessments remain unresolved and have no adoption path. Their
+recommendation receipts leave unprojected measurements absent. Inspect the
+canonical measurements or delegated auto status for measured facts.
+Adoption records a fitr role selection only, and only after a
+separate approval of a finished owned fitting. It does not change an Ollama
+alias, configure an external agent, or restart a runtime.
 
 ## Let fitr run a bounded fitting
 
@@ -198,7 +231,7 @@ each request, and collects comparable evidence. A preselected choice gets one
 fresh confirmation attempt before adoption. Quality floors stay fixed, and
 an uncertain result stays unresolved. Status explains each candidate's gaps.
 
-<img src="docs/assets/auto.svg?v=0.11.1" alt="Auto fitting fixture with a confirmed preselected model, separate evidence progress and consumed allowances, and explicit adoption" width="820">
+<img src="docs/assets/auto.svg?v=0.11.2" alt="Auto fitting fixture with a confirmed preselected model, separate evidence progress and consumed allowances, and explicit adoption" width="820">
 
 Manual adoption is the default. `--adoption confirmed-only` can authorize
 selection in fitr after confirmation and runtime cleanup. The first owner is
@@ -225,6 +258,7 @@ unresolved dependencies remain explicit. See [cleanup planning](docs/cleanup.md)
 | Local measurement | Structured output, instruction following, refusal, tool-channel behavior, degeneration, load state, TTFT, prefill, decode, context, placement, and allocation when the backend exposes them | [Design](docs/design.md), [tasks](docs/tasks.md) |
 | Capacity policy | A pre-load sealed resource domain, timestamped availability, explicit operator budget or reserve, exact usable-budget formula, component projection, and observed safe headroom | [Choosing hardware](docs/choosing-hardware.md#capacity), [usage](docs/usage.md#capacity-policy-for-a-run) |
 | Workload decisions | Constraint-based eligibility under a versioned declaration, with no universal weighted score | [Decisions](docs/decisions.md) |
+| Guided fitting | A sealed preview of requirements, task definitions, context and one capacity policy; endpoint assessment or an approved handoff to owned auto. Recommendation projection remains unresolved | [Personal fitting](docs/personal-fitting.md) |
 | Personal roles | Quality and resource floors, fixed preferences, fresh confirmation, explicit selection, evidence expiry and validated rollback | [Roles](docs/roles.md), [confirmation](docs/role-confirmation.md) |
 | Source resolution and screening | Commit-pinned metadata, publisher lineage, explicit license and architecture filters, and bounded weights-plus-cache projections with unresolved dependencies | [Source metadata](docs/source-resolution.md) |
 | Discovery investigations | Private source attachments and separately stated metadata, dependency, runtime and quality gaps | [Source attachments](docs/source-attachments.md) |

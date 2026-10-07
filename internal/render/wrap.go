@@ -8,6 +8,16 @@ import (
 	"github.com/clipperhouse/displaywidth"
 )
 
+// WrapLines composes semantic lines at a resolved display width. Callers in
+// the CLI and TUI share the same sanitization and grapheme-aware wrapping.
+func WrapLines(lines []string, width int) []string {
+	var out []string
+	for _, line := range lines {
+		out = append(out, wrap(SingleLine(line), width)...)
+	}
+	return out
+}
+
 // wrap breaks already-sanitized text into lines of at most width display cells,
 // preferring spaces. A word longer than the width is hard-split rather than
 // allowed to overhang, because an overhanging line is what the terminal wraps

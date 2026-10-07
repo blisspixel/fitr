@@ -9,6 +9,8 @@ package eval
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/boundedio"
@@ -155,6 +158,15 @@ type CheckOutcome struct {
 	Outcome   Outcome `json:"outcome,omitempty"`
 	Detail    string  `json:"detail"`
 	Truncated bool    `json:"truncated,omitempty"`
+	// Diagnosis is recorded only for a graded fail. The prompt and the reply
+	// stay out of the record. Empty fields stay omitted so older signed
+	// payloads keep their bytes.
+	InputSHA256     string `json:"input_sha256,omitempty"`
+	CanonicalSHA256 string `json:"canonical_sha256,omitempty"`
+	ParserOutcome   string `json:"parser_outcome,omitempty"`
+	FailingField    string `json:"failing_field,omitempty"`
+	Verifier        string `json:"verifier,omitempty"`
+	RawRetained     bool   `json:"raw_retained,omitempty"`
 }
 
 // RunCheck generates the instance, prompts the model once, and grades the
@@ -177,6 +189,7 @@ func RunCheck(ctx context.Context, c llm.Backend, model string, cs CheckSpec, se
 	if m.Truncated && !out.Pass {
 		out.Detail += " (output hit the token cap)"
 	}
+	noteCheckFailure(&out, inst.Prompt, inst.Canon, false)
 	return out, nil
 }
 
@@ -212,7 +225,83 @@ func runToolChannelCheck(ctx context.Context, c llm.Backend, model string, cs Ch
 	if m.Truncated && !out.Pass {
 		out.Detail += " (output hit the token cap)"
 	}
+	noteCheckFailure(&out, inst.Prompt, inst.Canon, true)
 	return out, nil
+}
+
+// noteCheckFailure records identity for one graded miss. A skip, a transport
+// error, and a pass carry no diagnosis. The reply is not stored.
+func noteCheckFailure(out *CheckOutcome, prompt, canon string, toolChannel bool) {
+	if out == nil || out.Outcome != OutcomeFail {
+		return
+	}
+	sum := sha256.Sum256([]byte(prompt))
+	out.InputSHA256 = "sha256:" + hex.EncodeToString(sum[:])
+	if canon != "" {
+		csum := sha256.Sum256([]byte(canon))
+		out.CanonicalSHA256 = "sha256:" + hex.EncodeToString(csum[:])
+	}
+	out.ParserOutcome, out.FailingField = classifyFailureDetail(out.Detail, toolChannel)
+	out.Verifier = "fitr.eval.grade/v1"
+	// Even a known mode can quote a returned value, tool name, unexpected
+	// field, or parser error. Retain only the mode and harness-owned field.
+	out.Detail = redactedFailureDetail(out.ParserOutcome, out.FailingField)
+}
+
+func redactedFailureDetail(parser, field string) string {
+	if parser == "" {
+		return "failed"
+	}
+	if field == "" {
+		return parser
+	}
+	return parser + ": " + strconv.Quote(field)
+}
+
+func classifyFailureDetail(detail string, toolChannel bool) (string, string) {
+	token, rest, ok := strings.Cut(detail, ":")
+	token = strings.TrimSpace(token)
+	if ok && knownFailureMode(token) {
+		switch token {
+		case "missing_param", "wrong_type", "wrong_value":
+			return token, quotedFailureField(rest)
+		default:
+			return token, ""
+		}
+	}
+	if knownFailureMode(strings.TrimSpace(detail)) {
+		return strings.TrimSpace(detail), ""
+	}
+	if toolChannel {
+		return "tool-channel", ""
+	}
+	return "text-grade", ""
+}
+
+func knownFailureMode(token string) bool {
+	switch token {
+	case "prose_channel", "no_call", "wrong_name", "extra_calls", "bad_json",
+		"missing_param", "wrong_type", "extra_param", "wrong_value":
+		return true
+	default:
+		return false
+	}
+}
+
+func quotedFailureField(text string) string {
+	start := strings.IndexByte(text, '"')
+	if start < 0 {
+		return ""
+	}
+	quoted, err := strconv.QuotedPrefix(text[start:])
+	if err != nil {
+		return ""
+	}
+	field, err := strconv.Unquote(quoted)
+	if err != nil {
+		return ""
+	}
+	return field
 }
 
 // declinesTools reports whether a chat error means "this model has no tool

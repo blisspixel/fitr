@@ -126,7 +126,7 @@ Bounded workflow evaluation follows the same rule. A workflow can earn a PASS
 only when its declared definition of done is verified independently of the
 worker that attempted it. Model judging and self-report may be useful
 observations, but they are labeled weaker evidence and cannot silently become
-a deterministic verdict. The evidence classes and planned workflow contract
+a deterministic verdict. The evidence classes and implemented workflow contracts
 are specified in [workload evidence](workload-evidence.md).
 
 ---
@@ -288,7 +288,9 @@ so Board does not compare across those presentation-contract changes.
   declaration is required. A hybrid
   missing its `ssm` shape, including the declared recurrent group count, still
   requires a load receipt. Malformed numeric dimensions and unsupported boolean
-  recurrent-layer patterns remain unmeasured. Split GGUFs require
+  recurrent-layer patterns with incomplete state dimensions remain unmeasured.
+  Complete scalar or per-layer boolean declarations can project the attention
+  cache and fixed recurrent state; contradictions stay unresolved. Split GGUFs require
   every shard. An artifact
   whose `head_count_kv` is a per-layer array is projected by summing the
   layers, so a layer that does not attend costs nothing; the array is used only
@@ -332,6 +334,29 @@ so Board does not compare across those presentation-contract changes.
   page with an opaque device ID and allowlisted comparison configuration. It
   omits hostnames, local paths, raw model output, the raw fingerprint key, and
   arbitrary runtime configuration. JSON under `~/.fitr` stays local.
+
+## Guided fitting
+
+`fitr tailor` seals a private orchestration plan, separate from canonical run
+evidence. The role schema supplies its requirements; endpoint collection uses
+`run`, and approved owned collection uses `auto`. The preview binds the effective
+task definitions, context and ceiling or reserve before inference. Start and
+resume refuse changed tasks. Resident allocation is measured at that same
+context, rather than the ordinary run's separate 32K memory probe.
+
+Endpoint assessment cannot adopt a winner. Its recommendation projection
+currently carries planned settings and unresolved evidence classes; phase,
+point count and loopback locality cannot establish measured context or device
+identity. Owned auto evidence retains its own sealed exploration and fresh
+confirmation seeds. Workload presets cannot establish executable coding or
+populated token-accounted context from the short battery. See
+[personal fitting](personal-fitting.md) for the current interface and limits.
+
+New failed-check diagnoses store prompt and canonical-answer hashes, a verifier
+identifier, a parser mode and a harness-owned field when available. They omit
+returned values, unexpected field names, tool names and parser error text.
+Additive fields use `omitempty`, preserving older signed payloads. Historical
+receipts remain immutable; this collection change does not scrub their details.
 
 ## Advise (design rule 7)
 
@@ -378,8 +403,9 @@ startup, and trivial cross-compilation for every platform the runtimes serve.
 
 Go still uses every logical CPU it can schedule (`GOMAXPROCS`). Runtime
 discovery probes ports concurrently. Hardware fingerprint probes overlap
-(on Windows each is a PowerShell round-trip), share a five-second deadline,
-and honor cancellation. Split GGUF shard stats overlap.
+(on Windows each is a PowerShell round-trip), use bounded individual deadlines,
+and honor cancellation. Successful stable host facts are cached per process;
+failed readings are retried rather than cached as absence. Split GGUF shard stats overlap.
 None of that is the wall clock of `fitr run`.
 
 ## Cores, GPUs, and honesty

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/blisspixel/fitr/internal/device"
@@ -105,5 +106,17 @@ func TestContextHintStaysQuietForAutomaticNVIDIAUnifiedCapacity(t *testing.T) {
 	}
 	if got := largerFittingContext(context.Background(), backend, "model", fp, 8192); got != 0 {
 		t.Fatalf("automatic shared capacity suggested %d, want no unproved wider context", got)
+	}
+}
+
+func TestRunContextHintCallsTheWiderWindowUntested(t *testing.T) {
+	backend := &archBackend{runIntegrationBackend: &runIntegrationBackend{}, kvs: llama8BKVs(), size: 5 << 30}
+	res := &Result{Model: "qwen3:30b", Device: device.Fingerprint{VRAMGb: 24, VRAMSource: "nvidia-smi", Config: map[string]string{}}}
+	stderr, _ := captureTopStderr(t, func() int {
+		writeRunContextHint(context.Background(), backend, runCommand{runOpts: runOpts{numCtx: 32768}}, res)
+		return 0
+	})
+	if !strings.Contains(stderr, "untested projection") || strings.Contains(stderr, "this device fits") {
+		t.Fatalf("wider window was not labeled as an untested projection:\n%s", stderr)
 	}
 }

@@ -33,6 +33,7 @@ type Artifact struct {
 	Meta          Meta
 	NextCommand   string
 	Contamination []string
+	Claims        []string
 }
 
 // ShareDevice is an allowlisted hardware view. It deliberately cannot carry a
@@ -182,6 +183,7 @@ type htmlData struct {
 	LoadedCacheHitTTFT  string
 	Resident            string
 	CapacityFacts       []htmlKV
+	Claims              []string
 	ContextTasks        *htmlContextTasks
 	Accelerator         string
 	NonAccelerator      string
@@ -328,6 +330,12 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 {{if .Next}}
 <p class="sub">next <span class="use">{{.Next}}</span></p>
 {{end}}
+{{if .Claims}}
+<h2>Workload claims</h2>
+<ul>
+{{range .Claims}}<li>{{.}}</li>{{end}}
+</ul>
+{{end}}
 <footer>
 fitr {{.Version}} · schema {{.Schema}} · {{.Level}} · {{.StartedAt}}<br>
 Written only because you asked (fitr export / fitr run --html). Never uploaded. Contains an opaque device ID and allowlisted comparison configuration.
@@ -385,6 +393,7 @@ func htmlDataFrom(a Artifact) htmlData {
 		d.CapacityFacts = htmlCapacityFacts(a.Meta.Analysis.Capacity)
 		d.ContextTasks = htmlContextTasksFrom(a.Meta.Analysis.ContextTasks)
 	}
+	d.Claims = append([]string(nil), a.Claims...)
 	d.Decode, d.Prefill, d.TTFT = htmlPerformance(a.Meta, g)
 	d.Resident = htmlCapacity(a.Meta)
 	if a.Meta.Analysis != nil {

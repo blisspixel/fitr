@@ -298,6 +298,7 @@ func renderResult(canvas *Canvas, state State, glyphs Glyphs) {
 		return
 	}
 	renderResultIdentity(w, run, glyphs)
+	renderWorkloadClaims(w, run.Claims)
 	renderResultVerdicts(w, run, canvas.Width)
 	renderResultNext(w, run)
 	renderResultPerformance(w, run, glyphs, false)
@@ -307,6 +308,7 @@ func renderResult(canvas *Canvas, state State, glyphs Glyphs) {
 
 func renderCompactResult(w *lineWriter, run Run, glyphs Glyphs) {
 	renderResultIdentity(w, run, glyphs)
+	renderWorkloadClaims(w, run.Claims)
 	renderCompactVerdicts(w, run)
 	renderResultNext(w, run)
 	renderResultPerformance(w, run, glyphs, true)

@@ -54,6 +54,12 @@ canonical answer must pass its own grader, and a grader that rejected right
 answers would fail the build. A harness bug reported as a model weakness is
 the sin this repo exists to avoid.
 
+New failed checks retain the task, family, seed, prompt hash, canonical-answer
+hash and verifier identifier. Native tool checks also retain a parser mode
+and a harness-owned failing field when available. Returned values, unexpected
+parameter names, tool names and parser error text are omitted. The reply is
+not retained or reconstructed. Existing signed records remain unchanged.
+
 Grading is strict where strictness is the point - a reply that wraps JSON in
 commentary fails `structured_output`, because no pipeline can consume it -
 and duplicate object names fail because different consumers can choose

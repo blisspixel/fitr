@@ -123,7 +123,7 @@ package before believing it, and never edit a test on the strength of a single
 red run on Windows.
 
 `.github/workflows/ci.yml` is the authority on the full gate set and on every
-tool version. It additionally runs the race detector, twelve fuzz smoke targets, a
+tool version. It additionally runs the race detector, thirteen fuzz smoke targets, a
 1600-line cap on non-test `.go` files, a measured binary size cap in `dist`, a
 deterministic-rebuild comparison, installer smokes on three operating systems, and
 `govulncheck`. Take Go and linter versions from `go.mod` and that workflow, not

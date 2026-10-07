@@ -47,6 +47,18 @@ type autoExecution struct {
 	display render.Display
 }
 
+type autoSessionNotifier func(string) error
+
+type autoNotifyKey struct{}
+
+func notifyAutoSession(ctx context.Context, id string) error {
+	note, _ := ctx.Value(autoNotifyKey{}).(autoSessionNotifier)
+	if note == nil {
+		return nil
+	}
+	return note(id)
+}
+
 func autoStores() (role.Store, record.Store) {
 	return role.Store{Dir: filepath.Join(resultsDir(), ".roles")}, record.Store{Dir: resultsDir()}
 }
@@ -503,6 +515,9 @@ func startAutoLeased(ctx context.Context, command autoCommand, roles role.Store,
 		return autoFailure(err)
 	}
 	defer func() { _ = session.Close() }()
+	if err := notifyAutoSession(ctx, plan.ID); err != nil {
+		return autoFailure(err)
+	}
 	run.session, run.plan = session, plan
 	backend.Admission = session.Reserve
 	display.Phase("session", plan.ID)
