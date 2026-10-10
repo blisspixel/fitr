@@ -4,13 +4,45 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-10-09. The 0.11.3 candidate adds the read-only Omarchy
-bar and `fitr desktop`; its CI and release workflow receipts are recorded here
-after publication. Neither establishes acceptance on a running Omarchy
-session, which [the Omarchy bar](omarchy.md) lists as open. The 0.11.2 receipt
-below covers its exact tagged revision and independently downloaded assets.
-Historical sections retain their original candidates, including older
-metadata-only source receipts.
+Last updated: 2026-10-10. The 0.11.3 receipt below covers its exact tagged
+revision and downloaded assets. Historical sections retain their original
+candidates, including older metadata-only source receipts.
+
+### 0.11.3 release receipt
+
+Release [0.11.3](https://github.com/blisspixel/fitr/releases/tag/v0.11.3)
+is bound to commit `a4dddff66cf47ba1d6eeda8d5278b0dbc234c76b`.
+[Main CI 38025232706](https://github.com/blisspixel/fitr/actions/runs/38025232706)
+passed with **80.43% aggregate coverage**, race, lint with golangci-lint
+v2.14.0, govulncheck on Go 1.27.2, fuzz smoke targets, minimum-Go
+compatibility, six binary builds, deterministic rebuild, the built-binary
+Omarchy plugin install script, and all three SDK and installer platform jobs.
+Local Windows aggregate coverage passed at **80.34%**.
+
+[Native acceptance 38025473509](https://github.com/blisspixel/fitr/actions/runs/38025473509)
+passed on Linux amd64 and macOS arm64. The
+[release workflow 38025508668](https://github.com/blisspixel/fitr/actions/runs/38025508668)
+repeated the release gates and all three installer jobs before uploading ten
+verified assets to the owner-created draft. Its first attempt stopped at the
+native-acceptance precondition because the tag was pushed before that run
+finished; the rerun passed. The release was published on October 10 UTC.
+
+All ten downloaded public assets passed the checksum manifest. The Windows
+amd64 executable reports `fitr 0.11.3`, was built with go1.27.2 from the
+tagged revision with `vcs.modified=false`, and is **16,171,520 bytes**, below
+the shared **16,210,344-byte** ceiling. Public Windows SHA-256:
+`4b4e60507896527f89a69fef84cb7782597012a84466036bd3eb03f4f13114d6`.
+Manifest SHA-256:
+`a118cc89574f49a2b32a76ec64108a0a0e20ef6a0b91d2445dbb8dd4be927469`.
+
+This receipt does not include the independent byte comparison against the
+workflow artifact or a fresh official SDK receipt for the public binary that
+0.11.2 recorded. CI's built-binary script installs the embedded Omarchy
+plugin into a temporary directory, reads an empty status and removes the
+plugin; it does not start Quickshell. Acceptance on a running Omarchy session
+remains open as listed in [the Omarchy bar](omarchy.md). The oversized-prompt
+refusal on legacy Go and Jinja templates, a recorded Pi process, and a
+recorded native local-model pi-workspace trial also remain open.
 
 ### 0.11.2 release receipt
 
