@@ -2,12 +2,13 @@
 set -eu
 
 # Measured with Go 1.27.0, CGO_ENABLED=0, -trimpath and -ldflags="-s -w"
-# on windows/amd64, the largest target. Guided fitting and the associated
-# evidence/privacy fixes in 0.11.2 added 249,856 bytes over 0.11.0:
-# 15,815,680 -> 16,065,536. No new Go dependency was added. This deliberate
-# release-envelope update retains the existing 38,824-byte headroom.
+# on windows/amd64, the largest target. The Omarchy bar widget and
+# `fitr desktop` in 0.11.3 added 85,504 bytes over 0.11.2:
+# 16,065,536 -> 16,151,040. The embedded plugin is four small text files and
+# no new Go dependency was added. This deliberate release-envelope update
+# retains the existing 38,824-byte headroom.
 # CI and releases use this single measured gate.
-max_bytes=16104360
+max_bytes=16189864
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"

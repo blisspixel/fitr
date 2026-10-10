@@ -207,6 +207,28 @@ func AttachRecord(path string, records record.Store) (Attachment, error) {
 	return Attachment{Path: canonical, EvidenceSHA256: result.Completion.EvidenceSHA256, RunID: result.StableRunID()}, nil
 }
 
+// ReadAttachedRecord loads the canonical record a review would accept for this
+// attachment. A missing file, a non-canonical path, or a digest mismatch is an
+// error. Callers must leave fit unmeasured in that case rather than reading a
+// nearby file and treating it as the pinned evidence.
+func ReadAttachedRecord(attachment Attachment, records record.Store) (*record.Record, error) {
+	if err := validateAttachment(attachment); err != nil {
+		return nil, err
+	}
+	result, _, err := readCanonicalRoleRecord(attachment.Path, records)
+	if err != nil {
+		return nil, err
+	}
+	if result.Completion == nil || result.Completion.EvidenceSHA256 != attachment.EvidenceSHA256 ||
+		result.StableRunID() != attachment.RunID {
+		return nil, errors.New("attached evidence identity does not match")
+	}
+	if issue := result.EvidenceIntegrityIssue(); issue != "" {
+		return nil, errors.New(issue)
+	}
+	return result, nil
+}
+
 func readCanonicalRoleRecord(path string, records record.Store) (*record.Record, string, error) {
 	if err := rejectRoleSymlink(path); err != nil {
 		return nil, "", err

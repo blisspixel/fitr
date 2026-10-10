@@ -209,7 +209,9 @@ the sealed capacity policy and pre-observation component projection, observed
 safe-budget fit or excess, signed headroom, typed evidence gaps, direct
 receipt-state diagnoses, and a semantic next action. CLI, TUI, JSON, and HTML
 consume supported subsets of that projection rather than deriving their own
-claims; compatibility fields remain additive.
+claims; compatibility fields remain additive. The Omarchy status document
+copies that analysis plus role review and selection status, and it is not
+written back as evidence.
 
 The analysis is rebuilt from the record and is never written into schema 6 as
 new evidence. Its estimates use pointers so an observed zero is not confused

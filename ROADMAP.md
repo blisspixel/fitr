@@ -64,6 +64,7 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.11.0 | Owned fitting collects and freshly confirms the document-context scorecard. The pinned pi-workspace session seals an independent file receipt. Live oversized-prompt, Pi-process, and native local-model checks remain open. |
 | Shipped | 0.11.1 | Workload plain text keeps the sealed contract in the header and inside the terminal width. Auto status reads a sealed document schedule from its sibling store. |
 | Shipped | 0.11.2 | Guided fitting previews fixed requirements and task definitions, reuses run or owned auto collection, and keeps endpoint assessments unresolved. Checked byte conversion, endpoint identity, private check diagnoses and exact-context memory probes. |
+| Shipped | 0.11.3 | A read-only Omarchy Quattro bar widget over sealed role and analysis evidence, installed and removed only by `fitr desktop`, with a confirmed local-only benchmark gate. Session acceptance on a running Omarchy shell remains open. |
 | Now | 0.11 | Rows 7 and 8 stay open for those live checks. The next build is the model-set experiment. |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Later | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -73,6 +74,12 @@ Progress is counted in releases, not dates. The immediate build order is a
 dependency order, not a schedule. Each pre-1.0 release below states its own
 exit criterion. 1.0 ships when those criteria are met and not before: the
 point of the version is that it is trustworthy, not that it is reached.
+
+The Omarchy bar shipped in 0.11.3 is a read-only projection beside those
+surfaces. It does not close rows 7 through 12, it is not in the build order
+below, and it is not the native desktop application in the interface
+direction. Its rendered panel still needs acceptance on a running Omarchy
+session. See [the Omarchy bar](docs/omarchy.md).
 
 ## Immediate build order
 
@@ -1541,6 +1548,7 @@ These features must preserve the evidence contract.
 | 0.11.0 | Owned document-context collection and fresh confirmation inside fitting, and the pinned pi-workspace session. Live oversized-prompt, Pi-process, and native local-model checks remain open. |
 | 0.11.1 | Workload plain text keeps the sealed contract in the header and inside the terminal width. Auto status reads a sealed document schedule from its sibling store. |
 | 0.11.2 | Guided fitting and evidence/privacy corrections; live oversized-prompt and Pi-process acceptance remain open. |
+| 0.11.3 | Read-only Omarchy bar widget and `fitr desktop` status, install, remove and confirmed local benchmark; Omarchy session acceptance remains open. |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).

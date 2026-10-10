@@ -33,8 +33,10 @@ These are enforced in code and tests. Do not weaken them for convenience:
 - An exploration cannot certify its own winner. Confirmation requires a fresh
   sealed plan and fresh evidence.
 - fitr never mutates or restarts the user's serving runtime. `apply` prints a
-  recipe. fitr may mutate or remove only what fitr created, and there is no
-  delete path today at all: `cleanup` is read-only planning.
+  recipe. fitr may mutate or remove only what fitr created. `cleanup` is
+  read-only planning. `fitr desktop remove --yes` deletes only a plugin
+  directory that carries fitr's install marker. It does not edit Omarchy's
+  `shell.json`, and it does not delete models or results.
 - Network access happens only for an explicit install, update, pull, source
   resolution or remote endpoint. No telemetry and no background checks.
 - Exports and receipts omit raw model output, hostnames, local paths and the
@@ -66,6 +68,7 @@ itself.
 | Files and exclusion | `internal/atomicfile`, `internal/boundedio`, `internal/lock` | One way to write, one way to bound a read, one way to lock. |
 | Long-context document pack | `internal/contextquality` (pure plan, generate, verify, analyze), `internal/eval/contexttask.go` (submission), `internal/record/context_quality.go` (sealing), `fitr run --context-tiers` (direct collection), owned fitting in `cmd/fitr` | CLI, JSON, HTML and the TUI project the sealed phase; its wording is derived once in `internal/analysis`. Owned fitting seals one schedule for every candidate and confirms the byte floor from a fresh plan. The battery and the document pack stay separate records. See `docs/context-quality.md`. |
 | Bounded validated work | `internal/workload`, `fitr experiment workload` | `policy-repair` is the default contract. `--workflow pi-workspace` seals `fitr.pi-session.v1` against the pinned Pi 0.85.1 split-summary schedule and does not launch Pi. A Harbor reward is not the receipt. See `docs/workload-evidence.md`. |
+| Omarchy bar projection | `internal/desktop`, `plugins/omarchy`, `fitr desktop` | Read-only status over role review, selection status, and analysis. The QML widget does not score. A benchmark starts only from `fitr desktop benchmark --confirm` after a fresh allowlist check. See `docs/omarchy.md`. |
 
 New value-taking CLI flags also belong in `takesValue` in `cmd/fitr/main.go`.
 Exercise the documented space-separated form; `--flag=value` alone can hide

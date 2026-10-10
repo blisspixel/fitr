@@ -153,6 +153,10 @@ usage:
   fitr artifact bind --source <resolution.json> --mapping <local-files.json> --out <artifact.json>
   fitr artifact show <artifact.json> [--display MODE]
   fitr cleanup plan <directory> [--min-age-days N] [--display MODE]
+  fitr desktop status [--role NAME] [--display MODE]
+  fitr desktop benchmark [--role NAME] [--confirm] [--display MODE]
+  fitr desktop install [--plugins-dir DIR]
+  fitr desktop remove [--plugins-dir DIR] --yes
 
 flags:
   --display  auto|rich|plain|json|none   output mode (default auto)
@@ -266,7 +270,7 @@ func commandHandler(name string) commandFunc {
 		return cmdCalibrate
 	case "compare":
 		return cmdCompare
-	case "decide", "discover", "role", "experiment", "cleanup", "mcp", "source", "artifact", "auto", "tailor":
+	case "decide", "discover", "role", "experiment", "cleanup", "mcp", "source", "artifact", "auto", "tailor", "desktop":
 		return planningCommandHandler(name)
 	case "screenshots": // dev-only: regenerate docs/assets from mock data
 		return cmdScreenshots
@@ -296,6 +300,8 @@ func planningCommandHandler(name string) commandFunc {
 		return cmdExperiment
 	case "cleanup":
 		return cmdCleanup
+	case "desktop":
+		return cmdDesktop
 	default:
 		return nil
 	}
@@ -339,7 +345,7 @@ func takesValue(flagArg string) bool {
 		"weight-quant", "weight-preference", "weight-minimum", "workload", "model-card",
 		"reserve-system-tokens", "reserve-output-tokens", "reserve-reasoning-tokens",
 		"projected-resident-gb", "concurrency", "alternative-ctx", "kv-permitted",
-		"warmup":
+		"warmup", "plugins-dir":
 		return true
 	}
 	return false

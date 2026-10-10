@@ -36,7 +36,7 @@ See [personal fitting](docs/personal-fitting.md) for `fitr tailor`, usable
 context, compaction, and harness scorecards. The live oversized-prompt, Pi
 process, and native local-model checks remain open.
 
-<img src="docs/assets/top.svg?v=0.11.2" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
+<img src="docs/assets/top.svg?v=0.11.3" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
 The wide Board keeps the comparable configurations, selected evidence, exact
 measurements, unresolved requirements, and one next action on one screen. The
@@ -89,7 +89,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.11.2" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.11.3" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 
@@ -114,7 +114,7 @@ fitr discover attach-source <idea-id> candidate.json
 fitr discover plan <idea-id>
 ```
 
-<img src="docs/assets/source.svg?v=0.11.2" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
+<img src="docs/assets/source.svg?v=0.11.3" alt="Source metadata fixture with a pinned file, declared size, a projector candidate and unresolved local fit" width="1000">
 
 The receipt pins a commit, preserves declared file sizes and hashes, and
 surfaces publisher lineage, declared license and dependency gaps. An optional
@@ -144,7 +144,7 @@ flow, and [agent interoperability](docs/agent-interop.md) for the portable
 Agent Plugins package, read-only MCP tools, and the researched A2A, Hermes,
 Pi and OpenClaw integration boundaries.
 
-<img src="docs/assets/discovery.svg?v=0.11.2" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
+<img src="docs/assets/discovery.svg?v=0.11.3" alt="Discovery inbox fixture with a linked metadata receipt, an unverified claim and an unmeasured classifier idea" width="820">
 
 For files already on disk, an explicit mapping can compare their local hashes
 with the pinned receipt before any runtime experiment:
@@ -155,7 +155,7 @@ fitr artifact bind --source candidate.json --mapping local-files.json --max-byte
 
 Read [artifact binding](docs/artifact-binding.md) for the mapping and I/O bounds.
 
-<img src="docs/assets/artifact.svg?v=0.11.2" alt="Local artifact fixture with a whole-file hash match and separate unverified dependencies, unbound runtime and unmeasured quality" width="820">
+<img src="docs/assets/artifact.svg?v=0.11.3" alt="Local artifact fixture with a whole-file hash match and separate unverified dependencies, unbound runtime and unmeasured quality" width="820">
 
 Matching local bytes still leaves runtime unbound, and capacity and quality
 unmeasured.
@@ -171,7 +171,7 @@ fitr role attach coding /path/to/canonical-result.json
 fitr role review coding
 ```
 
-<img src="docs/assets/roles.svg?v=0.11.2" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
+<img src="docs/assets/roles.svg?v=0.11.3" alt="Role review fixture showing a qualified daily model and a smaller model that fails the quality floor" width="900">
 
 A candidate must clear every floor before preferences matter. Comparisons
 retain uncertainty and check sensitivity to weight changes; missing evidence
@@ -231,7 +231,7 @@ each request, and collects comparable evidence. A preselected choice gets one
 fresh confirmation attempt before adoption. Quality floors stay fixed, and
 an uncertain result stays unresolved. Status explains each candidate's gaps.
 
-<img src="docs/assets/auto.svg?v=0.11.2" alt="Auto fitting fixture with a confirmed preselected model, separate evidence progress and consumed allowances, and explicit adoption" width="820">
+<img src="docs/assets/auto.svg?v=0.11.3" alt="Auto fitting fixture with a confirmed preselected model, separate evidence progress and consumed allowances, and explicit adoption" width="820">
 
 Manual adoption is the default. `--adoption confirmed-only` can authorize
 selection in fitr after confirmation and runtime cleanup. The first owner is
@@ -299,6 +299,32 @@ presentation paths with `make screenshots`. Host identity and local paths are
 omitted. Full receipts and the other command surfaces live in the linked docs,
 where they can be explained without turning the front page into a transcript.
 
+## Omarchy bar
+
+On an Omarchy Quattro desktop, fitr can install a read-only bar widget, plugin
+version 0.1.0, that shows one role's sealed evidence: model, requested
+context, measured and estimated fit, freshness, unresolved requirements, and
+the next action.
+
+```sh
+fitr desktop install
+omarchy plugin enable dev.fitr.evidence --section right
+omarchy restart shell
+```
+
+Opening the panel reads `fitr desktop status`. It does not download a model,
+reconfigure serving, or call a model. A benchmark starts only from
+`fitr desktop benchmark --confirm`, and only when that command can show the
+run stays on a local `ollama` or `llama-server` runtime with no remote client
+URL in the environment.
+
+The widget ships in the fitr binary from 0.11.3. It is not an Omarchy
+marketplace listing, and it is not the native desktop application described
+in the interface direction. The built binary's install, status and removal
+are checked in CI; the rendered panel has not yet been accepted on a running
+Omarchy session. Details and the remaining session checks are in
+[the Omarchy bar](docs/omarchy.md).
+
 ## Why the evidence is useful
 
 - **Fit is not performance.** Artifact size, KV projection, addressable
@@ -334,6 +360,8 @@ to invent a verdict.
   recipe.
 - It does not run generated code by default or silently score unavailable
   execution evidence.
+- It does not treat the Omarchy panel as a measurement, a ranking, or a
+  substitute for the deferred native desktop applications.
 
 These boundaries are part of the product. The detailed evidence model and
 known limits are in [design](docs/design.md).
@@ -395,6 +423,8 @@ restricted to your account. fitr does not encrypt receipts or replace Windows AC
   opt-in OpenRouter role and its evidence boundary.
 - [Discovery](docs/discovery.md) and [agent interoperability](docs/agent-interop.md):
   ideas, role-specific choices, bounded automation and integration contracts.
+- [Omarchy bar](docs/omarchy.md): the read-only shell projection, its install
+  boundary, and what has not been accepted on a real Omarchy system.
 - [Terminal design language](docs/design-language.md): color, layout, live
   activity and reduced-motion behavior.
 - [Roadmap](ROADMAP.md) and [release acceptance](docs/release-acceptance.md):

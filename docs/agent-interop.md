@@ -13,6 +13,9 @@ verified model-plus-harness work are separate acceptance boundaries.
 | Agent Plugins | 1.0.0 | Portable skill plus root MCP configuration |
 | A2A | 1.0.0 specification, `1.0` wire version | Researched future evaluation adapter; no endpoint or adapter implemented |
 
+The Omarchy bar widget is a local shell projection, not an MCP or A2A adapter.
+See [the Omarchy bar](omarchy.md).
+
 The current MCP revision is still `2026-07-28`, which can receive backwards
 compatible corrections without changing its date. Agent Plugins `1.0.0` is
 the published release; `1.1.0` is a working draft. The current acceptance pins

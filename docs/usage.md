@@ -87,10 +87,10 @@ enter a PASS or FAIL denominator.
 
 Terminal views of the loop, regenerated from the real printers:
 
-<img src="assets/advise.svg?v=0.11.2" alt="fitr advise (demo data)" width="820">
-<img src="assets/apply.svg?v=0.11.2" alt="fitr apply (demo data)" width="820">
-<img src="assets/board.svg?v=0.11.2" alt="fitr board (demo data)" width="820">
-<img src="assets/top.svg?v=0.11.2" alt="fitr top (demo data)" width="820">
+<img src="assets/advise.svg?v=0.11.3" alt="fitr advise (demo data)" width="820">
+<img src="assets/apply.svg?v=0.11.3" alt="fitr apply (demo data)" width="820">
+<img src="assets/board.svg?v=0.11.3" alt="fitr board (demo data)" width="820">
+<img src="assets/top.svg?v=0.11.3" alt="fitr top (demo data)" width="820">
 
 ### Bounded fitting
 
@@ -279,6 +279,9 @@ of installed RAM as an unconditional model budget.
 | `fitr artifact show <artifact.json>` | validate and inspect a saved local-byte observation without reopening model files |
 | `fitr source show <receipt.json>` | validate and inspect a saved metadata receipt offline |
 | `fitr cleanup plan <directory> [--min-age-days 7]` | bounded read-only storage inventory with aged partial-download review candidates; see [cleanup](cleanup.md) |
+| `fitr desktop status [--role NAME]` | read-only Omarchy status document from sealed role review, selection status, and analysis; default display is json; opening it does not measure; see [Omarchy](omarchy.md) |
+| `fitr desktop benchmark [--role NAME] [--confirm]` | start one allowlisted local run only when `--confirm` is set and locality is proven again |
+| `fitr desktop install [--plugins-dir DIR]` / `fitr desktop remove --yes` | copy or delete only the marked Omarchy plugin directory; neither command edits `shell.json` |
 | `fitr device [--display MODE]` / `fitr profiles [new]` | fingerprint and gates; `new` writes an UNCALIBRATED local profile |
 | `fitr calibrate <a> <b> [--out PATH] [--lineage PATH]` | paired item discrimination; optional same-base lineage receipt |
 | `fitr calibrate merge <pair.json>... [--out PATH]` | aggregate unsigned leads without claiming verified campaign readiness |

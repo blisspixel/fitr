@@ -157,3 +157,7 @@ Desktop work starts only when all of these are true:
   platforms.
 
 Until then, terminal UX is product work, not a placeholder.
+
+The Omarchy bar widget is not that desktop application. It is a thin shell
+reader over existing JSON contracts. It does not open this gate, and it does
+not replace the CLI. See [the Omarchy bar](omarchy.md).

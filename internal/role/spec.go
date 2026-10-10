@@ -28,6 +28,10 @@ const (
 
 var roleNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
+// ValidName reports whether name can be a role library filename. Callers that
+// accept an empty name as "not chosen" must test that before calling this.
+func ValidName(name string) bool { return roleNamePattern.MatchString(name) }
+
 type Spec struct {
 	Schema      string                `json:"schema"`
 	Name        string                `json:"name"`

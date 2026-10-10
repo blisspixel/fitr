@@ -111,6 +111,12 @@ jobs:
           set -e
           test "$status" -eq 2
           grep -F "hint: fitr device" <<<"$diagnostic"
+      # Copies the built binary's embedded plugin into a temp directory and
+      # reads desktop status from an empty results directory. This is not
+      # Omarchy shell acceptance: no Quickshell, no panel, and no serving runtime.
+      - name: built binary desktop plugin install
+        shell: bash
+        run: sh scripts/check-desktop-plugin.sh dist/fitr-linux-amd64
       - name: binary size gate
         run: sh scripts/check-binary-size.sh dist
       - name: checksums

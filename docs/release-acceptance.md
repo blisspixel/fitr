@@ -4,9 +4,13 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-10-07. The 0.11.2 receipt below covers its exact tagged
-revision and independently downloaded assets. Historical sections retain their
-original candidates, including older metadata-only source receipts.
+Last updated: 2026-10-09. The 0.11.3 candidate adds the read-only Omarchy
+bar and `fitr desktop`; its CI and release workflow receipts are recorded here
+after publication. Neither establishes acceptance on a running Omarchy
+session, which [the Omarchy bar](omarchy.md) lists as open. The 0.11.2 receipt
+below covers its exact tagged revision and independently downloaded assets.
+Historical sections retain their original candidates, including older
+metadata-only source receipts.
 
 ### 0.11.2 release receipt
 

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.fitr.evidence",
+  "name": "fitr evidence",
+  "version": "0.1.0",
+  "author": "blisspixel",
+  "license": "Apache-2.0",
+  "description": "Read-only Omarchy bar for sealed local evidence: model, role, context, measured and estimated fit, freshness, unresolved requirements, and the next action.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "fitr evidence",
+    "category": "AI",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 300,
+      "fitrCommand": "fitr",
+      "role": ""
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 60,
+        "max": 3600,
+        "step": 60,
+        "defaultValue": 300
+      },
+      {
+        "key": "fitrCommand",
+        "type": "string",
+        "label": "fitr executable",
+        "defaultValue": "fitr"
+      },
+      {
+        "key": "role",
+        "type": "string",
+        "label": "Role name",
+        "defaultValue": ""
+      }
+    ]
+  }
+}
