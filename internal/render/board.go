@@ -3,8 +3,13 @@ package render
 import (
 	"fmt"
 	"io"
+	"maps"
 	"math"
+	"slices"
 	"strings"
+
+	"github.com/blisspixel/fitr/internal/analysis"
+	"github.com/blisspixel/fitr/internal/score"
 )
 
 // Board column plan.
@@ -89,16 +94,17 @@ func boardDistinctions(groups []BoardGroup) []string {
 }
 
 type BoardRow struct {
-	Model        string    `json:"model"`
-	ParamSize    string    `json:"parameter_size,omitempty"`
-	Quant        string    `json:"quant,omitempty"`
-	DecodeMean   float64   `json:"decode_tps"`
-	DecodeSD     float64   `json:"decode_sd,omitempty"`
-	PrefillMean  float64   `json:"prefill_tps,omitempty"`
-	ResidentGB   float64   `json:"resident_gb,omitempty"`
-	DecodeSeries []float64 `json:"decode_series,omitempty"`
-	Repeats      int       `json:"repeats"`
-	Serves       []string  `json:"serves,omitempty"`
+	Model        string                                  `json:"model"`
+	ParamSize    string                                  `json:"parameter_size,omitempty"`
+	Quant        string                                  `json:"quant,omitempty"`
+	DecodeMean   float64                                 `json:"decode_tps"`
+	DecodeSD     float64                                 `json:"decode_sd,omitempty"`
+	PrefillMean  float64                                 `json:"prefill_tps,omitempty"`
+	ResidentGB   float64                                 `json:"resident_gb,omitempty"`
+	DecodeSeries []float64                               `json:"decode_series,omitempty"`
+	Repeats      int                                     `json:"repeats"`
+	Serves       []string                                `json:"serves,omitempty"`
+	Verdicts     map[string]analysis.VerdictPresentation `json:"verdicts,omitempty"`
 }
 
 // WriteBoard renders a data-dense overview without taking over the terminal.
@@ -240,12 +246,26 @@ func writeBoardRowTail(w io.Writer, row BoardRow, p palette, g glyphs) {
 	if len(row.Serves) > 0 {
 		tail = append(tail, "serves "+strings.Join(row.Serves, ", "))
 	}
-	if len(tail) == 0 {
-		return
-	}
 	// The visible separator survives wrapping; whitespace runs do not.
-	for _, line := range wrap(SingleLine(strings.Join(tail, g.Dot)), boardWidth-4) {
-		fmt.Fprintf(w, "    %s\n", p.wrap(p.Muted, line))
+	if len(tail) > 0 {
+		for _, line := range wrap(SingleLine(strings.Join(tail, g.Dot)), boardWidth-4) {
+			fmt.Fprintf(w, "    %s\n", p.wrap(p.Muted, line))
+		}
+	}
+	// Failed quality must stay visible beside speed and established uses.
+	// The same projection is carried in Board JSON and the result views.
+	for _, need := range slices.Sorted(maps.Keys(row.Verdicts)) {
+		verdict := row.Verdicts[need]
+		if verdict.State != score.Fail {
+			continue
+		}
+		label := score.NeedLabel[need]
+		if label == "" {
+			label = need
+		}
+		for _, line := range wrap(SingleLine("[FAIL] "+label+": "+verdict.Why), boardWidth-4) {
+			fmt.Fprintf(w, "    %s\n", p.wrap(p.Fail, line))
+		}
 	}
 }
 

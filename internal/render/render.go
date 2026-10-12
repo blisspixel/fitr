@@ -562,50 +562,14 @@ func UseForLabel(value string) string {
 // PresentVerdictParts resolves display-only wording where one independent
 // scenario can override a pooled rate. The sealed verdict remains unchanged.
 func PresentVerdictParts(need string, verdict score.Verdict) (string, string, []string, string) {
-	measure, gate, detail, note := verdict.Parts()
-	if need != "tool_restraint" || verdict.State != score.Fail || !hasWithdrawalFailure(detail) {
-		return measure, gate, detail, note
-	}
-	note = strings.Replace(note, "undecided:", "ordinary irrelevance checks are undecided:", 1)
-	note = strings.Replace(note, "Not a fail", "that interval alone is not a fail", 1)
-	note = strings.TrimSpace(note)
-	if note != "" {
-		note += "; "
-	}
-	note += "overall FAIL comes from the separate withdrawal scenario above"
-	return measure, gate, detail, note
+	view := analysis.PresentVerdict(need, verdict)
+	return view.Measure, view.Gate, view.Detail, view.Note
 }
 
 // PresentVerdictWhy composes the display-only parts for clients that render a
 // single evidence string.
 func PresentVerdictWhy(need string, verdict score.Verdict) string {
-	measure, gate, detail, note := PresentVerdictParts(need, verdict)
-	var parts []string
-	head := measure
-	if head != "" && gate != "" {
-		head += " (" + gate + ")"
-	} else if head == "" {
-		head = gate
-	}
-	if head != "" {
-		parts = append(parts, head)
-	}
-	if len(detail) > 0 {
-		parts = append(parts, strings.Join(detail, ", "))
-	}
-	if note != "" {
-		parts = append(parts, note)
-	}
-	return strings.Join(parts, "; ")
-}
-
-func hasWithdrawalFailure(detail []string) bool {
-	for _, item := range detail {
-		if strings.Contains(item, "withdrawn tool") || strings.Contains(item, "stop cleanly after a tool was withdrawn") {
-			return true
-		}
-	}
-	return false
+	return analysis.PresentVerdict(need, verdict).Why
 }
 
 func writeResultContext(w io.Writer, m Meta) {
@@ -1107,7 +1071,8 @@ func (d *jsonDisplay) Result(sc score.Scorecard, m Meta) {
 	payload := map[string]any{
 		"event": "result", "model": sc.Model, "profile": sc.Profile,
 		"use_for": useFor, "serves": sc.Serves, "needs": states,
-		"passes": sc.Passes, "fails": sc.Fails, "unproven": sc.Unproven,
+		"verdicts": analysis.PresentVerdicts(sc.Needs),
+		"passes":   sc.Passes, "fails": sc.Fails, "unproven": sc.Unproven,
 		"repeats": m.Repeats, "num_ctx": m.NumCtx, "saved": m.SavedPath,
 	}
 	if m.ContextState != "" {

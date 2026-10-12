@@ -682,6 +682,14 @@ func renderResultVerdicts(w *lineWriter, run Run, width int) {
 		if !w.line(spans...) {
 			return
 		}
+		// A compact view still has to explain a failed quality floor. Put the
+		// shared deciding summary first on its own clipped line so the label
+		// cannot consume all the room for the reason.
+		if width < 100 && verdict.State == "FAIL" && verdict.Why != "" {
+			if !w.line(Span{Text: "       " + verdict.Why, Role: RoleMuted}) {
+				return
+			}
+		}
 	}
 }
 
@@ -917,6 +925,9 @@ func boardWhyNot(run Run) string {
 		label := verdict.Label
 		if label == "" {
 			label = verdict.Need
+		}
+		if verdict.Why != "" {
+			return "[" + shortVerdictState(verdict.State) + "] " + verdict.Why
 		}
 		return label + " [" + shortVerdictState(verdict.State) + "]"
 	}

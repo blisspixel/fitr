@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/record"
@@ -188,6 +189,7 @@ func writeViewedJSON(selected *Result, full bool) int {
 		payload = map[string]any{
 			"schema": "fitr.view.v1", "model": selected.Model,
 			"scorecard": card, "meta": meta,
+			"verdicts": analysis.PresentVerdicts(card.Needs),
 		}
 	}
 	if err := encoder.Encode(payload); err != nil {
@@ -405,6 +407,7 @@ func makeBoardRow(result *Result, excluded *boardExclusions) render.BoardRow {
 		DecodeMean: meta.DecodeMean, DecodeSD: meta.DecodeSD,
 		PrefillMean: meta.PrefillMean, ResidentGB: meta.ResidentGB,
 		DecodeSeries: slices.Clone(meta.DecodeSeries), Repeats: result.Repeats, Serves: codes,
+		Verdicts: analysis.PresentVerdicts(scorecard.Needs),
 	}
 }
 
