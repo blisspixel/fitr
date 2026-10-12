@@ -1,5 +1,18 @@
 # Ollama execution provenance
 
+The serving-runtime version comes only from the configured endpoint's
+`GET /api/version` response. An unreachable daemon, malformed response or
+missing version leaves that identity unobserved. fitr does not substitute
+`ollama --version`: the CLI selects an endpoint through its own `OLLAMA_HOST`
+environment and can report an installed client or a different daemon. A stopped
+daemon therefore has no measured runtime version, and its fingerprint cannot
+stand in for an observed serving process. Existing sealed records retain their
+original identity; fitr cannot repair older warning text into a daemon version.
+This follows Ollama v0.40.3's
+[version API](https://github.com/ollama/ollama/blob/v0.40.3/docs/api.md#version)
+and [CLI handler](https://github.com/ollama/ollama/blob/v0.40.3/cmd/cmd.go),
+reviewed October 12, 2026.
+
 A local Ollama endpoint can route a model to a remote service. fitr preserves
 the API's explicit `remote_model` and `remote_host` fields and checks selected
 models before local run, diagnosis, advice and confirmation paths proceed.

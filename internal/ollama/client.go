@@ -16,7 +16,6 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -1240,9 +1239,9 @@ func (c *Client) checkPullRoom(want int64) error {
 		float64(want)/(1<<30), probe, float64(free)/(1<<30))
 }
 
-// Version asks the server, falling back to the CLI. The server's answer wins:
-// the fingerprint must describe the process that served the tokens, and that
-// frequently differs from whatever binary happens to be first on PATH.
+// Version observes only the configured server. The CLI selects its own endpoint
+// and can print an installed-client version even when no daemon is running;
+// neither establishes the identity of the process that served these tokens.
 func (c *Client) Version(ctx context.Context) string {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -1258,11 +1257,7 @@ func (c *Client) Version(ctx context.Context) string {
 			}
 		}
 	}
-	out, err := exec.CommandContext(cctx, "ollama", "--version").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(strings.ReplaceAll(string(out), "ollama version is ", ""))
+	return ""
 }
 
 func (c *Client) Reachable(ctx context.Context) bool {
