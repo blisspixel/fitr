@@ -26,7 +26,7 @@ class InstallerFixtureTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.artifacts = self.root / "artifacts"
         self.artifacts.mkdir()
-        (self.artifacts / "SHA256SUMS").write_text("exact checksum fixture\n", encoding="utf-8")
+        (self.artifacts / "SHA256SUMS").write_bytes(b"exact checksum fixture\n")
         self.log = self.root / "server.log"
 
     def test_assigned_port_serves_exact_bytes_and_reaps_child(self):
@@ -49,6 +49,13 @@ class InstallerFixtureTests(unittest.TestCase):
         with self.assertRaises((OSError, URLError)):
             build_opener(ProxyHandler({})).open(url + "/SHA256SUMS", timeout=0.2)
         self.assertIn("GET /SHA256SUMS", self.log.read_text(encoding="utf-8"))
+
+    def test_numeric_loopback_binding_does_not_resolve_hostnames(self):
+        with patch("socket.getfqdn", side_effect=AssertionError("unexpected hostname resolution")) as resolve:
+            with fixture.ArtifactHTTPServer(("127.0.0.1", 0), fixture.SimpleHTTPRequestHandler) as server:
+                self.assertEqual(server.server_name, "127.0.0.1")
+                self.assertGreater(server.server_port, 0)
+        resolve.assert_not_called()
 
     def test_missing_manifest_has_bounded_http_diagnostic_and_cleanup(self):
         (self.artifacts / "SHA256SUMS").unlink()

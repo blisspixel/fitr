@@ -1,8 +1,10 @@
 """Serve exact installer artifacts on an owned loopback listener."""
 
 import argparse
+import faulthandler
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 import json
 import os
 from pathlib import Path
@@ -19,13 +21,24 @@ class FixtureError(RuntimeError):
     pass
 
 
+class ArtifactHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # The listener is numeric loopback; reverse DNS adds an unbounded startup dependency.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 def serve(directory, ready_file):
     handler = partial(SimpleHTTPRequestHandler, directory=str(directory))
-    with ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+    print("binding an assigned loopback artifact listener", flush=True)
+    faulthandler.dump_traceback_later(10, repeat=True)
+    with ArtifactHTTPServer(("127.0.0.1", 0), handler) as server:
+        print("publishing the owned listener marker", flush=True)
         marker = {"port": server.server_port, "pid": os.getpid()}
         pending = ready_file.with_suffix(".pending")
         pending.write_text(json.dumps(marker), encoding="utf-8")
         pending.replace(ready_file)
+        faulthandler.cancel_dump_traceback_later()
         print("serving installer artifacts on 127.0.0.1:" + str(server.server_port), flush=True)
         server.serve_forever()
 
@@ -84,6 +97,7 @@ class ArtifactServer:
             return wait_ready(self.process, ready_file, self.timeout)
         except BaseException:
             self.__exit__(None, None, None)
+            show_log(self.log)
             raise
 
     def __exit__(self, *_):
