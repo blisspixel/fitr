@@ -210,23 +210,17 @@ jobs:
         with:
           name: binaries
           path: dist
+      - name: installer fixture regressions
+        shell: bash
+        run: python -I -B -m unittest discover -s scripts -p test_installer_fixture.py
       - name: candidate installer smoke
         if: runner.os != 'Windows'
         shell: bash
         env:
           FITR_BIN: ${{ runner.temp }}/fitr-install
-          FITR_RELEASE_BASE_URL: http://127.0.0.1:8765
           FITR_REQUIRE_BINARY: '1'
         run: |
-          python3 -m http.server 8765 --bind 127.0.0.1 --directory dist >/dev/null 2>&1 &
-          server_pid=$!
-          trap 'kill "$server_pid"' EXIT
-          for attempt in {1..20}; do
-            curl --fail --silent http://127.0.0.1:8765/SHA256SUMS >/dev/null && break
-            if [ "$attempt" -eq 20 ]; then exit 1; fi
-            sleep 0.25
-          done
-          sh install.sh
+          python3 scripts/installer_fixture.py --directory dist --log "$RUNNER_TEMP/installer-valid-server.log" -- sh install.sh
           expected="fitr $(tr -d '[:space:]' < internal/buildinfo/version.txt)"
           test "$("$FITR_BIN/fitr" version)" = "$expected"
       - name: candidate installer smoke
@@ -234,40 +228,22 @@ jobs:
         shell: pwsh
         env:
           FITR_BIN: ${{ runner.temp }}\fitr-install
-          FITR_RELEASE_BASE_URL: http://127.0.0.1:8765
           FITR_REQUIRE_BINARY: '1'
           FITR_NO_PATH: '1'
         run: |
           $userPathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
-          $server = Start-Process python -ArgumentList '-m','http.server','8765','--bind','127.0.0.1','--directory','dist' -PassThru -WindowStyle Hidden
-          try {
-            $ready = $false
-            for ($attempt = 1; $attempt -le 20; $attempt++) {
-              try {
-                Invoke-WebRequest http://127.0.0.1:8765/SHA256SUMS -UseBasicParsing | Out-Null
-                $ready = $true
-                break
-              } catch {
-                Start-Sleep -Milliseconds 250
-              }
-            }
-            if (-not $ready) { throw "candidate server did not become ready" }
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-            if ($LASTEXITCODE -ne 0) { throw "installer exited $LASTEXITCODE" }
-            $expected = "fitr $((Get-Content internal/buildinfo/version.txt -Raw).Trim())"
-            $installed = & "$env:FITR_BIN\fitr.exe" version
-            if ($installed -ne $expected) { throw "installed $installed, want $expected" }
-            $userPathAfter = [Environment]::GetEnvironmentVariable('Path', 'User')
-            if ($userPathAfter -cne $userPathBefore) { throw "installer changed the persistent user PATH" }
-          } finally {
-            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
-          }
+          & python scripts/installer_fixture.py --directory dist --log "$env:RUNNER_TEMP\installer-valid-server.log" -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+          if ($LASTEXITCODE -ne 0) { throw "installer exited $LASTEXITCODE" }
+          $expected = "fitr $((Get-Content internal/buildinfo/version.txt -Raw).Trim())"
+          $installed = & "$env:FITR_BIN\fitr.exe" version
+          if ($installed -ne $expected) { throw "installed $installed, want $expected" }
+          $userPathAfter = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($userPathAfter -cne $userPathBefore) { throw "installer changed the persistent user PATH" }
       - name: reject a corrupt candidate without replacing the install
         if: runner.os != 'Windows'
         shell: bash
         env:
           FITR_BIN: ${{ runner.temp }}/fitr-install
-          FITR_RELEASE_BASE_URL: http://127.0.0.1:8766
           FITR_REQUIRE_BINARY: '1'
         run: |
           hash_file() {
@@ -294,19 +270,11 @@ jobs:
           mkdir "$corrupt"
           cp -R dist/. "$corrupt/"
           printf 'corrupt' >> "$corrupt/$candidate_asset"
-          python3 -m http.server 8766 --bind 127.0.0.1 --directory "$corrupt" >/dev/null 2>&1 &
-          server_pid=$!
-          trap 'kill "$server_pid"' EXIT
-          for attempt in {1..20}; do
-            curl --fail --silent http://127.0.0.1:8766/SHA256SUMS >/dev/null && break
-            if [ "$attempt" -eq 20 ]; then exit 1; fi
-            sleep 0.25
-          done
           set +e
-          sh install.sh
+          python3 scripts/installer_fixture.py --directory "$corrupt" --log "$RUNNER_TEMP/installer-corrupt-server.log" -- sh install.sh
           status=$?
           set -e
-          test "$status" -ne 0
+          test "$status" -eq 1
           after="$(hash_file "$FITR_BIN/fitr")"
           test "$after" = "$before"
       - name: reject a corrupt candidate without replacing the Windows install
@@ -314,7 +282,6 @@ jobs:
         shell: pwsh
         env:
           FITR_BIN: ${{ runner.temp }}\fitr-install
-          FITR_RELEASE_BASE_URL: http://127.0.0.1:8766
           FITR_REQUIRE_BINARY: '1'
         run: |
           $before = (Get-FileHash "$env:FITR_BIN\fitr.exe" -Algorithm SHA256).Hash
@@ -327,29 +294,20 @@ jobs:
           }
           $asset = Join-Path $corrupt "fitr-windows-$archName.exe"
           [IO.File]::AppendAllText($asset, "corrupt", [Text.Encoding]::ASCII)
-          $server = Start-Process python -ArgumentList '-m','http.server','8766','--bind','127.0.0.1','--directory',$corrupt -PassThru -WindowStyle Hidden
-          try {
-            $ready = $false
-            for ($attempt = 1; $attempt -le 20; $attempt++) {
-              try {
-                Invoke-WebRequest http://127.0.0.1:8766/SHA256SUMS -UseBasicParsing | Out-Null
-                $ready = $true
-                break
-              } catch {
-                Start-Sleep -Milliseconds 250
-              }
-            }
-            if (-not $ready) { throw "corrupt candidate server did not become ready" }
-            $installer = Start-Process powershell.exe `
-              -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',(Resolve-Path .\install.ps1).Path `
-              -Wait -PassThru -WindowStyle Hidden
-            $installerStatus = $installer.ExitCode
-            if ($installerStatus -eq 0) { throw "corrupt candidate was accepted" }
-            $after = (Get-FileHash "$env:FITR_BIN\fitr.exe" -Algorithm SHA256).Hash
-            if ($after -cne $before) { throw "corrupt candidate replaced the existing install" }
-          } finally {
-            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
-          }
+          $installer = Start-Process python `
+            -ArgumentList 'scripts/installer_fixture.py','--directory',$corrupt,'--log',"$env:RUNNER_TEMP\installer-corrupt-server.log",'--','powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',(Resolve-Path .\install.ps1).Path `
+            -Wait -PassThru -NoNewWindow
+          $installerStatus = $installer.ExitCode
+          if ($installerStatus -ne 1) { throw "corrupt candidate installer exited $installerStatus, want 1" }
+          $after = (Get-FileHash "$env:FITR_BIN\fitr.exe" -Algorithm SHA256).Hash
+          if ($after -cne $before) { throw "corrupt candidate replaced the existing install" }
+
+      - name: upload installer fixture server logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-server-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/installer-*-server.log
 
   security:
     runs-on: ubuntu-latest
