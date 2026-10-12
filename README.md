@@ -85,6 +85,11 @@ effective context, a specific latency state, and exact-context resident
 memory. The answer is eligible, ineligible, or unresolved, with exit code 4
 reserved for required evidence that has not yet been established.
 
+Linux AMD APUs use positively identified, adapter-bound GTT mapping capacity
+when available. A BIOS VRAM carve-out is not the shared model budget. Automatic
+fit from shared capacity stays unproven until an explicit budget or exact-context
+runtime allocation supports the point. See [memory sources](docs/usage.md#hardware-coverage).
+
 Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.

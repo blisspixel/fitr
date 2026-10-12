@@ -81,6 +81,11 @@ below, and it is not the native desktop application in the interface
 direction. Its rendered panel still needs acceptance on a running Omarchy
 session. See [the Omarchy bar](docs/omarchy.md).
 
+Linux AMD APU capacity now distinguishes a positively identified GTT mapping
+limit from the BIOS VRAM carve-out and a safe model budget. Historical evidence
+keeps its exact comparison keys. Kernel counter observations and fixture gates
+do not close native Phoenix/ROCm model-loading or performance acceptance.
+
 ## Immediate build order
 
 0.10.0 establishes the decision substrate and three demanding vertical probes:

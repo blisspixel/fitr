@@ -117,6 +117,23 @@ reading. The addressable pool still contains Linux, services, page cache, and
 every CPU and accelerator allocation. It is not a live free-memory receipt or
 an unconditional fit budget.
 
+Linux AMD APUs expose a BIOS VRAM carve-out and a GTT mapping limit through
+`amdgpu`. fitr uses GTT only for one unambiguous AMD adapter whose kernel GC IP
+identity explicitly identifies an APU. A larger GTT than VRAM is not identity.
+The GTT limit is neither extra physical RAM nor memory to add to the carve-out.
+Missing, zero, malformed, ambiguous, or physically inconsistent observations
+remain unknown; fitr does not substitute all installed RAM. Advice, inventory,
+source component projections and run capacity share this routing decision.
+An observed CPU placement takes
+host memory precedence over the graphics adapter's physical type.
+
+This read-only capacity path does not establish ROCm support, acceleration,
+model loading, or performance on Phoenix or another APU. Those claims still
+require a native serving-runtime observation at the exact configuration.
+
+The source semantics follow the [Linux amdgpu memory ABI](https://docs.kernel.org/gpu/amdgpu/driver-misc.html)
+and the kernel's [APU IP identity table](https://github.com/torvalds/linux/blob/24a19b953e2a3d0ea5a8c4951a0ab8f32720c907/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c#L3413).
+
 For advice, an operator can pass a deliberately conservative planning budget
 with `--vram-gb`. That value is labeled as supplied rather than measured. For
 a scored run, `--capacity-budget-gb` seals a final safe limit before the model

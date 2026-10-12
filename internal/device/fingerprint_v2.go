@@ -253,6 +253,9 @@ func (f FingerprintV2) ComparabilityKey() (string, error) {
 		EffectiveTokens: *f.Context.EffectiveTokens,
 		EffectiveSource: f.Context.EffectiveSource,
 	}
+	if f.Device.VRAMSource == AMDGTTMappingSource {
+		material.MemoryCapacityKind = "shared_gtt_mapping_limit"
+	}
 	b, err := json.Marshal(material)
 	if err != nil {
 		return "", fmt.Errorf("encode fingerprint key: %w", err)
@@ -267,22 +270,23 @@ type configEntry struct {
 }
 
 type fingerprintKeyMaterial struct {
-	Schema          string                `json:"schema"`
-	Host            string                `json:"host"`
-	OS              string                `json:"os"`
-	CPU             string                `json:"cpu"`
-	RAMGb           float64               `json:"ram_gb"`
-	GPU             string                `json:"gpu"`
-	GPUDriver       string                `json:"gpu_driver"`
-	GPUDriverDate   string                `json:"gpu_driver_date"`
-	GPUBackend      string                `json:"gpu_backend"`
-	VRAMGb          float64               `json:"vram_gb"`
-	Runtime         string                `json:"runtime"`
-	InferenceDevice string                `json:"inference_device"`
-	Config          []configEntry         `json:"config"`
-	RequestedTokens int                   `json:"requested_tokens"`
-	EffectiveTokens int                   `json:"effective_tokens"`
-	EffectiveSource ContextEvidenceSource `json:"effective_source"`
+	Schema             string                `json:"schema"`
+	Host               string                `json:"host"`
+	OS                 string                `json:"os"`
+	CPU                string                `json:"cpu"`
+	RAMGb              float64               `json:"ram_gb"`
+	GPU                string                `json:"gpu"`
+	GPUDriver          string                `json:"gpu_driver"`
+	GPUDriverDate      string                `json:"gpu_driver_date"`
+	GPUBackend         string                `json:"gpu_backend"`
+	VRAMGb             float64               `json:"vram_gb"`
+	MemoryCapacityKind string                `json:"memory_capacity_kind,omitempty"`
+	Runtime            string                `json:"runtime"`
+	InferenceDevice    string                `json:"inference_device"`
+	Config             []configEntry         `json:"config"`
+	RequestedTokens    int                   `json:"requested_tokens"`
+	EffectiveTokens    int                   `json:"effective_tokens"`
+	EffectiveSource    ContextEvidenceSource `json:"effective_source"`
 }
 
 func sortedNonemptyConfig(config map[string]string) []configEntry {

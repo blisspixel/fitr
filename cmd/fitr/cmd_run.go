@@ -632,7 +632,7 @@ func (run *runExecution) initializeResult() error {
 	if err != nil {
 		return err
 	}
-	fp := device.Detect(run.ctx, run.backend)
+	fp := device.DetectFor(run.ctx, run.backend, run.model)
 	if run.opts.ownedConfiguration != nil {
 		// Detect normally consults the caller's environment and a global server
 		// log. An owned process has its own explicitly sealed launch settings.
@@ -1223,7 +1223,8 @@ func observeServingCtx(ctx context.Context, model, kind string) (int, bool) {
 // throwing it away, so anyone who skipped advise measured a narrow window and
 // was never told a wider one was available.
 func largerFittingContext(ctx context.Context, c llm.Backend, model string, fp device.Fingerprint, used int) int {
-	if c == nil || used <= 0 || fp.VRAMGb <= 0 {
+	selected := device.SelectMemoryCapacity(fp)
+	if c == nil || used <= 0 || selected.GB <= 0 {
 		return 0
 	}
 	info, err := c.Show(ctx, model)
@@ -1232,11 +1233,9 @@ func largerFittingContext(ctx context.Context, c llm.Backend, model string, fp d
 	}
 	in := advise.Input{
 		Model: model, Backend: c.Name(),
-		HaveGB: fp.VRAMGb, HaveSrc: fp.VRAMSource,
+		HaveGB: selected.GB, HaveSrc: selected.Source,
 		Arch: advise.ArchFromKVs(info.Info), WeightsB: info.Size,
-		NVIDIAUnifiedMemory: device.IsNVIDIAUnifiedMemoryGPU(fp.GPU) ||
-			fp.VRAMSource == device.NVIDIAUnifiedMemorySource ||
-			fp.VRAMSource == device.NVIDIAUnifiedProbeSource,
+		SharedMemory: selected.Shared,
 	}
 	if in.WeightsB == 0 {
 		in.WeightsB = weightsFromTags(ctx, c, model)

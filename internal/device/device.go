@@ -414,7 +414,7 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 		cpu = cpuName(retryCtx)
 		cancelRetry()
 	}
-	vram, vsrc = preferUnifiedMemory(gpu, ram, vram, vsrc)
+	vram, vsrc = detectedMemoryCapacity(gpu, ram, vram, vsrc)
 	return Fingerprint{
 		Host: host, OS: runtime.GOOS, CPU: cpu, RAMGb: ram,
 		GPU: gpu, GPUDriver: drv, GPUDriverDate: date,
@@ -433,12 +433,27 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 // model budget marks everything incompatible. Discrete NVIDIA remains
 // nvidia-smi; GB10 and Thor use the measured Linux system pool only when the
 // dedicated-memory probe has no answer.
-func preferUnifiedMemory(gpu string, ram, vram float64, src string) (float64, string) {
+func detectedMemoryCapacity(gpu string, ram, vram float64, src string) (float64, string) {
+	vram, src = amdMemoryCapacity(gpu, ram, vram, src)
 	return preferUnifiedMemoryForOS(runtime.GOOS, gpu, ram, vram, src)
+}
+
+// DetectFor binds serving placement to the requested resident model. General
+// device discovery cannot borrow the first entry of a multi-model status list.
+func DetectFor(ctx context.Context, b llm.Backend, model string) Fingerprint {
+	fp := Detect(ctx, b)
+	fp.InferenceDevice = InferenceDeviceFor(ctx, b, model)
+	return fp
 }
 
 func preferUnifiedMemoryForOS(goos, gpu string, ram, vram float64, src string) (float64, string) {
 	if ram <= 0 {
+		return vram, src
+	}
+	// Linux AMD capacity needs adapter-bound DRM evidence. Missing GTT must
+	// not fall through to the older name-based whole-RAM substitution.
+	if goos == "linux" && (strings.Contains(strings.ToLower(gpu), "amd") ||
+		strings.Contains(strings.ToLower(gpu), "radeon")) {
 		return vram, src
 	}
 	// GB10 and Thor are NVIDIA unified-memory SoCs. Their nvidia-smi
@@ -670,7 +685,7 @@ func inferenceDevice(ctx context.Context, b llm.Backend, model string) string {
 }
 
 func inferenceDeviceFromRuntime(ctx context.Context, b llm.Backend, model string) string {
-	if b == nil {
+	if b == nil || model == "" {
 		return ""
 	}
 	running, err := b.PS(ctx)

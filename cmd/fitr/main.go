@@ -1034,14 +1034,18 @@ func renderInventoryStatus(ctx context.Context, b llm.Backend, also []string, mo
 			"repair or remove invalid files in "+device.UserProfilesDir())
 		return exitError
 	}
-	freeVRAM, _ := device.AvailableVRAM(ctx)
+	selected := device.SelectMemoryCapacity(fp)
+	var freeVRAM float64
+	if !selected.Shared {
+		freeVRAM, _ = device.AvailableVRAM(ctx)
+	}
 	inv := render.Inventory{
 		Fitr:         version,
 		CPU:          device.FormatCPU(fp.CPU),
 		GPU:          fp.GPU,
 		GPUBackend:   fp.GPUBackend,
-		MemoryGB:     fp.VRAMGb,
-		MemorySource: fp.VRAMSource,
+		MemoryGB:     selected.GB,
+		MemorySource: selected.Source,
 		FreeGB:       freeVRAM,
 		Profile:      prof.Name,
 		Uncalibrated: profileUncalibrated(prof),
@@ -1102,9 +1106,10 @@ func joinInstalled(ctx context.Context, b llm.Backend, fp device.Fingerprint) (a
 			"%d saved result file(s) could not be trusted; run fitr top history for details",
 			len(stored.Warnings)))
 	}
+	selected := device.SelectMemoryCapacity(fp)
 	return advise.Join(advise.InventoryQuery{
 		Tags: installed, Loaded: loaded, Evidence: evidenceFromRecords(stored.Records),
-		Current: fp, CurrentKey: fp.Key(), HaveGB: fp.VRAMGb, HaveSrc: fp.VRAMSource,
+		Current: fp, CurrentKey: fp.Key(), HaveGB: selected.GB, HaveSrc: selected.Source,
 		Serving: serving,
 	}), warnings, nil
 }

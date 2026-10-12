@@ -978,14 +978,14 @@ func TestExplicitBudgetOverridesAutomaticWholeSystemCapacity(t *testing.T) {
 func TestSharedNVIDIAUserBudgetSeparatesProjectionKinds(t *testing.T) {
 	ordinary := Evaluate(Input{
 		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
-		NVIDIAUnifiedMemory: true, Ctx: 8192, Arch: llama8B(),
+		SharedMemory: true, Ctx: 8192, Arch: llama8B(),
 	})
 	if ordinary.Tier != Compatible {
 		t.Fatalf("ordinary declared-budget projection = %+v, want compatible", ordinary)
 	}
 	withFit := Evaluate(Input{
 		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb",
-		NVIDIAUnifiedMemory: true, Ctx: 8192, Arch: llama8B(),
+		SharedMemory: true, Ctx: 8192, Arch: llama8B(),
 		FitB: 7 * GiB, FitSrc: "llama-fit-params",
 	})
 	if withFit.Tier != Skip || !strings.Contains(withFit.Why, "effective context and placement were not captured") {
@@ -1005,7 +1005,7 @@ func TestNVIDIAUnifiedIdentityStaysAutomaticWithDedicatedProbeValue(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			r := Evaluate(Input{
 				WeightsB: 5 * GiB, HaveGB: 121.7, HaveSrc: "nvidia-smi",
-				NVIDIAUnifiedMemory: tc.unified, Ctx: 8192, Arch: llama8B(),
+				SharedMemory: tc.unified, Ctx: 8192, Arch: llama8B(),
 			})
 			if r.Tier != tc.want {
 				t.Fatalf("tier = %s (%s), want %s", r.Tier, r.Why, tc.want)
@@ -1019,7 +1019,7 @@ func TestNVIDIAUnifiedIdentityStaysAutomaticWithDedicatedProbeValue(t *testing.T
 
 func TestSharedNVIDIAResidentNeedsReportedRequestedContext(t *testing.T) {
 	r := Evaluate(Input{
-		HaveGB: 96, HaveSrc: "--vram-gb", NVIDIAUnifiedMemory: true,
+		HaveGB: 96, HaveSrc: "--vram-gb", SharedMemory: true,
 		Ctx: 8192, ResidentB: 7 * GiB, ResidentSrc: "runtime status",
 	})
 	if r.Tier != Skip || r.Source == "runtime status" || !strings.Contains(strings.Join(r.Gaps, " "), "does not prove") {
