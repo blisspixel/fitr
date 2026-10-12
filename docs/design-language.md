@@ -47,9 +47,13 @@ Successful withdrawal never becomes the explanation for failed irrelevance.
 `internal/analysis` derives this wording once for CLI, HTML, result JSON and
 TUI detail views, including a selected Board row. The CLI Board keeps failed
 needs beside its performance columns. Narrow TUI views retain the leading
-failure explanation. Result, View and Board JSON add `verdicts` with the same parts
-and `deciding_family` when the recorded breakdown identifies it; the existing
-`needs` state map, scoring policy, sealed receipt and `view --full` bytes stay
+failure explanation. Result and Board JSON add `verdicts` with the same parts
+and `deciding_family` when the recorded breakdown identifies it. View JSON
+already contains the canonical scorecard, so its additive `verdicts` map carries
+only deciding-family overrides instead of duplicating every unchanged need.
+When the scoring profile is unavailable, View JSON uses the same unresolved
+presentation as plain output. The existing `needs` state map, scoring policy,
+sealed receipt and `view --full` bytes stay
 unchanged. Historical verdicts without an identifiable breakdown retain their
 original explanation; no missing evidence is promoted.
 

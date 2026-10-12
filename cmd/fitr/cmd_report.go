@@ -182,14 +182,11 @@ func writeViewedJSON(selected *Result, full bool) int {
 	// scorecard the command prints.
 	var payload any = selected
 	if !full {
-		card, meta := selected.Scorecard, resultMeta(selected, selected.Profile)
-		if artifact, err := artifactFrom(selected); err == nil {
-			card, meta = artifact.Scorecard, artifact.Meta
-		}
+		card, meta := viewedPresentation(selected)
 		payload = map[string]any{
 			"schema": "fitr.view.v1", "model": selected.Model,
 			"scorecard": card, "meta": meta,
-			"verdicts": analysis.PresentVerdicts(card.Needs),
+			"verdicts": analysis.DecidingVerdicts(card.Needs),
 		}
 	}
 	if err := encoder.Encode(payload); err != nil {

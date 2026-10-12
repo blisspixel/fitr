@@ -98,6 +98,20 @@ func PresentVerdicts(needs map[string]score.Verdict) map[string]VerdictPresentat
 	return views
 }
 
+// DecidingVerdicts supplements a View export that already contains the full
+// canonical scorecard. Carry only the independent-family overrides so the
+// compact view does not duplicate every unchanged explanation and breakdown.
+func DecidingVerdicts(needs map[string]score.Verdict) map[string]VerdictPresentation {
+	views := make(map[string]VerdictPresentation)
+	for need, verdict := range needs {
+		view := PresentVerdict(need, verdict)
+		if view.DecidingFamily != "" {
+			views[need] = view
+		}
+	}
+	return views
+}
+
 func verdictHead(measure, gate string) string {
 	if measure != "" && gate != "" {
 		return measure + " (" + gate + ")"

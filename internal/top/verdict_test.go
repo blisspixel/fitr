@@ -38,3 +38,15 @@ func TestBoardDetailLeadsWithDecidingFailure(t *testing.T) {
 		t.Fatalf("selected Board detail hides the deciding failure:\n%s", text)
 	}
 }
+
+func TestCompactResultKeepsDecidingFailure(t *testing.T) {
+	run := Run{Verdicts: []Verdict{{
+		Need: "tool_restraint", Label: "leaves unused tools alone", State: "FAIL",
+		Why: "withdrawal; did not stop cleanly after a tool was withdrawn",
+	}}}
+	canvas := NewCanvas(40, 14)
+	renderCompactVerdicts(contentWriter(&canvas), run)
+	if text := canvas.Plain(); !strings.Contains(text, "[FAIL] withdrawal;") {
+		t.Fatalf("compact result dropped the deciding failure:\n%s", text)
+	}
+}

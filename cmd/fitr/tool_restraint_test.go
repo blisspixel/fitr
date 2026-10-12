@@ -8,6 +8,7 @@ import (
 	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/render"
+	"github.com/blisspixel/fitr/internal/score"
 )
 
 func TestViewedAndBoardJSONKeepDecidingWithdrawalEvidence(t *testing.T) {
@@ -67,5 +68,32 @@ func TestViewedAndBoardJSONKeepDecidingWithdrawalEvidence(t *testing.T) {
 	sealedBytes, _ := json.Marshal(sealedValue)
 	if code != exitOK || string(fullBytes) != string(sealedBytes) {
 		t.Fatal("full export changed the sealed receipt")
+	}
+}
+
+func TestViewJSONKeepsUnreproducibleVerdictsUnresolved(t *testing.T) {
+	result := golden(t)
+	result.Profile = "deleted-local-profile"
+	result.Scorecard.Needs = map[string]score.Verdict{
+		"tool_restraint": {
+			State: score.Fail, Measure: "3/3 clean", Gate: "need >=0.70",
+			Detail: []string{"tool_irrelevance 3/3", "did not stop cleanly after a tool was withdrawn"},
+		},
+	}
+	card, _ := viewedPresentation(result)
+	if card.Needs["tool_restraint"].State != score.Inconclusive {
+		t.Fatal("fixture did not lose reproducibility")
+	}
+	out, code := captureTopStdout(t, func() int { return writeViewedJSON(result, false) })
+	var view struct {
+		Scorecard score.Scorecard                         `json:"scorecard"`
+		Verdicts  map[string]analysis.VerdictPresentation `json:"verdicts"`
+	}
+	if err := json.Unmarshal([]byte(out), &view); err != nil {
+		t.Fatal(err)
+	}
+	if code != exitOK || view.Scorecard.Needs["tool_restraint"].State != score.Inconclusive ||
+		view.Verdicts["tool_restraint"].DecidingFamily != "" {
+		t.Fatalf("JSON promoted a verdict that plain output cannot reproduce: %s", out)
 	}
 }
