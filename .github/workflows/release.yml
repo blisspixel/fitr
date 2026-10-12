@@ -170,53 +170,34 @@ jobs:
         shell: bash
         env:
           FITR_BIN: ${{ runner.temp }}/fitr-install
-          FITR_RELEASE_BASE_URL: http://127.0.0.1:8765
           FITR_REQUIRE_BINARY: '1'
         run: |
-          python3 -m http.server 8765 --bind 127.0.0.1 --directory dist >/dev/null 2>&1 &
-          server_pid=$!
-          trap 'kill "$server_pid"' EXIT
-          for attempt in {1..20}; do
-            curl --fail --silent http://127.0.0.1:8765/SHA256SUMS >/dev/null && break
-            if [ "$attempt" -eq 20 ]; then exit 1; fi
-            sleep 0.25
-          done
-          sh install.sh
+          python3 scripts/installer_fixture.py --directory dist --log "$RUNNER_TEMP/installer-valid-server.log" -- sh install.sh
           test "$("$FITR_BIN/fitr" version)" = "fitr ${GITHUB_REF_NAME#v}"
       - name: install candidate
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           FITR_BIN: ${{ runner.temp }}\fitr-install
-          FITR_RELEASE_BASE_URL: http://127.0.0.1:8765
           FITR_REQUIRE_BINARY: '1'
           FITR_NO_PATH: '1'
         run: |
           $userPathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
-          $server = Start-Process python -ArgumentList '-m','http.server','8765','--bind','127.0.0.1','--directory','dist' -PassThru -WindowStyle Hidden
-          try {
-            $ready = $false
-            for ($attempt = 1; $attempt -le 20; $attempt++) {
-              try {
-                Invoke-WebRequest http://127.0.0.1:8765/SHA256SUMS -UseBasicParsing | Out-Null
-                $ready = $true
-                break
-              } catch {
-                Start-Sleep -Milliseconds 250
-              }
-            }
-            if (-not $ready) { throw "candidate server did not become ready" }
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-            if ($LASTEXITCODE -ne 0) { throw "installer exited $LASTEXITCODE" }
-            $installed = & "$env:FITR_BIN\fitr.exe" version
-            if ($installed -ne "fitr $($env:GITHUB_REF_NAME.Substring(1))") {
-              throw "installed $installed from candidate"
-            }
-            $userPathAfter = [Environment]::GetEnvironmentVariable('Path', 'User')
-            if ($userPathAfter -cne $userPathBefore) { throw "installer changed the persistent user PATH" }
-          } finally {
-            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          & python scripts/installer_fixture.py --directory dist --log "$env:RUNNER_TEMP\installer-valid-server.log" -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+          if ($LASTEXITCODE -ne 0) { throw "installer exited $LASTEXITCODE" }
+          $installed = & "$env:FITR_BIN\fitr.exe" version
+          if ($installed -ne "fitr $($env:GITHUB_REF_NAME.Substring(1))") {
+            throw "installed $installed from candidate"
           }
+          $userPathAfter = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($userPathAfter -cne $userPathBefore) { throw "installer changed the persistent user PATH" }
+
+      - name: upload installer fixture server logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-server-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/installer-*-server.log
 
   publish:
     needs: installer
