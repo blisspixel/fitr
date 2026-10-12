@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/capacity"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/lock"
@@ -184,7 +185,7 @@ func readBackendAdviseSource(ctx context.Context, command adviseCommand,
 	applyAdviseDeviceEvidence(in, fp)
 	selected := device.SelectMemoryCapacity(fp)
 	in.FreeGB = 0
-	if !selected.Shared {
+	if selected.Domain == capacity.DomainAccelerator {
 		in.FreeGB, _ = device.AvailableVRAM(ctx)
 	}
 	if command.vram < 0 {

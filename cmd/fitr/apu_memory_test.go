@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -30,12 +32,14 @@ func TestAPUObservedCPUPlacementUsesHostCapacity(t *testing.T) {
 
 func TestAPUSourceProjectionUsesSameCapacitySelection(t *testing.T) {
 	for _, test := range []struct {
-		name, source, budget string
-		gb, want             float64
+		name, gpu, source, budget string
+		gb, want                  float64
 	}{
-		{"carveout remains unknown", "drm sysfs", "", 2, 0},
-		{"GTT mapping observation", device.AMDGTTMappingSource, "", 30, 30},
-		{"operator ceiling survives", "drm sysfs", "8", 2, 8},
+		{"carveout remains unknown", "AMD Radeon 780M", "drm sysfs", "", 2, 0},
+		{"GTT mapping observation", "AMD Radeon 780M", device.AMDGTTMappingSource, "", 30, 30},
+		{"operator ceiling survives", "AMD Radeon 780M", "drm sysfs", "8", 2, 8},
+		{"missing GPU remains unknown", "", "", "", 0, 0},
+		{"explicit component ceiling without GPU", "", "", "8", 0, 8},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			reads := 0
@@ -44,7 +48,7 @@ func TestAPUSourceProjectionUsesSameCapacitySelection(t *testing.T) {
 				if test.budget != "" {
 					t.Fatal("explicit component ceiling consulted automatic capacity")
 				}
-				return device.Fingerprint{GPU: "AMD Radeon 780M", RAMGb: 60,
+				return device.Fingerprint{GPU: test.gpu, RAMGb: 60,
 					VRAMGb: test.gb, VRAMSource: test.source}
 			}
 			args := []string{"resolve", "hf", "--repo", "owner/model", "--revision", "main",
@@ -63,12 +67,89 @@ func TestAPUSourceProjectionUsesSameCapacitySelection(t *testing.T) {
 			got := report.Projection.CapacityBytes
 			if test.want == 0 {
 				if got != nil || code != exitUnresolved {
-					t.Fatalf("carveout became source addressable capacity: code %d, %+v", code, report.Projection)
+					t.Fatalf("missing capacity became source addressable capacity: code %d, %+v", code, report.Projection)
 				}
 			} else if got == nil || *got != int64(test.want*advise.GiB) {
 				t.Fatalf("source capacity = %v, want %v GiB", got, test.want)
 			}
 		})
+	}
+}
+
+func TestAPUMissingDomainRefusesCapacityPlanWithOrWithoutBudget(t *testing.T) {
+	for _, explicitBudget := range []bool{false, true} {
+		t.Run(map[bool]string{false: "automatic", true: "explicit byte budget"}[explicitBudget], func(t *testing.T) {
+			display := render.New("none")
+			defer display.Close()
+			run := runExecution{ctx: memoryProbeForbiddenContext{context.Background()}, display: display,
+				result: &Result{Device: device.Fingerprint{RAMGb: 60, InferenceDevice: "unknown"},
+					TaskPlan: record.TaskPlan{Memory: true}}}
+			run.resolved.Identity.Value = integrationDigest()
+			budget := 8.0
+			if explicitBudget {
+				run.opts.capacityBudgetGB = &budget
+			}
+			defer refuseMemoryProbePanic(t)
+			if err := run.prepareCapacityPlan(); err == nil || !strings.Contains(err.Error(), "memory resource domain is unobserved") {
+				t.Fatalf("unknown serving memory sealed or produced the wrong refusal: %v", err)
+			}
+			if run.result.CapacityPlan != nil {
+				t.Fatal("refused capacity plan was retained")
+			}
+		})
+	}
+}
+
+func TestAPUUnknownDomainDoesNotReadHostOrAcceleratorMemory(t *testing.T) {
+	probe := "nvidia-smi"
+	if runtime.GOOS == "windows" {
+		probe += ".exe"
+	}
+	root := t.TempDir()
+	// This executable is only a LookPath sentinel. Any attempted observation
+	// fails at its context deadline before a process can execute.
+	if err := os.WriteFile(filepath.Join(root, probe), nil, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root)
+	fp := device.Fingerprint{GPU: "NVIDIA RTX 4090", RAMGb: 60, VRAMGb: 24, VRAMSource: "nvidia-smi"}
+	for _, domain := range []capacity.ResourceDomain{"", "unknown"} {
+		t.Run(string(domain), func(t *testing.T) {
+			defer refuseMemoryProbePanic(t)
+			at := time.Unix(1, 0)
+			if got := addressableObservation(fp, domain, at); got != nil {
+				t.Errorf("unknown-domain addressable observation = %+v", got)
+			}
+			ctx := memoryProbeForbiddenContext{context.Background()}
+			if got := availableObservation(ctx, fp, domain, at); got != nil {
+				t.Errorf("unknown-domain availability = %+v", got)
+			}
+			if got := containerObservation(domain, at); got != nil {
+				t.Errorf("unknown-domain container observation = %+v", got)
+			}
+		})
+	}
+}
+
+func TestAPUUnknownOwnedDomainRefusesBeforeAcceleratorProbe(t *testing.T) {
+	defer refuseMemoryProbePanic(t)
+	ctx := memoryProbeForbiddenContext{context.Background()}
+	got, err := autoPlacementAvailable(ctx, "", time.Unix(1, 0), device.Fingerprint{})
+	if got != nil || err == nil || !strings.Contains(err.Error(), "memory resource domain") {
+		t.Fatalf("unknown owned domain = %+v, error %v", got, err)
+	}
+}
+
+type memoryProbeForbiddenContext struct{ context.Context }
+
+func (memoryProbeForbiddenContext) Deadline() (time.Time, bool) {
+	panic("memory probe consulted a context before the resource domain was established")
+}
+
+func refuseMemoryProbePanic(t *testing.T) {
+	t.Helper()
+	if recovered := recover(); recovered != nil {
+		t.Fatalf("memory observation started before domain refusal: %v", recovered)
 	}
 }
 

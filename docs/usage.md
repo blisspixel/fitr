@@ -238,6 +238,10 @@ different limits, so shared allocation headroom stays unobserved. Use
 `--capacity-budget-gb` for an explicit safe run budget; the reserve form needs
 a defensible current-availability receipt and is unavailable for this domain.
 Target-specific resident CPU placement can use the host-memory path instead.
+Missing GPU discovery and unknown serving placement do not establish CPU
+execution or a host-memory budget. A run refuses to seal a memory capacity plan
+until its resource domain is observed; an explicit byte budget alone does not
+identify that domain.
 
 Apple Silicon shares one pool, but the GPU cannot wire all of it. Reporting
 installed RAM as GPU-available memory is the unified-memory version of grading

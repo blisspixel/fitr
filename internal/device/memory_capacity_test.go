@@ -1,6 +1,7 @@
 package device
 
 import (
+	"math"
 	"testing"
 
 	"github.com/blisspixel/fitr/internal/capacity"
@@ -19,6 +20,13 @@ func TestAPUCapacitySelectionKeepsPlacementAndSemanticsSeparate(t *testing.T) {
 		{"carveout is not shared capacity", "AMD Radeon 780M", "GPU 100%", "drm sysfs", 2, 0, capacity.DomainUnified, true},
 		{"discrete VRAM", "AMD Radeon RX 7900 XTX", "GPU 100%", "drm sysfs", 24, 24, capacity.DomainAccelerator, false},
 		{"no GPU backend is not CPU", "AMD Radeon RX 7900 XTX", "unknown", "drm sysfs", 24, 24, capacity.DomainAccelerator, false},
+		{"missing GPU is not CPU", "", "unknown", "", 0, 0, "", false},
+		{"missing placement is not CPU", "", "", "", 0, 0, "", false},
+		{"negative capacity is not CPU", "", "unknown", "", -1, 0, "", false},
+		{"malformed capacity is not CPU", "", "unknown", "", math.NaN(), 0, "", false},
+		{"infinite capacity is not CPU", "", "unknown", "", math.Inf(1), 0, "", false},
+		{"positive CPU without GPU", "", "CPU", "", 0, 60, capacity.DomainHost, true},
+		{"positive VRAM without name", "", "unknown", "nvidia-smi", 24, 24, capacity.DomainAccelerator, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := SelectMemoryCapacity(Fingerprint{GPU: test.gpu, InferenceDevice: test.placement,

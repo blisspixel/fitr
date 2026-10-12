@@ -1,6 +1,7 @@
 package device
 
 import (
+	"math"
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/capacity"
@@ -23,10 +24,13 @@ type MemoryCapacity struct {
 // SelectMemoryCapacity is the common routing decision for advice, inventory
 // and sealed capacity plans. An empty accelerator reading is not CPU evidence.
 func SelectMemoryCapacity(fp Fingerprint) MemoryCapacity {
-	if strings.EqualFold(strings.TrimSpace(fp.InferenceDevice), "CPU") ||
-		(strings.TrimSpace(fp.GPU) == "" && fp.VRAMGb <= 0) {
+	if strings.EqualFold(strings.TrimSpace(fp.InferenceDevice), "CPU") {
 		return MemoryCapacity{Domain: capacity.DomainHost, GB: fp.RAMGb,
 			Source: "system physical memory", Shared: fp.RAMGb > 0}
+	}
+	if strings.TrimSpace(fp.GPU) == "" &&
+		(fp.VRAMGb <= 0 || math.IsNaN(fp.VRAMGb) || math.IsInf(fp.VRAMGb, 0)) {
+		return MemoryCapacity{}
 	}
 	selected := MemoryCapacity{Domain: capacity.DomainAccelerator, GB: fp.VRAMGb, Source: fp.VRAMSource}
 	if IsUnifiedMemoryGPU(fp.GPU) || sharedCapacitySource(fp.VRAMSource) {

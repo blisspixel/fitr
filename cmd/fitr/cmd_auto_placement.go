@@ -67,6 +67,9 @@ func autoPlacementAvailable(ctx context.Context, domain capacity.ResourceDomain,
 	if domain == capacity.DomainHost {
 		return availableObservation(ctx, expected, domain, at), nil
 	}
+	if domain != capacity.DomainAccelerator {
+		return nil, errors.New("owned availability needs an observed host or dedicated accelerator memory resource domain")
+	}
 	bytes, err := device.SingleNVIDIAAvailable(ctx, expected)
 	if err != nil {
 		return nil, err

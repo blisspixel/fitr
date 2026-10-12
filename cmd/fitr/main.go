@@ -38,6 +38,7 @@ import (
 	"github.com/blisspixel/fitr/internal/atomicfile"
 	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/calibration"
+	"github.com/blisspixel/fitr/internal/capacity"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/llm"
@@ -1036,7 +1037,7 @@ func renderInventoryStatus(ctx context.Context, b llm.Backend, also []string, mo
 	}
 	selected := device.SelectMemoryCapacity(fp)
 	var freeVRAM float64
-	if !selected.Shared {
+	if selected.Domain == capacity.DomainAccelerator {
 		freeVRAM, _ = device.AvailableVRAM(ctx)
 	}
 	inv := render.Inventory{

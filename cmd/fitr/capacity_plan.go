@@ -17,6 +17,9 @@ func (run *runExecution) prepareCapacityPlan() error {
 		return nil
 	}
 	domain := capacityDomain(run.result.Device)
+	if domain == "" {
+		return errors.New("memory resource domain is unobserved; observe target CPU placement or accelerator memory before sealing a capacity plan")
+	}
 	observedAt := time.Now().UTC()
 	policyInput := capacity.PolicyInput{ResourceDomain: domain}
 	policyInput.Addressable = addressableObservation(run.result.Device, domain, observedAt)
@@ -61,6 +64,9 @@ func capacityDomain(fp device.Fingerprint) capacity.ResourceDomain {
 func addressableObservation(fp device.Fingerprint, domain capacity.ResourceDomain,
 	observedAt time.Time) *capacity.MemoryObservation {
 	selected := device.SelectMemoryCapacity(fp)
+	if selected.Domain == "" || selected.Domain != domain {
+		return nil
+	}
 	gb, source := selected.GB, selected.Source
 	if domain == capacity.DomainUnified && (source == device.AppleWiredLimitSource ||
 		source == device.AppleAssumedShareSource) {
@@ -87,14 +93,17 @@ func availableObservation(ctx context.Context, fp device.Fingerprint, domain cap
 	var bytes int64
 	var source string
 	var ok bool
-	if domain == capacity.DomainUnified || domain == capacity.DomainHost {
+	switch domain {
+	case capacity.DomainUnified, capacity.DomainHost:
 		bytes, source, ok = device.SystemMemoryAvailable(ctx)
-	} else {
+	case capacity.DomainAccelerator:
 		var gb float64
 		gb, source, ok = device.AvailableVRAMWithSource(ctx)
 		if ok {
 			bytes, _ = gibBytes(gb)
 		}
+	default:
+		return nil
 	}
 	if !ok || bytes <= 0 {
 		return nil
@@ -106,7 +115,7 @@ func availableObservation(ctx context.Context, fp device.Fingerprint, domain cap
 }
 
 func containerObservation(domain capacity.ResourceDomain, observedAt time.Time) *capacity.ContainerReceipt {
-	if domain == capacity.DomainAccelerator {
+	if domain != capacity.DomainHost && domain != capacity.DomainUnified {
 		return nil
 	}
 	observed, ok := device.ContainerMemoryLimit()
