@@ -38,6 +38,25 @@ keeps the text name instead of approximating the mark with ambiguous glyphs.
 - Sanitize untrusted text before rendering. Command recipes must preserve
   argument boundaries for the target shell.
 
+Need verdicts lead with the evidence that decides their state. When a failed
+tool-withdrawal scenario overrides the ordinary tool-irrelevance interval, the
+headline names withdrawal and the receipt retains the irrelevance count,
+interval and threshold separately. An undecided irrelevance sample is not an
+overall undecided result when the independent withdrawal scenario failed.
+Successful withdrawal never becomes the explanation for failed irrelevance.
+`internal/analysis` derives this wording once for CLI, HTML, result JSON and
+TUI detail views, including a selected Board row. The CLI Board keeps failed
+needs beside its performance columns. Narrow TUI views retain the leading
+failure explanation. Result and Board JSON add `verdicts` with the same parts
+and `deciding_family` when the recorded breakdown identifies it. View JSON
+already contains the canonical scorecard, so its additive `verdicts` map carries
+only deciding-family overrides instead of duplicating every unchanged need.
+When the scoring profile is unavailable, View JSON uses the same unresolved
+presentation as plain output. The existing `needs` state map, scoring policy,
+sealed receipt and `view --full` bytes stay
+unchanged. Historical verdicts without an identifiable breakdown retain their
+original explanation; no missing evidence is promoted.
+
 ## Color and motion
 
 Cyan emphasizes focus and active work, amber marks gaps and warnings, green

@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/record"
@@ -181,13 +182,11 @@ func writeViewedJSON(selected *Result, full bool) int {
 	// scorecard the command prints.
 	var payload any = selected
 	if !full {
-		card, meta := selected.Scorecard, resultMeta(selected, selected.Profile)
-		if artifact, err := artifactFrom(selected); err == nil {
-			card, meta = artifact.Scorecard, artifact.Meta
-		}
+		card, meta := viewedPresentation(selected)
 		payload = map[string]any{
 			"schema": "fitr.view.v1", "model": selected.Model,
 			"scorecard": card, "meta": meta,
+			"verdicts": analysis.DecidingVerdicts(card.Needs),
 		}
 	}
 	if err := encoder.Encode(payload); err != nil {
@@ -405,6 +404,7 @@ func makeBoardRow(result *Result, excluded *boardExclusions) render.BoardRow {
 		DecodeMean: meta.DecodeMean, DecodeSD: meta.DecodeSD,
 		PrefillMean: meta.PrefillMean, ResidentGB: meta.ResidentGB,
 		DecodeSeries: slices.Clone(meta.DecodeSeries), Repeats: result.Repeats, Serves: codes,
+		Verdicts: analysis.PresentVerdicts(scorecard.Needs),
 	}
 }
 

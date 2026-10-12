@@ -507,6 +507,29 @@ func TestTopRunPreservesObservedZeroAndResidentContext(t *testing.T) {
 	}
 }
 
+func TestTopVerdictsLeadWithFailedWithdrawal(t *testing.T) {
+	card := score.Scorecard{Needs: map[string]score.Verdict{
+		"tool_restraint": {
+			State: score.Fail, Measure: "3/3 clean [0.21-1.00]", Gate: "need >=0.70",
+			Detail: []string{"tool_irrelevance 3/3", "did not stop cleanly after a tool was withdrawn"},
+			Note:   "undecided: the interval crosses the bar. Not a fail",
+		},
+	}}
+	verdicts := topVerdicts(card)
+	var restraint top.Verdict
+	for _, verdict := range verdicts {
+		if verdict.Need == "tool_restraint" {
+			restraint = verdict
+		}
+	}
+	if restraint.State != "FAIL" || !strings.HasPrefix(restraint.Why, "withdrawal;") {
+		t.Fatalf("TUI hides deciding withdrawal evidence: %+v", verdicts)
+	}
+	if restraint.Why != render.PresentVerdictWhy("tool_restraint", card.Needs["tool_restraint"]) {
+		t.Fatal("TUI and CLI disagree about deciding evidence")
+	}
+}
+
 func TestTopSnapshotKeepsContaminatedRunInHistoryButOutOfBoard(t *testing.T) {
 	clean := mockResult("clean", 10, .1, 100, 1, 1, 1, 1, 1)
 	contaminated := mockResult("contaminated", 100, .1, 100, 1, 1, 1, 1, 1)

@@ -348,6 +348,9 @@ func renderCompactVerdicts(w *lineWriter, run Run) {
 		}
 	}
 	w.line(Span{Text: "summary    ", Role: RoleMuted}, Span{Text: strings.Join(parts, " | "), Role: RoleDefault})
+	if why := boardWhyNot(run); why != "" {
+		w.line(Span{Text: "why not    ", Role: RoleWarning}, Span{Text: why, Role: RoleDefault})
+	}
 	if len(attention) > 0 {
 		w.line(Span{Text: "attention  ", Role: RoleWarning}, Span{Text: strings.Join(attention, "; "), Role: RoleDefault})
 	}
@@ -662,29 +665,6 @@ func renderResultNext(w *lineWriter, run Run) {
 	}
 }
 
-func renderResultVerdicts(w *lineWriter, run Run, width int) {
-	if len(run.Verdicts) == 0 {
-		return
-	}
-	w.line(Span{Text: "verdicts", Role: RoleHeader})
-	for _, verdict := range run.Verdicts {
-		label := verdict.Label
-		if label == "" {
-			label = verdict.Need
-		}
-		spans := []Span{
-			{Text: fmt.Sprintf("[%-4s] ", verdict.State), Role: verdictRole(verdict.State)},
-			{Text: label, Role: RoleDefault},
-		}
-		if width >= 100 {
-			spans = append(spans, Span{Text: "  " + verdict.Why, Role: RoleMuted})
-		}
-		if !w.line(spans...) {
-			return
-		}
-	}
-}
-
 func renderBoard(canvas *Canvas, state State, glyphs Glyphs) {
 	groups := VisibleBoard(state)
 	w := contentWriter(canvas)
@@ -917,6 +897,9 @@ func boardWhyNot(run Run) string {
 		label := verdict.Label
 		if label == "" {
 			label = verdict.Need
+		}
+		if verdict.Why != "" {
+			return "[" + shortVerdictState(verdict.State) + "] " + verdict.Why
 		}
 		return label + " [" + shortVerdictState(verdict.State) + "]"
 	}
