@@ -174,19 +174,26 @@ func TestVerifierRejectsInterpreterChangedAfterPreflight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	contents, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.WriteString("changed"); err != nil {
+	// Preflight just executed this inode. Replacing the path atomically tests
+	// the same hash mismatch without writing a recently executing image,
+	// which Linux can reject with ETXTBSY even after the child was reaped.
+	replacement := path + ".changed"
+	if err := os.WriteFile(replacement, append(contents, []byte("changed")...), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Close(); err != nil {
+	if err := os.Rename(replacement, path); err != nil {
 		t.Fatal(err)
 	}
 	receipt := verifyIn(context.Background(), t.TempDir(), runner, "PASS_TOKEN")
 	if receipt.ProcessStarted || receipt.Failure == nil || receipt.Failure.Kind != FailureExecutorPreflight {
 		t.Fatalf("changed interpreter was launched: %+v", receipt)
+	}
+	if !strings.Contains(receipt.Failure.Message, "resolved interpreter changed after preflight") {
+		t.Fatalf("replacement did not exercise the identity check: %+v", receipt)
 	}
 }
 
