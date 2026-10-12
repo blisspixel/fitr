@@ -6,6 +6,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from socketserver import TCPServer
 import json
+import ntpath
 import os
 from pathlib import Path
 import signal
@@ -123,6 +124,16 @@ def show_log(log):
         print(log.read_text(encoding="utf-8", errors="replace"), file=sys.stderr)
 
 
+def installer_environment(command, url):
+    environment = dict(os.environ, FITR_RELEASE_BASE_URL=url)
+    if os.name == "nt" and ntpath.basename(command[0]).lower() == "powershell.exe":
+        # A Python intermediary does not apply PowerShell 7's direct-child module-path adjustment.
+        # Let Windows PowerShell construct its own defaults instead of loading PowerShell 7 modules.
+        environment = {key: value for key, value in environment.items()
+                       if key.upper() != "PSMODULEPATH"}
+    return environment
+
+
 def interrupted(*_):
     raise KeyboardInterrupt
 
@@ -146,7 +157,7 @@ def main():
     signal.signal(signal.SIGTERM, interrupted)
     try:
         with ArtifactServer(args.directory, args.log) as url:
-            environment = dict(os.environ, FITR_RELEASE_BASE_URL=url)
+            environment = installer_environment(command, url)
             status = subprocess.call(command, env=environment)
     except (FixtureError, OSError, ValueError) as exc:
         print("installer fixture: " + str(exc), file=sys.stderr)
