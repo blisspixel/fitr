@@ -412,9 +412,9 @@ func (session Session) Recommendation(sources ...ObservationSource) Recommendati
 		in.Scope.Device = observed.Device
 		in.Scope.TestedContext = observed.TestedContext
 		in.MeasuredTokens = observed.TestedContext
-		// This fitting's own exploration cannot certify a winner. Fresh
-		// confirmation is a later, separate step.
-		in.Exploration = true
+		// A fitting's own exploration cannot certify a winner. Only a source
+		// from resolved fresh confirmation clears the hold.
+		in.Exploration = !allConfirmed(sources)
 	}
 	return AssessRecommendation(in)
 }
@@ -454,15 +454,17 @@ func AssessRecommendation(in RecommendationInput) Recommendation {
 	}
 	unresolved = appendUncertainty(unresolved, in.Scope.Uncertainty)
 	rec.Passed, rec.Failed, rec.Unresolved = passed, failed, unresolved
-	rec.deriveOutcome(in, passed, failed, unresolved)
+	rec.deriveOutcome(in, passed, failed)
 	rec.Lines = recommendationLines(rec, in)
 	return rec
 }
 
-// deriveOutcome sets the outcome and qualification from the class results. An
-// exploration and a stated conflict both withhold qualification even when every
-// declared class passed: neither is a certification.
-func (rec *Recommendation) deriveOutcome(in RecommendationInput, passed, failed, unresolved []string) {
+// deriveOutcome sets the outcome and qualification from the class results. A
+// missing required class, a conflict, a failure, or an uncertified exploration
+// withholds qualification. The plan-derived uncertainty stays visible in
+// Unresolved but does not by itself block a fully measured result: caveats are
+// not the same as missing evidence.
+func (rec *Recommendation) deriveOutcome(in RecommendationInput, passed, failed []string) {
 	missingRequired := false
 	for _, class := range in.Required {
 		if !sliceHas(passed, class) {
@@ -478,7 +480,7 @@ func (rec *Recommendation) deriveOutcome(in RecommendationInput, passed, failed,
 		rec.Outcome = "supported"
 		rec.Qualified = true
 	}
-	if len(in.Conflicts) > 0 || len(unresolved) > 0 || in.Exploration {
+	if len(in.Conflicts) > 0 || in.Exploration {
 		rec.Qualified = false
 		if rec.Outcome == "supported" {
 			rec.Outcome = "unresolved"

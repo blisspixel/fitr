@@ -8,10 +8,12 @@ set -eu
 # security fixes added 20,480 more: 16,171,520. Listening-process
 # accelerator evidence, bubblewrap isolation, ranked cleanup, context
 # boundary probes, and model suggestions added 77,312 bytes:
-# 16,171,520 -> 16,248,832. No new Go dependency was added. This deliberate
+# 16,171,520 -> 16,248,832. The guided-fitting recommendation projection
+# (validated records into evidence classes) added 38,912 bytes:
+# 16,248,832 -> 16,287,744. No new Go dependency was added. This deliberate
 # release-envelope update retains the existing 38,824-byte headroom.
 # CI and releases use this single measured gate.
-max_bytes=16287656
+max_bytes=16326568
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"

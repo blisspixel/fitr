@@ -678,12 +678,17 @@ func printTailor(session fitting.Session, display string) int {
 	}
 }
 
-// fittingObservationSources resolves each pinned fitting point to its sealed
-// record and projects it. A missing record, a changed digest, a failed
-// validation, or a broken store yields no source and a gap line; it never
-// produces an evidence class. Identity comes only from the validated record, so
-// a phase or a point count cannot stand in for a measured configuration.
+// fittingObservationSources resolves a fitting's sealed evidence into
+// observation sources. An owned fitting reads its delegated auto session; an
+// endpoint fitting reads its own managed store. A missing record, a changed
+// digest, a failed validation, or a broken store yields no source and a gap
+// line; it never produces an evidence class. Identity comes only from the
+// validated record, so a phase or a point count cannot stand in for a measured
+// configuration.
 func fittingObservationSources(session fitting.Session) ([]fitting.ObservationSource, []string) {
+	if session.AutoSessionID != "" {
+		return delegatedObservationSources(session)
+	}
 	if session.ExplorationID == "" || len(session.Points) == 0 {
 		return nil, nil
 	}
@@ -714,6 +719,56 @@ func fittingObservationSources(session fitting.Session) ([]fitting.ObservationSo
 		sources = append(sources, source)
 	}
 	return sources, gaps
+}
+
+// delegatedObservationSources resolves an owned auto session's sealed points.
+// A resolved fresh confirmation is preferred and clears the exploration hold;
+// otherwise the exploration evidence is projected, still uncertified. The auto
+// outcome is surfaced but never becomes a class.
+func delegatedObservationSources(session fitting.Session) ([]fitting.ObservationSource, []string) {
+	journal, err := (automation.Store{Results: resultsDir()}).Load(session.AutoSessionID)
+	if err != nil {
+		return nil, []string{"delegated auto session could not be read"}
+	}
+	state, err := journal.Replay()
+	if err != nil {
+		return nil, []string{"delegated auto session could not be replayed"}
+	}
+	var notes []string
+	if state.Outcome != "" {
+		notes = append(notes, "delegated auto outcome "+state.Outcome)
+	}
+	records := record.Store{Dir: resultsDir()}
+	if state.ConfirmationStore != nil && len(state.CompletedConfirmation) > 0 {
+		points, err := autoGroupPoints(journal.Plan, records, state.ConfirmationStore, "confirmation", state.CompletedConfirmation)
+		if err != nil {
+			return nil, append(notes, "fresh confirmation evidence could not be resolved; nothing was certified")
+		}
+		return sourcesFromRecords(points, true), notes
+	}
+	if state.ExplorationStore != nil && len(state.CompletedExploration) > 0 {
+		points, err := autoGroupPoints(journal.Plan, records, state.ExplorationStore, "exploration", state.CompletedExploration)
+		if err != nil {
+			return nil, append(notes, "exploration evidence could not be resolved")
+		}
+		return sourcesFromRecords(points, false), notes
+	}
+	return nil, notes
+}
+
+// sourcesFromRecords projects sealed records into observation sources. A record
+// that fails validation is skipped rather than becoming a class.
+func sourcesFromRecords(records []*record.Record, confirmed bool) []fitting.ObservationSource {
+	sources := make([]fitting.ObservationSource, 0, len(records))
+	for _, rec := range records {
+		source, err := fitting.ObservationSourceFromRecord(rec)
+		if err != nil {
+			continue
+		}
+		source.Confirmed = confirmed
+		sources = append(sources, source)
+	}
+	return sources
 }
 
 func fittingFailureLines(session fitting.Session) []string {
