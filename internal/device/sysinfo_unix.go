@@ -75,6 +75,11 @@ func vramInfo(ctx context.Context) (float64, string) {
 	if runtime.GOOS == "darwin" {
 		return appleGPUBudget(ctx)
 	}
+	// An AMD APU reports only its BIOS carve-out as mem_info_vram_total, so
+	// prefer the combined VRAM+GTT pool before falling back to the carve-out.
+	if gb, src, ok := drmUnifiedPool(); ok {
+		return gb, src
+	}
 	if gb := drmVRAM(); gb > 0 {
 		return gb, "drm sysfs"
 	}
@@ -102,6 +107,49 @@ func drmVRAM() float64 {
 		}
 	}
 	return best
+}
+
+// combineUnifiedPool decides whether a DRM card's numbers describe an AMD-style
+// APU. On an APU the GTT aperture is larger than the BIOS VRAM carve-out and
+// the GPU can address both, so the pool is their sum. A discrete card reports
+// an aperture smaller than its VRAM and is left to drmVRAM. It is pure so the
+// arithmetic is testable without sysfs. ok=false means "not obviously an APU",
+// never "zero memory".
+func combineUnifiedPool(vramGB, gttGB float64) (float64, string, bool) {
+	if gttGB <= 0 || gttGB <= vramGB {
+		return 0, "", false
+	}
+	return vramGB + gttGB, DRMUnifiedPoolSource, true
+}
+
+// drmUnifiedPool reads VRAM and GTT per DRM card and returns the largest
+// combined pool. It reads GTT first because a card without mem_info_gtt_total
+// is not an APU and never enters the comparison.
+func drmUnifiedPool() (float64, string, bool) {
+	paths, err := filepath.Glob("/sys/class/drm/card*/device/mem_info_gtt_total")
+	if err != nil {
+		return 0, "", false
+	}
+	var best float64
+	var found bool
+	for _, gttPath := range paths {
+		gttBytes := readSysfsUint(gttPath)
+		if gttBytes <= 0 {
+			continue
+		}
+		vramPath := strings.Replace(gttPath, "mem_info_gtt_total", "mem_info_vram_total", 1)
+		vramBytes := readSysfsUint(vramPath)
+		if vramBytes < 0 {
+			vramBytes = 0
+		}
+		if gb, _, ok := combineUnifiedPool(float64(vramBytes)/GB, float64(gttBytes)/GB); ok && gb > best {
+			best, found = gb, true
+		}
+	}
+	if !found {
+		return 0, "", false
+	}
+	return best, DRMUnifiedPoolSource, true
 }
 
 // appleGPUBudget reports how much memory the GPU may actually use, not how much

@@ -461,7 +461,7 @@ func preferUnifiedMemoryForOS(goos, gpu string, ram, vram float64, src string) (
 	// list because its budget is now computed against the wired-memory limit
 	// rather than installed RAM, so second-guessing it here would undo that.
 	switch src {
-	case "nvidia-smi", "drm sysfs",
+	case "nvidia-smi", "drm sysfs", DRMUnifiedPoolSource,
 		NVIDIAUnifiedMemorySource, NVIDIAUnifiedProbeSource,
 		AppleWiredLimitSource, AppleAssumedShareSource, AppleLegacyRAMSource:
 		return vram, src
@@ -960,6 +960,12 @@ const (
 	// AppleLegacyRAMSource is what fitr wrote before the budget was corrected.
 	// Retained so saved results still read as measured.
 	AppleLegacyRAMSource = "unified memory (system RAM)"
+	// DRMUnifiedPoolSource is an AMD-style APU pool: the DRM carve-out
+	// (mem_info_vram_total) plus the GTT aperture (mem_info_gtt_total). The
+	// carve-out alone is a BIOS setting, not the addressable pool, and sizing
+	// against it marked a 60 GB 780M box unable to hold a 2 GB model. It names
+	// its components so a reader can tell it apart from the carve-out reading.
+	DRMUnifiedPoolSource = "drm sysfs (vram+gtt)"
 )
 
 func AvailableVRAM(ctx context.Context) (float64, bool) {

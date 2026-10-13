@@ -117,6 +117,15 @@ reading. The addressable pool still contains Linux, services, page cache, and
 every CPU and accelerator allocation. It is not a live free-memory receipt or
 an unconditional fit budget.
 
+On Linux AMD APUs (for example a Radeon 780M in a Ryzen 7040), the DRM
+`mem_info_vram_total` reading is only the BIOS VRAM carve-out, not the
+addressable pool: a 60 GB machine reports about 2 GB there while the GTT
+aperture exposes about 30 GB. When the GTT aperture is larger than the
+carve-out, fitr reports their sum as `drm sysfs (vram+gtt)` and treats it as a
+shared pool, so a model is not sized against the carve-out alone. A discrete
+card reports an aperture smaller than its VRAM and keeps the plain `drm sysfs`
+carve-out reading.
+
 For advice, an operator can pass a deliberately conservative planning budget
 with `--vram-gb`. That value is labeled as supplied rather than measured. For
 a scored run, `--capacity-budget-gb` seals a final safe limit before the model

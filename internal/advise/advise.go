@@ -493,6 +493,7 @@ func sharedMemoryPool(in Input) bool {
 func wholeSystemUnifiedMemorySource(src string) bool {
 	switch strings.TrimSpace(src) {
 	case device.NVIDIAUnifiedMemorySource, device.NVIDIAUnifiedProbeSource,
+		device.DRMUnifiedPoolSource,
 		device.AppleLegacyRAMSource:
 		return true
 	default:

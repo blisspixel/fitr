@@ -965,6 +965,23 @@ func TestWholeSystemUnifiedBudgetFailsClosedAndAcceptsExactReceipt(t *testing.T)
 	}
 }
 
+// The DRM vram+gtt pool is a shared, whole-system pool: an AMD APU budget must
+// take the same fail-closed path as the other whole-system sources instead of
+// being read as a dedicated VRAM figure (issue #29).
+func TestDRMUnifiedPoolTakesWholeSystemPath(t *testing.T) {
+	if !wholeSystemUnifiedMemorySource(device.DRMUnifiedPoolSource) {
+		t.Fatalf("%q must be treated as a whole-system shared pool", device.DRMUnifiedPoolSource)
+	}
+	r := Evaluate(Input{
+		Model: "qwen3:4b", WeightsB: 3 * GiB,
+		HaveGB: 32.3, HaveSrc: device.DRMUnifiedPoolSource,
+		Ctx: 8192, Arch: llama8B(), Backend: "ollama",
+	})
+	if r.Tier != Skip || !strings.Contains(r.Why, "safe available shared memory was not measured") {
+		t.Fatalf("DRM unified pool = %+v, want fail-closed skip", r)
+	}
+}
+
 func TestExplicitBudgetOverridesAutomaticWholeSystemCapacity(t *testing.T) {
 	r := Evaluate(Input{
 		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "--vram-gb 8",
