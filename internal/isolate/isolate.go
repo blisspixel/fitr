@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -157,21 +158,28 @@ func bindOrSymlink(host string) []string {
 // interpreterRoot is the install prefix of an interpreter that does not live
 // under /usr. The prefix is mounted read-only at the same path. A prefix that
 // is the user's home directory, or a top-level directory, is refused.
-func interpreterRoot(path string) (string, error) {
-	if strings.HasPrefix(path, "/usr/") {
+// These are Linux bubblewrap paths. The path package keeps slash semantics
+// when Windows CI builds this argv: filepath would rewrite separators and
+// reject a two-level prefix such as /opt/py.
+func interpreterRoot(interpreter string) (string, error) {
+	cleaned := path.Clean(interpreter)
+	if cleaned == "/" || !strings.HasPrefix(cleaned, "/") {
+		return "", fmt.Errorf("interpreter %s is outside /usr and its directory is too broad to bind", interpreter)
+	}
+	if strings.HasPrefix(cleaned, "/usr/") {
 		return "", nil
 	}
-	dir := filepath.Dir(path)
+	dir := path.Dir(cleaned)
 	root := dir
-	if filepath.Base(dir) == "bin" {
-		root = filepath.Dir(dir)
+	if path.Base(dir) == "bin" {
+		root = path.Dir(dir)
 	}
 	switch root {
 	case "", "/", "/home", "/usr", "/opt", "/var", "/tmp", "/root":
-		return "", fmt.Errorf("interpreter %s is outside /usr and its directory is too broad to bind", path)
+		return "", fmt.Errorf("interpreter %s is outside /usr and its directory is too broad to bind", interpreter)
 	}
 	if strings.Count(strings.Trim(root, "/"), "/") < 1 {
-		return "", fmt.Errorf("interpreter %s is outside /usr and its directory is too broad to bind", path)
+		return "", fmt.Errorf("interpreter %s is outside /usr and its directory is too broad to bind", interpreter)
 	}
 	return root, nil
 }

@@ -445,7 +445,7 @@ func validateIsolatedCoding(label string, result eval.ExecResult) error {
 	if err := result.Verifier.ValidateIsolated(); err != nil {
 		return fmt.Errorf("%s: %w", label, err)
 	}
-	if result.Outcome == eval.OutcomePass && !(result.Verifier.SuccessfulExit && result.Verifier.ExactFinalMarker) {
+	if result.Outcome == eval.OutcomePass && (!result.Verifier.SuccessfulExit || !result.Verifier.ExactFinalMarker) {
 		return fmt.Errorf("%s pass is not a successful isolated verifier", label)
 	}
 	return nil
@@ -462,7 +462,7 @@ func validateIsolatedTool(label string, result eval.ToolLoopResult) error {
 		if err := result.Verifier.ValidateIsolated(); err != nil {
 			return fmt.Errorf("%s: %w", label, err)
 		}
-		if result.Outcome == eval.OutcomePass && !(result.Verifier.SuccessfulExit && result.Verifier.ExactFinalMarker) {
+		if result.Outcome == eval.OutcomePass && (!result.Verifier.SuccessfulExit || !result.Verifier.ExactFinalMarker) {
 			return fmt.Errorf("%s pass is not a successful isolated verifier", label)
 		}
 	}

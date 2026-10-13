@@ -212,7 +212,16 @@ func (q dirQueue) Less(i, j int) bool {
 	return q[i].seq < q[j].seq
 }
 func (q dirQueue) Swap(i, j int) { q[i], q[j] = q[j], q[i] }
-func (q *dirQueue) Push(v any)   { *q = append(*q, v.(queuedDir)) }
+
+// heap.Interface erases the element type. A mismatch is a programmer error,
+// the same failure an unchecked assertion would raise.
+func (q *dirQueue) Push(v any) {
+	item, ok := v.(queuedDir)
+	if !ok {
+		panic(fmt.Sprintf("cleanup queue: pushed %T, want queuedDir", v))
+	}
+	*q = append(*q, item)
+}
 func (q *dirQueue) Pop() any {
 	old := *q
 	item := old[len(old)-1]
@@ -243,7 +252,11 @@ func (s *scanner) drain() {
 			s.stop("entry_limit")
 			break
 		}
-		item := heap.Pop(&s.queue).(queuedDir)
+		popped := heap.Pop(&s.queue)
+		item, ok := popped.(queuedDir)
+		if !ok {
+			panic(fmt.Sprintf("cleanup queue: popped %T, want queuedDir", popped))
+		}
 		s.enter(item.path, item.depth)
 	}
 	s.recordUnentered()

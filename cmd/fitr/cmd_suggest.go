@@ -164,7 +164,7 @@ func firstRunNotes(runtimeDown bool, gpu, backend, memorySource string) []string
 func localStartCommand() string {
 	_, binaryErr := exec.LookPath("ollama")
 	home, _ := os.UserHomeDir()
-	user := suggest.Unit{User: true, Exists: home != "" && fileExists(filepath.Join(home, ".config/systemd/user/ollama.service"))}
+	user := suggest.Unit{User: true, Exists: home != "" && fileExists(filepath.Join(home, ".config", "systemd", "user", "ollama.service"))}
 	system := suggest.Unit{Exists: fileExists("/usr/lib/systemd/system/ollama.service") || fileExists("/etc/systemd/system/ollama.service")}
 	user.Active = unitActive(true)
 	system.Active = unitActive(false)

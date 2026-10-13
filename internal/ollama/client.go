@@ -18,7 +18,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -1071,21 +1070,6 @@ func (c *Client) Accel(ctx context.Context) string {
 		return ""
 	}
 	return libraryFromOpenLogs(paths)
-}
-
-func serverLogPath() string {
-	if runtime.GOOS == "windows" {
-		base := os.Getenv("LOCALAPPDATA")
-		if base == "" {
-			return ""
-		}
-		return filepath.Join(base, "Ollama", "server.log")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ""
-	}
-	return filepath.Join(home, ".ollama", "logs", "server.log")
 }
 
 // Pull downloads a model, streaming progress lines. Ollama pulls GGUFs
