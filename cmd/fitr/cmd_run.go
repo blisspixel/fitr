@@ -832,6 +832,16 @@ func (run *runExecution) observeContext() (device.ContextVerification, error) {
 		receipt.EffectiveTokens = &effective
 		receipt.EffectiveSource = device.ContextSourceRuntimeReport
 	}
+	if run.backend.Name() == "ollama" {
+		var note string
+		receipt, note, err = run.confirmBoundary(receipt)
+		if err != nil {
+			return receipt, err
+		}
+		if note != "" {
+			run.display.Note(note, "warn")
+		}
+	}
 	if run.opts.validateLoaded != nil {
 		if err := run.opts.validateLoaded(run, receipt); err != nil {
 			return receipt, err
