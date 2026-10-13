@@ -261,11 +261,12 @@ func collectSourceFit(ctx context.Context, output *sourceFitOutput, options *sou
 		request.RuntimeProfile = prof
 	}
 	if request.CapacityBytes == 0 {
-		fingerprint := services.detect(ctx)
-		if fingerprint.VRAMGb > 0 && fingerprint.VRAMGb <= 1<<30 && !math.IsInf(fingerprint.VRAMGb, 0) {
-			request.CapacityBytes = int64(fingerprint.VRAMGb * advise.GiB)
+		selected := device.SelectMemoryCapacity(services.detect(ctx))
+		request.CapacitySource = ""
+		if selected.GB > 0 && selected.GB <= 1<<30 && !math.IsInf(selected.GB, 0) {
+			request.CapacityBytes = int64(selected.GB * advise.GiB)
+			request.CapacitySource = selected.Source + "; addressable capacity, not a safe runtime budget"
 		}
-		request.CapacitySource = fingerprint.VRAMSource + "; addressable capacity, not a safe runtime budget"
 	}
 	var headers []advise.SourceHeader
 	for _, file := range output.Resolution.Files {

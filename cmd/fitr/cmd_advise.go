@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/capacity"
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/lock"
@@ -126,19 +127,15 @@ func initialAdviseInput(ctx context.Context, command adviseCommand) (advise.Inpu
 		in.HaveGB = command.vram
 		in.HaveSrc = "--vram-gb"
 	} else {
-		in.HaveGB = currentFP.VRAMGb
-		in.HaveSrc = currentFP.VRAMSource
+		selected := device.SelectMemoryCapacity(currentFP)
+		in.HaveGB, in.HaveSrc = selected.GB, selected.Source
 	}
 	setAdviseKV(&in, os.Getenv("OLLAMA_KV_CACHE_TYPE"))
 	return in, currentFP
 }
 
 func applyAdviseDeviceEvidence(in *advise.Input, fp device.Fingerprint) {
-	if fp.VRAMSource == device.NVIDIAUnifiedMemorySource ||
-		fp.VRAMSource == device.NVIDIAUnifiedProbeSource ||
-		device.IsNVIDIAUnifiedMemoryGPU(fp.GPU) {
-		in.NVIDIAUnifiedMemory = true
-	}
+	in.SharedMemory = device.SelectMemoryCapacity(fp).Shared
 }
 
 func setAdviseKV(in *advise.Input, kv string) {
@@ -184,14 +181,15 @@ func readBackendAdviseSource(ctx context.Context, command adviseCommand,
 		return nil, "", device.Fingerprint{}, code
 	}
 	in.Backend = c.Name()
-	fp := device.Detect(ctx, c)
+	fp := device.DetectFor(ctx, c, command.model)
 	applyAdviseDeviceEvidence(in, fp)
-	if free, ok := device.AvailableVRAM(ctx); ok {
-		in.FreeGB = free
+	selected := device.SelectMemoryCapacity(fp)
+	in.FreeGB = 0
+	if selected.Domain == capacity.DomainAccelerator {
+		in.FreeGB, _ = device.AvailableVRAM(ctx)
 	}
 	if command.vram < 0 {
-		in.HaveGB = fp.VRAMGb
-		in.HaveSrc = fp.VRAMSource
+		in.HaveGB, in.HaveSrc = selected.GB, selected.Source
 	}
 	setAdviseKV(in, fp.Config["OLLAMA_KV_CACHE_TYPE"])
 	ggufPath, err := readShownAdviseSource(ctx, c, command.model, in)

@@ -65,7 +65,10 @@ func newAutoPlacementGuard(backend autoPlacementBackend, candidate automation.Ca
 
 func autoPlacementAvailable(ctx context.Context, domain capacity.ResourceDomain, at time.Time, expected device.Fingerprint) (*capacity.MemoryObservation, error) {
 	if domain == capacity.DomainHost {
-		return availableObservation(ctx, domain, at), nil
+		return availableObservation(ctx, expected, domain, at), nil
+	}
+	if domain != capacity.DomainAccelerator {
+		return nil, errors.New("owned availability needs an observed host or dedicated accelerator memory resource domain")
 	}
 	bytes, err := device.SingleNVIDIAAvailable(ctx, expected)
 	if err != nil {

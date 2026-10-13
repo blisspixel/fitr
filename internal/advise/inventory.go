@@ -95,6 +95,11 @@ type InventoryTable struct {
 // a compact context-fit graph. Serving context comes only from a live PS
 // observation, never from a guessed default.
 func Join(q InventoryQuery) InventoryTable {
+	if strings.EqualFold(strings.TrimSpace(q.Current.InferenceDevice), "CPU") &&
+		!strings.HasPrefix(q.HaveSrc, "--vram-gb") {
+		selected := device.SelectMemoryCapacity(q.Current)
+		q.HaveGB, q.HaveSrc = selected.GB, selected.Source
+	}
 	loaded := map[string]bool{}
 	for _, name := range q.Loaded {
 		if name = strings.TrimSpace(name); name != "" {
@@ -256,10 +261,14 @@ func attachFit(row *InventoryRow, tag InstalledModel, ev *InventoryEvidence, q I
 }
 
 func inventoryMemoryInput(q InventoryQuery) Input {
+	selected := device.SelectMemoryCapacity(q.Current)
+	if selected.Shared && q.HaveSrc == "drm sysfs" && selected.Source == "" {
+		q.HaveGB, q.HaveSrc = selected.GB, selected.Source
+	}
 	return Input{
-		HaveGB:              q.HaveGB,
-		HaveSrc:             q.HaveSrc,
-		NVIDIAUnifiedMemory: device.IsNVIDIAUnifiedMemoryGPU(q.Current.GPU),
+		HaveGB:       q.HaveGB,
+		HaveSrc:      q.HaveSrc,
+		SharedMemory: selected.Shared,
 	}
 }
 

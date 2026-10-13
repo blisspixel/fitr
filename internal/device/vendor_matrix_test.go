@@ -36,7 +36,7 @@ func TestUnifiedMemoryPrefersAuthoritativeSources(t *testing.T) {
 		NVIDIAUnifiedMemorySource, NVIDIAUnifiedProbeSource, "nvidia-smi", "drm sysfs",
 	} {
 		vram := ram * appleWiredLimitFraction
-		gotVRAM, gotSrc := preferUnifiedMemory("Apple M3 Max", ram, vram, src)
+		gotVRAM, gotSrc := preferUnifiedMemoryForOS("darwin", "Apple M3 Max", ram, vram, src)
 		if gotSrc != src || gotVRAM != vram {
 			t.Errorf("%s: preferUnifiedMemory second-guessed an authoritative source "+
 				"-> %.1f %q", src, gotVRAM, gotSrc)
