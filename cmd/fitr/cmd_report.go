@@ -221,9 +221,14 @@ func cmdBoard(ctx context.Context, args []string) int {
 	}
 	curDevice := device.Detect(ctx, probeBackend(ctx))
 	groups, order, excluded := groupBoardResults(results, command.current, curDevice)
-	board, visible := buildBoard(groups, order, curDevice, &excluded)
+	board, visible := buildBoard(groups, order, curDevice, &excluded, command.role)
 	writeBoardExclusions(excluded)
 	if len(board.Groups) == 0 {
+		if command.role != "" {
+			errPrint("no measured grade for that role inside these fingerprint groups", "",
+				"rows stay inside the group they were measured in. The role library is still open.")
+			return exitOK
+		}
 		return emptyBoardResult(excluded)
 	}
 	if render.Resolve(command.mode) == "json" {
@@ -237,6 +242,7 @@ func cmdBoard(ctx context.Context, args []string) int {
 type boardCommand struct {
 	current bool
 	full    bool
+	role    string
 	mode    string
 }
 
@@ -245,6 +251,7 @@ func parseBoardCommand(args []string) (boardCommand, int, bool) {
 	fs.SetOutput(os.Stderr)
 	current := fs.Bool("current", false, "only this machine, including its measured context variants")
 	full := fs.Bool("full", false, "with --display json, emit the complete sealed result records instead of the reported columns")
+	role := fs.String("role", "", "coding or agent: keep rows with that measured grade inside each fingerprint group")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return boardCommand{}, code, false
@@ -254,10 +261,28 @@ func parseBoardCommand(args []string) (boardCommand, int, bool) {
 		return boardCommand{}, exitUsage, false
 	}
 	if fs.NArg() != 0 {
-		errPrint("unexpected argument", fs.Arg(0), "fitr board [--current] [--display MODE]")
+		errPrint("unexpected argument", fs.Arg(0), "fitr board [--current] [--role coding|agent] [--display MODE]")
 		return boardCommand{}, exitUsage, false
 	}
-	return boardCommand{current: *current, full: *full, mode: *mode}, exitOK, true
+	need, ok := boardRoleNeed(*role)
+	if !ok {
+		errPrint("unknown board role", *role, "use coding or agent. The role library is still open.")
+		return boardCommand{}, exitUsage, false
+	}
+	return boardCommand{current: *current, full: *full, role: need, mode: *mode}, exitOK, true
+}
+
+func boardRoleNeed(role string) (string, bool) {
+	switch strings.TrimSpace(role) {
+	case "":
+		return "", true
+	case "coding":
+		return "coding", true
+	case "agent":
+		return "unattended_agentic", true
+	default:
+		return "", false
+	}
 }
 
 func groupBoardResults(results []*Result, current bool, curDevice device.Fingerprint) (
@@ -303,12 +328,27 @@ type boardExclusions struct {
 	unscored     int
 }
 
+func measuredRoleRows(rows []*Result, need string) []*Result {
+	if need == "" {
+		return rows
+	}
+	kept := make([]*Result, 0, len(rows))
+	for _, row := range rows {
+		verdict, ok := row.Scorecard.Needs[need]
+		if !ok || verdict.State == "" || verdict.State == score.Skip {
+			continue
+		}
+		kept = append(kept, row)
+	}
+	return kept
+}
+
 func buildBoard(groups map[string][]*Result, order []string, curDevice device.Fingerprint,
-	excluded *boardExclusions) (render.Board, map[string][]*Result) {
+	excluded *boardExclusions, role string) (render.Board, map[string][]*Result) {
 	board := render.Board{}
 	visible := map[string][]*Result{}
 	for _, key := range order {
-		rows := claimableBoardRows(groups[key], excluded)
+		rows := measuredRoleRows(claimableBoardRows(groups[key], excluded), role)
 		if len(rows) == 0 {
 			continue
 		}

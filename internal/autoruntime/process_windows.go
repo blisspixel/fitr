@@ -86,6 +86,11 @@ func (g *processGuard) alive() error {
 	return nil
 }
 
+// listenerOwned is the fail-closed check for a runtime fitr launched. It
+// accepts only an IPv4 loopback row owned by that PID. A wildcard or IPv6
+// bind fails this check on purpose. Daemons fitr did not start are inspected
+// separately by internal/listen, which can name those binds without treating
+// them as proof that fitr owns the process.
 func listenerOwned(pid, port int) error {
 	proc := windows.NewLazySystemDLL("iphlpapi.dll").NewProc("GetExtendedTcpTable")
 	var size uint32

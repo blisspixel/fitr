@@ -18,11 +18,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
-	"github.com/blisspixel/fitr/internal/boundedio"
 	"github.com/blisspixel/fitr/internal/diskspace"
 	"github.com/blisspixel/fitr/internal/strictjson"
 )
@@ -1059,36 +1057,19 @@ func (c *Client) StopAll(ctx context.Context) ([]string, error) {
 func (c *Client) Name() string { return "ollama" }
 func (c *Client) URL() string  { return c.BaseURL }
 
-// Accel reads the last `library=` from Ollama's server log. There is no HTTP
-// field for it; the log is how the runtime names CUDA vs Vulkan vs Metal.
+// Accel reads the last library= from a log file the listening process still
+// has open. There is no HTTP field for the compute backend. The default
+// server log is not that file: it rotates, and a sample of it can name a
+// backend the process answering this client is not using.
 func (c *Client) Accel(ctx context.Context) string {
 	if err := ctx.Err(); err != nil {
 		return ""
 	}
-	b, err := boundedio.ReadTail(serverLogPath(), maxServerLogTail)
-	if err != nil {
+	paths, err := openLogsForAccel(c.BaseURL)
+	if err != nil || len(paths) == 0 {
 		return ""
 	}
-	all := serverLibraryPattern.FindAllStringSubmatch(string(b), -1)
-	if len(all) == 0 {
-		return ""
-	}
-	return all[len(all)-1][1]
-}
-
-func serverLogPath() string {
-	if runtime.GOOS == "windows" {
-		base := os.Getenv("LOCALAPPDATA")
-		if base == "" {
-			return ""
-		}
-		return filepath.Join(base, "Ollama", "server.log")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ""
-	}
-	return filepath.Join(home, ".ollama", "logs", "server.log")
+	return libraryFromOpenLogs(paths)
 }
 
 // Pull downloads a model, streaming progress lines. Ollama pulls GGUFs

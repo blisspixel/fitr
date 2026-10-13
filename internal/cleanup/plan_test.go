@@ -1,8 +1,10 @@
 package cleanup
 
 import (
+	"container/heap"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -182,6 +184,53 @@ func TestScanRejectsBadRootAndOptions(t *testing.T) {
 	plan, err := Scan(t.Context(), root, Options{})
 	if err != nil || plan.AsOf.IsZero() || plan.Limits != DefaultLimits() {
 		t.Fatalf("defaults failed: %+v, %v", plan, err)
+	}
+}
+
+func TestScanEntersModelStoresBeforeCacheTrees(t *testing.T) {
+	root := t.TempDir()
+	// Create the cache first. A depth-first walk that follows creation order
+	// spends the entry budget inside it and never stats the blob.
+	for i := range 20 {
+		fixtureFile(t, root, fmt.Sprintf(".tool-cache/n%d/f.bin", i), 1, testNow)
+	}
+	fixtureFile(t, root, "blobs/weights.gguf", 5000, testNow)
+	o := testOptions()
+	o.Limits.MaxEntries = 3
+	plan, err := Scan(t.Context(), root, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Complete || plan.StopReason != "entry_limit" {
+		t.Fatalf("budget was not exhausted: %+v", plan)
+	}
+	if plan.ApparentBytes < 5000 {
+		t.Fatalf("model blob was not counted: %+v", plan)
+	}
+	if len(plan.LargestFiles) == 0 || plan.LargestFiles[0].Path != "blobs/weights.gguf" {
+		t.Fatalf("largest file = %+v, want the blob", plan.LargestFiles)
+	}
+	if plan.UnenteredCount < 1 {
+		t.Fatalf("incomplete scan did not name a directory it skipped: %+v", plan)
+	}
+	joined := strings.Join(plan.UnenteredDirectories, ",")
+	if !strings.Contains(joined, ".tool-cache") {
+		t.Fatalf("unentered = %v, want the cache tree", plan.UnenteredDirectories)
+	}
+}
+
+func TestDirectoryRankPrefersModelStoresOverCaches(t *testing.T) {
+	if directoryRank("blobs") >= directoryRank(".tool-cache") || directoryRank("manifests") >= directoryRank("notes") {
+		t.Fatal("model stores do not outrank cache and ordinary directories")
+	}
+	// Insertion order is the cache first. Equal ranks would review that cache
+	// before the blob directory that was listed second.
+	s := &scanner{}
+	s.enqueue(".tool-cache/nested", 1)
+	s.enqueue("blobs", 1)
+	first := heap.Pop(&s.queue).(queuedDir)
+	if first.path != "blobs" {
+		t.Fatalf("next directory = %s, want blobs ahead of the earlier cache", first.path)
 	}
 }
 

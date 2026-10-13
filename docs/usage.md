@@ -78,12 +78,14 @@ Authenticated OpenAI-compatible endpoints use `FITR_OPENAI_API_KEY`.
 are intentionally not accepted as command-line flags, where shell history and
 process listings could expose them. Auto-discovery never attaches credentials.
 
-Generated-code execution is disabled by default. `--allow-unsafe-exec` opts
-into unisolated built-in Python diagnostics and therefore requires `python` on
-PATH. Generated code in that mode has the current user's ordinary filesystem,
-environment, credential, and network access. Run it only on a disposable,
-credential-free machine. Its observations are always INCONCLUSIVE and never
-enter a PASS or FAIL denominator.
+`fitr run` executes generated Python inside bubblewrap on Linux when `bwrap`
+and `/usr/bin/prlimit` can run a probe with no network and no home directory.
+A missing sandbox records executable tasks as SKIP before a model call. macOS,
+Windows, and a refused user namespace stay SKIP. `--allow-unsafe-exec` is a
+separate unisolated path: it requires `python` on PATH, the process has the
+user's ordinary filesystem, environment, credential, and network access, and
+its observations stay INCONCLUSIVE. Auto, tailor, role confirmation, and the
+context pack keep generated code disabled.
 
 Terminal views of the loop, regenerated from the real printers:
 
@@ -288,14 +290,15 @@ of installed RAM as an unconditional model budget.
 
 | Level | Runs | ~Time |
 |---|---|---|
-| `--quick` | speed, memory, plumbing; executable tasks recorded as SKIP | minutes; smoke-test the stack |
-| *(default)* | + all 22 generated checks across 16 families, refusal, safe tool withdrawal | many minutes; first real measurement |
-| `--full` | + long-horizon agent task, SKIP while execution is disabled | tens of minutes; coding still unproven |
+| `--quick` | speed, memory, plumbing; executable tasks use the Linux sandbox when it is available, otherwise SKIP | minutes; smoke-test the stack |
+| *(default)* | + all 22 generated checks across 16 families, refusal, safe tool withdrawal, and the sandboxed coding tasks when the worker is available | many minutes; first real measurement |
+| `--full` | + long-horizon agent task in that same sandbox | tens of minutes |
 | `--checks-only` | generated checks only; requires `--seedset`, defaults to 5 repeats | model-dependent |
 | `--context-tiers` | document pack only: two to four payload sizes, nine cells each; no default battery | operator-declared |
 
 A default run tells *broken* from *working*, not 71 from 74. `--full` adds up
-to 40 agent turns; it is not a coding grade until the isolated worker exists.
+to 40 agent turns. On Linux those coding and agent grades are measured inside
+bubblewrap when the sandbox probe succeeds, and they stay SKIP when it does not.
 Ctrl-C is safe (exit 130).
 
 ## Flags worth knowing

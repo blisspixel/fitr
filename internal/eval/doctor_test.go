@@ -64,10 +64,23 @@ func TestRunDoctorHealthyStack(t *testing.T) {
 	if !result.Healthy || result.Verdict != "healthy - measurements on this box mean what they say" {
 		t.Fatalf("healthy doctor = %+v", result)
 	}
+	sawIsolation := false
 	for _, check := range result.Checks {
+		if check.ID == "isolated_execution" {
+			sawIsolation = true
+			// The package test hook pins the sandbox unavailable. SKIP is
+			// not a quality zero and must not flip Healthy.
+			if check.State != "SKIP" {
+				t.Fatalf("isolated execution = %+v, want SKIP", check)
+			}
+			continue
+		}
 		if check.State != "PASS" {
 			t.Fatalf("healthy check = %+v", check)
 		}
+	}
+	if !sawIsolation {
+		t.Fatal("healthy doctor omitted isolated_execution")
 	}
 }
 
@@ -116,8 +129,9 @@ func TestRunDoctorTurnsInitialGenerationFaultsIntoFindings(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := RunDoctor(context.Background(), tc.backend, "model", 1, DoctorOpts{})
-			if err != nil || result.Healthy || len(result.Checks) != 1 ||
-				result.Checks[0].State != "FAIL" || !strings.Contains(result.Verdict, tc.want) {
+			if err != nil || result.Healthy || len(result.Checks) != 2 ||
+				result.Checks[0].State != "FAIL" || result.Checks[1].ID != "isolated_execution" ||
+				result.Checks[1].State != "SKIP" || !strings.Contains(result.Verdict, tc.want) {
 				t.Fatalf("initial fault = %+v, %v", result, err)
 			}
 		})

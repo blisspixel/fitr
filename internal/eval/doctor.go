@@ -75,6 +75,7 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	}
 	r := DoctorResult{Model: model, Runs: runs}
 	if ready, err := doctorRealToken(ctx, c, model, &r); !ready {
+		doctorIsolation(&r)
 		return r, err
 	}
 	doctorPlacement(ctx, opts, &r)
@@ -90,8 +91,24 @@ func RunDoctor(ctx context.Context, c llm.Backend, model string, runs int, opts 
 	}
 	doctorConfig(opts.Config, opts.ConfigObserved, &r)
 	doctorGPUContention(ctx, opts, &r)
+	doctorIsolation(&r)
 	finishDoctor(&r)
 	return r, nil
+}
+
+// doctorIsolation reports whether generated verifiers can run in a sandbox.
+// Unavailable is a skip with the enablement reason, not a quality zero.
+func doctorIsolation(r *DoctorResult) {
+	status := isolationStatus()
+	if status.Available {
+		addDoctorCheck(r, "isolated_execution", "PASS", status.Reason)
+		return
+	}
+	reason := status.Reason
+	if reason == "" {
+		reason = "isolated execution is unavailable"
+	}
+	addDoctorCheck(r, "isolated_execution", "SKIP", reason)
 }
 
 // doctorGPUContention reports what else holds the accelerator before anyone

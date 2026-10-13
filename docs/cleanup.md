@@ -25,10 +25,15 @@ outputs and role coverage before retiring an incumbent.
 
 The scan visits at most 250,000 entries, descends at most 64 levels and checks a
 30-second deadline between filesystem operations. An operating-system call that
-stalls can outlast that deadline. Each human-facing list contains at most 20
+stalls can outlast that deadline. Within that budget, known model-store
+directories (`blobs`, `manifests`, `models`) are entered before cache trees, so
+a large directory of small cache files cannot consume the deadline before the
+weights are seen. An incomplete plan names directories that were listed and not
+entered; a deadline or entry limit still does not invent the contents of those
+directories. Each human-facing list contains at most 20
 items, with omitted counts where relevant. The JSON plan includes the absolute
 root, UTC as-of and cutoff times, limits, total counts, categories, relative paths,
-candidate reasons and bounded scan issues. Text uses relative paths and sanitizes
+candidate reasons, unentered directories and bounded scan issues. Text uses relative paths and sanitizes
 terminal control sequences. All display modes use the same plan; `NO_COLOR`
 disables colors.
 

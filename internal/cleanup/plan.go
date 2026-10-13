@@ -3,6 +3,7 @@
 package cleanup
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
@@ -76,6 +77,8 @@ type Plan struct {
 	ReviewApparentBytes  int64     `json:"review_apparent_bytes"`
 	Issues               []Issue   `json:"issues"`
 	IssueCount           int       `json:"issue_count"`
+	UnenteredDirectories []string  `json:"unentered_directories,omitempty"`
+	UnenteredCount       int       `json:"unentered_directory_count,omitempty"`
 	Notes                []string  `json:"notes"`
 }
 
@@ -88,6 +91,8 @@ type scanner struct {
 	lstat     func(string) (os.FileInfo, error)
 	openDir   func(string) (*os.File, error)
 	entryInfo func(string, os.DirEntry) (os.FileInfo, error)
+	queue     dirQueue
+	seq       int
 }
 
 func Scan(ctx context.Context, directory string, options Options) (Plan, error) {
@@ -170,12 +175,115 @@ func newScanner(ctx context.Context, root *os.Root, absolute string, o Options) 
 				"Names and modification times are hints, not proof of ownership, inactivity, model quality or obsolescence. No model contents or application references were inspected.",
 				"Observed symbolic links and special files are skipped. Concurrent changes or skipped entries can make this inventory incomplete.",
 				"The deadline is checked between filesystem operations; a stalled filesystem operation can outlast it.",
+				"Directories are entered with model stores (blobs, manifests, models) ahead of cache trees. An incomplete scan names directories that were seen and not entered.",
 			}},
 	}
 }
 
+// directoryRank spends a bounded scan on the directories this command exists
+// to review. A depth-first walk gives the first cache tree the entire deadline
+// and can report a few gigabytes of tool cache while never opening blobs.
+func directoryRank(path string) int {
+	base := strings.ToLower(filepath.Base(path))
+	switch base {
+	case "blobs", "manifests", "models":
+		return 0
+	}
+	if strings.Contains(base, "cache") {
+		return 2
+	}
+	return 1
+}
+
+type queuedDir struct {
+	path  string
+	depth int
+	rank  int
+	seq   int
+}
+
+type dirQueue []queuedDir
+
+func (q dirQueue) Len() int { return len(q) }
+func (q dirQueue) Less(i, j int) bool {
+	if q[i].rank != q[j].rank {
+		return q[i].rank < q[j].rank
+	}
+	return q[i].seq < q[j].seq
+}
+func (q dirQueue) Swap(i, j int) { q[i], q[j] = q[j], q[i] }
+
+// heap.Interface erases the element type. A mismatch is a programmer error,
+// the same failure an unchecked assertion would raise.
+func (q *dirQueue) Push(v any) {
+	item, ok := v.(queuedDir)
+	if !ok {
+		panic(fmt.Sprintf("cleanup queue: pushed %T, want queuedDir", v))
+	}
+	*q = append(*q, item)
+}
+func (q *dirQueue) Pop() any {
+	old := *q
+	item := old[len(old)-1]
+	*q = old[:len(old)-1]
+	return item
+}
+
+func (s *scanner) enqueue(path string, depth int) {
+	s.seq++
+	heap.Push(&s.queue, queuedDir{path: path, depth: depth, rank: directoryRank(path), seq: s.seq})
+}
+
+// walk enters one directory, then the rest of the priority queue. Callers that
+// still name a single path, including the tests for raced entries, use it.
 func (s *scanner) walk(path string, depth int) {
+	s.enqueue(path, depth)
+	s.drain()
+}
+
+func (s *scanner) drain() {
+	for s.queue.Len() > 0 {
+		if s.stopped() {
+			break
+		}
+		// Opening a directory only to have its first child trip the entry
+		// limit does not review it. Leave it in the unentered set.
+		if s.plan.EntriesVisited >= s.plan.Limits.MaxEntries {
+			s.stop("entry_limit")
+			break
+		}
+		popped := heap.Pop(&s.queue)
+		item, ok := popped.(queuedDir)
+		if !ok {
+			panic(fmt.Sprintf("cleanup queue: popped %T, want queuedDir", popped))
+		}
+		s.enter(item.path, item.depth)
+	}
+	s.recordUnentered()
+}
+
+func (s *scanner) recordUnentered() {
+	if s.plan.Complete && s.plan.StopReason == "" {
+		return
+	}
+	pending := make([]string, 0, s.queue.Len())
+	for _, item := range s.queue {
+		if item.path == "." {
+			continue
+		}
+		pending = append(pending, filepath.ToSlash(item.path))
+	}
+	sort.Strings(pending)
+	s.plan.UnenteredCount = len(pending)
+	if len(pending) > s.plan.Limits.MaxItems {
+		pending = pending[:s.plan.Limits.MaxItems]
+	}
+	s.plan.UnenteredDirectories = pending
+}
+
+func (s *scanner) enter(path string, depth int) {
 	if s.stopped() {
+		s.enqueue(path, depth)
 		return
 	}
 	if depth > s.plan.Limits.MaxDepth {
@@ -220,10 +328,12 @@ func (s *scanner) readDirectory(directory *os.File, path string, depth int) {
 		entries, err := directory.ReadDir(128)
 		for _, entry := range entries {
 			if s.stopped() {
+				s.issue(path, "listing_incomplete")
 				return
 			}
 			if s.plan.EntriesVisited >= s.plan.Limits.MaxEntries {
 				s.stop("entry_limit")
+				s.issue(path, "listing_incomplete")
 				return
 			}
 			s.plan.EntriesVisited++
@@ -251,7 +361,11 @@ func (s *scanner) visit(path string, depth int, entry os.DirEntry) {
 		s.issue(path, "link_skipped")
 	case info.IsDir():
 		s.plan.Directories++
-		s.walk(path, depth)
+		if depth > s.plan.Limits.MaxDepth {
+			s.issue(path, "depth_limit")
+			return
+		}
+		s.enqueue(path, depth)
 	case info.Mode().IsRegular():
 		s.addFile(path, info)
 	default:

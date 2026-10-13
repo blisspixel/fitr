@@ -152,7 +152,7 @@ change until a real session shows otherwise.
 | Go tests of `internal/desktop`, `plugins/omarchy`, the renderer, and `fitr desktop` | Projection rules, the benchmark allowlist, marker install and remove, and that the QML source does not contain a shell string, a URL, or a benchmark inside `open()` |
 | `scripts/check-desktop-plugin.sh` on a built binary | That binary can install its embed into a temp directory, emit an empty `fitr.desktop.status.v1`, and remove the marked directory. CI and the release workflow run this on the Linux amd64 dist binary |
 | Published 0.11.3 | The first release that embeds the plugin. The release workflow runs the built-binary script above; that is not session acceptance |
-| Real Omarchy | Not accepted from this workspace. `omarchy plugin validate`, `qmllint`, panel summon and hide, click, Escape, disable, enable, shell restart, a missing fitr binary, a non-zero status, and removal on a running shell still have to be done on an Omarchy machine |
+| Real Omarchy | Not accepted. On 2026-10-12, Omarchy 4.0.4, the installed `fitr 0.11.3` binary installed the embedded plugin into a temporary directory. `omarchy plugin validate` exited 0. `qmllint` with the shell's `qs.Ui` and `qs.Commons` import path exited 0 and warned about dynamic panel members and nested unqualified ids. The widget was not enabled, the shell was not restarted, and the panel was not summoned, clicked, or removed on the running bar |
 
 A green CI run, including the built-binary script, does not accept the
 rendered panel. Do not describe the widget as working on Omarchy until those

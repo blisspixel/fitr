@@ -7,14 +7,25 @@ Coding fixtures and executable tool or agent loops are disabled by default.
 
 ## Executable task safety
 
-The current cross-platform executor is not a sandbox. An explicit
-`--allow-unsafe-exec` run preflights the interpreter and requires a successful
-exit plus an exact final verifier receipt, but generated Python still has the
-current user's normal filesystem, environment, credential, and network access.
-For that reason:
+`fitr run` on Linux executes the built-in verifier inside bubblewrap when
+`bwrap` and `/usr/bin/prlimit` can run a probe. That sandbox has no network
+and no view of the home directory. A PASS or FAIL from that worker is a
+measured outcome. A sandbox that does not start is an error, not a model
+score.
 
-1. Default runs record executable tasks as SKIP before a model call or work
-   directory is created.
+macOS, Windows, a missing `bwrap`, and a kernel that refuses the namespace
+record those tasks as SKIP before a model call or work directory is created.
+Auto, tailor, role confirmation, and the context pack do not opt in, so they
+keep generated code disabled. The same guarantee is not implemented on the
+other release targets.
+
+`--allow-unsafe-exec` is a separate path. It preflights the interpreter and
+requires a successful exit plus an exact final verifier receipt, but generated
+Python still has the current user's normal filesystem, environment,
+credential, and network access. Those observations stay INCONCLUSIVE.
+
+1. A run that cannot isolate records executable tasks as SKIP before a model
+   call or work directory is created.
 2. Unsafe opt-in observations are recorded as INCONCLUSIVE even when their
    assertions appear to pass or fail.
 3. INCONCLUSIVE and executor errors never enter a scoring or comparison
@@ -22,10 +33,6 @@ For that reason:
 4. User task files remain declarative. Executable kinds, executable fields,
    unknown fields, duplicate JSON object names, and trailing JSON are hard
    errors.
-
-Verified executable PASS and FAIL evidence requires the isolated worker in the
-benchmark-quality release. Until then, no generated model code is allowed to
-make a ranking claim.
 
 ## Generated checks: no answer strings, anywhere
 

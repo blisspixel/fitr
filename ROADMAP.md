@@ -929,10 +929,10 @@ preflight is in [doctor](docs/doctor.md).
 | OpenAI-compatible timings are client-derived | Usage supplies token counts, but the generic protocol does not expose server timing receipts. |
 | Two device profiles | `lappy` is calibrated; `default` is explicitly uncalibrated. No hardware SKU gates are invented from names. |
 | Device detection is probe-derived | Vendor tools and OS inventories disagree about what a GPU is. The fingerprint is only as good as the probe, which is why device identity gets its own gate. |
-| Serving-runtime configuration may be unobserved | fitr reads the runtime's startup log when it can. An owned auto launch seals the child environment it started. Otherwise configuration is unobserved: empty values are not the daemon's unset settings, and a new run cannot enter ranking or comparison until the daemon is actually read. Historical records sealed before provenance existed keep their original key. Binding config to the listening process is still open. |
+| Serving-runtime configuration may be unobserved | A local Ollama endpoint copies known keys from the initial environment of the single process bound to that port. An owned auto launch seals the child environment it started. Anything else, including Windows and macOS listeners, stays unobserved: empty values are not the daemon's unset settings, and a new run cannot enter ranking or comparison until the daemon is actually read. Historical records sealed before provenance existed keep their original key. |
 | Conventional attention uses weights plus KV by default | `--load` can observe runtime allocation. `--fit` reports a descriptive allocator projection but cannot establish a context-specific tier until its final context, placement, version, and resource domains are sealed. A remainder from an observed total may include compute buffers, mappings, and runtime overhead, but is not an independently measured buffer breakdown. A hybrid is projected when the artifact determines both the layers that scale with context and the fixed recurrent state held by the rest; one that does not carry its `ssm` shape stays SKIP without a load receipt. A per-layer `head_count_kv` array is projected by summing its layers. An artifact declaring a sliding window stays SKIP, because which layers slide is a per-architecture decision in the runtime rather than a fact the artifact carries. |
 | Inventory comes from the serving runtime | There is no disk crawl or internet catalog. A llama-server exposes one model row. |
-| `--full` is a long agent loop | Executable coding evidence stays SKIP until the isolated worker exists. The default battery is the first real measurement. |
+| `--full` is a long agent loop | On Linux, `fitr run` scores executable coding and the agent task inside bubblewrap when that sandbox is available. Other operating systems, and a Linux machine without the sandbox, stay SKIP. The default battery is the first real measurement. |
 | Scored inference is single-flight | Parallel prompts would contaminate throughput and context measurements. |
 | TTFT cache state may be unknown | The timing remains visible, but unknown or cache-hit TTFT cannot prove the uncached responsiveness gate. |
 | Low-footprint is a requested 32K load probe | It is scored only when the runtime confirms that effective context. Older receipts remain visible but cannot support the claim. |
@@ -948,9 +948,10 @@ in [design](docs/design.md), [statistics](docs/statistics.md), and
 Trust C strengthens provenance and generalizes the minimum safe execution
 boundary required by the 1.0 workload experiment.
 
-- [ ] Harden the cross-platform isolated worker beyond the minimum bounded
-      verifier boundary. Executable coding tasks remain SKIP until confinement
-      has the same testable guarantees on all six release targets.
+- [ ] Harden the cross-platform isolated worker beyond the Linux bubblewrap
+      verifier. `fitr run` on Linux scores the built-in verifier inside that
+      sandbox. The other release targets stay SKIP until confinement has the
+      same testable guarantees there.
 
       The requirement that the guarantee be the same on all six is what rules
       out the obvious answers. macOS has no kernel memory bound without root.
@@ -1301,11 +1302,11 @@ authority at all, while the in-place restart needs a consent subsystem that
 does not exist yet. So the order inverts: five shippable steps that mutate
 nothing come before any restart code.
 
-- [ ] **Separate listener inspection from listener ownership.** The owned
-      check asserts a loopback row held by the expected process and must stay
-      that strict. Reading which process holds a port on an attached daemon is
-      a different question with the opposite failure mode, and it needs both
-      address families. Tracked as
+- [x] **Separate listener inspection from listener ownership.** The owned
+      check still asserts a loopback row held by the expected process. The
+      read-only inspector names the process bound to the measured port on
+      either address family, and it fails closed when that row is missing,
+      unreadable, or shared. Tracked as
       [issue 14](https://github.com/blisspixel/fitr/issues/14).
 - [ ] **Per-key configuration provenance.** Record how each knob was observed,
       not how the map as a whole was. A value read from the daemon's log, a
