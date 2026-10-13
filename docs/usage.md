@@ -134,11 +134,11 @@ points, and the remaining decision. Resume does not mint a confirmation seed
 or rerun a finished point. `tailor adopt --approve-adoption` records a fitr
 role selection only, and only for a finished owned fitting. It does not
 change an Ollama alias, configure an external agent, or restart a runtime.
-A finished endpoint assessment stays unresolved. The current recommendation
-receipt does not yet project canonical measurements, and leaves device identity
-and tested context absent. A session phase cannot supply them. Use the canonical
-records or the delegated `fitr auto status` for measured facts. The memory
-probe uses the planned context. Changing task definitions after preview
+A finished endpoint assessment stays unresolved for adoption. Its recommendation
+now projects each pinned point's validated record and takes artifact, runtime,
+device and tested context only from those observations; a missing or changed
+record stays unresolved, and a session phase or point count supplies no
+identity. The memory probe uses the planned context. Changing task definitions after preview
 requires a new plan before start or resume. Failed checks keep the task, seed, parser, field, verifier,
 and hashes. The response is not retained and is not reconstructed.
 

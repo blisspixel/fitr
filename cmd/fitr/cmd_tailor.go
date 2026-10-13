@@ -660,8 +660,10 @@ func fittingRunOpts(plan fitting.Plan) (runOpts, error) {
 }
 
 func printTailor(session fitting.Session, display string) int {
-	recommendation := session.Recommendation()
-	lines := append([]string(nil), session.StatusLines()...)
+	sources, gaps := fittingObservationSources(session)
+	recommendation := session.Recommendation(sources...)
+	lines := append([]string(nil), session.StatusLines(sources...)...)
+	lines = append(lines, gaps...)
 	lines = append(lines, fittingFailureLines(session)...)
 	switch render.Resolve(display) {
 	case "none":
@@ -674,6 +676,44 @@ func printTailor(session fitting.Session, display string) int {
 		}
 		return exitOK
 	}
+}
+
+// fittingObservationSources resolves each pinned fitting point to its sealed
+// record and projects it. A missing record, a changed digest, a failed
+// validation, or a broken store yields no source and a gap line; it never
+// produces an evidence class. Identity comes only from the validated record, so
+// a phase or a point count cannot stand in for a measured configuration.
+func fittingObservationSources(session fitting.Session) ([]fitting.ObservationSource, []string) {
+	if session.ExplorationID == "" || len(session.Points) == 0 {
+		return nil, nil
+	}
+	evidence, err := record.OpenManagedStore(record.Store{Dir: resultsDir()}, session.ExplorationID)
+	if err != nil {
+		return nil, []string{"evidence projection is unavailable; the fitting store could not be opened"}
+	}
+	var sources []fitting.ObservationSource
+	var gaps []string
+	for _, point := range session.Points {
+		rec, readErr := evidence.Read(point.Model)
+		if readErr != nil {
+			rec, readErr = evidence.ReadSaved(point.Model)
+		}
+		if readErr != nil || rec == nil {
+			gaps = append(gaps, point.Model+": no validated record to project")
+			continue
+		}
+		if rec.StableRunID() != point.RunID || rec.Completion == nil || rec.Completion.EvidenceSHA256 != point.EvidenceSHA256 {
+			gaps = append(gaps, point.Model+": evidence changed or does not match the pinned digest")
+			continue
+		}
+		source, err := fitting.ObservationSourceFromRecord(rec)
+		if err != nil {
+			gaps = append(gaps, point.Model+": record failed validation and was not projected")
+			continue
+		}
+		sources = append(sources, source)
+	}
+	return sources, gaps
 }
 
 func fittingFailureLines(session fitting.Session) []string {

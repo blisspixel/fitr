@@ -215,7 +215,7 @@ func (session Session) AdoptionAction() (string, error) {
 }
 
 // StatusLines is the session view shared by text and JSON.
-func (session Session) StatusLines() []string {
+func (session Session) StatusLines(sources ...ObservationSource) []string {
 	lines := session.Plan.Lines(session.Phase)
 	lines = append(lines, fmt.Sprintf("completed evidence points %d of %d", len(session.Points), len(session.Plan.Candidates)))
 	for _, point := range session.Points {
@@ -234,7 +234,7 @@ func (session Session) StatusLines() []string {
 	if session.ExecutableSHA256 != "" {
 		lines = append(lines, "executable "+session.ExecutableSHA256)
 	}
-	return append(lines, session.Recommendation().Lines...)
+	return append(lines, session.Recommendation(sources...).Lines...)
 }
 
 func remainingDecision(action string) string {
@@ -333,6 +333,10 @@ type RecommendationInput struct {
 	MeasuredTokens   int
 	RequestedContext int
 	Conflicts        []string
+	// Exploration is true while the observations come from a fitting's own
+	// exploration and no fresh confirmation has resolved. An exploration never
+	// certifies a winner, so Qualified stays false even when every class passed.
+	Exploration bool
 }
 
 // Recommendation is the machine-readable receipt. Lines is the same text the
@@ -353,18 +357,15 @@ type Recommendation struct {
 	Lines             []string            `json:"lines"`
 }
 
-// Recommendation derives the current receipt from the sealed plan. It does
+// Recommendation derives the current receipt from the sealed plan and, when
+// validated observation sources are supplied, from those observations. It does
 // not change the plan bytes. Missing checks stay unresolved.
-func (session Session) Recommendation() Recommendation {
+func (session Session) Recommendation(sources ...ObservationSource) Recommendation {
 	plan := session.Plan
 	workload := plan.RoleName
 	if plan.Workload != nil && plan.Workload.Preset != "" {
 		workload = plan.Workload.Preset
 	}
-	// A phase or saved point identifies work, not a verified runtime window.
-	// Until canonical observations are projected here, measurement identity
-	// remains absent even for a delegated or finished session.
-	tested := 0
 	uncertainty := []string{"a changed configuration invalidates this conclusion"}
 	if plan.Workload == nil || !plan.Workload.KVServerVerified {
 		uncertainty = append(uncertainty, "unmeasured cache type")
@@ -380,15 +381,42 @@ func (session Session) Recommendation() Recommendation {
 	if plan.Workload != nil && plan.Workload.DesiredContextTokens > 0 && plan.Workload.DesiredContextTokens > plan.ContextTokens {
 		conflicts = append(conflicts, desiredUnmetReason(plan.Workload.DesiredContextTokens, plan.ContextTokens))
 	}
-	return AssessRecommendation(RecommendationInput{
-		Role: plan.RoleName, Required: []string{ClassLoad, ClassSimplePrompt, ClassToolWorkflow, ClassLongContext, ClassHarness},
+	required := RequiredClasses(plan)
+	if len(required) == 0 {
+		required = []string{ClassLoad, ClassSimplePrompt, ClassToolWorkflow, ClassLongContext, ClassHarness}
+	}
+	in := RecommendationInput{
+		Role: plan.RoleName, Required: required,
 		Scope: RecommendationScope{
 			Artifact: strings.Join(plan.Candidates, ", "), Runtime: plan.Endpoint,
 			Configuration: fmt.Sprintf("context %d, kv %s, %s %s", plan.ContextTokens, plan.KVCacheType, plan.CapacityKind, FormatGiB(plan.CapacityBytes)),
-			Workload:      workload, TestedContext: tested, Uncertainty: uncertainty,
+			Workload:      workload, Uncertainty: uncertainty,
 		},
-		RequestedContext: plan.ContextTokens, MeasuredTokens: tested, Conflicts: conflicts,
-	})
+		RequestedContext: plan.ContextTokens, Conflicts: conflicts,
+	}
+	// Identity and class verdicts come only from validated observations. Without
+	// them the plan-derived display is kept and every class stays unresolved.
+	if len(sources) > 0 {
+		observations, observed, observedConflicts := ProjectObservations(sources)
+		in.Observations = observations
+		in.Conflicts = append(in.Conflicts, observedConflicts...)
+		if observed.Artifact != "" {
+			in.Scope.Artifact = observed.Artifact
+		}
+		if observed.Runtime != "" {
+			in.Scope.Runtime = observed.Runtime
+		}
+		if observed.Configuration != "" {
+			in.Scope.Configuration = observed.Configuration
+		}
+		in.Scope.Device = observed.Device
+		in.Scope.TestedContext = observed.TestedContext
+		in.MeasuredTokens = observed.TestedContext
+		// This fitting's own exploration cannot certify a winner. Fresh
+		// confirmation is a later, separate step.
+		in.Exploration = true
+	}
+	return AssessRecommendation(in)
 }
 
 // AssessRecommendation keeps each evidence class visible. A comfortable load
@@ -426,6 +454,15 @@ func AssessRecommendation(in RecommendationInput) Recommendation {
 	}
 	unresolved = appendUncertainty(unresolved, in.Scope.Uncertainty)
 	rec.Passed, rec.Failed, rec.Unresolved = passed, failed, unresolved
+	rec.deriveOutcome(in, passed, failed, unresolved)
+	rec.Lines = recommendationLines(rec, in)
+	return rec
+}
+
+// deriveOutcome sets the outcome and qualification from the class results. An
+// exploration and a stated conflict both withhold qualification even when every
+// declared class passed: neither is a certification.
+func (rec *Recommendation) deriveOutcome(in RecommendationInput, passed, failed, unresolved []string) {
 	missingRequired := false
 	for _, class := range in.Required {
 		if !sliceHas(passed, class) {
@@ -441,14 +478,12 @@ func AssessRecommendation(in RecommendationInput) Recommendation {
 		rec.Outcome = "supported"
 		rec.Qualified = true
 	}
-	if len(in.Conflicts) > 0 || len(unresolved) > 0 {
+	if len(in.Conflicts) > 0 || len(unresolved) > 0 || in.Exploration {
 		rec.Qualified = false
 		if rec.Outcome == "supported" {
 			rec.Outcome = "unresolved"
 		}
 	}
-	rec.Lines = recommendationLines(rec, in)
-	return rec
 }
 
 func appendUncertainty(unresolved, uncertainty []string) []string {
@@ -503,6 +538,9 @@ func recommendationLines(rec Recommendation, in RecommendationInput) []string {
 			scopeText(rec.Scope.Artifact), scopeText(rec.Scope.Runtime), scopeText(rec.Scope.Configuration),
 			scopeText(rec.Scope.Device), scopeText(rec.Scope.Workload), tested),
 		"projected memory fit, successful loading, measured performance, behavioral reliability, and end-to-end harness qualification are separate. None establishes the next.",
+	}
+	if in.Exploration {
+		lines = append(lines, "exploration evidence does not certify a winner; fresh confirmation is required")
 	}
 	if len(rec.Passed) > 0 {
 		lines = append(lines, "passed: "+strings.Join(rec.Passed, ", "))

@@ -35,18 +35,17 @@ not walk the context downward or adopt another row. No eligible configuration
 is a legitimate result. Cloud is not an automatic substitute.
 
 `fitr tailor` status, in text and JSON, carries one recommendation receipt,
-`fitr.recommendation.v1`. It currently describes the planned candidate names,
-endpoint, configuration and workload. It does not yet project canonical
-observations into the recommendation: device identity and tested context stay
-absent, and the recommendation stays unresolved even after collection. A
-completed point or delegated phase cannot establish those facts. Inspect the
-canonical measurements or the delegated `fitr auto status` for measured facts. Projected memory fit,
+`fitr.recommendation.v1`. It projects each pinned evidence point against its
+validated canonical record, resolved to its run ID and evidence digest, and
+takes artifact, runtime, device and tested context identity only from those
+observations. A missing, changed or incompatible record stays unresolved, and a
+completed point or delegated phase cannot establish those facts on its own. Projected memory fit,
 loading, measured performance, behavioral reliability, and harness
 qualification stay separate. A model that loads and answers a simple prompt
 while failing a required tool or coding workflow stays unqualified. The
-recommendation policy keeps passed, failed and unresolved classes separate;
-the current status receipt leaves them unresolved until observations are wired
-into that projection.
+recommendation policy keeps passed, failed and unresolved classes separate.
+Exploration evidence does not certify a winner: the fitting's own collection
+stays unresolved until fresh confirmation resolves it.
 A weights-plus-KV projection is not tested long-context quality. Unknown
 runtime overhead, an unverified cache type, a skipped executable test, and a
 small sample stay on the receipt. Conflicting constraints are shown as
