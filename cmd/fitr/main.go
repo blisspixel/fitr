@@ -114,6 +114,7 @@ usage:
   fitr export <model> [--out PATH] [--retonr]
   fitr view [model|result.json] [--display MODE]
   fitr board [--current] [--role coding|agent]
+  fitr suggest [model] [--size-gb N]
   fitr top [--view live|result|board|history|inventory]
   fitr top view [model|result.json]
   fitr top run <model> [run flags]
@@ -254,6 +255,8 @@ func commandHandler(name string) commandFunc {
 		return cmdView
 	case "board":
 		return cmdBoard
+	case "suggest":
+		return cmdSuggest
 	case "top":
 		return cmdTop
 	case "diag":
@@ -345,7 +348,7 @@ func takesValue(flagArg string) bool {
 		"weight-quant", "weight-preference", "weight-minimum", "workload", "model-card",
 		"reserve-system-tokens", "reserve-output-tokens", "reserve-reasoning-tokens",
 		"projected-resident-gb", "concurrency", "alternative-ctx", "kv-permitted",
-		"warmup", "plugins-dir":
+		"warmup", "plugins-dir", "size-gb":
 		return true
 	}
 	return false
@@ -1052,6 +1055,7 @@ func renderInventoryStatus(ctx context.Context, b llm.Backend, also []string, mo
 	}
 	if b == nil {
 		inv.Empty = "none reachable"
+		inv.Warnings = append(inv.Warnings, firstRunNotes(true, fp.GPU, fp.GPUBackend, fp.VRAMSource)...)
 		render.WriteInventory(os.Stdout, inv, mode)
 		return exitOK
 	}
@@ -1077,6 +1081,7 @@ func renderInventoryStatus(ctx context.Context, b llm.Backend, also []string, mo
 	if len(inv.Rows) == 0 {
 		inv.Empty = "reachable, no models"
 	}
+	inv.Warnings = append(inv.Warnings, firstRunNotes(false, fp.GPU, fp.GPUBackend, fp.VRAMSource)...)
 	render.WriteInventory(os.Stdout, inv, mode)
 	return exitOK
 }

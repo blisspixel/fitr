@@ -174,13 +174,13 @@ func writeEmptyInventory(w io.Writer, inv Inventory, p palette) bool {
 	switch inv.Empty {
 	case "none reachable":
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, p.wrap(p.Muted, "  next      start Ollama, llama-server, or an OpenAI-compatible server"))
+		fmt.Fprintln(w, p.wrap(p.Muted, "  next      fitr suggest names models for this machine before a download"))
 		fmt.Fprintln(w, p.wrap(p.Muted, "            then: fitr advise <model>   and   fitr run <model>"))
 		return true
 	case "reachable, no models":
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, p.wrap(p.Muted, "  no models installed on this runtime"))
-		fmt.Fprintln(w, p.wrap(p.Muted, "  next      pull a model, then: fitr advise <model>"))
+		fmt.Fprintln(w, p.wrap(p.Muted, "  next      fitr suggest, or pull a model, then: fitr advise <model>"))
 		return true
 	default:
 		return false
