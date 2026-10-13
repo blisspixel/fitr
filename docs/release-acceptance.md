@@ -39,8 +39,12 @@ This receipt does not include the independent byte comparison against the
 workflow artifact or a fresh official SDK receipt for the public binary that
 0.11.2 recorded. CI's built-binary script installs the embedded Omarchy
 plugin into a temporary directory, reads an empty status and removes the
-plugin; it does not start Quickshell. Acceptance on a running Omarchy session
-remains open as listed in [the Omarchy bar](omarchy.md). The oversized-prompt
+plugin; it does not start Quickshell. On 2026-10-12 the installed 0.11.3
+binary was installed into a temporary directory on Omarchy 4.0.4.
+`omarchy plugin validate` exited 0, and `qmllint` exited 0 with warnings
+about dynamic members. The running bar was not changed: no enable, no shell
+restart, and no panel summon, click, or removal. Acceptance on a running
+Omarchy session remains open as listed in [the Omarchy bar](omarchy.md). The oversized-prompt
 refusal on legacy Go and Jinja templates, a recorded Pi process, and a
 recorded native local-model pi-workspace trial also remain open.
 
