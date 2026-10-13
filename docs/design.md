@@ -50,6 +50,12 @@ the daemon is actually read. Historical records sealed before that provenance
 existed keep their original key. Change the driver and your old numbers are
 explicitly void.
 
+The new Linux AMD APU GTT mapping-limit source contributes the optional
+`memory_capacity_kind` to fingerprint v2 comparison material. Equal numeric
+dedicated VRAM and shared mapping limits cannot pool evidence. Historical
+sources omit that field and preserve their exact keys and signed payloads;
+volatile total-used or current-availability readings never enter the key.
+
 ## 2. "Is it good" is unanswerable. "Does it serve need X" is answerable.
 
 Independent needs, each with its own gate. A model can serve one brilliantly

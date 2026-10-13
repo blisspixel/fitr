@@ -17,10 +17,13 @@ func (run *runExecution) prepareCapacityPlan() error {
 		return nil
 	}
 	domain := capacityDomain(run.result.Device)
+	if domain == "" {
+		return errors.New("memory resource domain is unobserved; observe target CPU placement or accelerator memory before sealing a capacity plan")
+	}
 	observedAt := time.Now().UTC()
 	policyInput := capacity.PolicyInput{ResourceDomain: domain}
 	policyInput.Addressable = addressableObservation(run.result.Device, domain, observedAt)
-	policyInput.CurrentAvailable = availableObservation(run.ctx, domain, observedAt)
+	policyInput.CurrentAvailable = availableObservation(run.ctx, run.result.Device, domain, observedAt)
 	policyInput.Container = containerObservation(domain, observedAt)
 	var err error
 	policyInput.OperatorBudgetBytes, err = optionalPositiveGiBBytes(run.opts.capacityBudgetGB)
@@ -55,22 +58,16 @@ func (run *runExecution) prepareCapacityPlan() error {
 }
 
 func capacityDomain(fp device.Fingerprint) capacity.ResourceDomain {
-	if device.IsUnifiedMemoryGPU(fp.GPU) || fp.VRAMSource == device.NVIDIAUnifiedMemorySource ||
-		fp.VRAMSource == device.NVIDIAUnifiedProbeSource {
-		return capacity.DomainUnified
-	}
-	if strings.EqualFold(strings.TrimSpace(fp.InferenceDevice), "CPU") || strings.TrimSpace(fp.GPU) == "" {
-		return capacity.DomainHost
-	}
-	return capacity.DomainAccelerator
+	return device.SelectMemoryCapacity(fp).Domain
 }
 
 func addressableObservation(fp device.Fingerprint, domain capacity.ResourceDomain,
 	observedAt time.Time) *capacity.MemoryObservation {
-	gb, source := fp.VRAMGb, fp.VRAMSource
-	if domain == capacity.DomainHost {
-		gb, source = fp.RAMGb, "system physical memory"
+	selected := device.SelectMemoryCapacity(fp)
+	if selected.Domain == "" || selected.Domain != domain {
+		return nil
 	}
+	gb, source := selected.GB, selected.Source
 	if domain == capacity.DomainUnified && (source == device.AppleWiredLimitSource ||
 		source == device.AppleAssumedShareSource) {
 		// These sources are GPU policy limits, not addressable-pool readings.
@@ -86,19 +83,27 @@ func addressableObservation(fp device.Fingerprint, domain capacity.ResourceDomai
 	}
 }
 
-func availableObservation(ctx context.Context, domain capacity.ResourceDomain,
+func availableObservation(ctx context.Context, fp device.Fingerprint, domain capacity.ResourceDomain,
 	observedAt time.Time) *capacity.MemoryObservation {
+	if domain == capacity.DomainUnified && fp.VRAMSource == device.AMDGTTMappingSource {
+		// Host MemAvailable can exceed the GPU mapping limit. Neither it nor
+		// unused GTT mappings alone measure shared-pool allocation headroom.
+		return nil
+	}
 	var bytes int64
 	var source string
 	var ok bool
-	if domain == capacity.DomainUnified || domain == capacity.DomainHost {
+	switch domain {
+	case capacity.DomainUnified, capacity.DomainHost:
 		bytes, source, ok = device.SystemMemoryAvailable(ctx)
-	} else {
+	case capacity.DomainAccelerator:
 		var gb float64
 		gb, source, ok = device.AvailableVRAMWithSource(ctx)
 		if ok {
 			bytes, _ = gibBytes(gb)
 		}
+	default:
+		return nil
 	}
 	if !ok || bytes <= 0 {
 		return nil
@@ -110,7 +115,7 @@ func availableObservation(ctx context.Context, domain capacity.ResourceDomain,
 }
 
 func containerObservation(domain capacity.ResourceDomain, observedAt time.Time) *capacity.ContainerReceipt {
-	if domain == capacity.DomainAccelerator {
+	if domain != capacity.DomainHost && domain != capacity.DomainUnified {
 		return nil
 	}
 	observed, ok := device.ContainerMemoryLimit()

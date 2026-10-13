@@ -47,10 +47,10 @@ type Input struct {
 	WeightsB       int64   // on-disk size; 0 unknown
 	HaveGB         float64 // capacity input; HaveSrc defines whether it is a budget
 	HaveSrc        string  // where HaveGB came from; empty if unmeasured
-	// NVIDIAUnifiedMemory is true when device detection identified an NVIDIA
-	// shared-memory SoC. It remains true when --vram-gb replaces HaveGB so a
+	// SharedMemory is true when device detection identified a shared host pool.
+	// It remains true when --vram-gb replaces HaveGB so a
 	// device-only allocator projection cannot be mistaken for whole-pool use.
-	NVIDIAUnifiedMemory bool
+	SharedMemory bool
 	// FreeGB is GPU memory not currently committed elsewhere. Display only:
 	// it moves minute to minute and must never reach a comparability key.
 	FreeGB float64
@@ -487,13 +487,13 @@ func residentSource(in Input) string {
 }
 
 func sharedMemoryPool(in Input) bool {
-	return in.NVIDIAUnifiedMemory || wholeSystemUnifiedMemorySource(in.HaveSrc)
+	return in.SharedMemory || wholeSystemUnifiedMemorySource(in.HaveSrc)
 }
 
 func wholeSystemUnifiedMemorySource(src string) bool {
 	switch strings.TrimSpace(src) {
 	case device.NVIDIAUnifiedMemorySource, device.NVIDIAUnifiedProbeSource,
-		device.AppleLegacyRAMSource:
+		device.AppleLegacyRAMSource, device.AMDGTTMappingSource, "system physical memory":
 		return true
 	default:
 		return false

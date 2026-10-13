@@ -26,7 +26,7 @@ func TestApplyAdviseDeviceEvidencePreservesSharedMemoryDetectionUnderOverride(t 
 		applyAdviseDeviceEvidence(&in, device.Fingerprint{
 			GPU: "NVIDIA GB10", VRAMGb: 121.7, VRAMSource: source,
 		})
-		if !in.NVIDIAUnifiedMemory || in.HaveGB != 96 || in.HaveSrc != "--vram-gb" {
+		if !in.SharedMemory || in.HaveGB != 96 || in.HaveSrc != "--vram-gb" {
 			t.Fatalf("source %q changed declared budget or lost shared-memory fact: %+v", source, in)
 		}
 	}
@@ -37,7 +37,7 @@ func TestApplyAdviseDeviceEvidenceDoesNotMarkDiscreteNVIDIA(t *testing.T) {
 	applyAdviseDeviceEvidence(&in, device.Fingerprint{
 		GPU: "NVIDIA RTX 5090", VRAMGb: 32, VRAMSource: "nvidia-smi",
 	})
-	if in.NVIDIAUnifiedMemory {
+	if in.SharedMemory {
 		t.Fatalf("discrete NVIDIA marked shared memory: %+v", in)
 	}
 }

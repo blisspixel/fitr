@@ -181,7 +181,7 @@ func TestContextFitNVIDIAAddressableCapacityNeverSuggestsUnobservedFit(t *testin
 func TestContextFitNVIDIAUnifiedIdentityConstrainsNonzeroProbe(t *testing.T) {
 	tble := ContextFit(Input{
 		WeightsB: 5 * GiB, HaveGB: 8, HaveSrc: "nvidia-smi",
-		NVIDIAUnifiedMemory: true, Ctx: 8192, Arch: llama8B(),
+		SharedMemory: true, Ctx: 8192, Arch: llama8B(),
 	})
 	for _, point := range tble.Points {
 		if point.Tier == Compatible || point.Suggested {

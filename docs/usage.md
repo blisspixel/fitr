@@ -180,7 +180,8 @@ says so and omits the caveat rather than estimating one.
 |---|---|---|---|
 | NVIDIA discrete, any OS | `nvidia-smi` | `nvidia-smi` | `nvidia-smi` |
 | NVIDIA GB10 / Thor, Linux | `nvidia-smi` | `/proc/meminfo` `MemTotal` addressable pool | unavailable |
-| AMD, Linux | `rocm-smi`, else `lspci` | `drm sysfs` | `drm sysfs` (total minus used) |
+| AMD dedicated, Linux | `rocm-smi`, else `lspci` | `drm sysfs` VRAM | `drm sysfs` VRAM (total minus used) |
+| AMD APU, Linux | `rocm-smi`, else `lspci` | positively identified single-adapter GTT mapping limit | shared-pool availability unobserved |
 | AMD, Windows | `Win32_VideoController` | registry `qwMemorySize` | not available |
 | Apple Silicon | `system_profiler` | `iogpu.wired_limit_mb`, else assumed share | not applicable |
 | Intel iGPU | `lspci` / CIM | treated as unified memory | not available |
@@ -220,10 +221,29 @@ operator supplies a safe budget or a runtime receipt proves one loaded point.
 | NVIDIA discrete | `nvidia-smi` total, and free where a contention caveat applies | measured |
 | NVIDIA GB10 / Thor on Linux | `/proc/meminfo` `MemTotal` and timestamped `MemAvailable` | measured addressable pool plus transient availability, not an implicit safe budget |
 | AMD or Intel dedicated memory on Linux | `drm sysfs` | measured |
-| AMD or Intel integrated whole-system fallback | system RAM | measured addressable pool, not safe free budget |
+| AMD APU on Linux | single-adapter `mem_info_gtt_total`, with AMD vendor, amdgpu driver and kernel APU GC identity | measured mapping limit, not extra RAM or a safe budget |
+| AMD integrated on Windows or Intel integrated fallback | system RAM | measured addressable pool, not safe free budget |
 | Apple Silicon, limit set | `iogpu.wired_limit_mb` | measured |
 | Apple Silicon, default | 75% of `hw.memsize` | **assumed** |
 | Override | `--vram-gb N` | you said so |
+
+Linux AMD GTT capacity is never added to the BIOS VRAM carve-out or inferred
+from their ratio. Missing or invalid counters and ambiguous adapter identity
+remain unknown. A carve-out alone does not reject an unmeasured model on a
+recognized shared-memory GPU. `--vram-gb` still supplies a deliberate planning
+budget, and shared-memory resident evidence still needs the requested context.
+Observed CPU serving placement selects host RAM; a missing accelerator reading
+does not establish CPU serving. This does not establish native APU model loading.
+
+For the GTT mapping domain, host `MemAvailable` and GTT total-minus-used are
+different limits, so shared allocation headroom stays unobserved. Use
+`--capacity-budget-gb` for an explicit safe run budget; the reserve form needs
+a defensible current-availability receipt and is unavailable for this domain.
+Target-specific resident CPU placement can use the host-memory path instead.
+Missing GPU discovery and unknown serving placement do not establish CPU
+execution or a host-memory budget. A run refuses to seal a memory capacity plan
+until its resource domain is observed; an explicit byte budget alone does not
+identify that domain.
 
 Apple Silicon shares one pool, but the GPU cannot wire all of it. Reporting
 installed RAM as GPU-available memory is the unified-memory version of grading
