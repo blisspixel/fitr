@@ -353,9 +353,10 @@ resume refuse changed tasks. Resident allocation is measured at that same
 context, rather than the ordinary run's separate 32K memory probe.
 
 Endpoint assessment cannot adopt a winner. Its recommendation projection
-currently carries planned settings and unresolved evidence classes; phase,
-point count and loopback locality cannot establish measured context or device
-identity. Owned auto evidence retains its own sealed exploration and fresh
+resolves each pinned point's validated record and takes artifact, runtime,
+device and tested context only from those observations; phase, point count and
+loopback locality establish neither, and a missing or changed record stays
+unresolved. Owned auto evidence retains its own sealed exploration and fresh
 confirmation seeds. Workload presets cannot establish executable coding or
 populated token-accounted context from the short battery. See
 [personal fitting](personal-fitting.md) for the current interface and limits.

@@ -212,9 +212,11 @@ measured, weight quantization stays separate from KV-cache precision, and
 requirement. That record does not enable flash attention on a server that is
 already running, and a client environment variable does not prove the server
 applied the cache type.
-Endpoint assessments remain unresolved and have no adoption path. Their
-recommendation receipts leave unprojected measurements absent. Inspect the
-canonical measurements or delegated auto status for measured facts.
+Endpoint assessments stay unresolved for adoption and have no adoption path.
+Their recommendation now projects each pinned point's validated record,
+supplying artifact, runtime, device and tested context from observations; a
+missing or changed record stays unresolved, and exploration does not certify a
+winner.
 Adoption records a fitr role selection only, and only after a
 separate approval of a finished owned fitting. It does not change an Ollama
 alias, configure an external agent, or restart a runtime.
