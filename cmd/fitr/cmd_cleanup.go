@@ -70,6 +70,9 @@ func writeCleanupPlan(w io.Writer, plan cleanup.Plan, mode string) {
 	if plan.StopReason != "" {
 		field("stopped", plan.StopReason)
 	}
+	if plan.UnenteredCount > 0 {
+		field("unentered", fmt.Sprintf("%d directories seen and not entered", plan.UnenteredCount))
+	}
 	writeCleanupInventory(w, plan, field, width)
 	fmt.Fprintln(w)
 	for _, note := range plan.Notes {
@@ -106,6 +109,15 @@ func writeCleanupInventory(w io.Writer, plan cleanup.Plan, field func(string, st
 	}
 	if plan.ReviewCandidateCount > len(plan.ReviewCandidates) {
 		field("more", fmt.Sprintf("%d review candidates omitted", plan.ReviewCandidateCount-len(plan.ReviewCandidates)))
+	}
+	if plan.UnenteredCount > 0 {
+		heading("Seen, not entered")
+		for _, path := range plan.UnenteredDirectories {
+			field("unentered", path)
+		}
+		if plan.UnenteredCount > len(plan.UnenteredDirectories) {
+			field("more", fmt.Sprintf("%d unentered directories omitted", plan.UnenteredCount-len(plan.UnenteredDirectories)))
+		}
 	}
 	for _, issue := range plan.Issues {
 		field("scan issue", issue.Code+": "+issue.Path)
