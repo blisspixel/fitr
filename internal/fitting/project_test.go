@@ -16,6 +16,14 @@ func classState(observations []EvidenceObservation, class string) (string, bool)
 	return "", false
 }
 
+func evSession() Session {
+	return Session{
+		Schema: SessionSchema, Phase: PhaseMeasured,
+		Plan: Plan{Schema: PlanSchema, RoleName: "coding", Candidates: []string{"qwen3.6:35b"},
+			ContextTokens: 65536, KVCacheType: "f16"},
+	}
+}
+
 func passingSource() ObservationSource {
 	effective, prefix := 65536, 4096
 	return ObservationSource{
@@ -137,5 +145,19 @@ func TestExplorationCannotCertifyWinner(t *testing.T) {
 	})
 	if rec.Qualified || rec.Outcome != "unresolved" {
 		t.Fatalf("exploration certified a winner: outcome=%q qualified=%v", rec.Outcome, rec.Qualified)
+	}
+}
+
+// Only a source from resolved fresh confirmation clears the exploration hold;
+// the fitting's own exploration does not.
+func TestConfirmedSourceCanCertify(t *testing.T) {
+	confirmed := passingSource()
+	confirmed.Confirmed = true
+	rec := evSession().Recommendation(confirmed)
+	if !rec.Qualified || rec.Outcome != "supported" {
+		t.Fatalf("confirmed evidence did not certify: outcome=%q qualified=%v", rec.Outcome, rec.Qualified)
+	}
+	if rec := evSession().Recommendation(passingSource()); rec.Qualified || rec.Outcome != "unresolved" {
+		t.Fatalf("exploration certified a winner: outcome=%q", rec.Outcome)
 	}
 }

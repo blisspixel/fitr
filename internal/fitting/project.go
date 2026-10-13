@@ -40,8 +40,12 @@ type ObservationSource struct {
 	DeviceKey string
 	// RequestedContext is the context the record measured.
 	RequestedContext int
-	Report           analysis.Report
-	Scorecard        score.Scorecard
+	// Confirmed is true when the source comes from a resolved fresh
+	// confirmation rather than the fitting's own exploration. Only confirmed
+	// sources clear the recommendation's exploration hold.
+	Confirmed bool
+	Report    analysis.Report
+	Scorecard score.Scorecard
 }
 
 // ObservationSourceFromRecord derives one projection from a sealed record. It
@@ -347,4 +351,18 @@ func RequiredClasses(plan Plan) []string {
 		}
 	}
 	return classes
+}
+
+// allConfirmed reports whether every source comes from resolved fresh
+// confirmation. An empty slice is not confirmation.
+func allConfirmed(sources []ObservationSource) bool {
+	if len(sources) == 0 {
+		return false
+	}
+	for _, source := range sources {
+		if !source.Confirmed {
+			return false
+		}
+	}
+	return true
 }
