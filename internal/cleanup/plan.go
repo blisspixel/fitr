@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -39,6 +40,19 @@ type Summary struct {
 	ApparentBytes int64  `json:"apparent_bytes"`
 }
 
+// Component groups files that appear to belong to one artifact: a weights set
+// and its shards, a vision projector, a speculative draft, an adapter, a
+// tokenizer, or a runtime's libraries. Grouping is by filename only. It is a
+// hint for review and never proof that the files are used together, complete,
+// or safe to remove; the scanner does not open file data to confirm it.
+type Component struct {
+	Name          string   `json:"name"`
+	Role          string   `json:"role"`
+	Files         int      `json:"files"`
+	ApparentBytes int64    `json:"apparent_bytes"`
+	Paths         []string `json:"paths,omitempty"`
+}
+
 type Entry struct {
 	Path          string    `json:"path"`
 	Category      string    `json:"category"`
@@ -54,32 +68,33 @@ type Issue struct {
 }
 
 type Plan struct {
-	Schema               string    `json:"schema"`
-	Root                 string    `json:"root"`
-	AsOf                 time.Time `json:"as_of"`
-	Cutoff               time.Time `json:"cutoff"`
-	MinAgeDays           int       `json:"min_age_days"`
-	Limits               Limits    `json:"limits"`
-	Complete             bool      `json:"complete"`
-	StopReason           string    `json:"stop_reason,omitempty"`
-	EntriesVisited       int       `json:"entries_visited"`
-	Files                int       `json:"files"`
-	Directories          int       `json:"directories"`
-	LinksSkipped         int       `json:"links_skipped"`
-	SpecialFilesSkipped  int       `json:"special_files_skipped"`
-	ApparentBytes        int64     `json:"apparent_bytes"`
-	TopLevel             []Summary `json:"top_level"`
-	TopLevelOmitted      int       `json:"top_level_omitted"`
-	Categories           []Summary `json:"categories"`
-	LargestFiles         []Entry   `json:"largest_files"`
-	ReviewCandidates     []Entry   `json:"review_candidates"`
-	ReviewCandidateCount int       `json:"review_candidate_count"`
-	ReviewApparentBytes  int64     `json:"review_apparent_bytes"`
-	Issues               []Issue   `json:"issues"`
-	IssueCount           int       `json:"issue_count"`
-	UnenteredDirectories []string  `json:"unentered_directories,omitempty"`
-	UnenteredCount       int       `json:"unentered_directory_count,omitempty"`
-	Notes                []string  `json:"notes"`
+	Schema               string      `json:"schema"`
+	Root                 string      `json:"root"`
+	AsOf                 time.Time   `json:"as_of"`
+	Cutoff               time.Time   `json:"cutoff"`
+	MinAgeDays           int         `json:"min_age_days"`
+	Limits               Limits      `json:"limits"`
+	Complete             bool        `json:"complete"`
+	StopReason           string      `json:"stop_reason,omitempty"`
+	EntriesVisited       int         `json:"entries_visited"`
+	Files                int         `json:"files"`
+	Directories          int         `json:"directories"`
+	LinksSkipped         int         `json:"links_skipped"`
+	SpecialFilesSkipped  int         `json:"special_files_skipped"`
+	ApparentBytes        int64       `json:"apparent_bytes"`
+	TopLevel             []Summary   `json:"top_level"`
+	TopLevelOmitted      int         `json:"top_level_omitted"`
+	Categories           []Summary   `json:"categories"`
+	Components           []Component `json:"components"`
+	LargestFiles         []Entry     `json:"largest_files"`
+	ReviewCandidates     []Entry     `json:"review_candidates"`
+	ReviewCandidateCount int         `json:"review_candidate_count"`
+	ReviewApparentBytes  int64       `json:"review_apparent_bytes"`
+	Issues               []Issue     `json:"issues"`
+	IssueCount           int         `json:"issue_count"`
+	UnenteredDirectories []string    `json:"unentered_directories,omitempty"`
+	UnenteredCount       int         `json:"unentered_directory_count,omitempty"`
+	Notes                []string    `json:"notes"`
 }
 
 type scanner struct {
@@ -87,6 +102,7 @@ type scanner struct {
 	plan       Plan
 	groups     map[string]Summary
 	categories map[string]Summary
+	components map[string]*componentAcc
 	// Hooks allow deterministic tests of filesystem failures and races.
 	lstat     func(string) (os.FileInfo, error)
 	openDir   func(string) (*os.File, error)
@@ -165,6 +181,7 @@ func newScanner(ctx context.Context, root *os.Root, absolute string, o Options) 
 	}
 	return &scanner{ctx: ctx, lstat: root.Lstat, openDir: openDirectory, entryInfo: entryInfo,
 		groups: map[string]Summary{}, categories: map[string]Summary{},
+		components: map[string]*componentAcc{},
 		plan: Plan{Schema: Schema, Root: absolute, AsOf: o.AsOf.UTC(),
 			Cutoff: o.AsOf.UTC().AddDate(0, 0, -o.MinAgeDays), MinAgeDays: o.MinAgeDays,
 			Limits: o.Limits, Complete: true, TopLevel: []Summary{}, Categories: []Summary{},
@@ -176,6 +193,7 @@ func newScanner(ctx context.Context, root *os.Root, absolute string, o Options) 
 				"Observed symbolic links and special files are skipped. Concurrent changes or skipped entries can make this inventory incomplete.",
 				"The deadline is checked between filesystem operations; a stalled filesystem operation can outlast it.",
 				"Directories are entered with model stores (blobs, manifests, models) ahead of cache trees. An incomplete scan names directories that were seen and not entered.",
+				"Component groups come from filenames only, not from manifests. A group does not resolve shared dependencies across models or prove that its files belong to one artifact.",
 			}},
 	}
 }
@@ -414,6 +432,7 @@ func (s *scanner) addFile(path string, info os.FileInfo) {
 	}
 	addSummary(s.groups, group, info.Size())
 	addSummary(s.categories, category, info.Size())
+	s.addComponent(name, info.Size())
 	entry := Entry{name, category, info.Size(), info.ModTime().UTC(), "USAGE_UNRESOLVED", "Preserve until model, shard, projector, runtime and fallback dependencies are resolved."}
 	if category == "incomplete_download" && !info.ModTime().After(s.plan.Cutoff) {
 		entry.State, entry.Reason = "REVIEW", "Incomplete-download filename and modification time meet the age threshold. Verify no active transfer or resume dependency before any removal."
@@ -449,6 +468,7 @@ func (s *scanner) finish() {
 		s.plan.TopLevel = s.plan.TopLevel[:s.plan.Limits.MaxItems]
 	}
 	s.plan.Categories = sortedSummaries(s.categories)
+	s.plan.Components = sortedComponents(s.components, s.plan.Limits.MaxItems)
 }
 
 func sortedSummaries(values map[string]Summary) []Summary {
@@ -488,6 +508,91 @@ func classify(path string) string {
 	default:
 		return "other"
 	}
+}
+
+// shardPattern matches the "<name>-<index>-of-<count>" suffix multi-file weight
+// sets use, so a shard group is reviewed as one component rather than as
+// unrelated large files.
+var shardPattern = regexp.MustCompile(`-\d{2,5}-of-\d{2,5}`)
+
+// componentAcc accumulates one component's files during the walk.
+type componentAcc struct {
+	role  string
+	files int
+	bytes int64
+	paths []string
+}
+
+// componentKey is the filename with any shard suffix removed, so every shard of
+// one set shares a key.
+func componentKey(base string) string {
+	if loc := shardPattern.FindStringIndex(base); loc != nil {
+		return base[:loc[0]] + base[loc[1]:]
+	}
+	return base
+}
+
+// componentRole names the dependency role a filename suggests. It is a hint
+// from the name, never a reading of the file's contents, and never proof that
+// the file is used, complete, or safe to remove.
+func componentRole(base string) string {
+	lower := strings.ToLower(base)
+	switch {
+	case strings.Contains(lower, "mmproj"), strings.Contains(lower, "projector"), strings.Contains(lower, "clip"):
+		return "vision_projector"
+	case strings.Contains(lower, "draft"), strings.Contains(lower, "speculat"), strings.Contains(lower, "mtp"):
+		return "speculative_draft"
+	case strings.Contains(lower, "lora"), strings.Contains(lower, "adapter"):
+		return "adapter"
+	case strings.Contains(lower, "tokenizer"), strings.Contains(lower, "vocab"), strings.Contains(lower, "merges"):
+		return "tokenizer"
+	}
+	switch filepath.Ext(lower) {
+	case ".gguf", ".safetensors", ".pt", ".pth", ".onnx", ".tflite", ".ckpt", ".model":
+		return "weights"
+	case ".so", ".dll", ".dylib", ".exe":
+		return "runtime_asset"
+	default:
+		return ""
+	}
+}
+
+// addComponent folds one file into its inferred component group.
+func (s *scanner) addComponent(name string, size int64) {
+	base := filepath.Base(name)
+	role := componentRole(base)
+	if role == "" {
+		return
+	}
+	key := componentKey(base)
+	acc := s.components[key]
+	if acc == nil {
+		acc = &componentAcc{role: role}
+		s.components[key] = acc
+	}
+	acc.files++
+	acc.bytes += size
+	if len(acc.paths) < s.plan.Limits.MaxItems {
+		acc.paths = append(acc.paths, name)
+	}
+}
+
+func sortedComponents(values map[string]*componentAcc, limit int) []Component {
+	result := make([]Component, 0, len(values))
+	for name, acc := range values {
+		result = append(result, Component{Name: name, Role: acc.role, Files: acc.files,
+			ApparentBytes: acc.bytes, Paths: acc.paths})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].ApparentBytes != result[j].ApparentBytes {
+			return result[i].ApparentBytes > result[j].ApparentBytes
+		}
+		return result[i].Name < result[j].Name
+	})
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result
 }
 
 func Bytes(value int64) string { return fmt.Sprintf("%.2f GiB", float64(value)/(1<<30)) }
