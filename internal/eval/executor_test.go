@@ -11,14 +11,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/blisspixel/fitr/internal/isolate"
 	"github.com/blisspixel/fitr/internal/ollama"
 )
 
 func TestMain(m *testing.M) {
-	if os.Getenv("FITR_EXECUTOR_HELPER") != "1" {
-		os.Exit(m.Run())
+	if os.Getenv("FITR_EXECUTOR_HELPER") == "1" {
+		runExecutorHelper()
 	}
-	runExecutorHelper()
+	// Existing cases describe the unisolated flag. A workstation with
+	// bubblewrap must not turn those into live sandbox runs.
+	isolationStatus = func() isolate.Status {
+		return isolate.Status{Reason: "isolated execution is unavailable: bubblewrap (bwrap) is not installed"}
+	}
+	os.Exit(m.Run())
 }
 
 func runExecutorHelper() {

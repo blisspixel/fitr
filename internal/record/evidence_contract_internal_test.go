@@ -307,6 +307,9 @@ func TestExecutorEvidencePolicyCoversAllResultKinds(t *testing.T) {
 	t.Run("unsafe receipts bind across result kinds", fixture.testUnsafeReceiptsAcrossResultKinds)
 	t.Run("tool summary requires observation history", fixture.testToolSummaryRequiresHistory)
 	t.Run("observation must bind to executor", fixture.testObservationBindsToExecutor)
+	t.Run("isolated pass requires its receipt", fixture.testIsolatedPassRequiresReceipt)
+	t.Run("isolated pass accepts its receipt", fixture.testIsolatedPassAcceptsReceipt)
+	t.Run("isolated manifest rejects a host executor", fixture.testIsolatedRejectsHostExecutor)
 }
 
 type executorEvidenceFixture struct {
@@ -331,6 +334,45 @@ func (fixture executorEvidenceFixture) toolReceipt() eval.ToolLoopResult {
 	return eval.ToolLoopResult{
 		Outcome: eval.OutcomeInconclusive, Verifier: &fixture.receipt,
 		VerifierObservations: []eval.VerificationReceipt{fixture.receipt},
+	}
+}
+
+func (fixture executorEvidenceFixture) testIsolatedPassRequiresReceipt(t *testing.T) {
+	r := &Record{
+		Manifest:  &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionIsolated},
+		CodeWrite: []eval.ExecResult{{Outcome: eval.OutcomePass, Pass: true}},
+	}
+	if err := r.validateExecutorEvidence(); err == nil || !strings.Contains(err.Error(), "no verifier receipt") {
+		t.Fatalf("isolated pass without a receipt = %v", err)
+	}
+}
+
+func (fixture executorEvidenceFixture) testIsolatedPassAcceptsReceipt(t *testing.T) {
+	receipt := fixture.receipt
+	receipt.SuccessfulExit = true
+	receipt.ExactFinalMarker = true
+	receipt.ProcessStarted = true
+	r := &Record{
+		Manifest:  &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionIsolated},
+		CodeWrite: []eval.ExecResult{{Outcome: eval.OutcomePass, Pass: true, Verifier: &receipt}},
+	}
+	if err := r.validateExecutorEvidence(); err != nil {
+		t.Fatalf("isolated pass = %v", err)
+	}
+	behavioral := eval.ToolLoopResult{Outcome: eval.OutcomePass, Pass: true, Verified: true}
+	r.Withdrawal = &behavioral
+	if err := r.validateExecutorEvidence(); err != nil {
+		t.Fatalf("behavioral tool result = %v", err)
+	}
+}
+
+func (fixture executorEvidenceFixture) testIsolatedRejectsHostExecutor(t *testing.T) {
+	executor := fixture.executor
+	r := &Record{
+		Manifest: &RunManifest{Schema: RunManifestSchema, ExecutionPolicy: ExecutionIsolated, Executor: &executor},
+	}
+	if err := r.Manifest.validateExecutionFields(); err == nil || !strings.Contains(err.Error(), "unisolated executor") {
+		t.Fatalf("host executor on an isolated manifest = %v", err)
 	}
 }
 

@@ -113,7 +113,7 @@ usage:
   fitr tune [model-a model-b]
   fitr export <model> [--out PATH] [--retonr]
   fitr view [model|result.json] [--display MODE]
-  fitr board [--current]
+  fitr board [--current] [--role coding|agent]
   fitr top [--view live|result|board|history|inventory]
   fitr top view [model|result.json]
   fitr top run <model> [run flags]
@@ -620,11 +620,14 @@ type runOpts struct {
 	numCtx, memoryCtx       int
 	// contextTiers are the declared payload sizes for the context task pack.
 	// Non-empty exactly when level is levelContext.
-	contextTiers       []int
-	experiment         *record.ExperimentBinding
-	capacityBudgetGB   *float64
-	capacityReserveGB  *float64
-	allowUnsafeExec    bool
+	contextTiers      []int
+	experiment        *record.ExperimentBinding
+	capacityBudgetGB  *float64
+	capacityReserveGB *float64
+	allowUnsafeExec   bool
+	// isolatedExec is set by fitr run. Auto, tailor, role confirmation, and
+	// the context pack leave it false and keep generated code disabled.
+	isolatedExec       bool
 	runID              string
 	ownedConfiguration map[string]string
 	validatePrepared   func(*runExecution) error

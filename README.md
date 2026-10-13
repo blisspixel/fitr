@@ -358,8 +358,9 @@ to invent a verdict.
 - It does not certify an exploration winner on the data that selected it.
 - It does not mutate or restart your serving runtime. `fitr apply` prints a
   recipe.
-- It does not run generated code by default or silently score unavailable
-  execution evidence.
+- It does not run generated code on the host by default. `fitr run` on Linux
+  scores coding and agent tasks only inside bubblewrap. A missing sandbox stays
+  SKIP. `--allow-unsafe-exec` stays inconclusive and is not a score.
 - It does not treat the Omarchy panel as a measurement, a ranking, or a
   substitute for the deferred native desktop applications.
 

@@ -405,13 +405,73 @@ func (r *Record) validateExecutorEvidence() error {
 	if r == nil || r.Manifest == nil || r.Manifest.Schema != RunManifestSchema {
 		return nil
 	}
-	if r.Manifest.ExecutionPolicy != ExecutionUnsafe {
+	switch r.Manifest.ExecutionPolicy {
+	case ExecutionUnsafe:
+		if r.Manifest.Executor == nil {
+			return errors.New("unsafe evidence is missing its manifest executor receipt")
+		}
+		return r.validateUnsafeExecutorEvidence(*r.Manifest.Executor)
+	case ExecutionIsolated:
+		return r.validateIsolatedExecutorEvidence()
+	default:
 		return r.validateDisabledExecutorEvidence()
 	}
-	if r.Manifest.Executor == nil {
-		return errors.New("unsafe evidence is missing its manifest executor receipt")
+}
+
+func (r *Record) validateIsolatedExecutorEvidence() error {
+	for i, result := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
+		if err := validateIsolatedCoding(fmt.Sprintf("coding verifier %d", i), result); err != nil {
+			return err
+		}
 	}
-	return r.validateUnsafeExecutorEvidence(*r.Manifest.Executor)
+	for i, result := range r.toolLoopResults() {
+		if err := validateIsolatedTool(fmt.Sprintf("tool verifier %d", i), result); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateIsolatedCoding(label string, result eval.ExecResult) error {
+	switch result.Outcome {
+	case eval.OutcomePass, eval.OutcomeFail:
+		if result.Verifier == nil {
+			return fmt.Errorf("%s measured outcome has no verifier receipt", label)
+		}
+	}
+	if result.Verifier == nil {
+		return nil
+	}
+	if err := result.Verifier.ValidateIsolated(); err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	if result.Outcome == eval.OutcomePass && !(result.Verifier.SuccessfulExit && result.Verifier.ExactFinalMarker) {
+		return fmt.Errorf("%s pass is not a successful isolated verifier", label)
+	}
+	return nil
+}
+
+func validateIsolatedTool(label string, result eval.ToolLoopResult) error {
+	if result.Verifier == nil && len(result.VerifierObservations) == 0 {
+		return nil
+	}
+	if result.Verifier != nil && len(result.VerifierObservations) == 0 {
+		return fmt.Errorf("%s is missing its verifier observation history", label)
+	}
+	if result.Verifier != nil {
+		if err := result.Verifier.ValidateIsolated(); err != nil {
+			return fmt.Errorf("%s: %w", label, err)
+		}
+		if result.Outcome == eval.OutcomePass && !(result.Verifier.SuccessfulExit && result.Verifier.ExactFinalMarker) {
+			return fmt.Errorf("%s pass is not a successful isolated verifier", label)
+		}
+	}
+	for j := range result.VerifierObservations {
+		if err := result.VerifierObservations[j].ValidateIsolated(); err != nil {
+			return fmt.Errorf("%s observation %d: %w", label, j, err)
+		}
+	}
+	return nil
 }
 
 func (r *Record) toolLoopResults() []eval.ToolLoopResult {

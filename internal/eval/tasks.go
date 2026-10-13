@@ -366,8 +366,9 @@ func extractCode(text, prefer string) string {
 // tests. Pass/fail is execution, never a model's opinion about its own work.
 func RunExec(ctx context.Context, c llm.Backend, model string, spec ExecSpec, dir string) (ExecResult, error) {
 	r := ExecResult{Outcome: OutcomeSkipped}
-	if !unsafeExecutionEnabled(ctx) {
-		r.Detail = "disabled: generated code execution requires --allow-unsafe-exec and remains unverified"
+	kind := executionKind(ctx)
+	if kind == "unavailable" {
+		r.Detail = isolationSkipDetail()
 		return r, nil
 	}
 	runner, err := resolveTaskRunner(ctx, spec.Runner, spec.Files)
@@ -376,7 +377,11 @@ func RunExec(ctx context.Context, c llm.Backend, model string, spec ExecSpec, di
 		r.Outcome, r.Failure = OutcomeError, f
 		return r, f
 	}
-	r.Outcome = OutcomeInconclusive
+	if kind == "unsafe" {
+		// The explicit unisolated flag stays inconclusive. A passing process
+		// on the user's machine is not a score.
+		r.Outcome = OutcomeInconclusive
+	}
 	prompt, err := RenderPrompt(spec.Prompt, spec.Files)
 	if err != nil {
 		f := failure(FailureInvalidSpec, spec.ID+".prompt", err)
@@ -469,7 +474,7 @@ func writeDefaultExecOutput(dir, text string, spec ExecSpec, r *ExecResult) (boo
 }
 
 func gradeExecResult(ctx context.Context, dir string, runner resolvedTaskRunner, spec ExecSpec, r *ExecResult) {
-	receipt := verifyIn(ctx, dir, runner, spec.PassIfStdoutContains)
+	receipt := verifyForKind(ctx, dir, runner, spec.PassIfStdoutContains)
 	r.Detail = tail(receipt.Output, 400)
 	r.Pass = receipt.SuccessfulExit && receipt.ExactFinalMarker
 	r.Verifier = &receipt
@@ -477,8 +482,12 @@ func gradeExecResult(ctx context.Context, dir string, runner resolvedTaskRunner,
 	if receipt.Failure != nil {
 		r.Detail = strings.TrimSpace(r.Detail + "; " + receipt.Failure.Error())
 	}
-	// Executable observations stay inconclusive until an isolated worker keeps
-	// generated code away from the verifier and the user's machine.
+	if executionKind(ctx) == "isolated" {
+		r.Outcome = isolatedOutcome(r.Pass, receipt)
+		return
+	}
+	// --allow-unsafe-exec is the unisolated path. A matching receipt stays
+	// inconclusive and does not enter a score.
 	r.Outcome = OutcomeInconclusive
 }
 
@@ -563,10 +572,10 @@ func prepareToolLoop(ctx context.Context, spec ToolLoopSpec, dir string) (
 	r := ToolLoopResult{Ended: "turn_cap"}
 	requiresExec := ToolLoopRequiresExecution(spec)
 	var runner resolvedTaskRunner
-	if requiresExec && !unsafeExecutionEnabled(ctx) {
+	if requiresExec && executionKind(ctx) == "unavailable" {
 		r.Outcome = OutcomeSkipped
-		r.Ended = "unsafe_execution_disabled"
-		r.Detail = "disabled: generated code execution requires --allow-unsafe-exec and remains unverified"
+		r.Ended = "isolated_execution_unavailable"
+		r.Detail = isolationSkipDetail()
 		return r, runner, false, nil
 	}
 	if requiresExec {
@@ -763,7 +772,7 @@ func finishToolLoop(ctx context.Context, spec ToolLoopSpec, dir string, runner r
 		r.Verified = true
 		return r, nil
 	}
-	receipt := verifyIn(ctx, dir, runner, spec.Verify.PassIfStdoutContains)
+	receipt := verifyForKind(ctx, dir, runner, spec.Verify.PassIfStdoutContains)
 	r.VerifierObservations = append(r.VerifierObservations, receipt)
 	r.Detail = tail(receipt.Output, 300)
 	r.Pass = receipt.SuccessfulExit && receipt.ExactFinalMarker &&
@@ -772,6 +781,11 @@ func finishToolLoop(ctx context.Context, spec ToolLoopSpec, dir string, runner r
 	r.Failure = receipt.Failure
 	if receipt.Failure != nil {
 		r.Detail = strings.TrimSpace(r.Detail + "; " + receipt.Failure.Error())
+	}
+	if executionKind(ctx) == "isolated" {
+		r.Outcome = isolatedOutcome(r.Pass, receipt)
+		r.Verified = r.Outcome == OutcomePass || r.Outcome == OutcomeFail
+		return r, nil
 	}
 	r.Outcome = OutcomeInconclusive
 	return r, nil
@@ -837,7 +851,7 @@ func writeToolFile(dir, name, content string, written map[string]bool) (string, 
 
 func runTestsTool(ctx context.Context, dir string, runner resolvedTaskRunner, marker string,
 	observations *[]VerificationReceipt) (string, error) {
-	receipt := verifyIn(ctx, dir, runner, marker)
+	receipt := verifyForKind(ctx, dir, runner, marker)
 	*observations = append(*observations, receipt)
 	if receipt.SuccessfulExit && receipt.ExactFinalMarker {
 		return "PASS\n" + receipt.Output, nil

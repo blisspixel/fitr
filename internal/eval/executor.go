@@ -437,10 +437,25 @@ func (r VerificationReceipt) ValidateExecutor(expected ExecutorReceipt) error {
 	return nil
 }
 
+// ValidateIsolated checks the interpreter identity on a sandbox receipt.
+// There is no host executor receipt to match: the manifest does not seal one
+// for this policy.
+func (r VerificationReceipt) ValidateIsolated() error {
+	if r.Protocol != "fitr.verifier.v2" {
+		return fmt.Errorf("unsupported verifier protocol %q", r.Protocol)
+	}
+	actual := ExecutorReceipt{
+		Kind: "python", Path: r.InterpreterPath, Version: r.InterpreterVer, SHA256: r.InterpreterHash,
+	}
+	if err := actual.Validate(); err != nil {
+		return fmt.Errorf("verifier executor: %w", err)
+	}
+	return nil
+}
+
 // verifyIn requires both a successful process exit and an exact final marker.
-// Raw model output cannot override a failed process. Until the isolated worker
-// exists, even a matching receipt remains unverified and is scored as
-// inconclusive by callers.
+// Raw model output cannot override a failed process. Callers that did not opt
+// into the sandbox score a matching receipt as inconclusive.
 func verifyIn(ctx context.Context, dir string, runner resolvedTaskRunner, marker string) VerificationReceipt {
 	r := VerificationReceipt{
 		Protocol: "fitr.verifier.v2", ExitCode: -1,

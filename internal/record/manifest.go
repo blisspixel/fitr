@@ -30,6 +30,7 @@ const (
 	RunManifestSchema       = "fitr.run.manifest.v2"
 	ExecutionDisabled       = "generated_code_disabled"
 	ExecutionUnsafe         = "unsafe_unisolated_diagnostics"
+	ExecutionIsolated       = "bubblewrap_isolated"
 
 	IdentityRuntimeDigest   = "runtime_digest"
 	IdentityLocalFile       = "local_file_sha256"
@@ -835,12 +836,14 @@ func (m RunManifest) validateRequiredFields() error {
 
 func (m RunManifest) validateExecutionFields() error {
 	switch {
-	case m.ExecutionPolicy != ExecutionDisabled && m.ExecutionPolicy != ExecutionUnsafe:
+	case m.ExecutionPolicy != ExecutionDisabled && m.ExecutionPolicy != ExecutionUnsafe && m.ExecutionPolicy != ExecutionIsolated:
 		return fmt.Errorf("unknown execution policy %q", m.ExecutionPolicy)
 	case m.Schema == RunManifestSchema && m.ExecutionPolicy == ExecutionUnsafe && m.Executor == nil:
 		return errors.New("unsafe run manifest is missing its executor receipt")
 	case m.ExecutionPolicy == ExecutionDisabled && m.Executor != nil:
 		return errors.New("disabled execution manifest cannot contain an executor receipt")
+	case m.ExecutionPolicy == ExecutionIsolated && m.Executor != nil:
+		return errors.New("isolated execution manifest cannot contain an unisolated executor receipt")
 	}
 	return nil
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/blisspixel/fitr/internal/device"
 	"github.com/blisspixel/fitr/internal/eval"
 	"github.com/blisspixel/fitr/internal/fitting"
+	"github.com/blisspixel/fitr/internal/isolate"
 	"github.com/blisspixel/fitr/internal/llm"
 	"github.com/blisspixel/fitr/internal/lock"
 	"github.com/blisspixel/fitr/internal/ollama"
@@ -155,8 +156,8 @@ func newRunFlagSet(supplied render.Display) (*flag.FlagSet, *runFlags) {
 		fs.SetOutput(os.Stderr)
 	}
 	flags := &runFlags{}
-	flags.quick = fs.Bool("quick", false, "speed, memory, and plumbing; executable tasks default to SKIP")
-	flags.full = fs.Bool("full", false, "adds long-horizon tasks; executable tasks default to SKIP")
+	flags.quick = fs.Bool("quick", false, "speed, memory, and plumbing; executable tasks use bubblewrap on Linux when it is available")
+	flags.full = fs.Bool("full", false, "adds the long-horizon agent task; executable tasks use bubblewrap on Linux when it is available")
 	flags.checksOnly = fs.Bool("checks-only", false, "generated checks only for paired hardware calibration")
 	flags.contextTiers = fs.String("context-tiers", "", "two to four increasing payload sizes in bytes "+
 		"(2048 to 65536), measuring how well a long document is used at --ctx. There is no default: the "+
@@ -272,6 +273,7 @@ func buildRunCommand(model string, flags *runFlags, level string, reps int) runC
 			level: level, profile: *flags.profileName, seedSet: *flags.seedSet,
 			reps: reps, checksReps: generatedCheckRepeats(level, *flags.repeats, reps),
 			numCtx: *flags.numCtx, allowUnsafeExec: *flags.allowUnsafeExec,
+			isolatedExec:      level != "checks" && len(flags.parsedContextTiers) == 0 && !*flags.allowUnsafeExec,
 			contextTiers:      flags.parsedContextTiers,
 			capacityBudgetGB:  optionalPositiveFloat(*flags.capacityBudgetGB),
 			capacityReserveGB: optionalNonnegativeFloat(*flags.capacityReserveGB),
@@ -504,6 +506,9 @@ func executeUnderLease(ctx context.Context, c llm.Backend, model string, opts ru
 	if lease == nil {
 		return nil, errors.New("measurement requires the machine evaluation lease")
 	}
+	if opts.isolatedExec && isolate.Probe().Available {
+		ctx = eval.WithIsolatedExecution(ctx)
+	}
 	run := &runExecution{ctx: ctx, backend: c, model: model, opts: opts, display: disp}
 	if err := run.prepare(); err != nil {
 		return nil, err
@@ -599,8 +604,14 @@ func (run *runExecution) loadDefinition() error {
 		run.ctx = eval.WithUnsafeExecutor(run.ctx, executor)
 		run.display.Note("unsafe executable diagnostics enabled: generated Python code is not sandboxed; "+
 			"observations are INCONCLUSIVE and excluded from PASS/FAIL scoring", "warn")
+	} else if eval.IsolatedExecutionEnabled(run.ctx) {
+		run.display.Note("generated code runs in bubblewrap with no network and no home directory", "")
 	} else if run.opts.level != "checks" {
-		run.display.Note("generated-code execution is disabled by default; coding and executable agent tasks are SKIP", "")
+		detail := "generated-code execution is disabled by default; coding and executable agent tasks are SKIP"
+		if run.opts.isolatedExec {
+			detail += " (" + isolate.Probe().Reason + ")"
+		}
+		run.display.Note(detail, "")
 	}
 	return run.loadUserChecks()
 }
@@ -676,6 +687,8 @@ func (run *runExecution) initializeResult() error {
 	}
 	if run.opts.allowUnsafeExec {
 		run.result.ExecutionPolicy = record.ExecutionUnsafe
+	} else if eval.IsolatedExecutionEnabled(run.ctx) {
+		run.result.ExecutionPolicy = record.ExecutionIsolated
 	}
 	if identified, ok := run.display.(runIdentityTelemetry); ok {
 		run.result.RunID = identified.RunID()
