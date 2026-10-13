@@ -96,6 +96,14 @@ func writeCleanupInventory(w io.Writer, plan cleanup.Plan, field func(string, st
 	for _, item := range plan.Categories {
 		field(cleanup.Bytes(item.ApparentBytes), item.Name)
 	}
+	heading("Components (filename hints; not proof of ownership)")
+	if len(plan.Components) == 0 {
+		field("", "No artifact-named files were grouped.")
+	}
+	for _, component := range plan.Components {
+		field(cleanup.Bytes(component.ApparentBytes),
+			fmt.Sprintf("%s | %s | %d file(s)", component.Name, component.Role, component.Files))
+	}
 	heading("Largest files | usage unresolved")
 	for _, item := range plan.LargestFiles {
 		field(cleanup.Bytes(item.ApparentBytes), item.Path)

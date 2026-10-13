@@ -34,6 +34,34 @@ func fixtureFile(t *testing.T, root, path string, size int, modified time.Time) 
 
 func testOptions() Options { return Options{AsOf: testNow, MinAgeDays: 7, Limits: DefaultLimits()} }
 
+// Files that name one artifact are grouped so a human reviews a shard set and
+// its projector or adapter together. The role is a filename hint, never a
+// reading of the contents or proof that the group is safe to remove.
+func TestComponentsGroupShardsAndRoles(t *testing.T) {
+	root := t.TempDir()
+	fixtureFile(t, root, "models/model-00001-of-00002.safetensors", 100, testNow)
+	fixtureFile(t, root, "models/model-00002-of-00002.safetensors", 100, testNow)
+	fixtureFile(t, root, "models/mmproj-model.gguf", 64, testNow)
+	fixtureFile(t, root, "models/model.lora.safetensors", 32, testNow)
+	plan, err := Scan(context.Background(), root, testOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	components := map[string]Component{}
+	for _, component := range plan.Components {
+		components[component.Name] = component
+	}
+	if weights, ok := components["model.safetensors"]; !ok || weights.Role != "weights" || weights.Files != 2 || weights.ApparentBytes != 200 {
+		t.Fatalf("weights component = %+v ok=%v", weights, ok)
+	}
+	if projector, ok := components["mmproj-model.gguf"]; !ok || projector.Role != "vision_projector" {
+		t.Fatalf("projector component = %+v ok=%v", projector, ok)
+	}
+	if adapter, ok := components["model.lora.safetensors"]; !ok || adapter.Role != "adapter" {
+		t.Fatalf("adapter component = %+v ok=%v", adapter, ok)
+	}
+}
+
 func TestScanInventoryPreservesDependenciesAndReviewsOnlyAgedDownloads(t *testing.T) {
 	root := t.TempDir()
 	old, recent := testNow.AddDate(0, 0, -8), testNow.Add(-time.Hour)
