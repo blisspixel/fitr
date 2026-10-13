@@ -93,6 +93,29 @@ func TestServerLogFallbackExtractsLatestConfigAndPlacement(t *testing.T) {
 	}
 }
 
+// A library token that exists only in the head of a log longer than the
+// sample is an older process. Reading the head and the tail together let
+// that token win whenever the tail had not repeated it yet.
+func TestLogTailDoesNotReviveAStaleHead(t *testing.T) {
+	root := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("LOCALAPPDATA", root)
+	} else {
+		t.Setenv("HOME", root)
+	}
+	path := serverLogPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "library=cuda\n" + strings.Repeat("x", maxServerLogSample)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastLogMatch(`library=([A-Za-z0-9_]+)`); got != "" {
+		t.Fatalf("stale head matched %q", got)
+	}
+}
+
 func TestProfileBoolAcceptsOnlyBooleanValues(t *testing.T) {
 	p := Profile{Gates: map[string]Gate{"test": {"yes": true, "text": "true"}}}
 	if value, ok := p.Bool("test", "yes"); !ok || !value {
@@ -147,9 +170,9 @@ func TestObserveOllamaConfigDoesNotTreatProcessEnvAsTheDaemon(t *testing.T) {
 	}
 	t.Setenv("OLLAMA_FLASH_ATTENTION", "1")
 	t.Setenv("OLLAMA_KV_CACHE_TYPE", "q8_0")
-	cfg, source := observeOllamaConfig()
+	cfg, source := observeOllamaConfig("http://127.0.0.1:9")
 	if source != ConfigSourceUnobserved {
-		t.Fatalf("source = %q, want unobserved when the startup log is absent", source)
+		t.Fatalf("source = %q, want unobserved when no listener was read", source)
 	}
 	if cfg["OLLAMA_FLASH_ATTENTION"] != "" || cfg["OLLAMA_KV_CACHE_TYPE"] != "" {
 		t.Fatalf("unobserved config copied process environment: %+v", cfg)
@@ -161,21 +184,20 @@ func TestObserveOllamaConfigDoesNotTreatProcessEnvAsTheDaemon(t *testing.T) {
 	if err := os.WriteFile(path, []byte("env=[OLLAMA_FLASH_ATTENTION:0 OLLAMA_KV_CACHE_TYPE:f16]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, source = observeOllamaConfig()
-	if source != ConfigSourceServerLog {
-		t.Fatalf("source = %q, want server-log", source)
+	cfg, source = observeOllamaConfig("http://127.0.0.1:9")
+	if source != ConfigSourceUnobserved {
+		t.Fatalf("source = %q, want unobserved when only an unbound log exists", source)
 	}
-	if cfg["OLLAMA_FLASH_ATTENTION"] != "0" || cfg["OLLAMA_KV_CACHE_TYPE"] != "f16" {
-		t.Fatalf("server-log config = %+v", cfg)
+	if cfg["OLLAMA_FLASH_ATTENTION"] != "" || cfg["OLLAMA_KV_CACHE_TYPE"] != "" {
+		t.Fatalf("unbound log was published as the daemon: %+v", cfg)
 	}
 }
 
-// A readable log is the daemon's own account of itself. Keys it does not
-// mention are not reported, and this process's shell is not a substitute: a
-// Homebrew install pins flash attention and the KV cache dtype in its service
-// definition, where no shell fitr can read has ever seen them. Publishing a
-// shell value under server-log provenance put a setting the daemon never had
-// into the comparability key, which silently pools incomparable evidence.
+// The listener's initial environment is the daemon. Keys it does not mention
+// stay empty, and this process's shell is not a substitute: a service unit
+// can pin flash attention where no shell fitr can read has ever seen it.
+// Publishing a shell value, or a value from a log no listener has open, put
+// a setting the daemon never had into the comparability key.
 func TestServerLogConfigNeverFallsBackToThisProcessEnvironment(t *testing.T) {
 	root := t.TempDir()
 	var path string
@@ -196,14 +218,25 @@ func TestServerLogConfigNeverFallsBackToThisProcessEnvironment(t *testing.T) {
 	}
 	t.Setenv("OLLAMA_KV_CACHE_TYPE", "q8_0")
 
-	cfg, source := observeOllamaConfig()
-	if source != ConfigSourceServerLog {
-		t.Fatalf("source = %q, want server-log for a readable log", source)
+	prev := readListenerConfig
+	t.Cleanup(func() { readListenerConfig = prev })
+	readListenerConfig = func(string) (map[string]string, error) {
+		return map[string]string{"OLLAMA_CONTEXT_LENGTH": "8192", "UNRELATED": "1"}, nil
+	}
+	cfg, source := observeOllamaConfig("http://127.0.0.1:11434")
+	if source != ConfigSourceListener {
+		t.Fatalf("source = %q, want listener-environ", source)
+	}
+	if !(Fingerprint{ConfigSource: source}).RuntimeConfigObserved() {
+		t.Fatal("listener environment was not treated as observed configuration")
 	}
 	if cfg["OLLAMA_CONTEXT_LENGTH"] != "8192" {
-		t.Fatalf("the log's own value was lost: %+v", cfg)
+		t.Fatalf("the listener's own value was lost: %+v", cfg)
 	}
 	if cfg["OLLAMA_KV_CACHE_TYPE"] != "" {
 		t.Fatalf("a shell value was published as the daemon's: %q", cfg["OLLAMA_KV_CACHE_TYPE"])
+	}
+	if _, ok := cfg["UNRELATED"]; ok {
+		t.Fatal("a non-configuration variable was copied into the fingerprint")
 	}
 }

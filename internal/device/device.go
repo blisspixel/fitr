@@ -203,7 +203,9 @@ type Fingerprint struct {
 	// ConfigSource says how Config was obtained. Empty is historical: records
 	// sealed before provenance existed. server-log is the serving runtime's
 	// own startup log. owned-launch is an explicitly sealed child environment.
-	// unobserved means the daemon was not read, so Config cannot be compared.
+	// listener-environ is the initial environment of the one process bound to
+	// the measured local endpoint. unobserved means the daemon was not read,
+	// so Config cannot be compared.
 	ConfigSource string `json:"config_source,omitempty"`
 	// AccelSource says how GPUBackend was obtained. GPUBackend is part of the
 	// comparability key, and on Ollama it is read from the serving runtime's
@@ -217,6 +219,7 @@ type Fingerprint struct {
 const (
 	ConfigSourceServerLog   = "server-log"
 	ConfigSourceOwnedLaunch = "owned-launch"
+	ConfigSourceListener    = "listener-environ"
 	ConfigSourceUnobserved  = "unobserved"
 )
 
@@ -345,7 +348,8 @@ func (f Fingerprint) Diff(o Fingerprint) [][3]string {
 // RuntimeConfigObserved reports that Config came from the serving runtime
 // itself, not from this process's environment and not from an absent reading.
 func (f Fingerprint) RuntimeConfigObserved() bool {
-	return f.ConfigSource == ConfigSourceServerLog || f.ConfigSource == ConfigSourceOwnedLaunch
+	return f.ConfigSource == ConfigSourceServerLog || f.ConfigSource == ConfigSourceOwnedLaunch ||
+		f.ConfigSource == ConfigSourceListener
 }
 
 // AcceleratorObserved reports that a serving runtime named its compute backend.
@@ -390,7 +394,7 @@ func Detect(ctx context.Context, b llm.Backend) Fingerprint {
 	version := ""
 	isOllama := b != nil && b.Name() == "ollama"
 	if isOllama {
-		cfg, configSource = observeOllamaConfig()
+		cfg, configSource = observeOllamaConfig(b.URL())
 	}
 	if b != nil {
 		version = b.Version(probeCtx)
@@ -730,43 +734,40 @@ func serverLogPath() string {
 }
 
 func readLog() string {
-	b, err := boundedio.ReadEdges(serverLogPath(), maxServerLogSample)
+	// The head of a rotated log is an older process. A match that survives
+	// only there is not the runtime this client is talking to.
+	b, err := boundedio.ReadTail(serverLogPath(), maxServerLogSample)
 	if err != nil {
 		return ""
 	}
 	return string(b)
 }
 
-// ServerConfigObserved reports whether the serving runtime's own startup
-// configuration was readable. Detect falls back to this process's environment,
-// which is not the daemon's: a launchd unit, a systemd unit or a container
-// carries an environment this process never sees. Without this distinction an
-// unobserved setting is indistinguishable from one that is genuinely unset,
-// and the caller would state the stronger of the two.
+// ServerConfigObserved reports whether the default server log file has any
+// bytes. That file is not the daemon's configuration: a readable log can
+// belong to a process that is not the one listening, and an empty result is
+// not a claim that the daemon left a variable unset.
 func ServerConfigObserved() bool { return readLog() != "" }
 
-// observeOllamaConfig reads the serving runtime's startup log when it can.
-// Process environment is only a fallback inside that log merge: without a log,
-// the daemon was not observed, and the caller's shell variables are not it.
-func observeOllamaConfig() (map[string]string, string) {
+// observeOllamaConfig copies the known serving keys from the initial
+// environment of the single process listening on endpoint. This process's
+// shell is not that environment, and the unbound default log is not a
+// fallback: both have been wrong about a daemon fitr did not start.
+func observeOllamaConfig(endpoint string) (map[string]string, string) {
 	cfg := make(map[string]string, len(configKeys))
-	if !ServerConfigObserved() {
-		for _, k := range configKeys {
-			cfg[k] = ""
-		}
-		return cfg, ConfigSourceUnobserved
-	}
-	// Only what the log itself reports. Seeding from this process's
-	// environment and then labelling the whole map server-log meant any key
-	// the log omitted was published as the daemon's setting while carrying the
-	// operator's shell value. Those differ in practice: a Homebrew install
-	// pins flash attention and the KV cache dtype in its service definition,
-	// where no shell fitr can read has ever seen them.
 	for _, k := range configKeys {
 		cfg[k] = ""
 	}
-	mergeServerLogConfig(cfg)
-	return cfg, ConfigSourceServerLog
+	env, err := readListenerConfig(endpoint)
+	if err != nil {
+		return cfg, ConfigSourceUnobserved
+	}
+	for _, k := range configKeys {
+		if v, ok := env[k]; ok {
+			cfg[k] = v
+		}
+	}
+	return cfg, ConfigSourceListener
 }
 
 func mergeServerLogConfig(cfg map[string]string) {

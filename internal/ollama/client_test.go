@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -401,19 +402,34 @@ func TestClientIdentityConstructionVersionAndAcceleration(t *testing.T) {
 		t.Fatalf("server version = %q", got)
 	}
 
+	root := t.TempDir()
 	if runtime.GOOS == "windows" {
-		root := t.TempDir()
 		t.Setenv("LOCALAPPDATA", root)
-		path := filepath.Join(root, "Ollama", "server.log")
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte("library=cpu\nlibrary=cuda\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if got := c.Accel(context.Background()); got != "cuda" {
-			t.Fatalf("acceleration receipt = %q", got)
-		}
+	} else {
+		t.Setenv("HOME", root)
+	}
+	path := filepath.Join(root, "Ollama", "server.log")
+	if runtime.GOOS != "windows" {
+		path = filepath.Join(root, ".ollama", "logs", "server.log")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("library=cpu\nlibrary=cuda\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The file above is not open in a process bound to this endpoint. The
+	// httptest server is this process and may hold unrelated logs, so the
+	// probe targets a port nothing is listening on.
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := closed.Addr().String()
+	closed.Close()
+	c.BaseURL = "http://" + dead
+	if got := c.Accel(context.Background()); got != "" {
+		t.Fatalf("unbound server log produced acceleration %q", got)
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
