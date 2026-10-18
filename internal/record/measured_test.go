@@ -38,6 +38,9 @@ func TestCodeDispositionSeparatesExtractionFromAnIsolationSkip(t *testing.T) {
 	if !skip.CodePlanned || skip.CodeAttempted || skip.CodeExtractionMiss || skip.CodeKnown {
 		t.Fatalf("isolation skip = %+v", skip)
 	}
+	if skip.CodeSkipDetail != "isolated execution is unavailable: bubblewrap (bwrap) is not installed" {
+		t.Fatalf("skip detail = %q", skip.CodeSkipDetail)
+	}
 
 	mixed := &Record{
 		TaskPlan: TaskPlan{CodeTrials: 2},
@@ -49,6 +52,23 @@ func TestCodeDispositionSeparatesExtractionFromAnIsolationSkip(t *testing.T) {
 	}
 	if mixed.Measured().CodeExtractionMiss {
 		t.Fatal("a measured fix was called an extraction miss")
+	}
+}
+
+func TestDisagreeingSkipReasonsStayUnmeasured(t *testing.T) {
+	disagreed := &Record{
+		TaskPlan: TaskPlan{CodeTrials: 2},
+		CodeWrite: []eval.ExecResult{{
+			Outcome: eval.OutcomeSkipped,
+			Detail:  "isolated execution is unavailable: bubblewrap (bwrap) is not installed",
+		}},
+		CodeFix: []eval.ExecResult{{
+			Outcome: eval.OutcomeSkipped,
+			Detail:  "isolated execution is unavailable: /usr/bin/prlimit is not installed",
+		}},
+	}
+	if detail := disagreed.Measured().CodeSkipDetail; detail != "" {
+		t.Fatalf("disagreeing skips became one reason: %q", detail)
 	}
 }
 

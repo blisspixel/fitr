@@ -114,7 +114,32 @@ func (r *Record) addCodeMeasurements(m *score.Measured) {
 		m.CodeFlaky = writeFlakes.Flaky || fixFlakes.Flaky
 		m.CodePasses = writeFlakes.Passes + fixFlakes.Passes
 		m.CodeRepeats = writeFlakes.N + fixFlakes.N
+		results := make([]eval.ExecResult, 0, len(r.CodeWrite)+len(r.CodeFix))
+		results = append(results, r.CodeWrite...)
+		results = append(results, r.CodeFix...)
+		m.CodeSkipDetail = sharedSkipDetail(results, m.CodeAttempted)
 	}
+}
+
+// sharedSkipDetail returns the skip reason when every trial was skipped for
+// that one reason. A trial that ran, a blank reason, or two reasons leave
+// the detail blank so the card does not pick a package name.
+func sharedSkipDetail(results []eval.ExecResult, attempted bool) string {
+	if attempted || len(results) == 0 {
+		return ""
+	}
+	detail := ""
+	for _, result := range results {
+		if result.Outcome != eval.OutcomeSkipped {
+			return ""
+		}
+		text := strings.TrimSpace(result.Detail)
+		if text == "" || (detail != "" && text != detail) {
+			return ""
+		}
+		detail = text
+	}
+	return detail
 }
 
 func noteCodeDisposition(m *score.Measured, result eval.ExecResult, extractionMiss *bool) {
@@ -198,6 +223,9 @@ func (r *Record) addAgenticMeasurements(m *score.Measured) {
 		}
 		if r.Agentic.Outcome != eval.OutcomeSkipped && r.Agentic.Outcome != "" {
 			m.AgenticAttempted = true
+		}
+		if r.Agentic.Outcome == eval.OutcomeSkipped {
+			m.AgenticSkipDetail = strings.TrimSpace(r.Agentic.Detail)
 		}
 		m.AgenticMalformed = r.Agentic.Malformed
 		m.AgenticTurns = r.Agentic.Turns

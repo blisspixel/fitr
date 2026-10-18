@@ -301,12 +301,28 @@ func TestScorecardValidationPreservesSealedV3AuxiliaryLatencyProse(t *testing.T)
 	requireDistinctPolicyHashes(t, legacyHash, legacyV4Hash, legacyV5Hash, legacyV6Hash, currentHash)
 }
 
+func TestScoringPolicyHashesStayDistinct(t *testing.T) {
+	policies := []ScoringPolicy{
+		legacyScoringPolicyV3(), legacyScoringPolicyV4(), legacyScoringPolicyV5(),
+		legacyScoringPolicyV6(), legacyScoringPolicyV7(), CurrentScoringPolicy(),
+	}
+	hashes := make([]string, 0, len(policies))
+	for _, policy := range policies {
+		hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", policy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hashes = append(hashes, hash)
+	}
+	requireDistinctPolicyHashes(t, hashes...)
+}
+
 func requireDistinctPolicyHashes(t *testing.T, hashes ...string) {
 	t.Helper()
 	for i, left := range hashes {
 		for _, right := range hashes[i+1:] {
 			if left == right {
-				t.Fatal("scoring policies v3 through v7 must have distinct receipts")
+				t.Fatal("scoring policies v3 through v8 must have distinct receipts")
 			}
 		}
 	}
@@ -344,6 +360,42 @@ func TestPolicyV6KeepsAnExtractionMissAsAMissingWorker(t *testing.T) {
 	current := score.Score(measured, profile)
 	if strings.Contains(current.Needs["coding"].Why, "isolated execution") ||
 		!strings.Contains(current.Needs["coding"].Why, "no executable code was extracted") {
+		t.Fatalf("current coding = %s", current.Needs["coding"].Why)
+	}
+}
+
+func TestPolicyV7KeepsAGenericIsolationSkip(t *testing.T) {
+	profile := device.Profile{Name: "default"}
+	r := &Record{
+		TaskPlan: TaskPlan{CodeTrials: 2},
+		CodeWrite: []eval.ExecResult{{
+			Outcome: eval.OutcomeSkipped,
+			Detail:  "isolated execution is unavailable: bubblewrap (bwrap) is not installed",
+		}},
+		CodeFix: []eval.ExecResult{{
+			Outcome: eval.OutcomeSkipped,
+			Detail:  "isolated execution is unavailable: bubblewrap (bwrap) is not installed",
+		}},
+	}
+	measured := r.Measured()
+	if measured.CodeSkipDetail == "" {
+		t.Fatal("recorded skip reason was dropped")
+	}
+	policyHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV7())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Manifest = &RunManifest{Provenance: &RunProvenance{ScoringPolicySHA256: policyHash}}
+	r.Scorecard = score.ScoreLegacyV7(measured, profile)
+	if err := r.validateScorecard(profile); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(r.Scorecard.Needs["coding"].Why, "install bubblewrap") {
+		t.Fatalf("v7 coding named a package: %s", r.Scorecard.Needs["coding"].Why)
+	}
+	current := score.Score(measured, profile)
+	if !strings.Contains(current.Needs["coding"].Why, "install bubblewrap") ||
+		!strings.Contains(current.Needs["coding"].Why, "fitr doctor") {
 		t.Fatalf("current coding = %s", current.Needs["coding"].Why)
 	}
 }
