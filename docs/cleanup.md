@@ -28,7 +28,10 @@ file contents to obtain the count. Neither total is space a deletion would free,
 and neither one makes a partial download redundant or a checkpoint a replacement.
 `completed_file_integrity` and each file's `file_integrity` stay `unmeasured`:
 the scan does not read bytes or manifests, and a sibling name is not a
-completed copy.
+completed copy. A component group is filenames within one directory. The same
+shard name in another directory is a separate group, and `ownership` stays
+`unmeasured`. The directory is not an owner, and a repeated name is not a
+shared dependency.
 No newer model or faster configuration qualifies as a replacement from this scan.
 Establish acceptable outputs and role coverage before retiring an incumbent.
 

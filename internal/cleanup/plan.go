@@ -24,6 +24,10 @@ const Schema = "fitr.cleanup.plan.v1"
 // a completed-file digest.
 const IntegrityUnmeasured = "unmeasured"
 
+// OwnershipUnmeasured is the only component-ownership value this scan records.
+// A directory name is not an owner, and a repeated filename is not a shared dependency.
+const OwnershipUnmeasured = "unmeasured"
+
 type Limits struct {
 	MaxEntries int `json:"max_entries"`
 	MaxDepth   int `json:"max_depth"`
@@ -56,6 +60,9 @@ type Component struct {
 	Files         int      `json:"files"`
 	ApparentBytes int64    `json:"apparent_bytes"`
 	Paths         []string `json:"paths,omitempty"`
+	// Ownership is unmeasured. Filename grouping is not proof that one model,
+	// runtime, or application owns the files, or that a repeated name is shared.
+	Ownership string `json:"ownership"`
 }
 
 type Entry struct {
@@ -230,7 +237,7 @@ func newScanner(ctx context.Context, root *os.Root, absolute string, o Options) 
 				"Observed symbolic links and special files are skipped. Concurrent changes or skipped entries can make this inventory incomplete.",
 				"The deadline is checked between filesystem operations; a stalled filesystem operation can outlast it.",
 				"Directories are entered with model stores (blobs, manifests, models) ahead of cache trees. An incomplete scan names directories that were seen and not entered.",
-				"Component groups come from filenames only, not from manifests. A group does not resolve shared dependencies across models or prove that its files belong to one artifact.",
+				"Component groups come from filenames within one directory, not from manifests. The same name in another directory is a separate group. Ownership stays unmeasured: a group does not resolve shared dependencies or prove that its files belong to one artifact.",
 			}},
 	}
 }
@@ -602,13 +609,23 @@ type componentAcc struct {
 	paths []string
 }
 
-// componentKey is the filename with any shard suffix removed, so every shard of
-// one set shares a key.
-func componentKey(base string) string {
-	if loc := shardPattern.FindStringIndex(base); loc != nil {
-		return base[:loc[0]] + base[loc[1]:]
+// componentKey is the directory plus the filename with any shard suffix removed.
+// Shards in one directory share a key. The same filename in another directory
+// does not: model trees often reuse a shard name, and joining those names
+// would present two artifacts as one set. The directory is not an owner.
+func componentKey(path string) string {
+	slash := filepath.ToSlash(path)
+	dir, base := "", slash
+	if i := strings.LastIndex(slash, "/"); i >= 0 {
+		dir, base = slash[:i], slash[i+1:]
 	}
-	return base
+	if loc := shardPattern.FindStringIndex(base); loc != nil {
+		base = base[:loc[0]] + base[loc[1]:]
+	}
+	if dir == "" {
+		return base
+	}
+	return dir + "/" + base
 }
 
 // componentRole names the dependency role a filename suggests. It is a hint
@@ -643,7 +660,7 @@ func (s *scanner) addComponent(name string, size int64) {
 	if role == "" {
 		return
 	}
-	key := componentKey(base)
+	key := componentKey(name)
 	acc := s.components[key]
 	if acc == nil {
 		acc = &componentAcc{role: role}
@@ -660,7 +677,7 @@ func sortedComponents(values map[string]*componentAcc, limit int) []Component {
 	result := make([]Component, 0, len(values))
 	for name, acc := range values {
 		result = append(result, Component{Name: name, Role: acc.role, Files: acc.files,
-			ApparentBytes: acc.bytes, Paths: acc.paths})
+			ApparentBytes: acc.bytes, Paths: acc.paths, Ownership: OwnershipUnmeasured})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].ApparentBytes != result[j].ApparentBytes {
