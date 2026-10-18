@@ -103,7 +103,7 @@ func TestCleanupRendererSanitizesAndExplainsBounds(t *testing.T) {
 		if strings.Contains(text, "\x1b[2J") || strings.Contains(text, "\u202e") || strings.Contains(text, plan.Root) {
 			t.Fatalf("unsafe output: %q", text)
 		}
-		for _, want := range []string{"INCOMPLETE", "2 groups omitted", "2 review candidates omitted", "1 scan issues omitted", "entry_limit", "Read-only"} {
+		for _, want := range []string{"INCOMPLETE", "2 groups omitted", "2 review candidates omitted", "1 scan issues omitted", "entry_limit", "Read-only", "unmeasured"} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("lost %q: %s", want, text)
 			}

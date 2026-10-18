@@ -3,6 +3,7 @@ package cleanup
 import (
 	"container/heap"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -93,7 +95,8 @@ func TestScanInventoryPreservesDependenciesAndReviewsOnlyAgedDownloads(t *testin
 			t.Fatalf("entry path is absolute: %s", entry.Path)
 		}
 	}
-	if plan.AsOf != testNow || plan.Cutoff != testNow.AddDate(0, 0, -7) || !strings.Contains(strings.Join(plan.Notes, " "), "Hard links") {
+	joined := strings.Join(plan.Notes, " ")
+	if plan.AsOf != testNow || plan.Cutoff != testNow.AddDate(0, 0, -7) || !strings.Contains(joined, "Hard links") || !strings.Contains(joined, "Allocated bytes") {
 		t.Fatal("lost provenance or accounting limits")
 	}
 	if _, err := os.Stat(filepath.Join(root, "exact.part")); err != nil {
@@ -168,6 +171,27 @@ func TestScanHardLinksAreApparentBytesNotRecoveryPromises(t *testing.T) {
 	if !strings.Contains(strings.Join(plan.Notes, " "), "not recoverable disk space") {
 		t.Fatal("missing physical allocation uncertainty")
 	}
+	info, err := os.Lstat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, _, _, ok := observedAllocation(info)
+	if !ok {
+		if plan.AllocatedBytes != nil {
+			t.Fatalf("allocated bytes were invented without a stat block count: %d", *plan.AllocatedBytes)
+		}
+		return
+	}
+	if blocks <= 0 {
+		t.Fatalf("stat reported no blocks for a %d-byte file", info.Size())
+	}
+	if plan.AllocatedBytes == nil || *plan.AllocatedBytes != blocks {
+		got := int64(-1)
+		if plan.AllocatedBytes != nil {
+			got = *plan.AllocatedBytes
+		}
+		t.Fatalf("hard-linked names changed the stat block total: got %d want %d apparent %d", got, blocks, plan.ApparentBytes)
+	}
 }
 
 func TestWindowsEnumerationReusesMetadataWithoutResolvingFilePaths(t *testing.T) {
@@ -182,8 +206,9 @@ func TestWindowsEnumerationReusesMetadataWithoutResolvingFilePaths(t *testing.T)
 	// The enumerated observation remains usable after its path disappears;
 	// resolving this nonexistent name would cause a redundant metadata error.
 	s.visit("already-enumerated.part", 1, fs.FileInfoToDirEntry(info))
-	if !s.plan.Complete || s.plan.Files != 1 || s.plan.ApparentBytes != 1 {
-		t.Fatalf("enumerated metadata was resolved again: %+v", s.plan)
+	s.finish()
+	if !s.plan.Complete || s.plan.Files != 1 || s.plan.ApparentBytes != 1 || s.plan.AllocatedBytes != nil {
+		t.Fatalf("enumerated metadata was resolved again or copied into allocated bytes: %+v", s.plan)
 	}
 }
 
@@ -282,6 +307,97 @@ func TestClassificationIsConservativeAndDeterministic(t *testing.T) {
 	}
 	if Bytes(1<<30) != "1.00 GiB" {
 		t.Fatal("wrong units")
+	}
+	if AllocatedLine(nil) != "unmeasured" {
+		t.Fatal("unmeasured allocation was given a number")
+	}
+	zero := int64(0)
+	if !strings.Contains(AllocatedLine(&zero), "0.00 GiB") || strings.Contains(AllocatedLine(&zero), "unmeasured") {
+		t.Fatal("measured zero lost its number")
+	}
+}
+
+type allocationInfo struct {
+	size int64
+}
+
+func (allocationInfo) Name() string       { return "file.gguf" }
+func (info allocationInfo) Size() int64   { return info.size }
+func (allocationInfo) Mode() os.FileMode  { return 0o600 }
+func (allocationInfo) ModTime() time.Time { return testNow }
+func (allocationInfo) IsDir() bool        { return false }
+func (allocationInfo) Sys() any           { return nil }
+
+func withAllocation(t *testing.T, s *scanner, fn func(os.FileInfo) (int64, uint64, uint64, bool)) {
+	t.Helper()
+	s.allocation = fn
+}
+
+func TestHardLinkedNamesCountStatBlocksOnce(t *testing.T) {
+	s, _ := scannerFixture(t)
+	withAllocation(t, s, func(os.FileInfo) (int64, uint64, uint64, bool) { return 4096, 3, 9, true })
+	s.addFile("first.gguf", allocationInfo{size: 100})
+	s.addFile("second.gguf", allocationInfo{size: 100})
+	s.finish()
+	if s.plan.ApparentBytes != 200 || s.plan.AllocatedBytes == nil || *s.plan.AllocatedBytes != 4096 {
+		t.Fatalf("hard-linked names were summed or copied from apparent size: apparent=%d allocated=%s", s.plan.ApparentBytes, allocatedText(s.plan.AllocatedBytes))
+	}
+}
+
+func TestMissingBlockCountStaysUnmeasured(t *testing.T) {
+	s, _ := scannerFixture(t)
+	withAllocation(t, s, func(os.FileInfo) (int64, uint64, uint64, bool) { return 0, 0, 0, false })
+	s.addFile("weights.gguf", allocationInfo{size: 100})
+	s.finish()
+	if s.plan.ApparentBytes != 100 || s.plan.AllocatedBytes != nil {
+		t.Fatalf("apparent size became allocated bytes: apparent=%d allocated=%s", s.plan.ApparentBytes, allocatedText(s.plan.AllocatedBytes))
+	}
+	raw, err := json.Marshal(s.plan)
+	if err != nil || !strings.Contains(string(raw), `"allocated_bytes":null`) {
+		t.Fatalf("unmeasured allocation was not null: %s %v", raw, err)
+	}
+}
+
+func TestMeasuredZeroAllocationStaysZero(t *testing.T) {
+	s, _ := scannerFixture(t)
+	withAllocation(t, s, func(os.FileInfo) (int64, uint64, uint64, bool) { return 0, 4, 8, true })
+	s.addFile("empty.gguf", allocationInfo{size: 0})
+	s.finish()
+	if s.plan.AllocatedBytes == nil || *s.plan.AllocatedBytes != 0 {
+		t.Fatalf("measured zero became unmeasured: %v", s.plan.AllocatedBytes)
+	}
+	raw, err := json.Marshal(s.plan)
+	if err != nil || !strings.Contains(string(raw), `"allocated_bytes":0`) {
+		t.Fatalf("measured zero was omitted: %s %v", raw, err)
+	}
+}
+
+func TestAllocationOverflowStaysUnmeasured(t *testing.T) {
+	s, _ := scannerFixture(t)
+	next := uint64(1)
+	withAllocation(t, s, func(os.FileInfo) (int64, uint64, uint64, bool) {
+		next++
+		return 1 << 62, 1, next, true
+	})
+	s.addFile("one.gguf", allocationInfo{size: 1})
+	s.addFile("two.gguf", allocationInfo{size: 1})
+	s.finish()
+	if s.plan.ApparentBytes != 2 || s.plan.AllocatedBytes != nil {
+		t.Fatalf("overflowing block counts were published: apparent=%d allocated=%s", s.plan.ApparentBytes, allocatedText(s.plan.AllocatedBytes))
+	}
+}
+
+func allocatedText(value *int64) string {
+	if value == nil {
+		return "unmeasured"
+	}
+	return strconv.FormatInt(*value, 10)
+}
+
+func TestEmptyDirectoryMeasuresZeroAllocatedBytes(t *testing.T) {
+	plan, err := Scan(t.Context(), t.TempDir(), testOptions())
+	if err != nil || !plan.Complete || plan.Files != 0 || plan.AllocatedBytes == nil || *plan.AllocatedBytes != 0 {
+		t.Fatalf("empty observation was not a measured zero: allocated=%v err=%v", plan.AllocatedBytes, err)
 	}
 }
 

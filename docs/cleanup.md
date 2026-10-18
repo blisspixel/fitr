@@ -19,9 +19,15 @@ classification hint; it does not establish that its contents are disposable.
 
 Apparent bytes sum regular file lengths. They are not recoverable disk bytes:
 hard links can count one physical allocation more than once, while sparse files,
-compression and deduplication can also change disk usage. No newer model or faster
-configuration qualifies as a replacement from this scan. Establish acceptable
-outputs and role coverage before retiring an incumbent.
+compression and deduplication can also change disk usage. Allocated bytes are a
+separate total. They are present only when every accepted regular file reported
+a stat block count and an inode, and they sum those counts once per inode. A
+directory listing that does not include the count leaves the field null, and
+the text says unmeasured. Zero is a measured empty sum. The scan does not open
+file contents to obtain the count. Neither total is space a deletion would free,
+and neither one makes a partial download redundant or a checkpoint a replacement.
+No newer model or faster configuration qualifies as a replacement from this scan.
+Establish acceptable outputs and role coverage before retiring an incumbent.
 
 The scan visits at most 250,000 entries, descends at most 64 levels and checks a
 30-second deadline between filesystem operations. An operating-system call that
