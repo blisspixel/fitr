@@ -175,8 +175,12 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: '1.27.2' }
+      # cp314 wheels. pydantic-core 2.46.5 has no CPython 3.15 build, so this
+      # job stays on the current 3.14 security release. The reference-python
+      # job is the 3.15 run.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: '3.15.0' }
+        with:
+          python-version: '3.14.8'
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binaries

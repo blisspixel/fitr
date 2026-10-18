@@ -225,10 +225,10 @@ separate [native raw-wire smoke](../scripts/mcp-acceptance.py) checks the child'
 exit status. SDK acceptance does not test cancellation races or every protocol
 feature; existing Go protocol fixtures cover those narrower server contracts.
 
-Run from the repository using Go 1.27.2 and CPython 3.15.0, which is the CI pin. The September 13 receipt above used CPython 3.14.7. On Linux x64/macOS arm64:
+Run from the repository using Go 1.27.2. Official SDK acceptance uses CPython 3.14.8. The locked binary wheels are cp314, and pydantic-core 2.46.5 publishes no CPython 3.15 wheel, so this job does not follow the 3.15 reference-test pin. The September 13 receipt above used CPython 3.14.7. On Linux x64/macOS arm64:
 
 ```bash
-python3.15 -m venv .agents/mcp-sdk-venv
+python3.14 -m venv .agents/mcp-sdk-venv
 .agents/mcp-sdk-venv/bin/python -I -m pip install --require-hashes -r scripts/mcp-sdk-requirements.txt
 .agents/mcp-sdk-venv/bin/python -I -m pip check
 go build -o .agents/fitr-sdk ./cmd/fitr
