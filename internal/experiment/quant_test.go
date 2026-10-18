@@ -53,8 +53,13 @@ func TestQuantExperimentAllowsConfigurationChoiceWithoutInventingLineage(t *test
 		!strings.Contains(strings.Join(report.Gaps, " "), "configuration-level") {
 		t.Fatalf("unverified lineage report = %+v", report)
 	}
-	if argv := strings.Join(confirmationArgv(report.Candidates), " "); !strings.Contains(argv, "fitr experiment confirm") || !strings.Contains(argv, "--spec") {
+	argv := strings.Join(confirmationArgv(report.Candidates, "decode_tps"), " ")
+	if !strings.Contains(argv, "fitr experiment confirm") || !strings.Contains(argv, "--spec") ||
+		!strings.Contains(argv, "--min-gap") || !strings.Contains(argv, "--noise-from") {
 		t.Fatalf("confirmation argv = %q", argv)
+	}
+	if strings.Contains(strings.Join(confirmationArgv(report.Candidates, "artifact_bytes"), " "), "--min-gap") {
+		t.Fatal("an exact byte objective asked for a timing budget")
 	}
 }
 

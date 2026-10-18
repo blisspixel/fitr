@@ -102,7 +102,11 @@ requirements clear. This prevents an exploratory winner from certifying
 itself on the observations that selected it. `fitr experiment confirm` is the
 decision-bearing path: it seals two to four exact runtime-backed candidates,
 the device, context, protocol, spec digest, and a fresh shared task seed before
-collecting a new full battery for each candidate.
+collecting a new full battery for each candidate. A decode, prefill, or TTFT
+objective also requires a declared relative gap and a claimable coefficient
+of variation from this device and context. A budget whose expected 95%
+intervals would still overlap exits 4 before inference. That refusal does
+not measure the gap.
 
 ## Requirement semantics
 

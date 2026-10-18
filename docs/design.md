@@ -329,8 +329,11 @@ so Board does not compare across those presentation-contract changes.
   exploration winner. A separate
   configuration-confirmation plan seals exact runtime artifacts, device,
   context, protocol, decision spec, and a fresh shared task seed before the
-  full paired runs. Serving concurrency is its own experiment schema and does
-  not enter ordinary rankings. Evidence-backed limiter diagnoses beyond the
+  full paired runs. A timed objective is refused first when the declared
+  repeat budget cannot separate the declared relative gap at a coefficient
+  of variation measured on this device and context. Serving concurrency is
+  its own experiment schema and does not enter ordinary rankings.
+  Evidence-backed limiter diagnoses beyond the
   direct receipt patterns, context-experiment confirmation, model-set
   projections, and soak runs remain pre-1.0 experiments.
 - **Validated work starts with one fixed contract.** The policy-repair

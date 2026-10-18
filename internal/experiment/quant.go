@@ -290,6 +290,8 @@ func metricFromPerformance(code string, observation analysis.PerformanceObservat
 	if observation.SD == nil || observation.SampleCount < 2 {
 		return metric
 	}
+	// PredictMeanSeparation uses t_{n-1} * (sd/mean) / sqrt(n), the relative
+	// form of this margin. A change here has to change that preflight too.
 	margin := stats.TCrit975(float64(observation.SampleCount-1)) * *observation.SD /
 		math.Sqrt(float64(observation.SampleCount))
 	low, high := math.Max(0, *observation.Estimate-margin), *observation.Estimate+margin
@@ -513,7 +515,7 @@ func quantGapsAndAction(report QuantReport) ([]string, *Action) {
 		return gaps, &Action{Code: "declare_configuration_objective",
 			Reason: "add one narrow objective to the decision specification"}
 	case report.Objective.State == "exploratory":
-		return gaps, &Action{Code: "confirm_candidate", Argv: confirmationArgv(report.Candidates),
+		return gaps, &Action{Code: "confirm_candidate", Argv: confirmationArgv(report.Candidates, report.Objective.Metric),
 			Reason: "collect fresh evidence after sealing the exploratory candidate"}
 	case report.Objective.State == "confirmed":
 		return gaps, nil
@@ -526,7 +528,7 @@ func quantGapsAndAction(report QuantReport) ([]string, *Action) {
 	}
 }
 
-func confirmationArgv(candidates []QuantCandidate) []string {
+func confirmationArgv(candidates []QuantCandidate, metric string) []string {
 	argv := []string{"fitr", "experiment", "confirm"}
 	seen := make(map[string]bool, len(candidates))
 	for _, candidate := range candidates {
@@ -536,7 +538,11 @@ func confirmationArgv(candidates []QuantCandidate) []string {
 			seen[model] = true
 		}
 	}
-	return append(argv, "--spec", "<confirm-decision.json>")
+	argv = append(argv, "--spec", "<confirm-decision.json>")
+	if TimedObjective(metric) {
+		argv = append(argv, "--min-gap", "<relative>", "--noise-from", "<result.json>")
+	}
+	return argv
 }
 
 func removeString(values []string, target string) []string {

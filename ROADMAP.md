@@ -1404,7 +1404,10 @@ whether the declared budget could resolve the difference being asked about, and
 refuses with the repeat count that would be needed. A run that cannot answer
 the question is better refused in a second than concluded in an hour, and this
 is the same discipline that already refuses a ranking when configuration is
-unobserved.
+unobserved. A timed `fitr experiment confirm` now does that for the
+non-overlapping t-interval rule. The coefficient of variation comes from a
+claimable result on the same device and verified context. The 1.6 percent
+figure below is one device's observation and is not a default.
 
 The second thing is validity, because the published tooling is weaker here than
 its confidence suggests. One widely used benchmark reports a dispersion figure
@@ -1425,8 +1428,9 @@ and randomized, discarding candidates as they fall out, fits the budget that
 exists. Whatever survives goes through the existing fresh confirmation rather
 than being reported from the data that selected it.
 
-- [ ] Confirmation preflight: refuse a comparison the budget cannot resolve,
-      naming the repeat count that would resolve it.
+- [x] Confirmation preflight: refuse a comparison the budget cannot resolve,
+      naming the repeat count that would resolve it. Random point order and
+      the cached-token seal below remain open.
 - [ ] Randomize the sealed point order and seal the randomization, so drift is
       spread across candidates instead of loading one.
 - [ ] Treat a nonzero cached-token count as a failed validity seal for any

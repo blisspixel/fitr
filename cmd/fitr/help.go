@@ -48,7 +48,7 @@ compare:
   fitr decide [model|result.json] --spec decision.json [--display MODE]
   fitr experiment context <model> --ctx 4096,8192,... [-k N]
   fitr experiment quant <result.json> <result.json>... --spec decision.json [--lineage conversion.json]
-  fitr experiment confirm <model-a> <model-b> --spec decision.json [--ctx N] [-k N]
+  fitr experiment confirm <model-a> <model-b> --spec decision.json [--ctx N] [-k N] [--min-gap F] [--noise-from result.json]
   fitr experiment workload <model> [-n N] [--ctx N] [--workflow pi-workspace] [--backend B]
   fitr experiment serving <model> [--concurrency N] [-n N] [--warmup N] [--ctx N] [--backend B]
   fitr view [model|result.json] [--display MODE]

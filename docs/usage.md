@@ -284,7 +284,7 @@ of installed RAM as an unconditional model budget.
 | `fitr decide [model\|result.json] --spec decision.json` | evaluate sealed evidence against explicit workload requirements; unresolved required evidence exits 4 |
 | `fitr experiment context <model> --ctx 4096,8192,... [-k N]` | run a predeclared exploratory context plan with point-specific allocation and required-equal factor checks |
 | `fitr experiment quant <result.json>... --spec decision.json [--lineage conversion.json]` | build a decision-relative conservative configuration frontier; optional lineage verifies a shared base revision |
-| `fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N]` | seal the selected candidate set, collect fresh paired full-run evidence, and confirm only a separated decision objective |
+| `fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N] [--min-gap F] [--noise-from result.json]` | seal the selected candidate set and confirm only a separated objective; a timed objective refuses, before inference, a repeat budget that cannot separate the declared gap |
 | `fitr experiment workload <model> [-n 3] [--ctx N] [--workflow pi-workspace]` | run policy-repair, or the pinned pi-workspace session. pi-workspace does not launch Pi |
 | `fitr experiment serving <model> [--concurrency N] [-n N]` | measure throughput, client-side queueing, server duration and tail latency distributions at a declared concurrency |
 | `fitr discover add <source> --role <role> [--model <reference>]` | capture a private, unmeasured model or harness idea |
@@ -918,6 +918,22 @@ artifact identity, observes the device configuration, creates a fresh shared
 task seed, and seals all of those inputs into
 `fitr.experiment.confirmation.plan.v1`. Two to four distinct candidates are
 supported. At least three repeats are required.
+
+When the objective is decode, prefill, or TTFT, pass the relative gap the
+budget must be able to separate and a claimable result that measured this
+device's variation for that metric at the same verified context:
+
+```bash
+fitr experiment confirm qwen3:30b-q5 qwen3:30b-q4 \
+  --spec local-speed-confirm.json --ctx 16384 -k 3 \
+  --min-gap 0.08 --noise-from result.json
+```
+
+`--min-gap 0.08` asks whether three repeats can separate an eight percent
+gap. It does not assert that the gap exists. The noise result has to be
+claimable on this device. A copy outside the result store cannot authorize
+the run. If the budget cannot separate the gap, fitr exits 4 and names the
+repeat count that would, and it does not start inference.
 
 Each candidate receives the full measurement battery under the same context,
 task seed, runtime, device, grading policy, profile policy, and repeat count.
