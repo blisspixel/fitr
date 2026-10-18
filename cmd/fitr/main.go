@@ -102,112 +102,6 @@ func encodeMachineError(msg, note, hint string) bool {
 
 func terminalText(value string) string { return render.SingleLine(value) }
 
-const usageText = ` - evidence for what local AI works on this machine
-
-usage:
-  fitr [--display MODE]             installed models, evidence, next command
-  fitr <model>                      named advise (same as fitr advise <model>)
-  fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]
-  fitr run <model> [--quick|--full|--checks-only] [-k N] [--ctx N] [--profile P] [--display MODE] [--html]
-  fitr run <model> --context-tiers <bytes,bytes[,...]> [--ctx N]
-  fitr apply [model] [--ctx N]
-  fitr tune [model-a model-b]
-  fitr export <model> [--out PATH] [--retonr]
-  fitr view [model|result.json] [--display MODE]
-  fitr board [--current] [--role coding|agent]
-  fitr suggest [model] [--size-gb N]
-  fitr top [--view live|result|board|history|inventory]
-  fitr top view [model|result.json]
-  fitr top run <model> [run flags]
-  fitr top history [path|clear --yes]
-  fitr diag <model>
-  fitr doctor <model> [-n N]
-  fitr device
-  fitr update [--check] [--reinstall]
-  fitr profiles [new [name]]
-  fitr calibrate <model-a> <model-b> [--out PATH] [--lineage PATH]
-  fitr calibrate merge <pair.json>... [--out PATH]
-  fitr compare <model-a> <model-b>
-  fitr decide [model|result.json] --spec decision.json [--display MODE]
-  fitr experiment context <model> --ctx 4096,8192,... [-k N]
-  fitr experiment context <result.json> <result.json>... [--display MODE]
-  fitr experiment quant <result.json> <result.json>... --spec decision.json [--lineage conversion.json]
-  fitr experiment confirm <model-a> <model-b> --spec decision.json [--ctx N] [-k N]
-  fitr experiment confirm <confirmation-bundle.json> [--display MODE]
-  fitr experiment workload <model> [-n N] [--ctx N] [--workflow pi-workspace] [--backend B]
-  fitr experiment workload <workload-bundle.json> [--display MODE]
-  fitr experiment serving <model> [--concurrency N] [-n N] [--warmup N] [--ctx N] [--backend B]
-  fitr experiment serving <serving-bundle.json> [--display MODE]
-  fitr discover add <source> --role <role> [--model <reference>] [--harness <name>]
-  fitr discover list|plan [--role <role>] [--display MODE]
-  fitr role init <name> --quality <need> --memory-gb <limit> [--ctx N]
-  fitr role define <role.json> | list | show <name> | review <name>
-  fitr role attach <name> <result.json> | detach <name> <evidence-sha256>
-  fitr role confirm <name|bundle.json> | adopt <name> <bundle.json> | status <name> | rollback <name>
-  fitr auto runtime <ollama.exe> --models <directory> --out runtime.json
-  fitr auto start <role> --mode establish|improve --runtime runtime.json --candidate <model> --candidate <model>
-  fitr auto status|resume|adopt <session-id>
-  fitr tailor plan --role <name> --outcome <need> --candidate <model> --ctx N (--capacity-budget-gb N | --capacity-reserve-gb N --memory-gb N)
-  fitr tailor start|status|resume|adopt <session-id>
-  fitr mcp serve
-  fitr source resolve hf --repo <owner/model> --revision <revision> --file <path> --out <receipt.json>
-  fitr source show <receipt.json> [--display MODE]
-  fitr artifact bind --source <resolution.json> --mapping <local-files.json> --out <artifact.json>
-  fitr artifact show <artifact.json> [--display MODE]
-  fitr cleanup plan <directory> [--min-age-days N] [--display MODE]
-  fitr desktop status [--role NAME] [--display MODE]
-  fitr desktop benchmark [--role NAME] [--confirm] [--display MODE]
-  fitr desktop install [--plugins-dir DIR]
-  fitr desktop remove [--plugins-dir DIR] --yes
-
-flags:
-  --display  auto|rich|plain|json|none   output mode (default auto)
-  --backend  auto|ollama|llama-server|openai   serving runtime (default auto-detect)
-  --pull     fetch a missing model first (Ollama; HF repository aliases pull automatically)
-  --allow-unsafe-exec  run unisolated built-in code diagnostics; never score them
-  -k         repeats per noisy task (default 3; 1 quick; 5 checks-only)
-             A single run is not a measurement: identical configs vary 10-20pp.
-  -q         quiet (repeat for silent)      -v  verbose
-
-exit codes:
-  0 eligible/ok   1 error   2 usage   3 disproven   4 unresolved   130 interrupted
-
-environment:
-  FITR_OPENAI_URL       OpenAI-compatible endpoint
-  FITR_OPENAI_API_KEY   bearer token; kept out of command history and process arguments
-  FITR_OPENAI_MODEL_SHA256  independently obtained model digest required for measured OpenAI-compatible runs
-
-examples:
-  fitr
-  fitr qwen3:30b
-  fitr advise qwen3:30b --display json
-  fitr run qwen3-coder:30b
-  fitr run https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
-  fitr run some-new-model:tag -k 3 --pull
-  fitr diag dolphin3:8b
-  fitr doctor qwen3-coder:30b
-  fitr advise qwen3:30b
-  fitr advise ./model.gguf --vram-gb 8 --fit
-  fitr run qwen3:30b --ctx 4096
-  fitr apply qwen3:30b
-  fitr update --check
-  fitr tune
-  fitr tune qwen3:30b qwen3:30b-q8
-  fitr export qwen3:30b --out scorecard.html
-  fitr view qwen3:30b
-  fitr profiles new
-  fitr run qwen3:8b-q8_0 --checks-only --seedset qwen3-8b -k 5
-  fitr run qwen3:8b-q4_K_M --checks-only --seedset qwen3-8b -k 5
-  fitr calibrate qwen3:8b-q8_0 qwen3:8b-q4_K_M --out pair.json --lineage conversion.json
-  fitr experiment quant q8-result.json q4-result.json --spec coding.json --lineage conversion.json
-  fitr experiment confirm qwen3:8b-q8_0 qwen3:8b-q4_K_M --spec coding-confirm.json
-  fitr experiment workload qwen3-coder:30b -n 3
-  fitr experiment serving qwen3:8b --concurrency 4 -n 20
-  fitr run qwen3:8b --ctx 16384 --context-tiers 2048,8192,32768
-`
-
-func usage() { fmt.Fprint(os.Stderr, "fitr "+version+usageText) }
-
 func main() { os.Exit(run()) }
 
 func run() int {
@@ -223,9 +117,11 @@ func run() int {
 		return handler(ctx, os.Args[2:])
 	}
 	switch os.Args[1] {
-	case "-h", "--help", "help":
-		usage()
+	case "-h", "--help":
+		writeMainHelp(os.Stdout)
 		return exitOK
+	case "help":
+		return cmdHelp(ctx, os.Args[2:])
 	case "--version", "version":
 		fmt.Println("fitr", version)
 		return exitOK
@@ -355,9 +251,11 @@ func takesValue(flagArg string) bool {
 	return false
 }
 
-// parseCommandFlags keeps subcommand help on the success path. The standard
-// flag package writes the requested help before returning flag.ErrHelp; that
-// is not a bad invocation and must not become exit 2.
+// parseCommandFlags keeps subcommand help on the success path. -h and --help
+// are not a bad invocation and must not become exit 2. The page is written
+// here, to stdout, because the flag package would otherwise call Usage for a
+// bad flag as well. A command that already wrote its own page sets
+// helpPageWritten and is left alone.
 // machineErrors is set once a command's flags are known. An agent driving fitr
 // as a tool asked for a machine-readable surface and got prose on stderr for
 // every failure while stdout carried the schema-tagged document it asked for.
@@ -374,7 +272,10 @@ func noteDisplayMode(fs *flag.FlagSet) {
 }
 
 func parseCommandFlags(fs *flag.FlagSet, args []string) (int, bool) {
+	helpPageWritten = false
 	err := fs.Parse(permute(args))
+	wrote := helpPageWritten
+	helpPageWritten = false
 	noteDisplayMode(fs)
 	if err == nil {
 		if err := validateFlagModelRefs(fs); err != nil {
@@ -384,6 +285,9 @@ func parseCommandFlags(fs *flag.FlagSet, args []string) (int, bool) {
 		return exitOK, true
 	}
 	if errors.Is(err, flag.ErrHelp) {
+		if !wrote {
+			writeFlagHelp(os.Stdout, fs)
+		}
 		return exitOK, false
 	}
 	return exitUsage, false

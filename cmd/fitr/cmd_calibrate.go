@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/calibration"
@@ -52,8 +50,7 @@ type calibrateCommand struct {
 }
 
 func parseCalibrateCommand(args []string) (calibrateCommand, int, bool) {
-	fs := flag.NewFlagSet("calibrate", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("calibrate")
 	out := fs.String("out", "", "write a privacy-safe calibration pair as JSON")
 	lineagePath := fs.String("lineage", "", "publisher conversion manifest binding both artifacts to one base revision")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -183,8 +180,7 @@ func cmdCalibrateMerge(args []string) int {
 }
 
 func loadCalibrationReports(args []string) ([]calibration.PairReport, string, int, bool) {
-	fs := flag.NewFlagSet("calibrate merge", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("calibrate merge")
 	out := fs.String("out", "", "write the aggregate calibration summary as JSON")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return nil, "", code, false

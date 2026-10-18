@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -14,8 +13,7 @@ import (
 )
 
 func cmdDecide(_ context.Context, args []string) int {
-	fs := flag.NewFlagSet("decide", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("decide")
 	specPath := fs.String("spec", "", "decision specification JSON")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {

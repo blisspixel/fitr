@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -20,10 +18,10 @@ func cmdRole(ctx context.Context, args []string) int {
 		args = []string{"list"}
 	}
 	if args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(os.Stderr, "usage: fitr role init <name> --quality <need> --memory-gb <limit> [--minimum-rate 0.9] [--ctx 8192] [--usable-context-bytes N]")
-		fmt.Fprintln(os.Stderr, "       fitr role define <role.json> | list | show <name> | review <name>")
-		fmt.Fprintln(os.Stderr, "       fitr role attach <name> <result.json> | detach <name> <evidence-sha256>")
-		fmt.Fprintln(os.Stderr, "       fitr role confirm <name|bundle.json> | adopt <name> <bundle.json> | status <name> | rollback <name>")
+		writeAskedHelp(os.Stdout, `usage: fitr role init <name> --quality <need> --memory-gb <limit> [--minimum-rate 0.9] [--ctx 8192] [--usable-context-bytes N]
+       fitr role define <role.json> | list | show <name> | review <name>
+       fitr role attach <name> <result.json> | detach <name> <evidence-sha256>
+       fitr role confirm <name|bundle.json> | adopt <name> <bundle.json> | status <name> | rollback <name>`)
 		return exitOK
 	}
 	action := args[0]
@@ -70,7 +68,7 @@ type roleOptions struct {
 }
 
 func parseRoleOptions(action string, args []string) (roleOptions, []string, int) {
-	fs := flag.NewFlagSet("role "+action, flag.ContinueOnError)
+	fs := commandFlags("role " + action)
 	options := roleOptions{}
 	fs.StringVar(&options.display, "display", "auto", "auto|rich|plain|json|none")
 	if action == "init" {

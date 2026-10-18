@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,8 +18,7 @@ import (
 )
 
 func cmdSuggest(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("suggest", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("suggest")
 	sizeGB := fs.Float64("size-gb", 0, "project this weight size instead of asking the registry")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {

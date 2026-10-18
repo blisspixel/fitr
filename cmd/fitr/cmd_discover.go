@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"encoding/hex"
-	"flag"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +26,7 @@ type discoveryCommand struct {
 
 func cmdDiscover(ctx context.Context, args []string) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(os.Stderr, discoveryHelp)
+		writeAskedHelp(os.Stdout, discoveryHelp)
 		return exitOK
 	}
 	command, code, ok := parseDiscoveryCommand(args)
@@ -65,7 +63,7 @@ func renderDiscoverySnapshot(proposals []discovery.SourceProposal, command disco
 
 func parseDiscoveryCommand(args []string) (discoveryCommand, int, bool) {
 	command := discoveryCommand{action: args[0]}
-	fs := flag.NewFlagSet("discover "+command.action, flag.ContinueOnError)
+	fs := commandFlags("discover " + command.action)
 	fs.StringVar(&command.mode, "display", "auto", "auto|rich|plain|json|none")
 	switch command.action {
 	case "add":

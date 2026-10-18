@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -15,8 +14,7 @@ import (
 
 // ---------------------------------------------------------------- diag
 func cmdDiag(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("diag", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("diag")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	ctxSize := fs.Int("ctx", 0, "request context (default 8192)")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -97,8 +95,7 @@ type doctorCommand struct {
 }
 
 func parseDoctorCommand(args []string) (doctorCommand, int, bool) {
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("doctor")
 	n := fs.Int("n", 5, "identical generations per determinism probe")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	ctxSize := fs.Int("ctx", 0, "request context (default 8192)")

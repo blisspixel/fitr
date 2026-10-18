@@ -501,22 +501,22 @@ func TestTailorReserveUsageNamesTheResidentLimit(t *testing.T) {
 	if !reserveUsageNamesMemory(stdout) {
 		t.Fatalf("reserve usage omits --memory-gb:\n%s", stdout)
 	}
-	_, stderr, code := captureCommandOutput(t, func() int {
+	var stderr string
+	stdout, stderr, code = captureCommandOutput(t, func() int {
 		usage()
 		return exitOK
 	})
-	if code != exitOK || !reserveUsageNamesMemory(stderr) {
-		t.Fatalf("root usage omits --memory-gb:\n%s", stderr)
+	if code != exitOK || stderr != "" || !reserveUsageNamesMemory(stdout) {
+		t.Fatalf("root usage omits --memory-gb:\n%s", stdout)
 	}
 }
 
+// The three reserve flags share one synopsis. At 40 columns they cannot share
+// one physical line, so the page is searched as a whole.
 func reserveUsageNamesMemory(text string) bool {
-	for _, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, "--capacity-reserve-gb") && strings.Contains(line, "--capacity-budget-gb") {
-			return strings.Contains(line, "--memory-gb")
-		}
-	}
-	return false
+	return strings.Contains(text, "--capacity-reserve-gb") &&
+		strings.Contains(text, "--capacity-budget-gb") &&
+		strings.Contains(text, "--memory-gb")
 }
 
 func TestTailorGuide(t *testing.T) {

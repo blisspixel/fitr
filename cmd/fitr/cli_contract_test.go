@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -85,24 +86,49 @@ func TestPublicCommandHelpIsSuccessful(t *testing.T) {
 		{"experiment workload", func() int { return cmdExperiment(ctx, []string{"workload", "--help"}) }},
 		{"screenshots", func() int { return cmdScreenshots(ctx, []string{"--help"}) }},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			stdout := ""
-			stderr, code := captureTopStderr(t, func() int {
-				var inner int
-				stdout, inner = captureTopStdout(t, tc.run)
-				return inner
-			})
-			if code != exitOK {
-				t.Fatalf("help exit = %d, want %d; stdout=%q stderr=%q", code, exitOK, stdout, stderr)
+	for _, width := range []string{"80", "40"} {
+		t.Run("width "+width, func(t *testing.T) {
+			t.Setenv("FITR_WIDTH", width)
+			limit, err := strconv.Atoi(width)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if stdout != "" {
-				t.Fatalf("help wrote to stdout: %q", stdout)
-			}
-			if !strings.Contains(strings.ToLower(stderr), "usage") {
-				t.Fatalf("help did not include usage: %q", stderr)
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					stdout := ""
+					stderr, code := captureTopStderr(t, func() int {
+						var inner int
+						stdout, inner = captureTopStdout(t, tc.run)
+						return inner
+					})
+					assertPublicHelp(t, tc.name, stdout, stderr, code, limit)
+				})
 			}
 		})
+	}
+}
+
+func assertPublicHelp(t *testing.T, name, stdout, stderr string, code, limit int) {
+	t.Helper()
+	if code != exitOK {
+		t.Fatalf("help exit = %d, want %d; stdout=%q stderr=%q", code, exitOK, stdout, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("help wrote to stderr: %q", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stdout), "usage") {
+		t.Fatalf("help did not include usage: %q", stdout)
+	}
+	if strings.Contains(stdout, "Usage of ") || strings.Contains(stdout, "-backend string") {
+		t.Fatalf("help used the flag package's page: %q", stdout)
+	}
+	if name == "run" && !strings.Contains(stdout, "--backend") {
+		t.Fatalf("run help missing --backend: %q", stdout)
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		if len(line) > limit {
+			t.Fatalf("help line is %d columns, wider than %d: %q", len(line), limit, line)
+		}
 	}
 }
 

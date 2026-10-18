@@ -450,8 +450,12 @@ requested gates or component comparison clear. See [source resolution](source-re
 ## Output modes and exit codes
 
 Every documented subcommand accepts `--help` and exits 0 after printing its
-flag help. Malformed invocations write a diagnostic and next action to stderr,
-exit 2, and do not begin runtime discovery or modify stored evidence.
+flag help. Asked help, including `fitr --help`, `fitr help`, and
+`fitr help <command>`, is written to stdout and composed to the same width as
+a report. `fitr help <command> [form]` prints one command's flags, for example
+`fitr help run` or `fitr help experiment context`. Malformed invocations write
+a diagnostic and next action to stderr, exit 2, and do not begin runtime
+discovery or modify stored evidence. A usage error does not repeat the help page.
 
 ```bash
 fitr run m --display json    # NDJSON on stdout, nothing else

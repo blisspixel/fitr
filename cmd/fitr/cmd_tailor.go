@@ -901,7 +901,10 @@ func loadTailorCommand(action string, args []string) (fitting.Session, string, i
 func parseTailorPlan(args []string) (tailorPlanFlags, int, bool) {
 	fs := flag.NewFlagSet("tailor plan", flag.ContinueOnError)
 	fs.SetOutput(os.Stdout)
-	fs.Usage = func() { fmt.Fprintln(os.Stdout, tailorGuide) }
+	fs.Usage = func() {
+		helpPageWritten = true
+		writeAskedHelp(os.Stdout, tailorGuide)
+	}
 	var flags tailorPlanFlags
 	fs.StringVar(&flags.role, "role", "", "short name for this work")
 	fs.Var(&flags.outcomes, "outcome", "required behavior; repeat for each one")

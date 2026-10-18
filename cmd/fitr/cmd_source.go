@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"flag"
 	"fmt"
 	"os"
 
@@ -47,7 +46,7 @@ func cmdSourceWithResolver(ctx context.Context, args []string, resolve func(cont
 
 func cmdSourceWithServices(ctx context.Context, args []string, services sourceServices) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
-		fmt.Fprintln(os.Stderr, sourceHelp)
+		writeAskedHelp(os.Stdout, sourceHelp)
 		return exitOK
 	}
 	switch args[0] {
@@ -62,7 +61,7 @@ func cmdSourceWithServices(ctx context.Context, args []string, services sourceSe
 }
 
 func resolveSource(ctx context.Context, args []string, services sourceServices) int {
-	fs := flag.NewFlagSet("source resolve", flag.ContinueOnError)
+	fs := commandFlags("source resolve")
 	repo := fs.String("repo", "", "explicit owner/repository")
 	revision := fs.String("revision", "", "explicit branch, tag or full commit")
 	output := fs.String("out", "", "new private receipt in an existing directory")
@@ -114,7 +113,7 @@ func resolveSource(ctx context.Context, args []string, services sourceServices) 
 }
 
 func showSource(args []string) int {
-	fs := flag.NewFlagSet("source show", flag.ContinueOnError)
+	fs := commandFlags("source show")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code

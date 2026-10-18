@@ -45,7 +45,7 @@ The final decision depends on the workload. Interactive chat values responsive g
 
 func cmdScreenshots(ctx context.Context, args []string) int {
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
-		fmt.Fprintln(os.Stderr, "usage: fitr screenshots [directory]")
+		writeAskedHelp(os.Stdout, "usage: fitr screenshots [directory]")
 		return exitOK
 	}
 	if len(args) > 1 {

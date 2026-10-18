@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +32,7 @@ func roleLifecycleAction(action string) bool {
 
 func parseRoleConfirmation(args []string) (roleConfirmationCommand, int, bool) {
 	command := roleConfirmationCommand{action: args[0]}
-	fs := flag.NewFlagSet("role "+command.action, flag.ContinueOnError)
+	fs := commandFlags("role " + command.action)
 	fs.StringVar(&command.mode, "display", "auto", "auto|rich|plain|json|none")
 	if command.action == "confirm" {
 		fs.StringVar(&command.backend, "backend", "auto", "auto|ollama|llama-server|openai")

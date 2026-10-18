@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"sort"
@@ -30,8 +29,7 @@ func cmdDevice(ctx context.Context, args []string) int {
 }
 
 func parseDeviceCommand(args []string) (string, int, bool) {
-	fs := flag.NewFlagSet("device", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("device")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return "", code, false
@@ -167,7 +165,7 @@ func cmdProfiles(ctx context.Context, args []string) int {
 				errPrint("unexpected argument", args[1], "fitr profiles --help")
 				return exitUsage
 			}
-			fmt.Fprint(os.Stderr, "usage: fitr profiles [new [name]]\n")
+			writeAskedHelp(os.Stdout, "usage: fitr profiles [new [name]]")
 			return exitOK
 		default:
 			errPrint(fmt.Sprintf("unknown profiles subcommand %q", args[0]), "",
@@ -216,8 +214,7 @@ func cmdProfilesNew(ctx context.Context, name string) int {
 // cmdStatus is what a bare `fitr` prints after install: this box, what is
 // already serving, current evidence, and one next command per row.
 func cmdStatus(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("fitr", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("fitr")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	if code, ok := parseCommandFlags(fs, args); !ok {

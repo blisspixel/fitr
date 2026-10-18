@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 
@@ -33,7 +32,7 @@ func cmdArtifact(ctx context.Context, args []string) int {
 
 func cmdArtifactWithBinder(ctx context.Context, args []string, bind artifactBinder) int {
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
-		fmt.Fprintln(os.Stderr, artifactHelp)
+		writeAskedHelp(os.Stdout, artifactHelp)
 		return exitOK
 	}
 	switch args[0] {
@@ -49,7 +48,7 @@ func cmdArtifactWithBinder(ctx context.Context, args []string, bind artifactBind
 
 func parseArtifactBind(args []string) (artifactBindCommand, int, bool) {
 	command := artifactBindCommand{}
-	fs := flag.NewFlagSet("artifact bind", flag.ContinueOnError)
+	fs := commandFlags("artifact bind")
 	fs.StringVar(&command.sourcePath, "source", "", "saved source resolution receipt")
 	fs.StringVar(&command.mappingPath, "mapping", "", "explicit local file mapping specification")
 	fs.StringVar(&command.outputPath, "out", "", "new private binding receipt in an existing directory")
@@ -124,7 +123,7 @@ func loadArtifactBindInputs(command artifactBindCommand) (source.Resolution, art
 }
 
 func showArtifact(args []string) int {
-	fs := flag.NewFlagSet("artifact show", flag.ContinueOnError)
+	fs := commandFlags("artifact show")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code

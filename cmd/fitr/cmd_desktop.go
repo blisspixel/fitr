@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +19,7 @@ import (
 
 func cmdDesktop(ctx context.Context, args []string) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(os.Stderr, desktopUsage)
+		writeAskedHelp(os.Stdout, desktopUsage)
 		return exitOK
 	}
 	switch args[0] {
@@ -51,7 +50,7 @@ install copies the embedded Omarchy bar widget. It does not edit shell.json.
 remove deletes only a directory fitr marked as its own.`
 
 func cmdDesktopStatus(args []string) int {
-	fs := flag.NewFlagSet("desktop status", flag.ContinueOnError)
+	fs := commandFlags("desktop status")
 	roleName := fs.String("role", "", "role library name")
 	mode := fs.String("display", "json", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -68,7 +67,7 @@ func cmdDesktopStatus(args []string) int {
 }
 
 func cmdDesktopBenchmark(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("desktop benchmark", flag.ContinueOnError)
+	fs := commandFlags("desktop benchmark")
 	roleName := fs.String("role", "", "role library name")
 	mode := fs.String("display", "json", "auto|rich|plain|json|none")
 	confirm := fs.Bool("confirm", false, "start the allowlisted local measurement")
@@ -132,7 +131,7 @@ func cmdDesktopRemove(args []string) int {
 }
 
 func desktopPluginFlags(name string, args []string, remove bool) (string, string, int, bool) {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs := commandFlags(name)
 	parentFlag := fs.String("plugins-dir", "", "Omarchy third-party plugins directory")
 	mode := fs.String("display", "json", "auto|rich|plain|json|none")
 	yes := fs.Bool("yes", false, "remove the fitr-marked plugin directory")

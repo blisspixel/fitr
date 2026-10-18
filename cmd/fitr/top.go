@@ -63,8 +63,7 @@ func cmdTopHistory(ctx context.Context, args []string) int {
 		fmt.Println(terminalText(record.NewStore(resultsDir()).HistoryDir()))
 		return exitOK
 	case "clear":
-		fs := flag.NewFlagSet("top history clear", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
+		fs := commandFlags("top history clear")
 		yes := fs.Bool("yes", false, "confirm permanent history deletion")
 		if code, ok := parseCommandFlags(fs, args[1:]); !ok {
 			return code
@@ -90,7 +89,7 @@ func cmdTopHistory(ctx context.Context, args []string) int {
 			errPrint("unexpected history help argument", args[1], "fitr top history --help")
 			return exitUsage
 		}
-		fmt.Fprintln(os.Stderr, "usage: fitr top history [path|clear --yes]")
+		writeAskedHelp(os.Stdout, "usage: fitr top history [path|clear --yes]")
 		return exitOK
 	default:
 		errPrint("unknown history action", args[0], "use fitr top history, fitr top history path, or fitr top history clear --yes")
@@ -99,8 +98,7 @@ func cmdTopHistory(ctx context.Context, args []string) int {
 }
 
 func cmdTopBrowse(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("top", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("top")
 	viewName := fs.String("view", "inventory", "live|result|board|history|inventory")
 	snapshotOnly := fs.Bool("snapshot", false, "write a privacy-safe presentation snapshot as JSON")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -139,8 +137,7 @@ func cmdTopBrowse(ctx context.Context, args []string) int {
 }
 
 func cmdTopView(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("top view", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("top view")
 	snapshotOnly := fs.Bool("snapshot", false, "write a privacy-safe presentation snapshot as JSON")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code
@@ -193,7 +190,7 @@ func cmdTopView(ctx context.Context, args []string) int {
 
 func cmdTopRun(ctx context.Context, args []string) int {
 	if hasFlag(args, "help") || hasFlag(args, "h") {
-		fmt.Fprintln(os.Stderr, "usage: fitr top run <model> [run flags]")
+		writeAskedHelp(os.Stdout, "usage: fitr top run <model> [run flags]")
 		return cmdRun(ctx, []string{"--help"})
 	}
 	if hasFlag(args, "display") {

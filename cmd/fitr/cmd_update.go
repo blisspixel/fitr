@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,8 +54,7 @@ func cmdUpdate(ctx context.Context, args []string) int {
 }
 
 func parseUpdateOptions(args []string) (updateOptions, int, bool) {
-	fs := flag.NewFlagSet("update", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("update")
 	check := fs.Bool("check", false, "check the latest stable release without changing this binary")
 	reinstall := fs.Bool("reinstall", false, "reinstall the latest release when versions match")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
