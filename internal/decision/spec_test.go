@@ -75,6 +75,40 @@ func TestDecisionSpecRejectsUnknownObjectiveMetric(t *testing.T) {
 	}
 }
 
+func TestDecisionSpecRefusesPerplexityAndKL(t *testing.T) {
+	base := func(metric string) DecisionSpec {
+		return DecisionSpec{
+			Schema: SpecSchema, Name: "scoring boundary", Evidence: EvidenceDecide,
+			Requirements: []Requirement{{
+				ID: "context", Context: &ContextRequirement{MinimumEffectiveTokens: 4096},
+			}},
+			Objective: &Objective{Metric: metric, Direction: Minimize},
+		}
+	}
+	for _, metric := range []string{"perplexity", "kl_divergence", "kld"} {
+		err := base(metric).Validate()
+		if err == nil || !strings.Contains(err.Error(), "refused") || !strings.Contains(err.Error(), "full vocabulary") {
+			t.Fatalf("metric %q error = %v", metric, err)
+		}
+	}
+	err := base("perplexity_score").Validate()
+	if err == nil || strings.Contains(err.Error(), "full vocabulary") || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("a near miss was refused as perplexity: %v", err)
+	}
+	bound := 10.0
+	floor := DecisionSpec{
+		Schema: SpecSchema, Name: "scoring floor", Evidence: EvidenceDecide,
+		Requirements: []Requirement{{
+			ID:          "quality",
+			Performance: &PerformanceRequirement{Metric: "perplexity", AtMost: &bound},
+		}},
+	}
+	err = floor.Validate()
+	if err == nil || !strings.Contains(err.Error(), "refused") || !strings.Contains(err.Error(), "full vocabulary") {
+		t.Fatalf("performance perplexity error = %v", err)
+	}
+}
+
 func TestDecisionSpecContextValidation(t *testing.T) {
 	intPointer := func(v int) *int { return &v }
 	tests := []struct {
