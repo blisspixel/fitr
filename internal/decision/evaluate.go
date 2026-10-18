@@ -133,6 +133,10 @@ func evaluateValidated(result *record.Record, report analysis.Report, subject Co
 		}
 		evaluation.Requirements = append(evaluation.Requirements, outcome)
 	}
+	if requirement, account, ok := reasoningRequirement(spec); ok {
+		evaluation.Requirements = append(evaluation.Requirements, requirement)
+		evaluation.Reasoning = &account
+	}
 	evaluation.Eligibility = aggregateState(evaluation.Requirements)
 
 	if spec.Evidence == EvidenceConfirm || spec.Confirmation.FreshEvidence || spec.Confirmation.FreshTasks {

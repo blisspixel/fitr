@@ -64,7 +64,10 @@ Local comparisons need the exact artifact revision and quantization, runtime
 build and settings, device, task definitions and grading policy. Future harness
 evidence must additionally identify the harness build, tools, reasoning mode,
 tokenizer and compaction policy. Changing those inputs requires new compatible
-evidence. The existing [artifact binding](artifact-binding.md) observes local
+evidence. A requested reasoning effort is not that identification: until a
+protocol records that the mode was applied, the application stays unknown,
+and a capability flag does not stand in for it. An omitted effort is not a
+default. The existing [artifact binding](artifact-binding.md) observes local
 files; it does not establish what a runtime loaded or how well a task performed.
 
 For a future hosted experiment, pin the provider endpoint and disable fallback;
