@@ -589,6 +589,20 @@ func actionPriority(code string) int {
 	}
 }
 
+// StrongerNextAction reports whether candidate is collected before current.
+// The order is the one selectNextAction already uses inside one evaluation.
+// An action without argv is not a copyable command. Equal rank keeps current
+// so a tie stays with the earlier candidate. This does not decide eligibility.
+func StrongerNextAction(current, candidate *Action) bool {
+	if candidate == nil || len(candidate.Argv) == 0 {
+		return false
+	}
+	if current == nil || len(current.Argv) == 0 {
+		return true
+	}
+	return actionPriority(candidate.Code) < actionPriority(current.Code)
+}
+
 func blockedRequirement(id, reason, evidenceRef string) RequirementResult {
 	return RequirementResult{ID: id, State: RequirementBlocked, Reason: reason,
 		EvidenceRefs: []string{evidenceRef}, Missing: []string{"claimable evidence"}}

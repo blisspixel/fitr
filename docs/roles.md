@@ -90,6 +90,17 @@ joint confidence interval.
 | `tradeoff` | Qualified comparable candidates overlap in their bounds or change order under weight sensitivity. |
 | `exploration-lead` | One qualified candidate leads across bounds and all tested weight perturbations. Fresh confirmation is still required before adoption. |
 
+The text review prints one copyable command when an evaluation already
+carries an argv. The candidate's model name replaces `<current-model>`, and
+the action's reason is printed beside that command. When several candidates
+are unresolved, the command is the one with the stronger collection priority
+and the line names that candidate. Requirement rows stay `id: state` and do
+not each grow a command. When no argv exists, the line says the next command
+is unmeasured and keeps the review limit. `exploration-lead` reads only the
+lead. It does not print a sibling candidate's command, because that would be
+a switch this report does not authorize, and it does not synthesize
+`fitr role confirm`. JSON keeps the evaluation, including the argv template.
+
 The comparison retains the existing requirements for runtime, device,
 requested and effective context, task and grading protocol. Adding an
 unresolved candidate cannot silently improve the apparent certainty of a
