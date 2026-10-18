@@ -28,6 +28,10 @@ const IntegrityUnmeasured = "unmeasured"
 // A directory name is not an owner, and a repeated filename is not a shared dependency.
 const OwnershipUnmeasured = "unmeasured"
 
+// SuccessorUnmeasured is the only successor value this scan records. A similar
+// checkpoint name is not a source, revision, runtime, or quality replacement.
+const SuccessorUnmeasured = "unmeasured"
+
 type Limits struct {
 	MaxEntries int `json:"max_entries"`
 	MaxDepth   int `json:"max_depth"`
@@ -51,9 +55,10 @@ type Summary struct {
 
 // Component groups files that appear to belong to one artifact: a weights set
 // and its shards, a vision projector, a speculative draft, an adapter, a
-// tokenizer, or a runtime's libraries. Grouping is by filename only. It is a
-// hint for review and never proof that the files are used together, complete,
-// or safe to remove; the scanner does not open file data to confirm it.
+// tokenizer, or a runtime's libraries. Grouping is the directory plus the
+// filename. It is a hint for review and never proof that the files are used
+// together, complete, owned, or safe to remove. A similar checkpoint name is
+// not a successor. The scanner does not open file data to confirm any of that.
 type Component struct {
 	Name          string   `json:"name"`
 	Role          string   `json:"role"`
@@ -63,6 +68,9 @@ type Component struct {
 	// Ownership is unmeasured. Filename grouping is not proof that one model,
 	// runtime, or application owns the files, or that a repeated name is shared.
 	Ownership string `json:"ownership"`
+	// Successor is unmeasured. A nearby name, quant, or version token is not
+	// a source, revision, runtime, or quality replacement.
+	Successor string `json:"successor"`
 }
 
 type Entry struct {
@@ -117,12 +125,15 @@ type Plan struct {
 	// CompletedFileIntegrity is unmeasured for the whole plan. Nothing in
 	// this scan is a digest of a completed file, and the field is not a
 	// deletion decision.
-	CompletedFileIntegrity string   `json:"completed_file_integrity"`
-	Issues                 []Issue  `json:"issues"`
-	IssueCount             int      `json:"issue_count"`
-	UnenteredDirectories   []string `json:"unentered_directories,omitempty"`
-	UnenteredCount         int      `json:"unentered_directory_count,omitempty"`
-	Notes                  []string `json:"notes"`
+	CompletedFileIntegrity string `json:"completed_file_integrity"`
+	// SuccessorClaims is unmeasured. No similar filename is promoted to a
+	// source, revision, runtime, or quality successor.
+	SuccessorClaims      string   `json:"successor_claims"`
+	Issues               []Issue  `json:"issues"`
+	IssueCount           int      `json:"issue_count"`
+	UnenteredDirectories []string `json:"unentered_directories,omitempty"`
+	UnenteredCount       int      `json:"unentered_directory_count,omitempty"`
+	Notes                []string `json:"notes"`
 }
 
 type scanner struct {
@@ -228,7 +239,8 @@ func newScanner(ctx context.Context, root *os.Root, absolute string, o Options) 
 		plan: Plan{Schema: Schema, Root: absolute, AsOf: o.AsOf.UTC(),
 			Cutoff: o.AsOf.UTC().AddDate(0, 0, -o.MinAgeDays), MinAgeDays: o.MinAgeDays,
 			Limits: o.Limits, Complete: true, CompletedFileIntegrity: IntegrityUnmeasured,
-			TopLevel: []Summary{}, Categories: []Summary{},
+			SuccessorClaims: SuccessorUnmeasured,
+			TopLevel:        []Summary{}, Categories: []Summary{},
 			LargestFiles: []Entry{}, ReviewCandidates: []Entry{}, Issues: []Issue{},
 			Notes: []string{
 				"Read-only plan. REVIEW does not mean safe to delete; usage and dependencies remain unresolved.",
@@ -677,7 +689,8 @@ func sortedComponents(values map[string]*componentAcc, limit int) []Component {
 	result := make([]Component, 0, len(values))
 	for name, acc := range values {
 		result = append(result, Component{Name: name, Role: acc.role, Files: acc.files,
-			ApparentBytes: acc.bytes, Paths: acc.paths, Ownership: OwnershipUnmeasured})
+			ApparentBytes: acc.bytes, Paths: acc.paths, Ownership: OwnershipUnmeasured,
+			Successor: SuccessorUnmeasured})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].ApparentBytes != result[j].ApparentBytes {
@@ -699,6 +712,15 @@ func Bytes(value int64) string { return fmt.Sprintf("%.2f GiB", float64(value)/(
 func IntegrityLine(value string) string {
 	if value == "" || value == IntegrityUnmeasured {
 		return "unmeasured; file bytes and manifests were not read"
+	}
+	return value
+}
+
+// SuccessorLine is the text for successor claims. An empty value stays
+// unmeasured. A similar checkpoint name is not a replacement.
+func SuccessorLine(value string) string {
+	if value == "" || value == SuccessorUnmeasured {
+		return "unmeasured; a similar name is not a replacement"
 	}
 	return value
 }

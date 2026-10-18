@@ -65,6 +65,7 @@ func writeCleanupPlan(w io.Writer, plan cleanup.Plan, mode string) {
 	field("apparent", cleanup.Bytes(plan.ApparentBytes)+"; not recoverable disk space")
 	field("allocated", cleanup.AllocatedLine(plan.AllocatedBytes))
 	field("integrity", cleanup.IntegrityLine(plan.CompletedFileIntegrity))
+	field("successor", cleanup.SuccessorLine(plan.SuccessorClaims))
 	field("review", fmt.Sprintf("%d aged incomplete downloads | %s apparent", plan.ReviewCandidateCount, cleanup.Bytes(plan.ReviewApparentBytes)))
 	field("cutoff", plan.Cutoff.Format(time.RFC3339))
 	if plan.StopReason != "" {
