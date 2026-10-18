@@ -33,9 +33,21 @@ func TestFirstExistingPrefersTheEarliestPresentPath(t *testing.T) {
 		t.Fatalf("neither = %v", err)
 	}
 	if runtime.GOOS != "linux" {
-		_, err = probePython()
-		if err == nil || !strings.Contains(err.Error(), "/usr/bin/python3") {
-			t.Fatalf("probePython = %v", err)
+		// macOS runners ship /usr/bin/python3. Finding that file must not
+		// make isolation available: Probe refuses every non-Linux host
+		// before it looks for an interpreter. The missing-path error is
+		// checked only where both absolute paths are actually absent.
+		status := Probe()
+		if status.Available || status.Interpreter != "" || status.Reason != "isolated execution needs bubblewrap on Linux" {
+			t.Fatalf("non-linux probe = %+v", status)
+		}
+		if _, statErr := os.Stat("/usr/bin/python3"); statErr != nil {
+			if _, statErr = os.Stat("/usr/bin/python"); statErr != nil {
+				_, err = probePython()
+				if err == nil || !strings.Contains(err.Error(), "/usr/bin/python3") {
+					t.Fatalf("probePython = %v", err)
+				}
+			}
 		}
 	}
 }
