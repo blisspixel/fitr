@@ -1,6 +1,6 @@
 module github.com/blisspixel/fitr
 
-go 1.25.0
+go 1.27.2
 
 require (
 	github.com/clipperhouse/displaywidth v0.11.0

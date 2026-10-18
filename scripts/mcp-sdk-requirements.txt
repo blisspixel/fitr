@@ -1,6 +1,8 @@
 # Test-only official MCP SDK acceptance dependencies.
 # MCP SDK refreshed 2026-09-13 with CPython 3.14; use a separate venv.
-# Wheel hashes from official PyPI version metadata, CPython 3.14/abi3/pure Python.
+# Wheel hashes from official PyPI version metadata, abi3 or pure Python.
+# CI runs the acceptance job on CPython 3.15.0. The hashes were not
+# regenerated for that move: the pins do not select a 3.14-only wheel.
 # No source builds. No fitr runtime dependency.
 --index-url https://pypi.org/simple
 --only-binary :all:

@@ -27,7 +27,7 @@ release's `SHA256SUMS` file. A missing checksum tool, manifest, or asset entry
 is an error. `FITR_NO_VERIFY=1` is an explicit unsafe opt-out for environments
 where verification is impossible.
 
-From source (Go 1.25+):
+From source (Go 1.27.2+):
 
 ```bash
 git clone https://github.com/blisspixel/fitr && cd fitr

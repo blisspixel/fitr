@@ -279,7 +279,7 @@ renderer-neutral canvas first, then a thin adapter copies cells to tcell.
 This keeps fitr's interaction model deterministic and portable. It also avoids
 a current Windows resize limitation in
 [Bubble Tea v2](https://github.com/charmbracelet/bubbletea/blob/v2.0.8/screen.go).
-tcell v3.4.2 supports the repository's Go 1.25 floor and its current release
+tcell v3.4.2 supports the repository's Go 1.27.2 floor and its current release
 includes Windows input and screen lifecycle fixes.
 
 Only the event-loop goroutine touches the terminal. Evaluation, persistence,

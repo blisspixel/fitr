@@ -137,15 +137,26 @@ jobs:
       - name: repository coverage gate
         run: sh scripts/check-coverage.sh 80
 
-  compatibility:
+  reference-python:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Newest patch of each maintained line. 3.11.17, 3.12.15, 3.13.16
+        # and 3.14.8 are the 2026-10-01 security releases. 3.15.0 final
+        # shipped 2026-10-09. 3.10 reached end of life on 2026-10-01.
+        python: ["3.11.17", "3.12.15", "3.13.16", "3.14.8", "3.15.0"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.25.14' }
-      - run: go test ./... -count=1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: ${{ matrix.python }} }
+      - name: reference logic tests
+        working-directory: reference-python
+        run: |
+          python -m pip install --disable-pip-version-check "pytest>=7.4" "rich>=13.3.3,!=14.0.0"
+          python -m pytest tests -q
 
   mcp-sdk:
     needs: dist
@@ -162,7 +173,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: '1.27.2' }
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: '3.14.7' }
+        with: { python-version: '3.15.0' }
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binaries
