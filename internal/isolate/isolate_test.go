@@ -33,23 +33,32 @@ func TestFirstExistingPrefersTheEarliestPresentPath(t *testing.T) {
 		t.Fatalf("neither = %v", err)
 	}
 	if runtime.GOOS != "linux" {
-		// macOS runners ship /usr/bin/python3. Finding that file must not
-		// make isolation available: Probe refuses every non-Linux host
-		// before it looks for an interpreter. The missing-path error is
-		// checked only where both absolute paths are actually absent.
-		status := Probe()
-		if status.Available || status.Interpreter != "" || status.Reason != "isolated execution needs bubblewrap on Linux" {
-			t.Fatalf("non-linux probe = %+v", status)
-		}
-		if _, statErr := os.Stat("/usr/bin/python3"); statErr != nil {
-			if _, statErr = os.Stat("/usr/bin/python"); statErr != nil {
-				_, err = probePython()
-				if err == nil || !strings.Contains(err.Error(), "/usr/bin/python3") {
-					t.Fatalf("probePython = %v", err)
-				}
-			}
-		}
+		assertNonLinuxProbe(t)
 	}
+}
+
+// assertNonLinuxProbe checks that a host python3 does not make isolation
+// available. macOS runners ship /usr/bin/python3. Probe refuses every
+// non-Linux host before it looks. The missing-path error is checked only
+// where both absolute paths are actually absent.
+func assertNonLinuxProbe(t *testing.T) {
+	t.Helper()
+	status := Probe()
+	if status.Available || status.Interpreter != "" || status.Reason != "isolated execution needs bubblewrap on Linux" {
+		t.Fatalf("non-linux probe = %+v", status)
+	}
+	if hostInterpreterPresent("/usr/bin/python3") || hostInterpreterPresent("/usr/bin/python") {
+		return
+	}
+	_, err := probePython()
+	if err == nil || !strings.Contains(err.Error(), "/usr/bin/python3") {
+		t.Fatalf("probePython = %v", err)
+	}
+}
+
+func hostInterpreterPresent(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func TestSandboxArgvBindsOnlyTheWorkTreeAndUsr(t *testing.T) {
