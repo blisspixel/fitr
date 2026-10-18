@@ -202,6 +202,13 @@ func Scan(ctx context.Context, directory string, options Options) (Plan, error) 
 	return s.plan, nil
 }
 
+// Revalidate scans the same tree again. It is the revalidation before any
+// cleanup action, and no such action exists. The second plan does not
+// delete, rename, or truncate.
+func Revalidate(ctx context.Context, directory string, options Options) (Plan, error) {
+	return Scan(ctx, directory, options)
+}
+
 func validateOptions(o Options) error {
 	if o.MinAgeDays < 0 || o.MinAgeDays > 36500 {
 		return errors.New("min-age-days must be between 0 and 36500")
@@ -250,6 +257,7 @@ func newScanner(ctx context.Context, root *os.Root, absolute string, o Options) 
 				"The deadline is checked between filesystem operations; a stalled filesystem operation can outlast it.",
 				"Directories are entered with model stores (blobs, manifests, models) ahead of cache trees. An incomplete scan names directories that were seen and not entered.",
 				"Component groups come from filenames within one directory, not from manifests. The same name in another directory is a separate group. Ownership stays unmeasured: a group does not resolve shared dependencies or prove that its files belong to one artifact.",
+				"fitr will not delete, rename, or truncate. The scope is the entries this walk accepted. An incomplete plan does not describe unvisited files. Shared-component ownership stays unmeasured, and the directory is not an owner.",
 			}},
 	}
 }
