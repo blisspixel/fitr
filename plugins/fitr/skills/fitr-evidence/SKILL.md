@@ -107,7 +107,9 @@ once per inode, and only when every accepted file reported them; a null value
 is unmeasured, not zero, and is not space a deletion would free. Aged partial
 downloads are review candidates. File integrity stays `unmeasured`, including
 when a similarly named file sits beside a partial. That is not a completed
-copy and not a deletion decision. Check dependency groups and active
+copy and not a deletion decision. A component group is filenames within one
+directory. The same name elsewhere is not the same artifact, and `ownership`
+stays `unmeasured`. Check dependency groups and active
 downloads before proposing deletion. The command never deletes files.
 
 Recommend the smallest experiment that resolves the user's decision. Follow

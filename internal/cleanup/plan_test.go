@@ -53,14 +53,32 @@ func TestComponentsGroupShardsAndRoles(t *testing.T) {
 	for _, component := range plan.Components {
 		components[component.Name] = component
 	}
-	if weights, ok := components["model.safetensors"]; !ok || weights.Role != "weights" || weights.Files != 2 || weights.ApparentBytes != 200 {
+	if weights, ok := components["models/model.safetensors"]; !ok || weights.Role != "weights" || weights.Files != 2 || weights.ApparentBytes != 200 || weights.Ownership != OwnershipUnmeasured {
 		t.Fatalf("weights component = %+v ok=%v", weights, ok)
 	}
-	if projector, ok := components["mmproj-model.gguf"]; !ok || projector.Role != "vision_projector" {
+	if projector, ok := components["models/mmproj-model.gguf"]; !ok || projector.Role != "vision_projector" || projector.Ownership != OwnershipUnmeasured {
 		t.Fatalf("projector component = %+v ok=%v", projector, ok)
 	}
-	if adapter, ok := components["model.lora.safetensors"]; !ok || adapter.Role != "adapter" {
+	if adapter, ok := components["models/model.lora.safetensors"]; !ok || adapter.Role != "adapter" || adapter.Ownership != OwnershipUnmeasured {
 		t.Fatalf("adapter component = %+v ok=%v", adapter, ok)
+	}
+}
+
+func TestSameShardNameInTwoDirectoriesIsNotOneOwner(t *testing.T) {
+	root := t.TempDir()
+	fixtureFile(t, root, "video/model-00001-of-00002.safetensors", 100, testNow)
+	fixtureFile(t, root, "audio/model-00001-of-00002.safetensors", 80, testNow)
+	plan, err := Scan(t.Context(), root, testOptions())
+	if err != nil || !plan.Complete {
+		t.Fatal(err)
+	}
+	components := map[string]Component{}
+	for _, component := range plan.Components {
+		components[component.Name] = component
+	}
+	video, audio := components["video/model.safetensors"], components["audio/model.safetensors"]
+	if video.Files != 1 || audio.Files != 1 || video.Ownership != OwnershipUnmeasured || audio.Ownership != OwnershipUnmeasured {
+		t.Fatalf("same shard name became one owner: video=%+v audio=%+v all=%+v", video, audio, plan.Components)
 	}
 }
 
