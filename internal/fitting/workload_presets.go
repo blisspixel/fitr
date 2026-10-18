@@ -80,6 +80,14 @@ func presetByName(name string) (presetSpec, bool) {
 				{Class: ClassRecommendation, Name: "desired-context", Detail: "Set --desired-context. This preset does not choose a window."},
 			},
 		}, true
+	case "conversation":
+		return presetSpec{
+			outcomes: []string{"instruction_precision"},
+			requirements: []Requirement{
+				{Class: ClassMandatory, Name: "instruction", Detail: "Instruction following on the short battery has to pass. That pass does not establish multi-turn memory, tone, factual reliability, or that the model is a good daily conversation."},
+				{Class: ClassRecommendation, Name: "desired-context", Detail: "Set --desired-context to the working context you need. This preset does not substitute 32768, 65536, or any other window."},
+			},
+		}, true
 	case "structured-extraction":
 		return presetSpec{
 			outcomes: []string{"structured_output"},

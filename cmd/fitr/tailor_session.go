@@ -192,7 +192,7 @@ func fillWork(ctx context.Context, flags tailorPlanFlags, deps tailorDeps) (tail
 		return flags, code, false
 	}
 	switch answer {
-	case "repository-planning", "agentic-coding", "code-review", "document-research", "structured-extraction":
+	case "conversation", "repository-planning", "agentic-coding", "code-review", "document-research", "structured-extraction":
 		flags.workload = answer
 	default:
 		flags.outcomes = append(flags.outcomes, answer)
