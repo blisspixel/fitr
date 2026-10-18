@@ -577,10 +577,14 @@ func runContextExperiment(ctx context.Context, model string, contexts []int, rep
 	}
 	display := render.New("none")
 	defer display.Close()
-	results := make([]*record.Record, 0, len(contexts))
-	for index, requested := range contexts {
-		fmt.Fprintf(os.Stderr, "  point  %d/%d  requested context %d\n", index+1, len(contexts), requested)
-		binding := experiment.ContextPlanBinding(planSHA256, index+1, len(contexts))
+	// The flag order is the set. The sealed plan is the execution order, and
+	// a later point must not be what the operator typed last merely because
+	// that is where thermal drift lands.
+	fmt.Fprintf(os.Stderr, "  order  %s\n", joinContextOrder(plan.RequestedContexts))
+	results := make([]*record.Record, 0, len(plan.RequestedContexts))
+	for index, requested := range plan.RequestedContexts {
+		fmt.Fprintf(os.Stderr, "  point  %d/%d  requested context %d\n", index+1, len(plan.RequestedContexts), requested)
+		binding := experiment.ContextPlanBinding(planSHA256, index+1, len(plan.RequestedContexts))
 		result, runErr := execute(ctx, c, model, runOpts{
 			level: plan.Level, profile: profile, seedSet: plan.SeedSet,
 			reps: repeats, checksReps: 1, numCtx: requested, memoryCtx: requested,
@@ -591,7 +595,7 @@ func runContextExperiment(ctx context.Context, model string, contexts []int, rep
 				fmt.Fprintln(os.Stderr, "\ninterrupted")
 				return exitInterrupt
 			}
-			remaining := len(contexts) - index - 1
+			remaining := len(plan.RequestedContexts) - index - 1
 			note := fmt.Sprintf("%d completed point(s) remain saved; %d later point(s) were not run", len(results), remaining)
 			errPrint("context point failed: "+runErr.Error(), note,
 				"resolve the failed point before starting a new predeclared experiment")
@@ -607,6 +611,14 @@ func runContextExperiment(ctx context.Context, model string, contexts []int, rep
 		results = append(results, result)
 	}
 	return finishContextExperiment(plan, planSHA256, results, mode)
+}
+
+func joinContextOrder(contexts []int) string {
+	parts := make([]string, len(contexts))
+	for index, requested := range contexts {
+		parts[index] = strconv.Itoa(requested)
+	}
+	return strings.Join(parts, " ")
 }
 
 func finishContextExperiment(plan experiment.ContextPlan, planSHA256 string,

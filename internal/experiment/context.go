@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	randv2 "math/rand/v2"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,8 +18,14 @@ import (
 )
 
 const (
-	ContextPlanSchema                = "fitr.experiment.context.plan.v1"
-	ContextReportSchema              = "fitr.experiment.context.analysis.v1"
+	ContextPlanSchema   = "fitr.experiment.context.plan.v1"
+	ContextReportSchema = "fitr.experiment.context.analysis.v1"
+	// ContextOrderDeclared is a plan sealed before execution order was
+	// permuted. Those plans keep the operator's sequence. ContextOrderRandomized
+	// is the order new plans seal: a permutation of that sequence, derived from
+	// the plan seed, so the digest commits to the order before inference.
+	ContextOrderDeclared             = "declared"
+	ContextOrderRandomized           = "randomized"
 	maximumContextPoints             = 16
 	maximumContextTokens             = 16 * 1024 * 1024
 	maximumContextPerformanceSamples = 20
@@ -89,11 +96,15 @@ func NewContextPlan(model string, requestedContexts []int, performanceSamples in
 	if _, err := rand.Read(seedBytes); err != nil {
 		return ContextPlan{}, "", fmt.Errorf("create context seed set: %w", err)
 	}
+	ordered, err := permuteContexts(requestedContexts, seedBytes)
+	if err != nil {
+		return ContextPlan{}, "", err
+	}
 	plan := ContextPlan{
 		Schema: ContextPlanSchema, Model: strings.TrimSpace(model),
-		RequestedContexts:  append([]int(nil), requestedContexts...),
+		RequestedContexts:  ordered,
 		PerformanceSamples: performanceSamples, MeasurePointAllocation: true,
-		SeedSet: "context-" + hex.EncodeToString(seedBytes), Level: "quick", Order: "declared",
+		SeedSet: "context-" + hex.EncodeToString(seedBytes), Level: "quick", Order: ContextOrderRandomized,
 	}
 	if err := plan.validate(); err != nil {
 		return ContextPlan{}, "", err
@@ -106,8 +117,8 @@ func NewContextPlan(model string, requestedContexts []int, performanceSamples in
 }
 
 func (plan ContextPlan) validate() error {
-	if plan.Schema != ContextPlanSchema || plan.Level != "quick" || plan.Order != "declared" ||
-		!plan.MeasurePointAllocation {
+	if plan.Schema != ContextPlanSchema || plan.Level != "quick" || !plan.MeasurePointAllocation ||
+		(plan.Order != ContextOrderDeclared && plan.Order != ContextOrderRandomized) {
 		return errors.New("unsupported context plan schema or execution policy")
 	}
 	if plan.Model == "" {
@@ -144,6 +155,33 @@ func (plan ContextPlan) validate() error {
 
 func contextPlanDigest(plan ContextPlan) (string, error) {
 	return factorDigest("context_plan", plan)
+}
+
+// permuteContexts copies the declared windows into the execution order sealed
+// by the plan. Fisher-Yates draws from ChaCha8 keyed by SHA-256 of the domain
+// prefix and the 16-byte plan seed, so the digest commits to one order and a
+// later process cannot replay a different one. Checked against math/rand/v2
+// ChaCha8 in Go 1.27.2. An identity permutation is a possible draw, not a
+// reason to draw again.
+func permuteContexts(contexts []int, seed []byte) ([]int, error) {
+	if len(seed) != 16 {
+		return nil, errors.New("context point order seed must be 16 bytes")
+	}
+	ordered := append([]int(nil), contexts...)
+	if len(ordered) < 2 {
+		return ordered, nil
+	}
+	mac := sha256.New()
+	_, _ = mac.Write([]byte("fitr.context-point-order.v1\x00"))
+	_, _ = mac.Write(seed)
+	var key [32]byte
+	copy(key[:], mac.Sum(nil))
+	rng := randv2.New(randv2.NewChaCha8(key))
+	for index := len(ordered) - 1; index > 0; index-- {
+		swap := int(rng.Uint64N(uint64(index + 1)))
+		ordered[index], ordered[swap] = ordered[swap], ordered[index]
+	}
+	return ordered, nil
 }
 
 // ContextPlanBinding is recorded in a point manifest so later analysis can

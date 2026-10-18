@@ -22,10 +22,13 @@ func TestContextPlanBindsSealedPointOrderAndAllocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstBinding := experiment.ContextPlanBinding(digest, 1, len(contexts))
-	secondBinding := experiment.ContextPlanBinding(digest, 2, len(contexts))
-	first := contextMockResult(t, contexts[0], &firstBinding, "2026-08-31T10:00:00Z", plan)
-	second := contextMockResult(t, contexts[1], &secondBinding, "2026-08-31T11:00:00Z", plan)
+	if plan.Order != experiment.ContextOrderRandomized || len(plan.RequestedContexts) != len(contexts) {
+		t.Fatalf("plan order = %+v", plan)
+	}
+	firstBinding := experiment.ContextPlanBinding(digest, 1, len(plan.RequestedContexts))
+	secondBinding := experiment.ContextPlanBinding(digest, 2, len(plan.RequestedContexts))
+	first := contextMockResult(t, plan.RequestedContexts[0], &firstBinding, "2026-08-31T10:00:00Z", plan)
+	second := contextMockResult(t, plan.RequestedContexts[1], &secondBinding, "2026-08-31T11:00:00Z", plan)
 	report, err := experiment.AnalyzePlannedContext([]*Result{first, second}, plan, digest)
 	if err != nil {
 		t.Fatal(err)
@@ -33,9 +36,9 @@ func TestContextPlanBindsSealedPointOrderAndAllocation(t *testing.T) {
 	if !report.Predeclared || !report.Comparison.Ready || len(report.Points) != 2 {
 		t.Fatalf("planned context report = %+v", report)
 	}
-	if report.Points[0].Context.Requested != 4096 || report.Points[0].Sequence != 2 ||
-		report.Points[1].Context.Requested != 8192 || report.Points[1].Sequence != 1 {
-		t.Fatalf("sorted points lost declared sequence: %+v", report.Points)
+	assertSealedContextSequence(t, report, plan)
+	if _, err := experiment.AnalyzePlannedContext([]*Result{second, first}, plan, digest); err == nil {
+		t.Fatal("a reversed point list matched the sealed order")
 	}
 	if len(report.Coverage.AllocationContexts) != 2 || report.Coverage.MaximumAllocationContext == nil ||
 		*report.Coverage.MaximumAllocationContext != 8192 {
@@ -69,6 +72,24 @@ func TestContextPlanBindsSealedPointOrderAndAllocation(t *testing.T) {
 	if _, err := experiment.AnalyzePlannedContext([]*Result{first, second}, plan, digest); err == nil ||
 		!strings.Contains(err.Error(), "allocation was requested") {
 		t.Fatalf("mutated allocation context error = %v", err)
+	}
+}
+
+func assertSealedContextSequence(t *testing.T, report experiment.ContextReport, plan experiment.ContextPlan) {
+	t.Helper()
+	if len(report.Points) != 2 || report.Points[0].Context.Requested != 4096 || report.Points[1].Context.Requested != 8192 {
+		t.Fatalf("report did not sort by requested context: %+v", report.Points)
+	}
+	for _, point := range report.Points {
+		sealed := 0
+		for index, requested := range plan.RequestedContexts {
+			if requested == point.Context.Requested {
+				sealed = index + 1
+			}
+		}
+		if point.Sequence != sealed {
+			t.Fatalf("context %d sequence %d, sealed position %d", point.Context.Requested, point.Sequence, sealed)
+		}
 	}
 }
 

@@ -844,7 +844,10 @@ incorrectly required to remain equal when more context changes placement.
 If a required factor changes, all points remain visible but the comparison is
 unresolved.
 
-Point execution follows the declared order. If one point fails operationally,
+Point execution follows the order sealed in the plan. A new plan permutes the
+declared windows from its seed before the first request, and that permutation
+is part of the plan digest. A plan sealed with order `declared` still replays
+the sequence it recorded. If one point fails operationally,
 fitr stops, reports how many later points were not run, and keeps completed
 point records. It does not insert failed values for unattempted contexts. A
 fully completed plan writes a private local bundle under

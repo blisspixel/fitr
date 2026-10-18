@@ -323,8 +323,10 @@ so Board does not compare across those presentation-contract changes.
 - **No root-cause oracle.** Current output reports observations and
   contamination. A typed exploratory context experiment now binds a
   predeclared plan, measurement level, and fresh shared task seed into every
-  point manifest and enforces claim-specific required-equal factors. A typed
-  quant-configuration experiment applies one decision spec, checks comparison
+  point manifest and enforces claim-specific required-equal factors. New
+  plans seal a seeded permutation of the declared windows as that execution
+  order. A plan recorded as declared still replays its original sequence. A
+  typed quant-configuration experiment applies one decision spec, checks comparison
   factors, and uses confidence-bounded dominance without certifying its
   exploration winner. A separate
   configuration-confirmation plan seals exact runtime artifacts, device,
