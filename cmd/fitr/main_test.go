@@ -2198,6 +2198,41 @@ func TestTuneNamesAStartTimeBoundary(t *testing.T) {
 		!strings.Contains(got, "OLLAMA_KV_CACHE_TYPE") {
 		t.Fatalf("code = %d, start-time boundary missing:\n%s", code, got)
 	}
+	boundary := got[strings.LastIndex(got, "restart boundary"):]
+	if !strings.Contains(boundary, "historical f16") || strings.Contains(boundary, "measured") {
+		t.Fatalf("a record without configuration provenance was called measured:\n%s", boundary)
+	}
+}
+
+func TestTuneNamesAMeasuredStartValue(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "aa", "bb"
+	a.Device.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "f16"}
+	b.Device.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "q8_0"}
+	a.Device.ConfigSource = device.ConfigSourceServerLog
+	b.Device.ConfigSource = device.ConfigSourceServerLog
+	for _, r := range []*Result{a, b} {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := os.Stdout
+	or, ow, _ := os.Pipe()
+	os.Stdout = ow
+	code := cmdTune(context.Background(), []string{"aa", "bb"})
+	ow.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(or)
+	got := string(out)
+	if code != exitOK || !strings.Contains(got, "measured f16") || !strings.Contains(got, "measured q8_0") {
+		t.Fatalf("code = %d, measured start-time value missing:\n%s", code, got)
+	}
 }
 
 func TestResultNumCtxFallsBackToDefault(t *testing.T) {

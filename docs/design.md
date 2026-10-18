@@ -52,7 +52,11 @@ explicitly void. A start-time setting such as `OLLAMA_FLASH_ATTENTION` or
 `OLLAMA_KV_CACHE_TYPE` is read when the serving process starts. A difference
 between two results is a restart boundary, and a fresh measurement has to come
 from a process started with the new value. fitr does not restart that process.
-A request knob such as `num_ctx` is not that boundary.
+A request knob such as `num_ctx` is not that boundary. The configuration
+account names where a value came from: measured on the serving runtime,
+declared by the artifact, or a runtime default nobody chose. An unread
+runtime, a historical record, and this process's environment stay distinct.
+fitr does not fill a sampler default, and the account is not a ranking.
 
 The new Linux AMD APU GTT mapping-limit source contributes the optional
 `memory_capacity_kind` to fingerprint v2 comparison material. Equal numeric

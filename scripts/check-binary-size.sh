@@ -17,10 +17,13 @@ set -eu
 # memory selection, the empty-inventory and unmeasured-install next lines,
 # the conversation preset, the role-review command, and the embedded Omarchy
 # status and urgent-colour handlers added 49,664 bytes on the later dist job
-# the same day: 16,483,840 -> 16,533,504. No new Go dependency was added.
-# This deliberate release-envelope update retains the existing 38,824-byte
-# headroom. CI and releases use this single measured gate.
-max_bytes=16572328
+# the same day: 16,483,840 -> 16,533,504. The configuration account, which
+# names measured, declared, runtime-default, requested, historical,
+# unobserved, and process-environment values, added 56,320 bytes on the
+# following dist job: 16,533,504 -> 16,589,824. No new Go dependency was
+# added. This deliberate release-envelope update retains the existing
+# 38,824-byte headroom. CI and releases use this single measured gate.
+max_bytes=16628648
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"
