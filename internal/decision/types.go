@@ -34,6 +34,7 @@ type DecisionSpec struct {
 	Evidence     EvidenceLevel      `json:"evidence_level"`
 	Requirements []Requirement      `json:"requirements"`
 	Objective    *Objective         `json:"objective,omitempty"`
+	Reasoning    *ReasoningRequest  `json:"reasoning,omitempty"`
 	Confirmation ConfirmationPolicy `json:"confirmation,omitempty"`
 	Fallback     FallbackPolicy     `json:"fallback,omitempty"`
 }
@@ -130,6 +131,9 @@ func (s DecisionSpec) Validate() error {
 			return fmt.Errorf("duplicate requirement id %q", requirement.ID)
 		}
 		seen[requirement.ID] = true
+	}
+	if err := s.Reasoning.validate(); err != nil {
+		return err
 	}
 	if s.Objective != nil {
 		metric := strings.TrimSpace(s.Objective.Metric)
@@ -383,6 +387,7 @@ type Evaluation struct {
 	State        EvaluationState        `json:"state"`
 	Requirements []RequirementResult    `json:"requirements"`
 	Objective    *ObjectiveResult       `json:"objective,omitempty"`
+	Reasoning    *ReasoningAccount      `json:"reasoning,omitempty"`
 	Gaps         []string               `json:"gaps,omitempty"`
 	NextAction   *Action                `json:"next_action,omitempty"`
 }

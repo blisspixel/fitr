@@ -204,6 +204,12 @@ required-equal factors such as KV type, reasoning policy, sampling, parser,
 template, speculative decoding, and workflow authority. They will not place
 those fields in an untyped universal map.
 
+A decision spec may name a requested reasoning effort. An empty effort is
+omitted, not filled with a model default. The evaluation keeps that request
+and stays unresolved, because application was not observed. A capability
+declaration, API acceptance, elapsed time, output length, and a self-report
+are not an applied mode. Two such runs cannot certify an effort comparison.
+
 ## Objective and next evidence
 
 An objective such as minimizing latency or maximizing measured throughput is a
