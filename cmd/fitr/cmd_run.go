@@ -1071,6 +1071,18 @@ func (run *runExecution) contextWindowWasResolvedAsPlanned(window int) error {
 }
 
 func (run *runExecution) measureStandardPhases(work string) error {
+	// Resolve the probe interpreter before speed and memory. A Debian image
+	// that has python3 and not python used to pass the sandbox probe, measure
+	// those phases, and then abort when LookPath("python") failed. Nothing
+	// has completed if this step fails. A launch failure after it still
+	// discards the completed phases and is not rewritten as SKIP.
+	if eval.IsolatedExecutionEnabled(run.ctx) {
+		if err := run.step("interpreter", "probe identity", func() error {
+			return eval.PreflightIsolatedRunners(run.ctx, run.spec)
+		}); err != nil {
+			return err
+		}
+	}
 	if err := run.standardStep("speed", fmt.Sprintf("x%d", run.opts.reps), func() error {
 		return measureSpeed(run.ctx, run.backend, run.model, run.spec, run.result, run.opts.reps, run.display)
 	}); err != nil {

@@ -377,11 +377,11 @@ func (d *textDisplay) Phase(name, detail string) {
 }
 
 func (d *textDisplay) Note(msg, level string) {
-	style := d.pal.Muted
+	kind := NoticeNote
 	if level == "warn" {
-		style = d.pal.Warn
+		kind = NoticeWarning
 	}
-	fmt.Fprintf(d.err, "  %s\n", d.pal.wrap(style, "! "+SingleLine(msg)))
+	writeColoredNotice(d.err, d.pal, kind, msg, Width())
 }
 
 func (d *textDisplay) Done(name string, seconds float64) {
@@ -510,6 +510,7 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	d.resultPerformance(w, m, width)
 	d.resultCapacity(w, m, width)
 	d.resultContextTasks(w, m.Analysis, width)
+	d.resultTokenAccount(w, m.Analysis, width)
 	d.resultAnalysis(w, m, sc.Model, width)
 	d.resultEvidenceNotes(w, m, width)
 	fmt.Fprintln(w, rule)
@@ -1053,7 +1054,11 @@ func (d *jsonDisplay) Phase(name, detail string) {
 // Notes go to STDERR as plain text even in JSON mode; nobody wraps diagnostics
 // in JSON, and stdout must stay a clean record stream.
 func (d *jsonDisplay) Note(msg, level string) {
-	fmt.Fprintln(os.Stderr, SingleLine(msg))
+	kind := NoticeNote
+	if level == "warn" {
+		kind = NoticeWarning
+	}
+	writeColoredNotice(os.Stderr, palette{}, kind, msg, Width())
 }
 func (d *jsonDisplay) Done(name string, seconds float64) {
 	d.emit(map[string]any{"event": "phase_done", "name": name, "seconds": seconds})

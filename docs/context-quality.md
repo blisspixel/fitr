@@ -188,6 +188,35 @@ A run without a context phase omits these fields entirely rather than writing
 an empty one, so every manifest, record and completion payload written before
 the phase existed keeps its exact bytes and its signature.
 
+## Token-accounted receipt
+
+`fitr.context-token-account.v1` is a separate receipt from the byte pack.
+The v1 policy stays 2 to 64 KiB of UTF-8, with its 128-token output reserve,
+and it still refuses a silent byte-to-token conversion. A verified prefix of
+65536 bytes does not certify a 64000 usable-input target. `64K` is not
+accepted as either integer. Display the sealed target as that integer.
+
+The receipt binds artifact digest, weight quant, template digest, accounting
+source, runtime build, endpoint identity, device fingerprint and observed KV
+dtype. Payload tokens stay apart from template overhead, and the sealed
+generation reserve has to fit the enforced window. A short answer does not
+shrink that reserve. Missing counts, an unknown source, truncation, a shift,
+a changed template or fingerprint, a reduced window, or an unobserved cache
+cannot produce the qualification. A passing case does not erase a required
+failure at another position. An all-pass result stays a fixed battery, not a
+rate and not a maximum context.
+
+The claim is derived from the sealed plan and the observations when the
+receipt is attached, and derived again on load. CLI, JSON, HTML and the
+terminal monitor project that derived report. A record that cannot support a
+claim about its artifact keeps the receipt descriptive. Free memory stays its
+own observation: unmeasured memory is not spare room and is not a hardware cap.
+
+No live target has been recorded. fitr does not submit this schedule to a
+runtime yet, and a `--context-tiers` run does not fill the receipt. Absent
+64000, 128000 and 250000 results stay untested. This receipt does not certify
+Pi, Hermes, compaction, arbitrary coding or operational authority.
+
 ## Remaining connected acceptance
 
 The phase renders in the CLI, in JSON, in the HTML export and in the terminal

@@ -105,6 +105,13 @@ func TestDraftBlocksCodingUntilExecutionExists(t *testing.T) {
 	if !plan.Blocked || !strings.Contains(plan.BlockReason, "independently checked code") || !strings.Contains(plan.BlockReason, "--scope screen") {
 		t.Fatal(plan.BlockReason)
 	}
+	lines := plan.Lines(PhaseBlocked)
+	if len(lines) < 3 || !strings.Contains(lines[1], "stopped before inference") || !strings.Contains(lines[1], plan.BlockReason) || !strings.HasPrefix(lines[2], "next:") || !strings.Contains(lines[2], "--scope screen") {
+		t.Fatalf("blocker is not directly under the phase line: %q", lines[:min(4, len(lines))])
+	}
+	if strings.Contains(lines[len(lines)-1], "stopped before inference") {
+		t.Fatal("blocker is still buried at the end of the preview")
+	}
 }
 
 func TestDraftScreenDoesNotPromiseACoderOrCopyTheRate(t *testing.T) {

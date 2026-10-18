@@ -85,29 +85,66 @@ func suggestOne(ctx context.Context, name string, sizeGB, budget float64, source
 
 func suggestShortlist(ctx context.Context, budget float64, source string) int {
 	fp := device.Detect(ctx, nil)
-	items := suggest.Order(suggest.Shortlist(), suggest.PreferMoE(fp.GPU, fp.GPUBackend, fp.VRAMSource))
+	items := suggest.Shortlist()
+	prefer := suggest.PreferMoE(fp.GPU, fp.GPUBackend, fp.VRAMSource)
+	observed := make([]observedWeight, len(items))
+	weightBytes := make([]int64, len(items))
+	for i, item := range items {
+		got, err := fetchManifestBytes(ctx, item.Name)
+		observed[i] = observedWeight{bytes: got, err: err}
+		if err == nil {
+			weightBytes[i] = got
+		}
+	}
 	fmt.Println("projection, not a measurement. Sizes come from the registry manifest. KV cache is not estimated.")
 	if source != "" {
 		fmt.Printf("budget %.1f GiB (%s)\n", budget, source)
 	}
-	for _, item := range items {
-		bytes, err := fetchManifestBytes(ctx, item.Name)
-		label := item.Use
-		if item.CatalogMoE {
-			label += ", catalog MoE (active parameters were not read from the manifest)"
+	index := make(map[string]int, len(items))
+	for i, item := range items {
+		index[item.Name] = i
+	}
+	for _, group := range suggest.Partition(items, weightBytes, budget, prefer) {
+		if label := suggestGroupLabel(group.Class); label != "" {
+			fmt.Println(label)
 		}
-		if err != nil {
-			fmt.Printf("%s  %s  size unobserved: %s\n", item.Name, label, err.Error())
-			continue
+		for _, item := range group.Items {
+			fmt.Println(formatSuggestCandidate(item, observed[index[item.Name]], budget, group.Class))
 		}
-		project := suggest.ProjectWeights(budget, bytes)
-		line := item.Name + "  " + label + "  " + project.Note
-		if project.Known && project.WeightsFit {
-			line += "  pull: ollama pull " + item.Name
-		}
-		fmt.Println(line)
 	}
 	return exitOK
+}
+
+type observedWeight struct {
+	bytes int64
+	err   error
+}
+
+func suggestGroupLabel(class string) string {
+	switch class {
+	case suggest.WeightOverBudget:
+		return "weights exceed the budget; this is not resident fit, and KV was not estimated"
+	case suggest.WeightUnmeasured:
+		return "size or budget unmeasured; these names are not a fit and not a rejection"
+	default:
+		return ""
+	}
+}
+
+func formatSuggestCandidate(item suggest.Candidate, observed observedWeight, budget float64, class string) string {
+	label := item.Use
+	if item.CatalogMoE {
+		label += ", catalog MoE (active parameters were not read from the manifest)"
+	}
+	if observed.err != nil {
+		return fmt.Sprintf("%s  %s  size unobserved: %s", item.Name, label, observed.err.Error())
+	}
+	project := suggest.ProjectWeights(budget, observed.bytes)
+	line := item.Name + "  " + label + "  " + project.Note
+	if class == suggest.WeightFits && project.Known && project.WeightsFit {
+		line += "  pull: ollama pull " + item.Name
+	}
+	return line
 }
 
 func fetchManifestBytes(ctx context.Context, name string) (int64, error) {
@@ -156,7 +193,7 @@ func firstRunNotes(runtimeDown bool, gpu, backend, memorySource string) []string
 		notes = append(notes, status.Reason)
 	}
 	if suggest.PreferMoE(gpu, backend, memorySource) {
-		notes = append(notes, "CPU and APU shortlists put catalog mixture-of-experts coding and agent names first")
+		notes = append(notes, "on a CPU or APU, catalog mixture-of-experts names come first only among weights that fit the budget")
 	}
 	return notes
 }

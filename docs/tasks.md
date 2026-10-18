@@ -19,6 +19,20 @@ Auto, tailor, role confirmation, and the context pack do not opt in, so they
 keep generated code disabled. The same guarantee is not implemented on the
 other release targets.
 
+The probe and the battery share one interpreter. On Linux that is the first
+of `/usr/bin/python3` and `/usr/bin/python` that exists. An isolated run does
+not search `PATH` for the name `python`. If that interpreter is missing or
+will not start, the run stops before speed and memory, and nothing from the
+battery is saved. A launch that fails after that check is still an executor
+error: the completed phases are discarded, and the failure is not rewritten
+as SKIP.
+
+An isolated trial that ran and extracted no code is inconclusive. The coding
+row says that no executable code was extracted. It does not say the sandbox
+was unavailable. A trial that never started because the sandbox probe failed
+still says isolated execution is unavailable. Policy v6 cards keep the older
+sentence; new results use `fitr.scoring.policy.v7`.
+
 `--allow-unsafe-exec` is a separate path. It preflights the interpreter and
 requires a successful exit plus an exact final verifier receipt, but generated
 Python still has the current user's normal filesystem, environment,

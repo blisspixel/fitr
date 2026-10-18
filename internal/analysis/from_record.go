@@ -93,6 +93,7 @@ func fromValidatedRecordWithDisplayOnly(result *record.Record, displayOnly displ
 		Capacity:    capacityFrom(result, unclaimable),
 	}
 	report.ContextTasks = contextTasksFrom(result, unclaimable)
+	report.TokenAccount = tokenAccountFrom(result, unclaimable)
 	report.Gaps = gapsFrom(result, report, displayOnly)
 	report.Diagnoses = diagnosesFrom(result, unclaimable)
 	report.NextActions = nextActionsFrom(result, unclaimable)

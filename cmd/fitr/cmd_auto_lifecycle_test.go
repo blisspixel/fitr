@@ -14,6 +14,7 @@ import (
 	"github.com/blisspixel/fitr/internal/autoruntime"
 	"github.com/blisspixel/fitr/internal/decision"
 	"github.com/blisspixel/fitr/internal/eval"
+	"github.com/blisspixel/fitr/internal/fitting"
 	"github.com/blisspixel/fitr/internal/ollama"
 	"github.com/blisspixel/fitr/internal/record"
 	"github.com/blisspixel/fitr/internal/render"
@@ -264,6 +265,39 @@ func autoLifecycleIncumbent(t *testing.T) (*autoLifecycleFixture, role.Selection
 	f.confirm(t, [2]float64{80, 20})
 	autoLifecycleMust(t, autoAdoptIfDeclared(f.run.session))
 	return f, f.selection(t)
+}
+
+func TestDelegatedConfirmationProjectsOnlyTheConfirmedWinner(t *testing.T) {
+	f := newAutoLifecycleFixture(t, nil, "manual", [2]float64{80, 20})
+	f.compare(t)
+	f.confirm(t, [2]float64{80, 20})
+	winner := f.points[0].Manifest.Model.RuntimeBoundDigest()
+	loser := f.points[1].Manifest.Model.RuntimeBoundDigest()
+	if winner == "" || winner == loser {
+		t.Fatalf("fixture artifacts are not distinct: %s %s", winner, loser)
+	}
+	sources, notes := fittingObservationSources(fitting.Session{AutoSessionID: f.run.plan.ID})
+	if len(sources) != 1 || !sources[0].Confirmed || sources[0].ArtifactDigest != winner {
+		t.Fatalf("sources = %+v notes = %v", sources, notes)
+	}
+}
+
+func TestDelegatedConfirmationDoesNotCertifyAnIncumbentRetention(t *testing.T) {
+	first, _ := autoLifecycleIncumbent(t)
+	next := newAutoLifecycleFixture(t, first, "confirmed-only", [2]float64{20, 80})
+	next.compare(t)
+	next.confirm(t, [2]float64{80, 20})
+	if next.state(t).Outcome != "incumbent_retained" {
+		t.Fatalf("outcome = %s", next.state(t).Outcome)
+	}
+	sources, notes := fittingObservationSources(fitting.Session{AutoSessionID: next.run.plan.ID})
+	if len(sources) != 0 {
+		t.Fatalf("incumbent retention certified sources: %+v notes %v", sources, notes)
+	}
+	text := strings.Join(notes, "\n")
+	if !strings.Contains(text, "incumbent_retained") || !strings.Contains(text, "nothing was certified") {
+		t.Fatalf("notes = %v", notes)
+	}
 }
 
 func TestAutoLifecycleUnexpectedWinnerRetainsOriginalManagedIncumbent(t *testing.T) {

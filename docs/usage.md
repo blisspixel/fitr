@@ -80,7 +80,10 @@ process listings could expose them. Auto-discovery never attaches credentials.
 
 `fitr run` executes generated Python inside bubblewrap on Linux when `bwrap`
 and `/usr/bin/prlimit` can run a probe with no network and no home directory.
-A missing sandbox records executable tasks as SKIP before a model call. macOS,
+The worker uses the interpreter that probe ran, `/usr/bin/python3` or else
+`/usr/bin/python`, not whatever `python` means on `PATH`. A missing
+interpreter stops the run before speed and memory are recorded. A missing
+sandbox records executable tasks as SKIP before a model call. macOS,
 Windows, and a refused user namespace stay SKIP. `--allow-unsafe-exec` is a
 separate unisolated path: it requires `python` on PATH, the process has the
 user's ordinary filesystem, environment, credential, and network access, and
@@ -542,9 +545,12 @@ truncated display text never becomes identity. fitr does not guess from a
 prefix or a row number.
 
 If a saved result cannot be decoded or trusted, inventory keeps every healthy
-row visible and prints an evidence warning. The damaged file never contributes
-to a `measured` state. `fitr top history` shows the file-level details needed
-to repair or remove it.
+row visible and prints that evidence line as a `warning`. The damaged file
+never contributes to a `measured` state. `fitr top history` shows the
+file-level details needed to repair or remove it. Suggest, runtime-start,
+and isolated-execution lines are a `tip`. The mixture-of-experts ordering
+fact is a `note`. The JSON `warnings` array keeps the sentences without
+those display labels.
 
 A named `fitr advise` prints a context-fit table at 2k / 4k / 8k / 16k / 32k
 and the architecture max: weights, KV, other allocation where its evidence is
@@ -776,7 +782,9 @@ Native acceptance for an oversized-prompt refusal still needs a real runtime.
 This is not [the context experiment](#context-experiment). That command maps
 capacity and performance across requested windows and cannot certify a winner.
 The document pack asks whether a model uses a long prompt correctly at one
-fixed window.
+fixed window. A passing tier is a byte result. It does not certify a
+usable-input token target. That receipt is separate and has no recorded
+native run.
 
 The owning document is [context quality](context-quality.md).
 

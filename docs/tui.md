@@ -181,9 +181,10 @@ The interface uses dense facts and sparse chrome. Pane titles are lowercase;
 table columns and verdict tokens remain uppercase. Exact values accompany
 every relative bar. Cyan identifies structure, focus, active sorting, and
 actions. Green means established, red means disproven, yellow means blocked or
-warning, and inconclusive evidence remains neutral and dim. Selection also
-has a text marker and full-row terminal treatment, so color never carries the
-state by itself.
+warning, and inconclusive evidence remains neutral and dim. Live, result,
+and inventory notices use the same four words as the CLI: `tip`, `note`,
+`warning`, and `error`. Selection also has a text marker and full-row
+terminal treatment, so color never carries the state by itself.
 
 The compact scorecard tag `[INCL]` is only a width-safe rendering of the stored
 `INCONCLUSIVE` verdict. Detail, JSON, and evidence records retain the complete

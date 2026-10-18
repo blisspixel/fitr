@@ -61,11 +61,59 @@ func TestManifestBytesSumsLayersAndRefusesAPartialDocument(t *testing.T) {
 	}
 }
 
-func TestOrderPrefersCatalogMoEOnCPU(t *testing.T) {
-	items := Shortlist()
-	ordered := Order(items, true)
-	if ordered[0].Name != "mixtral:8x7b" {
-		t.Fatalf("first CPU candidate = %s", ordered[0].Name)
+func TestPartitionPutsFittingWeightsAheadOfOverBudgetMoE(t *testing.T) {
+	items := []Candidate{
+		{Name: "qwen2.5-coder:7b", Use: "coding"},
+		{Name: "mixtral:8x7b", Use: "agent", CatalogMoE: true},
+		{Name: "small-moe", Use: "coding", CatalogMoE: true},
+		{Name: "unmeasured", Use: "general"},
+	}
+	const gib = int64(1024 * 1024 * 1024)
+	bytes := []int64{5 * gib, 25 * gib, 4 * gib, 0}
+	groups := Partition(items, bytes, 15.6, true)
+	if len(groups) != 3 || groups[0].Class != WeightFits || groups[1].Class != WeightOverBudget ||
+		groups[2].Class != WeightUnmeasured {
+		t.Fatalf("groups = %+v", groups)
+	}
+	if groups[0].Items[0].Name != "small-moe" || groups[0].Items[1].Name != "qwen2.5-coder:7b" {
+		t.Fatalf("fitting order = %+v", groups[0].Items)
+	}
+	if len(groups[1].Items) != 1 || groups[1].Items[0].Name != "mixtral:8x7b" {
+		t.Fatalf("over-budget = %+v", groups[1].Items)
+	}
+	if len(groups[2].Items) != 1 || groups[2].Items[0].Name != "unmeasured" {
+		t.Fatalf("unmeasured = %+v", groups[2].Items)
+	}
+
+	short := Shortlist()
+	shortBytes := make([]int64, len(short))
+	for i, item := range short {
+		switch item.Name {
+		case "mixtral:8x7b":
+			shortBytes[i] = 25 * gib
+		case "qwen2.5-coder:32b":
+			shortBytes[i] = 20 * gib
+		default:
+			shortBytes[i] = 2 * gib
+		}
+	}
+	got := Partition(short, shortBytes, 15.6, true)
+	if len(got) == 0 || len(got[0].Items) == 0 || got[0].Items[0].Name == "mixtral:8x7b" || got[0].Class != WeightFits {
+		t.Fatalf("15.6 GiB CPU shortlist led with an over-budget MoE: %+v", got)
+	}
+	for _, item := range got[0].Items {
+		if item.Name == "mixtral:8x7b" {
+			t.Fatal("mixtral:8x7b was classified as fitting a 15.6 GiB budget")
+		}
+	}
+
+	dense := Partition(items, bytes, 15.6, false)
+	if dense[0].Items[0].Name != "qwen2.5-coder:7b" {
+		t.Fatalf("a discrete GPU reordered the fitting group: %+v", dense[0].Items)
+	}
+	unknown := Partition(items, bytes, 0, true)
+	if len(unknown) != 1 || unknown[0].Class != WeightUnmeasured || unknown[0].Items[0].Name != "qwen2.5-coder:7b" {
+		t.Fatalf("an unknown budget was classified: %+v", unknown)
 	}
 	if !PreferMoE("AMD Radeon Graphics", "", "unified memory") {
 		t.Fatal("an APU was not treated as a MoE-preference machine")

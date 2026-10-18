@@ -527,6 +527,9 @@ type Report struct {
 	// ContextTasks is absent for every run that planned no context phase, which
 	// is every run written before the phase existed.
 	ContextTasks *ContextTasks `json:"context_tasks,omitempty"`
+	// TokenAccount is absent unless a usable-input token receipt was attached.
+	// A document-pack phase does not fill it.
+	TokenAccount *TokenAccount `json:"token_account,omitempty"`
 	Gaps         []EvidenceGap `json:"gaps,omitempty"`
 	Diagnoses    []Diagnosis   `json:"diagnoses,omitempty"`
 	NextActions  []Action      `json:"next_actions"`

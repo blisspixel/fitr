@@ -498,6 +498,13 @@ type Measured struct {
 	CodePlanned                bool
 	CodeKnown                  bool
 	CodeFlaky                  bool
+	// CodeAttempted is true when at least one scheduled coding trial left
+	// SKIP. CodeExtractionMiss is true when every attempted trial was
+	// inconclusive because no code was extracted. Neither is a pass or a
+	// fail. An extraction miss must not be described as a missing sandbox,
+	// and a trial that never started must not be described as a bad answer.
+	CodeAttempted      bool
+	CodeExtractionMiss bool
 
 	// Pools of binary check-task trials, one per need they feed. Repeats of one
 	// family are fresh generated instances, not independent evidence; families
@@ -527,11 +534,14 @@ type Measured struct {
 
 	AgenticPlanned          bool
 	AgenticRan, AgenticPass bool
-	AgenticMalformed        int
-	AgenticTurns            int
-	AgenticCtxCeiling       bool
-	AgenticMaxPrompt        int
-	AgenticCompacted        bool
+	// AgenticAttempted is true when the long-horizon task left SKIP. A loop
+	// that ran and still has no measured outcome is not a missing sandbox.
+	AgenticAttempted  bool
+	AgenticMalformed  int
+	AgenticTurns      int
+	AgenticCtxCeiling bool
+	AgenticMaxPrompt  int
+	AgenticCompacted  bool
 
 	// Tool withdrawal: restraint under change. DeadCalls counts calls to a
 	// tool after it vanished from the tools list; one grace call is tolerated
@@ -566,6 +576,19 @@ type Scorecard struct {
 }
 
 func Score(m Measured, p device.Profile) Scorecard {
+	return score(m, p, scoreSemantics{
+		requireTTFTResidency:     true,
+		recordCapabilities:       true,
+		exactNeedClaims:          true,
+		distinguishIsolationSkip: true,
+	})
+}
+
+// ScoreLegacyV6 reconstructs policy v6 scorecards. That policy described
+// every planned coding or agent task without a measured outcome, and every
+// unproven use line, as a missing isolated worker. An extraction miss and a
+// sandbox that never started shared one sentence.
+func ScoreLegacyV6(m Measured, p device.Profile) Scorecard {
 	return score(m, p, scoreSemantics{
 		requireTTFTResidency: true,
 		recordCapabilities:   true,
@@ -611,6 +634,10 @@ type scoreSemantics struct {
 	unsupportedTruncationRate bool
 	recordCapabilities        bool
 	exactNeedClaims           bool
+	// distinguishIsolationSkip separates a worker that never started from a
+	// trial that ran and produced no measured outcome. Policy v6 and earlier
+	// leave it false.
+	distinguishIsolationSkip bool
 }
 
 func score(m Measured, p device.Profile, semantics scoreSemantics) Scorecard {
@@ -618,7 +645,7 @@ func score(m Measured, p device.Profile, semantics scoreSemantics) Scorecard {
 	n["fast_and_decent"] = scoreFastAndDecent(m, p,
 		semantics.includeAuxiliaryTTFT, semantics.requireTTFTResidency)
 
-	n["coding"] = scoreCoding(m)
+	n["coding"] = scoreCoding(m, semantics.distinguishIsolationSkip)
 
 	// --- structured output. It is a high-value damage probe because it can
 	// fail while ordinary prose remains superficially plausible.
@@ -648,7 +675,7 @@ func score(m Measured, p device.Profile, semantics scoreSemantics) Scorecard {
 	// side-loaded GGUF, a newline baked into a Jinja terminator -- and several
 	// reproduce byte-identically at temperature 0. The claim did not need a
 	// number to be true, and the number was not one we could stand behind.
-	n["unattended_agentic"] = scoreUnattendedAgentic(m, p)
+	n["unattended_agentic"] = scoreUnattendedAgentic(m, p, semantics.distinguishIsolationSkip)
 
 	// --- tool restraint: needs no ground truth, and it is the most common
 	// local-model tool failure. Two halves: restraint at REST (no calls on an
@@ -667,7 +694,7 @@ func score(m Measured, p device.Profile, semantics scoreSemantics) Scorecard {
 	if semantics.recordCapabilities {
 		sc.Capabilities = capabilityEvidence(m)
 	}
-	sc.UseFor = useFor(m, n, sc.Serves, semantics.exactNeedClaims)
+	sc.UseFor = useFor(m, n, sc.Serves, semantics.exactNeedClaims, semantics.distinguishIsolationSkip)
 	return ExcludeContamination(sc, m.Contamination)
 }
 
@@ -744,22 +771,9 @@ func scoreTTFTState(m Measured, ttftMax float64, decodeOK, requireResidency bool
 // scoreCoding keeps executable evidence separate from generated reasoning.
 // The latter has clustered families and cannot manufacture precision for the
 // executable write/fix contract.
-func scoreCoding(m Measured) Verdict {
+func scoreCoding(m Measured, distinguishSkip bool) Verdict {
 	if !m.CodeKnown {
-		v := skipped("executable coding not measured")
-		if m.CodePlanned {
-			v = skipped("scheduled coding task was skipped; isolated execution is unavailable")
-		}
-		if m.Reasoning.N == 0 {
-			return v
-		}
-		wi := stats.ClusteredWilson(m.Reasoning.clusters())
-		note := fmt.Sprintf("reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
-			m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi)
-		if m.CodePlanned {
-			note = joinNote("scheduled coding task was skipped because isolated execution is unavailable", note)
-		}
-		return newVerdict(Skip, "not measured", "", nil, note)
+		return scoreUnmeasuredCoding(m, distinguishSkip)
 	}
 
 	measure := "write+fix"
@@ -777,6 +791,53 @@ func scoreCoding(m Measured) Verdict {
 		note = "FLAKY - the same task passed on some repeats and failed on others"
 	}
 	return newVerdict(state(m.CodeWritePass && m.CodeFixPass), measure, "", detail, note)
+}
+
+func scoreUnmeasuredCoding(m Measured, distinguishSkip bool) Verdict {
+	if m.Reasoning.N == 0 {
+		return skipped(codingAbsenceNote(m, distinguishSkip, false))
+	}
+	wi := stats.ClusteredWilson(m.Reasoning.clusters())
+	note := fmt.Sprintf("reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
+		m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi)
+	if prefix := codingAbsenceNote(m, distinguishSkip, true); prefix != "" {
+		note = joinNote(prefix, note)
+	}
+	return newVerdict(Skip, "not measured", "", nil, note)
+}
+
+// codingAbsenceNote is the clause for a coding row that has no measured
+// pass or fail. withReasoning selects the form that joins in front of an
+// observed reasoning pool. An empty return means that pool stands alone.
+func codingAbsenceNote(m Measured, distinguishSkip, withReasoning bool) string {
+	if !distinguishSkip {
+		if !m.CodePlanned {
+			if withReasoning {
+				return ""
+			}
+			return "executable coding not measured"
+		}
+		if withReasoning {
+			return "scheduled coding task was skipped because isolated execution is unavailable"
+		}
+		return "scheduled coding task was skipped; isolated execution is unavailable"
+	}
+	switch {
+	case m.CodeExtractionMiss:
+		return "no executable code was extracted"
+	case m.CodePlanned && !m.CodeAttempted:
+		if withReasoning {
+			return "scheduled coding task was skipped because isolated execution is unavailable"
+		}
+		return "scheduled coding task was skipped; isolated execution is unavailable"
+	case m.CodePlanned:
+		return "scheduled coding trials did not produce a measured outcome"
+	default:
+		if withReasoning {
+			return ""
+		}
+		return "executable coding not measured"
+	}
 }
 
 func scoreToolCalling(m Measured, p device.Profile) Verdict {
@@ -831,13 +892,15 @@ func scoreUncensored(m Measured, p device.Profile) Verdict {
 		fmt.Sprintf("need <=%.0f", maxRef), nil, "")
 }
 
-func scoreUnattendedAgentic(m Measured, p device.Profile) Verdict {
+func scoreUnattendedAgentic(m Measured, p device.Profile, distinguishSkip bool) Verdict {
 	switch {
 	case m.PlumbingRan && !m.PlumbingHealthy:
 		return blocked("tool plumbing failed before capability could be judged: " +
 			m.PlumbingVerdict + " -- fix template/parser, then re-run")
-	case !m.AgenticRan && m.AgenticPlanned:
+	case !m.AgenticRan && m.AgenticPlanned && (!distinguishSkip || !m.AgenticAttempted):
 		return skipped("scheduled long-horizon task was skipped; isolated execution is unavailable")
+	case !m.AgenticRan && m.AgenticPlanned:
+		return skipped("scheduled long-horizon task did not produce a measured outcome")
 	case !m.AgenticRan && m.ToolsRan:
 		return skipped(fmt.Sprintf(
 			"only the 4-call proxy ran (tools=%v); use --full for the long-horizon verdict", m.ToolsPass))
@@ -1229,7 +1292,7 @@ func outputHealth(m Measured, p device.Profile, unsupportedTruncationRate bool) 
 
 // useFor never prints a bare dismissal. If nothing passed it says how much went
 // unmeasured, because that is the honest statement.
-func useFor(m Measured, n map[string]Verdict, serves []string, exactClaims bool) string {
+func useFor(m Measured, n map[string]Verdict, serves []string, exactClaims, distinguishSkip bool) string {
 	if !exactClaims && hasCap(m.Capabilities, "embedding") {
 		return "embeddings / local search"
 	}
@@ -1252,7 +1315,7 @@ func useFor(m Measured, n map[string]Verdict, serves []string, exactClaims bool)
 		bits = append(bits, "vision one-shot")
 	}
 	if len(bits) == 0 {
-		return noPassedUseClaim(n)
+		return noPassedUseClaim(n, distinguishSkip)
 	}
 	if has["low_footprint"] {
 		bits = append(bits, useClaim(exactClaims, "(resident-memory gate at 32K)", "(small footprint)"))
@@ -1287,16 +1350,27 @@ func useClaim(exact bool, exactText, legacyText string) string {
 	return legacyText
 }
 
-func noPassedUseClaim(needs map[string]Verdict) string {
+func noPassedUseClaim(needs map[string]Verdict, distinguishSkip bool) string {
 	unproven := 0
+	workerMissing := false
 	for _, verdict := range needs {
 		if s := verdict.State; s == Skip || s == NA || s == Blocked || s == Inconclusive {
 			unproven++
 		}
+		if strings.Contains(verdict.Note, "isolated execution is unavailable") ||
+			strings.Contains(verdict.Why, "isolated execution is unavailable") {
+			workerMissing = true
+		}
 	}
 	if unproven > 0 {
-		return fmt.Sprintf("no need passed yet, but %d were unmeasured/blocked "+
-			"- this is not a verdict; coding stays unproven until an isolated worker exists", unproven)
+		text := fmt.Sprintf("no need passed yet, but %d were unmeasured/blocked - this is not a verdict", unproven)
+		// Policy v6 appended the worker clause for every unproven card.
+		// A later policy appends it only when a row actually says the worker
+		// was unavailable, so an extraction miss is not that claim.
+		if !distinguishSkip || workerMissing {
+			text += "; coding stays unproven until an isolated worker exists"
+		}
+		return text
 	}
 	return "none of the measured needs on this device"
 }

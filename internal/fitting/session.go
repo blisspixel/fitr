@@ -131,6 +131,40 @@ func (session Session) Validate() error {
 		}
 		seen[point.Model] = true
 	}
+	return session.validateResumeObservations()
+}
+
+func (session Session) validateResumeObservations() error {
+	if err := optionalDigest(session.InspectedExecutableSHA256); err != nil {
+		return err
+	}
+	if err := optionalDigest(session.InspectedLibrariesSHA256); err != nil {
+		return err
+	}
+	if strings.ContainsAny(session.RuntimeExecutable, "\r\n") || strings.ContainsAny(session.ModelStore, "\r\n") || strings.ContainsAny(session.InspectedRuntimeVersion, "\r\n") {
+		return errors.New("fitting resume observations cannot contain a newline")
+	}
+	for _, name := range session.InventoryNames {
+		if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\r\n") {
+			return errors.New("fitting inventory names must be non-empty")
+		}
+	}
+	return nil
+}
+
+func optionalDigest(value string) error {
+	if value == "" {
+		return nil
+	}
+	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
+		return errors.New("fitting resume digest is not a sha256")
+	}
+	rest := value[len("sha256:"):]
+	for _, c := range rest {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return errors.New("fitting resume digest is not a sha256")
+		}
+	}
 	return nil
 }
 
@@ -178,6 +212,17 @@ func (store Store) path(id string, create bool) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// RuntimeSpecPath is the session-owned runtime file beside the session.
+// It is created only for this fitting. It is not an unrelated runtime file
+// the operator already had.
+func (store Store) RuntimeSpecPath(id string) (string, error) {
+	sessionPath, err := store.path(id, false)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(sessionPath, ".json") + ".runtime.json", nil
 }
 
 func writeSession(path string, session Session) error {

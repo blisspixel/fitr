@@ -95,8 +95,8 @@ func TestCanvasPreservesLayoutSpacesBetweenSanitizedSpans(t *testing.T) {
 
 func TestCanvasMarksSemanticHorizontalTruncation(t *testing.T) {
 	canvas := NewCanvas(14, 1)
-	canvas.SetLine(0, Span{Text: "warning    ", Role: RoleWarning}, Span{Text: "important detail", Role: RoleDefault})
-	if got := canvas.Plain(); got != "warning    ..." {
+	canvas.SetLine(0, Span{Text: "column     ", Role: RoleWarning}, Span{Text: "important detail", Role: RoleDefault})
+	if got := canvas.Plain(); got != "column     ..." {
 		t.Fatalf("clipped line = %q", got)
 	}
 }

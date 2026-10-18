@@ -122,7 +122,11 @@ Preference weights apply only after every floor passes. Compaction and restart
 must preserve decisions, constraints, and completed effects under external
 verification. The [personal fitting design](docs/personal-fitting.md) separates
 that measurement from today's runtime-window requirement. `fitr tailor` is a
-front door over the current auto and run paths. It seals one plan and does
+front door over the current auto and run paths. With no subcommand it asks
+for what the machine cannot observe and starts inference only after the
+sealed plan is approved. A pipe or `--display json` does not read stdin.
+Owned launch outside Windows is refused before a session is prepared.
+It seals one plan and does
 not close the live checks in rows 7 and 8. Endpoint recommendation projection
 still leaves measured facts unresolved. The
 [context task foundation](docs/context-quality.md) already supplies the document pack, the verifier, the sealed phase, and `fitr run --context-tiers`.
@@ -168,7 +172,10 @@ invoked, spending-capped, and outside the local FIT and PERFORMANCE trust
 boundary. Normal use, offline tests, CI, and releases never depend on it.
 
 - [ ] Extend the document scorecard with opt-in, token-accounted long-context
-      qualification. The current 2--64 KiB byte tiers and fixed 128-token output
+      qualification. The versioned receipt `fitr.context-token-account.v1` is
+      in code and refuses to read a 64 KiB pack, or the label 64K, as 64000
+      usable-input tokens. No native target has been recorded, so this row
+      stays open. The current 2--64 KiB byte tiers and fixed 128-token output
       reserve do not establish usable context near a large operating window.
       Seal the exact artifact, quant, runtime build, endpoint and applicable
       tokenizer or native accounting source; include system/tool overhead and

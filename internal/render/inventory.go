@@ -160,13 +160,7 @@ func writeInventoryHeader(w io.Writer, inv Inventory, width int, p palette, g gl
 		fmt.Fprintf(w, "  profile   %s\n", p.wrap(style, fit(label, width-invHeaderLabel, g.Ell)))
 	}
 	for _, warning := range inv.Warnings {
-		for i, l := range wrap(SingleLine(warning), width-invHeaderLabel) {
-			lead := pad("  warning", invHeaderLabel, "")
-			if i > 0 {
-				lead = strings.Repeat(" ", invHeaderLabel)
-			}
-			fmt.Fprintf(w, "%s%s\n", lead, p.wrap(p.Warn, l))
-		}
+		writeColoredNotice(w, p, ClassifyInventoryNotice(warning), warning, width)
 	}
 }
 

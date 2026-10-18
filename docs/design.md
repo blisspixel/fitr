@@ -250,13 +250,17 @@ bytes and derives only the non-accelerator remainder. On unified-memory systems
 that arithmetic does not identify exclusive pools, spill, layer placement, or
 host traffic.
 
-New results use `fitr.scoring.policy.v6`. Policy v4 keeps auxiliary latency
+New results use `fitr.scoring.policy.v7`. Policy v4 keeps auxiliary latency
 states out of behavior-verdict prose; v5 additionally requires the gated
 request's own residency receipt before a loaded-TTFT gate can clear. Sealed
-schema-6 results written with policies v3 through v5 are reconstructed with
+schema-6 results written with policies v3 through v6 are reconstructed with
 their original scorers and remain valid. Policy v6 separates declared
 capability availability from behavioral PASS and replaces broad need labels
-with the exact evidence each row establishes. The policy hashes are different,
+with the exact evidence each row establishes. Policy v6 also describes every
+planned coding or agent task without a measured outcome as a missing isolated
+worker. Policy v7 keeps that sentence for a trial that never started, and
+uses a different sentence when the trial ran and extracted no code or
+otherwise produced no measured outcome. The policy hashes are different,
 so Board does not compare across those presentation-contract changes.
 
 - **Small, heterogeneous battery.** The default battery has 22 generated task
@@ -358,7 +362,8 @@ device and tested context only from those observations; phase, point count and
 loopback locality establish neither, and a missing or changed record stays
 unresolved. Owned auto evidence retains its own sealed exploration and fresh
 confirmation seeds. Workload presets cannot establish executable coding or
-populated token-accounted context from the short battery. See
+populated token-accounted context from the short battery. A 64 KiB
+document pack cannot certify 64000 usable-input tokens. See
 [personal fitting](personal-fitting.md) for the current interface and limits.
 
 New failed-check diagnoses store prompt and canonical-answer hashes, a verifier

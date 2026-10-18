@@ -116,16 +116,21 @@ func (plan Plan) Lines(phase string) []string {
 	}
 	lines := []string{
 		"fitting " + plan.ID + " phase " + phase,
-		"build " + plan.BuildVersion,
-		"role " + plan.RoleName + " scope " + plan.Scope,
-		"candidates " + strings.Join(plan.Candidates, ", "),
-		"comparison " + comparison,
+	}
+	// The refusal is the decision. Policy prose comes after it, or the
+	// reason sits about fifty lines down and the next command is easy to miss.
+	lines = append(lines, plan.blockedFollow()...)
+	lines = append(lines,
+		"build "+plan.BuildVersion,
+		"role "+plan.RoleName+" scope "+plan.Scope,
+		"candidates "+strings.Join(plan.Candidates, ", "),
+		"comparison "+comparison,
 		fmt.Sprintf("context %d tokens. The requested window is not demonstrated until a run verifies it. Advertised model limits and byte-sized document tiers are separate.", plan.ContextTokens),
 		kvClaim(plan),
-		"capacity " + string(plan.CapacityKind) + " " + FormatGiB(plan.CapacityBytes) + " (" + policy + ")",
-		"role resident limit " + FormatGiB(plan.ResidentLimitBytes),
-		"endpoint " + plan.Endpoint + " source " + plan.EndpointSource + " locality " + plan.Locality,
-		"repeats " + repeats + " seed " + plan.SeedSet,
+		"capacity "+string(plan.CapacityKind)+" "+FormatGiB(plan.CapacityBytes)+" ("+policy+")",
+		"role resident limit "+FormatGiB(plan.ResidentLimitBytes),
+		"endpoint "+plan.Endpoint+" source "+plan.EndpointSource+" locality "+plan.Locality,
+		"repeats "+repeats+" seed "+plan.SeedSet,
 		"schedule full execution-disabled battery. Requested output caps are admission allowance, not tokens generated and not percent complete.",
 		"ordinary saved results are not imported. A different seed, context, capacity policy, or endpoint is not paired evidence.",
 		"retention model responses are not kept. Failed checks can keep task, family, seed, parser, field, verifier, and hashes.",
@@ -133,7 +138,7 @@ func (plan Plan) Lines(phase string) []string {
 		"permitted actions: no install, no download, no paid call, no provider switch, no stop of an unrelated Ollama.",
 		"tool_args grades JSON written as text. Native tool calls are tool_call, tool_call_strict, and tool_fanout. A tool_args miss does not show that native tool support is broken.",
 		"executable coding and the bounded-agent fixture stay unscored while execution is disabled. Inconclusive rates, an uncalibrated profile, and unknown cache state stay visible. Faster decode does not repair a failed required behavior.",
-	}
+	)
 	return append(lines, plan.extraLines()...)
 }
 
@@ -161,10 +166,57 @@ func (plan Plan) extraLines() []string {
 		lines = append(lines, plan.ScreeningNote)
 	}
 	lines = append(lines, plan.uncertaintyLines()...)
-	if plan.Blocked {
-		lines = append(lines, "stopped before inference: "+plan.BlockReason)
-	}
 	return lines
+}
+
+// blockedFollow is empty unless the sealed plan refused inference. The next
+// command is a way to draft again or inspect this session. It is not a verdict.
+func (plan Plan) blockedFollow() []string {
+	if !plan.Blocked {
+		return nil
+	}
+	reason := plan.BlockReason
+	if reason == "" {
+		reason = "the sealed plan refused inference"
+	}
+	return []string{
+		"stopped before inference: " + reason,
+		"next: " + plan.blockedNext(),
+	}
+}
+
+func (plan Plan) blockedNext() string {
+	switch {
+	case strings.Contains(plan.BlockReason, "--scope screen"):
+		return plan.replan("--scope", "screen")
+	case strings.Contains(plan.BlockReason, "not lowered"):
+		return "raise the repeat count with --k, or leave this fitting unresolved. fitr tailor status " + plan.ID
+	case strings.Contains(plan.BlockReason, "two to four"):
+		return "omit --approve-owned-runtime and measure through the selected endpoint, or pass a second --candidate"
+	case strings.Contains(plan.BlockReason, "desired"):
+		return "pass --ctx at the desired context, or draft again with --scope screen. fitr tailor status " + plan.ID
+	default:
+		return "fitr tailor status " + plan.ID
+	}
+}
+
+func (plan Plan) replan(extra ...string) string {
+	parts := []string{"fitr tailor plan", "--role", plan.RoleName}
+	parts = append(parts, extra...)
+	for _, candidate := range plan.Candidates {
+		parts = append(parts, "--candidate", candidate)
+	}
+	parts = append(parts, "--ctx", strconv.Itoa(plan.ContextTokens), plan.capacityFlag())
+	return strings.Join(parts, " ")
+}
+
+func (plan Plan) capacityFlag() string {
+	amount := strings.TrimSuffix(FormatGiB(plan.CapacityBytes), " GiB")
+	if plan.CapacityKind == CapacityReserve {
+		resident := strings.TrimSuffix(FormatGiB(plan.ResidentLimitBytes), " GiB")
+		return "--capacity-reserve-gb " + amount + " --memory-gb " + resident
+	}
+	return "--capacity-budget-gb " + amount
 }
 
 // ResumeAction says what a later invocation may do. Measuring never mints a
@@ -234,7 +286,28 @@ func (session Session) StatusLines(sources ...ObservationSource) []string {
 	if session.ExecutableSHA256 != "" {
 		lines = append(lines, "executable "+session.ExecutableSHA256)
 	}
-	return append(lines, session.Recommendation(sources...).Lines...)
+	lines = append(lines, session.Recommendation(sources...).Lines...)
+	if !session.Plan.Blocked {
+		lines = append(lines, "next: "+session.nextAction())
+	}
+	return lines
+}
+
+// nextAction is one command. A blocked plan already named its command beside
+// the refusal, so this is only for a session that can still be resumed or read.
+func (session Session) nextAction() string {
+	action, err := session.ResumeAction()
+	if err != nil {
+		return "fitr tailor status " + session.Plan.ID
+	}
+	switch action {
+	case "measure":
+		return "fitr tailor resume " + session.Plan.ID
+	case "auto":
+		return "fitr auto status " + session.AutoSessionID
+	default:
+		return "fitr tailor status " + session.Plan.ID
+	}
 }
 
 func remainingDecision(action string) string {

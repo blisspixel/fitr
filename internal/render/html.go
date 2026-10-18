@@ -150,6 +150,15 @@ type htmlContextTier struct {
 	Detail  string
 }
 
+// htmlTokenAccount mirrors the terminal token receipt. The sentences are the
+// analysis projection, so the export cannot describe the receipt differently
+// or turn a byte prefix into a usable-input target.
+type htmlTokenAccount struct {
+	Rows         []htmlKV
+	Reason, Free string
+	Next         string
+}
+
 type htmlData struct {
 	CSS                 template.CSS
 	Title               string
@@ -185,6 +194,7 @@ type htmlData struct {
 	CapacityFacts       []htmlKV
 	Claims              []string
 	ContextTasks        *htmlContextTasks
+	TokenAccount        *htmlTokenAccount
 	Accelerator         string
 	NonAccelerator      string
 	PlacementNote       string
@@ -319,6 +329,16 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 {{if .Descriptive}}<p class="warn">Descriptive only: this record cannot claim a verified prefix for the current artifact.</p>{{end}}
 {{end}}
 
+{{with .TokenAccount}}
+<h2>Token account</h2>
+<table>
+{{range .Rows}}<tr><th class="k">{{.K}}</th><td>{{.V}}</td></tr>{{end}}
+</table>
+<p class="sub">{{.Reason}}</p>
+<p class="sub">{{.Free}}</p>
+<p class="sub">{{.Next}}</p>
+{{end}}
+
 {{if .RepeatsWarn}}
 <p class="warn">Single-sample run - one trial cannot establish a stable rate; re-run with -k 3 before comparing a close result.</p>
 {{end}}
@@ -392,6 +412,7 @@ func htmlDataFrom(a Artifact) htmlData {
 		}
 		d.CapacityFacts = htmlCapacityFacts(a.Meta.Analysis.Capacity)
 		d.ContextTasks = htmlContextTasksFrom(a.Meta.Analysis.ContextTasks)
+		d.TokenAccount = htmlTokenAccountFrom(a.Meta.Analysis.TokenAccount)
 	}
 	d.Claims = append([]string(nil), a.Claims...)
 	d.Decode, d.Prefill, d.TTFT = htmlPerformance(a.Meta, g)
