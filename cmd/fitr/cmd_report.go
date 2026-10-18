@@ -351,8 +351,8 @@ func buildBoard(groups map[string][]*Result, order []string, curDevice device.Fi
 			continue
 		}
 		group := makeBoardGroup(rows, curDevice)
-		sort.Slice(rows, func(i, j int) bool {
-			return rows[i].DecodeSum.Mean > rows[j].DecodeSum.Mean
+		sort.SliceStable(rows, func(i, j int) bool {
+			return boardRowLess(rows[i], rows[j])
 		})
 		visible[key] = rows
 		for _, result := range rows {
@@ -386,6 +386,18 @@ func claimableBoardRows(rows []*Result, excluded *boardExclusions) []*Result {
 		clean = append(clean, result)
 	}
 	return clean
+}
+
+// boardRowLess keeps a block in label order. Decode tok/s would put the
+// faster model first, and a count of passed gates would be a composite
+// score. The block lists configurations. It does not rank them.
+func boardRowLess(left, right *Result) bool {
+	leftName := strings.ToLower(left.Model)
+	rightName := strings.ToLower(right.Model)
+	if leftName != rightName {
+		return leftName < rightName
+	}
+	return left.StartedAt < right.StartedAt
 }
 
 func makeBoardGroup(rows []*Result, curDevice device.Fingerprint) render.BoardGroup {

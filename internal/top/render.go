@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/analysis"
+	"github.com/blisspixel/fitr/internal/score"
 )
 
 // Render converts state into a clipped, renderer-neutral canvas.
@@ -109,7 +110,11 @@ func renderTinyResult(canvas *Canvas, state State) {
 		canvas.SetLine(1, Span{Text: "no saved result", Role: RoleMuted})
 		return
 	}
-	canvas.SetLine(1, Span{Text: run.Model + fmt.Sprintf(" | %.2f tok/s", run.DecodeMean), Role: RoleDefault})
+	detail := fmt.Sprintf("%.2f tok/s", run.DecodeMean)
+	if !behavioralMeasured(run.Verdicts) {
+		detail = score.QualityUnmeasuredLead
+	}
+	canvas.SetLine(1, Span{Text: run.Model + " | " + detail, Role: RoleDefault})
 }
 
 func renderHeader(canvas *Canvas, state State, glyphs Glyphs) {
@@ -304,6 +309,7 @@ func renderCompactVerdicts(w *lineWriter, run Run) {
 	if len(run.Verdicts) == 0 {
 		return
 	}
+	renderQualityGap(w, run, 80)
 	w.line(Span{Text: "verdicts", Role: RoleHeader})
 	order := []string{"PASS", "FAIL", "INCONCLUSIVE", "BLKD", "SKIP", "N/A"}
 	counts := make(map[string]int, len(order))

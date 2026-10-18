@@ -607,6 +607,9 @@ func resultRunLine(m Meta, g glyphs) string {
 }
 
 func (d *textDisplay) resultVerdicts(w io.Writer, sc score.Scorecard, width int) {
+	if !score.QualityMeasured(sc.Needs) {
+		d.footer(w, score.QualityUnmeasuredNote, width, 0, 2, d.pal.Warn)
+	}
 	for _, k := range score.SortedNeeds(sc.Needs) {
 		v, ok := sc.Needs[k]
 		if !ok {
@@ -1077,8 +1080,9 @@ func (d *jsonDisplay) Result(sc score.Scorecard, m Meta) {
 	payload := map[string]any{
 		"event": "result", "model": sc.Model, "profile": sc.Profile,
 		"use_for": useFor, "serves": sc.Serves, "needs": states,
-		"verdicts": analysis.PresentVerdicts(sc.Needs),
-		"passes":   sc.Passes, "fails": sc.Fails, "unproven": sc.Unproven,
+		"verdicts":         analysis.PresentVerdicts(sc.Needs),
+		"quality_measured": score.QualityMeasured(sc.Needs),
+		"passes":           sc.Passes, "fails": sc.Fails, "unproven": sc.Unproven,
 		"repeats": m.Repeats, "num_ctx": m.NumCtx, "saved": m.SavedPath,
 	}
 	if m.ContextState != "" {

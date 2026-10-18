@@ -297,17 +297,17 @@ func TestPresentationTypesHaveExplicitSnakeCaseJSONTags(t *testing.T) {
 
 func TestBoardAndHistoryKeepIndependentSorts(t *testing.T) {
 	state := NewState(testSnapshot())
-	if state.BoardSort != SortDecode || state.HistorySort != SortRecent {
+	if state.BoardSort != SortRecent || state.HistorySort != SortRecent {
 		t.Fatalf("defaults board=%s history=%s", state.BoardSort, state.HistorySort)
 	}
 	state.View = ViewHistory
 	state, _ = apply(t, state, InputEvent{Action: ActionSort})
-	if state.HistorySort != SortModel || state.BoardSort != SortDecode {
+	if state.HistorySort != SortModel || state.BoardSort != SortRecent {
 		t.Fatalf("after History sort board=%s history=%s", state.BoardSort, state.HistorySort)
 	}
 	state.View = ViewBoard
 	state, _ = apply(t, state, InputEvent{Action: ActionSort})
-	if state.BoardSort != SortPrefill || state.HistorySort != SortModel {
+	if state.BoardSort != SortModel || state.HistorySort != SortModel {
 		t.Fatalf("after Board sort board=%s history=%s", state.BoardSort, state.HistorySort)
 	}
 }

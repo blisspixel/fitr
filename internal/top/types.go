@@ -329,7 +329,7 @@ func NewState(snapshot Snapshot) State {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	s := State{View: ViewLive, Snapshot: cloneSnapshot(snapshot), BoardSort: SortDecode, HistorySort: SortRecent,
+	s := State{View: ViewLive, Snapshot: cloneSnapshot(snapshot), BoardSort: SortRecent, HistorySort: SortRecent,
 		Width: 80, Height: 24, Now: now, Revision: 1}
 	normalizeSelection(&s)
 	return s

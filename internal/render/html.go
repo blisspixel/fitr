@@ -182,6 +182,7 @@ type htmlData struct {
 	Config              []htmlKV
 	Needs               []htmlNeed
 	Gaps                []htmlNeed
+	QualityNote         string
 	EvidenceGaps        []htmlKV
 	Diagnoses           []htmlKV
 	Artifact            string
@@ -246,6 +247,7 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 {{range .Config}}<tr><th class="k">{{.K}}</th><td>{{.V}}</td></tr>{{end}}
 </table>
 
+{{if .QualityNote}}<p class="warn">{{.QualityNote}}</p>{{end}}
 <h2>Needs</h2>
 <table>
 {{range .Needs}}
@@ -371,7 +373,7 @@ func htmlDataFrom(a Artifact) htmlData {
 		d.Wall = fmt.Sprintf("%.0fs", a.WallSeconds)
 	}
 	d.Config = htmlConfig(a.Device)
-	d.Needs, d.Gaps = htmlNeeds(a.Scorecard)
+	d.Needs, d.Gaps, d.QualityNote = htmlNeeds(a.Scorecard)
 	if a.Meta.Analysis != nil {
 		d.TTFTLabel = analysis.TTFTLabel(a.Meta.Analysis.Performance.TTFTSeconds)
 		for _, gap := range a.Meta.Analysis.Gaps {
@@ -662,7 +664,7 @@ func htmlConfig(fingerprint ShareDevice) []htmlKV {
 	return config
 }
 
-func htmlNeeds(card score.Scorecard) (needs, gaps []htmlNeed) {
+func htmlNeeds(card score.Scorecard) (needs, gaps []htmlNeed, note string) {
 	for _, k := range score.SortedNeeds(card.Needs) {
 		v, ok := card.Needs[k]
 		if !ok {
@@ -684,7 +686,10 @@ func htmlNeeds(card score.Scorecard) (needs, gaps []htmlNeed) {
 			needs = append(needs, row)
 		}
 	}
-	return needs, gaps
+	if !score.QualityMeasured(card.Needs) {
+		note = score.QualityUnmeasuredNote
+	}
+	return needs, gaps, note
 }
 
 func htmlPerformance(meta Meta, g glyphs) (decode, prefill, ttft string) {

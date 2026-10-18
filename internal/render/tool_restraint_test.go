@@ -48,7 +48,7 @@ func TestWithdrawalFailureLeadsEveryResultSurface(t *testing.T) {
 	if !strings.HasPrefix(why, "withdrawal;") || strings.Contains(why, "Not a fail") {
 		t.Errorf("deciding summary is misleading: %s", why)
 	}
-	needs, _ := htmlNeeds(card)
+	needs, _, _ := htmlNeeds(card)
 	if len(needs) != 1 || needs[0].State != "FAIL" || needs[0].Why != why {
 		t.Errorf("HTML disagrees: %+v", needs)
 	}
