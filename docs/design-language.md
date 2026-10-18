@@ -65,7 +65,10 @@ label. The run card's use-for line follows that palette: green when the line
 names accepted work, amber when it names a gap, and the default ink for
 calibration evidence. Cyan stays on the next command. The card printed at the
 end of a run has one next action. It collapses evidence limits to a count and
-points at `fitr view`. `fitr view`, HTML, and JSON keep every limit. The live
+points at `fitr view`. `fitr view`, HTML, and JSON keep every limit. The shareable HTML scorecard uses the same roles. It opens on the house
+dark palette and can switch to the house light palette or the system palette.
+Empty device cells say unknown. The mark takes the accent color.
+The live
 TUI adds a four-frame ASCII activity marker while a run is
 active. It indicates activity, not percentage complete or healthy output.
 Terminal states stop it, and pausing the viewport freezes it while measurement

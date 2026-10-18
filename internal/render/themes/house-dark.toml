@@ -1,0 +1,14 @@
+# House dark palette for the shareable scorecard.
+# Text roles are checked at 4.5:1 on bg and on surface.
+bg = "#0f1419"
+surface = "#161b22"
+text = "#e6edf3"
+muted = "#8b949e"
+accent = "#39c5cf"
+success = "#3fb950"
+warning = "#d29922"
+error = "#f85149"
+info = "#58a6ff"
+rule = "#30363d"
+print_bg = "#ffffff"
+print_text = "#111111"
