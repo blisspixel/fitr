@@ -1,9 +1,11 @@
 package experiment
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,8 +24,8 @@ func TestContextPlanIsFiniteFreshAndBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	contexts[0] = 1
-	if plan.RequestedContexts[0] != 4096 || !strings.HasPrefix(digest, "sha256:") ||
-		!strings.HasPrefix(plan.SeedSet, "context-") || plan.Level != "quick" {
+	if !sameContexts(plan.RequestedContexts, []int{4096, 8192, 16384}) || plan.Order != ContextOrderRandomized ||
+		!strings.HasPrefix(digest, "sha256:") || !strings.HasPrefix(plan.SeedSet, "context-") || plan.Level != "quick" {
 		t.Fatalf("sealed plan = %+v digest=%q", plan, digest)
 	}
 	derivedDigest, err := contextPlanDigest(plan)
@@ -38,6 +40,67 @@ func TestContextPlanIsFiniteFreshAndBound(t *testing.T) {
 	if binding.Schema != record.ExperimentBindingSchema || binding.Kind != "context" ||
 		binding.Stage != string(StageExplore) || binding.PointIndex != 2 || binding.PointCount != 3 {
 		t.Fatalf("context binding = %+v", binding)
+	}
+}
+
+func TestSeededPointOrderIsTheChaCha8Permutation(t *testing.T) {
+	declared := []int{4096, 8192, 16384}
+	// These draws are the ChaCha8 Fisher-Yates output for an all-equal seed
+	// byte. Seed 0 moves the last two windows. Seed 7 is the declaration and
+	// is kept; redrawing until the order moves would seal a different plan.
+	cases := []struct {
+		seed byte
+		want []int
+	}{
+		{0, []int{4096, 16384, 8192}},
+		{6, []int{8192, 16384, 4096}},
+		{7, []int{4096, 8192, 16384}},
+	}
+	for _, tc := range cases {
+		got, err := permuteContexts(declared, bytes.Repeat([]byte{tc.seed}, 16))
+		if err != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("seed %d order = %v, want %v, %v", tc.seed, got, tc.want, err)
+		}
+	}
+	declared[0] = 1
+	again, err := permuteContexts([]int{4096, 8192, 16384}, bytes.Repeat([]byte{0}, 16))
+	if err != nil || !reflect.DeepEqual(again, []int{4096, 16384, 8192}) {
+		t.Fatalf("input mutation changed the sealed order: %v, %v", again, err)
+	}
+	if _, err := permuteContexts(declared, []byte{1}); err == nil {
+		t.Fatal("a short seed sealed an order")
+	}
+}
+
+func sameContexts(got, want []int) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	seen := map[int]int{}
+	for _, value := range want {
+		seen[value]++
+	}
+	for _, value := range got {
+		seen[value]--
+		if seen[value] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func TestDeclaredContextOrderRemainsReadable(t *testing.T) {
+	plan := ContextPlan{
+		Schema: ContextPlanSchema, Model: "model", RequestedContexts: []int{4096, 8192},
+		PerformanceSamples: 1, MeasurePointAllocation: true, Level: "quick", Order: ContextOrderDeclared,
+		SeedSet: "context-" + "01010101010101010101010101010101",
+	}
+	if err := plan.validate(); err != nil {
+		t.Fatal(err)
+	}
+	plan.Order = "shuffled"
+	if err := plan.validate(); err == nil {
+		t.Fatal("an unsealed order word was accepted")
 	}
 }
 
@@ -179,8 +242,8 @@ func TestAnalyzePlannedContextRebuildsSealedBundle(t *testing.T) {
 	}
 	firstBinding := ContextPlanBinding(digest, 1, 2)
 	secondBinding := ContextPlanBinding(digest, 2, 2)
-	first := sealedContextRecord(t, 4096, &firstBinding, "2026-08-31T10:00:00Z", plan.SeedSet)
-	second := sealedContextRecord(t, 8192, &secondBinding, "2026-08-31T11:00:00Z", plan.SeedSet)
+	first := sealedContextRecord(t, plan.RequestedContexts[0], &firstBinding, "2026-08-31T10:00:00Z", plan.SeedSet)
+	second := sealedContextRecord(t, plan.RequestedContexts[1], &secondBinding, "2026-08-31T11:00:00Z", plan.SeedSet)
 	report, err := AnalyzePlannedContext([]*record.Record{first, second}, plan, digest)
 	if err != nil {
 		t.Fatal(err)
@@ -221,8 +284,8 @@ func TestAnalyzePlannedContextRejectsPointWithDifferentSeedSet(t *testing.T) {
 	}
 	firstBinding := ContextPlanBinding(digest, 1, 2)
 	secondBinding := ContextPlanBinding(digest, 2, 2)
-	first := sealedContextRecord(t, 4096, &firstBinding, "2026-08-31T10:00:00Z", plan.SeedSet)
-	second := sealedContextRecord(t, 8192, &secondBinding, "2026-08-31T11:00:00Z",
+	first := sealedContextRecord(t, plan.RequestedContexts[0], &firstBinding, "2026-08-31T10:00:00Z", plan.SeedSet)
+	second := sealedContextRecord(t, plan.RequestedContexts[1], &secondBinding, "2026-08-31T11:00:00Z",
 		"context-00000000000000000000000000000000")
 	if _, err := AnalyzePlannedContext([]*record.Record{first, second}, plan, digest); err == nil ||
 		!strings.Contains(err.Error(), "seed set") {
