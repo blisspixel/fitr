@@ -57,6 +57,16 @@ Panel {
     }
   }
 
+  // quattro Bar.qml exposes bar.urgent as Commons.Color.bar.active.
+  // Checked 2026-10-18 in omacom/omarchy shell/plugins/bar/Bar.qml.
+  // A missing property keeps the bar foreground. Bold plus the state word
+  // still mark the row when that colour is ignored.
+  function urgentColor() {
+    if (root.bar && root.bar.urgent !== undefined)
+      return root.bar.urgent
+    return root.barForeground
+  }
+
   function measurementReady() {
     var doc = root.hostWidget ? root.hostWidget.document : null
     return doc && doc.next && doc.next.effect === "explicit-local" && doc.next.local_proven === true
@@ -111,9 +121,10 @@ Panel {
             width: content.width
             wrapMode: Text.WordWrap
             text: String(modelData.label || "") + ": " + String(modelData.value || "") + " (" + String(modelData.state || "") + ")"
-            color: root.urgent(modelData.state) ? "#c45c26" : root.barForeground
+            color: root.urgent(modelData.state) ? root.urgentColor() : root.barForeground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.subtitle
+            font.bold: root.urgent(modelData.state)
           }
         }
 
@@ -126,9 +137,10 @@ Panel {
             wrapMode: Text.WordWrap
             text: "Unresolved " + String(modelData.id || "") + ": " + String(modelData.state || "")
               + (modelData.reason ? " " + String(modelData.reason) : "")
-            color: root.urgent(modelData.state) ? "#c45c26" : root.barForeground
+            color: root.urgent(modelData.state) ? root.urgentColor() : root.barForeground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.subtitle
+            font.bold: root.urgent(modelData.state)
           }
         }
 

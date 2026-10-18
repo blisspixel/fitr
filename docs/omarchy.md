@@ -37,8 +37,15 @@ is replaced with a fixed sentence.
 `fitr desktop status` exits 0 when it produced the document, including empty,
 stale, and unresolved states. Exit 2 is usage. A non-zero exit, or a payload
 that is not `fitr.desktop.status.v1`, is an unavailable or unsupported panel
-state. It is not a quality zero. A status process that stops without `exited`
-did not start. Quickshell emits `runningChanged` and does not emit `exited`
+state. It is not a quality zero. Urgent rows take `bar.urgent` when the host
+bar exposes it. That property is `Commons.Color.bar.active` on Omarchy
+quattro `shell/plugins/bar/Bar.qml`, read 2026-10-18. Otherwise the row keeps
+`barForeground`. The state word stays in the text and the row is bold, so the
+urgency does not depend on the colour. A light theme and a dark theme on a
+running bar have not been compared. That check stays with the open session
+acceptance.
+
+A status process that stops without `exited` did not start. Quickshell emits `runningChanged` and does not emit `exited`
 for `QProcess::FailedToStart`. Checked 2026-10-18 in quickshell-mirror
 `process.cpp` at `43d4fa9e883cb03239b3d578c9c57070f4fbd281`, and the same two
 signals were still the master behavior that day. The bar then says
