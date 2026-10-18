@@ -263,7 +263,8 @@ downloads worth investigating. Allocated bytes appear only when every accepted
 file reported a stat block count, summed once per inode. They are not space a
 deletion would free, and a listing without that count says unmeasured. The
 plan does not delete files or assume a large encoder, projector, shard or
-cache is unused. Links, incomplete scans and unresolved dependencies remain
+cache is unused. An aged partial beside a similarly named file is not a
+completed copy; file integrity stays unmeasured. Links, incomplete scans and unresolved dependencies remain
 explicit. See [cleanup planning](docs/cleanup.md).
 
 ## What ships today

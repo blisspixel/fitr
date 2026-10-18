@@ -105,9 +105,10 @@ Use `fitr cleanup plan <directory>` for a read-only storage review. Apparent
 bytes are not recoverable space. Allocated bytes are stat block counts summed
 once per inode, and only when every accepted file reported them; a null value
 is unmeasured, not zero, and is not space a deletion would free. Aged partial
-downloads are review candidates. Check dependency groups, completed-file
-integrity and active downloads before proposing deletion. The command never
-deletes files.
+downloads are review candidates. File integrity stays `unmeasured`, including
+when a similarly named file sits beside a partial. That is not a completed
+copy and not a deletion decision. Check dependency groups and active
+downloads before proposing deletion. The command never deletes files.
 
 Recommend the smallest experiment that resolves the user's decision. Follow
 the host's existing authorization and the user's budgets before downloads,
