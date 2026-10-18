@@ -76,6 +76,18 @@ func TestQMLStaysReadOnlyUntilAnExplicitBenchmark(t *testing.T) {
 	}
 }
 
+func TestStatusStartFailureSaysUnavailable(t *testing.T) {
+	bar := string(mustPayload(t, "BarWidget.qml"))
+	status := bar[strings.Index(bar, "id: statusProcess"):]
+	status = status[:strings.Index(status, "id: benchmarkProcess")]
+	if !strings.Contains(status, "onRunningChanged") || !strings.Contains(status, `failStatus("unavailable", "fitr desktop status did not start.")`) {
+		t.Fatal("a status process that never exits still falls through to ?")
+	}
+	if !strings.Contains(status, "statusExitSeen") {
+		t.Fatal("start failure would overwrite a finished status")
+	}
+}
+
 func TestInstallAndRemoveHonorTheMarker(t *testing.T) {
 	parent := t.TempDir()
 	if err := Install(parent, "0.11.2"); err != nil {

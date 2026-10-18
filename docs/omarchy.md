@@ -37,7 +37,13 @@ is replaced with a fixed sentence.
 `fitr desktop status` exits 0 when it produced the document, including empty,
 stale, and unresolved states. Exit 2 is usage. A non-zero exit, or a payload
 that is not `fitr.desktop.status.v1`, is an unavailable or unsupported panel
-state. It is not a quality zero.
+state. It is not a quality zero. A status process that stops without `exited`
+did not start. Quickshell emits `runningChanged` and does not emit `exited`
+for `QProcess::FailedToStart`. Checked 2026-10-18 in quickshell-mirror
+`process.cpp` at `43d4fa9e883cb03239b3d578c9c57070f4fbd281`, and the same two
+signals were still the master behavior that day. The bar then says
+`unavailable` instead of `?`. A live Omarchy bar has not shown this yet.
+That check stays with the open session acceptance.
 
 ## What the panel does not do
 
