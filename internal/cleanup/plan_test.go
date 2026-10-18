@@ -394,6 +394,33 @@ func allocatedText(value *int64) string {
 	return strconv.FormatInt(*value, 10)
 }
 
+func TestSiblingFileDoesNotMakeAnAgedPartialRedundant(t *testing.T) {
+	root := t.TempDir()
+	old := testNow.AddDate(0, 0, -8)
+	fixtureFile(t, root, "models/model.gguf", 100, old)
+	fixtureFile(t, root, "models/model.gguf.partial", 40, old)
+	plan, err := Scan(t.Context(), root, testOptions())
+	if err != nil || !plan.Complete || plan.ApparentBytes != 140 || plan.ReviewCandidateCount != 1 {
+		t.Fatalf("sibling inventory: %+v %v", plan, err)
+	}
+	if plan.CompletedFileIntegrity != IntegrityUnmeasured {
+		t.Fatalf("completed-file integrity = %q, want unmeasured", plan.CompletedFileIntegrity)
+	}
+	partial := plan.ReviewCandidates[0]
+	if partial.Path != "models/model.gguf.partial" || partial.State != "REVIEW" || partial.FileIntegrity != IntegrityUnmeasured {
+		t.Fatalf("aged partial became a completed copy: %+v", partial)
+	}
+	for _, entry := range plan.LargestFiles {
+		if entry.FileIntegrity != IntegrityUnmeasured || entry.State == "REDUNDANT" {
+			t.Fatalf("file integrity was inferred: %+v", entry)
+		}
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil || strings.Contains(string(raw), `"redundant"`) || !strings.Contains(string(raw), `"file_integrity":"unmeasured"`) {
+		t.Fatalf("plan claimed redundancy: %s %v", raw, err)
+	}
+}
+
 func TestEmptyDirectoryMeasuresZeroAllocatedBytes(t *testing.T) {
 	plan, err := Scan(t.Context(), t.TempDir(), testOptions())
 	if err != nil || !plan.Complete || plan.Files != 0 || plan.AllocatedBytes == nil || *plan.AllocatedBytes != 0 {

@@ -19,6 +19,11 @@ import (
 
 const Schema = "fitr.cleanup.plan.v1"
 
+// IntegrityUnmeasured is the only file-integrity value this scan records.
+// A sibling name, a manifest-shaped filename, and an aged partial are not
+// a completed-file digest.
+const IntegrityUnmeasured = "unmeasured"
+
 type Limits struct {
 	MaxEntries int `json:"max_entries"`
 	MaxDepth   int `json:"max_depth"`
@@ -60,6 +65,9 @@ type Entry struct {
 	ModifiedAt    time.Time `json:"modified_at"`
 	State         string    `json:"state"`
 	Reason        string    `json:"reason"`
+	// FileIntegrity is unmeasured. The scan does not read bytes or manifests,
+	// so a partial beside a similarly named file is not a verified leftover.
+	FileIntegrity string `json:"file_integrity"`
 }
 
 type Issue struct {
@@ -99,11 +107,15 @@ type Plan struct {
 	ReviewCandidates     []Entry     `json:"review_candidates"`
 	ReviewCandidateCount int         `json:"review_candidate_count"`
 	ReviewApparentBytes  int64       `json:"review_apparent_bytes"`
-	Issues               []Issue     `json:"issues"`
-	IssueCount           int         `json:"issue_count"`
-	UnenteredDirectories []string    `json:"unentered_directories,omitempty"`
-	UnenteredCount       int         `json:"unentered_directory_count,omitempty"`
-	Notes                []string    `json:"notes"`
+	// CompletedFileIntegrity is unmeasured for the whole plan. Nothing in
+	// this scan is a digest of a completed file, and the field is not a
+	// deletion decision.
+	CompletedFileIntegrity string   `json:"completed_file_integrity"`
+	Issues                 []Issue  `json:"issues"`
+	IssueCount             int      `json:"issue_count"`
+	UnenteredDirectories   []string `json:"unentered_directories,omitempty"`
+	UnenteredCount         int      `json:"unentered_directory_count,omitempty"`
+	Notes                  []string `json:"notes"`
 }
 
 type scanner struct {
@@ -208,7 +220,8 @@ func newScanner(ctx context.Context, root *os.Root, absolute string, o Options) 
 		components: map[string]*componentAcc{},
 		plan: Plan{Schema: Schema, Root: absolute, AsOf: o.AsOf.UTC(),
 			Cutoff: o.AsOf.UTC().AddDate(0, 0, -o.MinAgeDays), MinAgeDays: o.MinAgeDays,
-			Limits: o.Limits, Complete: true, TopLevel: []Summary{}, Categories: []Summary{},
+			Limits: o.Limits, Complete: true, CompletedFileIntegrity: IntegrityUnmeasured,
+			TopLevel: []Summary{}, Categories: []Summary{},
 			LargestFiles: []Entry{}, ReviewCandidates: []Entry{}, Issues: []Issue{},
 			Notes: []string{
 				"Read-only plan. REVIEW does not mean safe to delete; usage and dependencies remain unresolved.",
@@ -457,7 +470,11 @@ func (s *scanner) addFile(path string, info os.FileInfo) {
 	addSummary(s.groups, group, info.Size())
 	addSummary(s.categories, category, info.Size())
 	s.addComponent(name, info.Size())
-	entry := Entry{name, category, info.Size(), info.ModTime().UTC(), "USAGE_UNRESOLVED", "Preserve until model, shard, projector, runtime and fallback dependencies are resolved."}
+	entry := Entry{
+		Path: name, Category: category, ApparentBytes: info.Size(), ModifiedAt: info.ModTime().UTC(),
+		State: "USAGE_UNRESOLVED", Reason: "Preserve until model, shard, projector, runtime and fallback dependencies are resolved.",
+		FileIntegrity: IntegrityUnmeasured,
+	}
 	if category == "incomplete_download" && !info.ModTime().After(s.plan.Cutoff) {
 		entry.State, entry.Reason = "REVIEW", "Incomplete-download filename and modification time meet the age threshold. Verify no active transfer or resume dependency before any removal."
 		s.plan.ReviewCandidateCount++
@@ -658,6 +675,16 @@ func sortedComponents(values map[string]*componentAcc, limit int) []Component {
 }
 
 func Bytes(value int64) string { return fmt.Sprintf("%.2f GiB", float64(value)/(1<<30)) }
+
+// IntegrityLine is the text for file integrity. An empty value stays
+// unmeasured, which is the same claim as IntegrityUnmeasured: no digest
+// was read. Any other value is shown unchanged.
+func IntegrityLine(value string) string {
+	if value == "" || value == IntegrityUnmeasured {
+		return "unmeasured; file bytes and manifests were not read"
+	}
+	return value
+}
 
 // AllocatedLine is the text for AllocatedBytes. Unmeasured stays a word so
 // a reader cannot mistake a missing stat block count for zero disk usage.

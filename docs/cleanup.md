@@ -26,6 +26,9 @@ directory listing that does not include the count leaves the field null, and
 the text says unmeasured. Zero is a measured empty sum. The scan does not open
 file contents to obtain the count. Neither total is space a deletion would free,
 and neither one makes a partial download redundant or a checkpoint a replacement.
+`completed_file_integrity` and each file's `file_integrity` stay `unmeasured`:
+the scan does not read bytes or manifests, and a sibling name is not a
+completed copy.
 No newer model or faster configuration qualifies as a replacement from this scan.
 Establish acceptable outputs and role coverage before retiring an incumbent.
 
