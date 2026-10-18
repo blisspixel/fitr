@@ -137,21 +137,24 @@ jobs:
       - name: repository coverage gate
         run: sh scripts/check-coverage.sh 80
 
+  # Newest patch of each maintained line. 3.11.17, 3.12.15, 3.13.16 and
+  # 3.14.8 are the 2026-10-01 security releases. 3.15.0 final shipped
+  # 2026-10-09. 3.10 reached end of life on 2026-10-01. python-version
+  # stays a block mapping. A one-line flow mapping around the matrix
+  # expression is rejected as invalid workflow YAML before any job starts.
   reference-python:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # Newest patch of each maintained line. 3.11.17, 3.12.15, 3.13.16
-        # and 3.14.8 are the 2026-10-01 security releases. 3.15.0 final
-        # shipped 2026-10-09. 3.10 reached end of life on 2026-10-01.
         python: ["3.11.17", "3.12.15", "3.13.16", "3.14.8", "3.15.0"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: ${{ matrix.python }} }
+        with:
+          python-version: ${{ matrix.python }}
       - name: reference logic tests
         working-directory: reference-python
         run: |
@@ -383,7 +386,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [test, dist, coverage, compatibility, mcp-sdk, installer, security]
+    needs: [test, dist, coverage, reference-python, mcp-sdk, installer, security]
     runs-on: ubuntu-latest
     steps:
       - name: require every CI gate
