@@ -95,6 +95,7 @@ func writeDecisionText(evaluation decision.Evaluation) {
 				terminalText(strings.Join(requirement.Missing, "; ")))
 		}
 	}
+	writeDecisionReasoning(evaluation)
 	if evaluation.Objective != nil {
 		fmt.Fprintln(os.Stdout, "\nOBJECTIVE")
 		fmt.Fprintf(os.Stdout, "  %-12s %-22s %s\n", strings.ToUpper(string(evaluation.Objective.State)),
@@ -102,16 +103,38 @@ func writeDecisionText(evaluation decision.Evaluation) {
 	}
 	if evaluation.NextAction != nil {
 		fmt.Fprintln(os.Stdout, "\nNEXT")
-		if len(evaluation.NextAction.Argv) > 0 {
+		switch {
+		case len(evaluation.NextAction.Argv) > 0:
 			argv := make([]string, 0, len(evaluation.NextAction.Argv))
 			for _, argument := range evaluation.NextAction.Argv {
 				argv = append(argv, terminalText(argument))
 			}
 			fmt.Fprintln(os.Stdout, "  "+strings.Join(argv, " "))
-		} else {
+		case evaluation.NextAction.Experiment != "":
 			fmt.Fprintln(os.Stdout, "  experiment "+terminalText(evaluation.NextAction.Experiment))
+		case evaluation.NextAction.Code != "":
+			// A code with no argv is not a command. Printing it as
+			// "experiment" would invent a run that fitr does not have.
+			fmt.Fprintln(os.Stdout, "  "+terminalText(evaluation.NextAction.Code))
 		}
 		fmt.Fprintln(os.Stdout, "  "+terminalText(evaluation.NextAction.Reason))
+	}
+}
+
+func writeDecisionReasoning(evaluation decision.Evaluation) {
+	account := evaluation.Reasoning
+	if account == nil {
+		return
+	}
+	requested := account.Requested
+	if requested == "" {
+		requested = "omitted"
+	}
+	fmt.Fprintln(os.Stdout, "\nREASONING")
+	fmt.Fprintf(os.Stdout, "  %-12s %s\n", "requested", terminalText(requested))
+	fmt.Fprintf(os.Stdout, "  %-12s %s\n", "application", terminalText(account.Application))
+	if account.Note != "" {
+		fmt.Fprintf(os.Stdout, "  %-12s %s\n", "note", terminalText(account.Note))
 	}
 }
 
