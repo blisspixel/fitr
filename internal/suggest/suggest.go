@@ -21,8 +21,12 @@ type Candidate struct {
 	CatalogMoE bool
 }
 
+// ShortlistReviewed is the date this fixed set was accepted. It is not a
+// live search and not a measured purpose.
+const ShortlistReviewed = "2026-10-12"
+
 // Shortlist is the names fitr will ask the registry about. Sizes are not
-// stored here.
+// stored here. The order is the reviewed order, not a search result.
 func Shortlist() []Candidate {
 	return []Candidate{
 		{Name: "qwen2.5-coder:1.5b", Use: "coding"},

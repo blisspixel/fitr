@@ -18,7 +18,7 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 			{Model: "qwen3:8b", State: "measured", SizeB: 5 << 30, Ctx: "16k/8k", Next: "fitr apply qwen3:8b",
 				Note: "measured ctx=16384; serving ctx=8192", Windows: "2k ok | 4k ok | 8k ok | *16k ok | 32k no"},
 			{Model: "gemma4:12b", State: "unproven", SizeB: 8 << 30, Loaded: true, Next: "fitr advise gemma4:12b"},
-			{Model: "llama3.1:70b", State: "incompatible", SizeB: 40 << 30, Next: "try a smaller quant", Note: "weights 40.0 GB exceed 16.0 GB (nvidia-smi)"},
+			{Model: "llama3.1:70b", State: "incompatible", SizeB: 40 << 30, Next: "fitr suggest", Note: "weights 40.0 GB exceed 16.0 GB (nvidia-smi)"},
 		},
 	}, "plain")
 	got := out.String()
@@ -27,7 +27,7 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 		"measured", "unproven", "incompatible", "EVID", "16k/8k", "*16k ok",
 		// The verb survives; the model name and the binary's own name do not,
 		// because the row already carries both.
-		"apply", "advise", "try a smaller quant",
+		"apply", "advise", "suggest",
 		"[L] gemma4:12b", "never a recommendation",
 		"fitr advise qwen3:8b", // the one worked example in the legend
 		"warning", "could not be trusted",
@@ -41,6 +41,9 @@ func TestWriteInventoryPlainCarriesStateInText(t *testing.T) {
 	}
 	if strings.Contains(got, "fitr run llama3.1:70b") {
 		t.Fatal("incompatible row must not suggest run")
+	}
+	if strings.Contains(got, "try a smaller quant") {
+		t.Fatal("incompatible next still names a smaller quant")
 	}
 	for _, line := range strings.Split(got, "\n") {
 		if n := len([]rune(line)); n > DefaultWidth {
@@ -78,7 +81,7 @@ func TestShortNextDropsWhatTheRowAlreadyShows(t *testing.T) {
 		{"fitr run mistral-openorca:7b -k 3", "mistral-openorca:7b", "run -k 3"},
 		{"fitr advise qwen3-coder:30b", "qwen3-coder:30b", "advise"},
 		{`fitr run "model with spaces"`, "model with spaces", "run"},
-		{"try a smaller quant", "llama3:70b", "try a smaller quant"},
+		{"fitr suggest", "llama3:70b", "suggest"},
 		{"fitr apply qwen3:8b --ctx 16384", "qwen3:8b", "apply --ctx 16384"},
 		{"", "m", "-"},
 		// A command that is nothing but the binary and the model still has to
@@ -90,6 +93,40 @@ func TestShortNextDropsWhatTheRowAlreadyShows(t *testing.T) {
 			t.Errorf("shortNext(%q, %q) = %q, want %q", tc.next, tc.model, got, tc.want)
 		}
 	}
+}
+
+func TestReachableEmptyInventorySuggestsBeforeAPull(t *testing.T) {
+	unreachable := inventoryText(t, Inventory{Fitr: "0.6.0", Empty: "none reachable"})
+	reachable := inventoryText(t, Inventory{
+		Fitr: "0.6.0", Empty: "reachable, no models",
+		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
+	})
+	if strings.Contains(reachable, "pull") || emptyNextCommand(unreachable) != "fitr suggest" || emptyNextCommand(reachable) != "fitr suggest" {
+		t.Fatalf("unreachable %q\nreachable:\n%s", emptyNextCommand(unreachable), reachable)
+	}
+	if !strings.Contains(reachable, "weight projection") || !strings.Contains(reachable, "KV cache is not estimated") {
+		t.Fatalf("projection clause missing:\n%s", reachable)
+	}
+	if strings.Contains(reachable, "GiB") || strings.Contains(reachable, "fitr advise") || strings.Contains(reachable, "fitr run") {
+		t.Fatalf("reachable empty offered a substitute:\n%s", reachable)
+	}
+}
+
+func inventoryText(t *testing.T, inv Inventory) string {
+	t.Helper()
+	var out strings.Builder
+	WriteInventory(&out, inv, "plain")
+	return out.String()
+}
+
+func emptyNextCommand(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "next" && fields[1] == "fitr" {
+			return fields[1] + " " + strings.TrimRight(fields[2], ",:;")
+		}
+	}
+	return ""
 }
 
 func TestWriteInventoryEmptyRuntime(t *testing.T) {

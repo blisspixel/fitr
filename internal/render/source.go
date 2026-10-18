@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/source"
 )
 
@@ -54,7 +55,7 @@ func WriteSourceResolution(w io.Writer, resolution source.Resolution, mode strin
 		Field(w, "  gap", 13, strings.ReplaceAll(gap, "_", " "), width)
 	}
 	fmt.Fprintln(w)
-	Field(w, "  next", 13, "Resolve dependencies and runtime compatibility before planning a download or local measurement.", width)
+	Field(w, "  next", 13, analysis.InstallCommandUnmeasured, width)
 	fmt.Fprintln(w)
 	Field(w, "  ", 2, "File metadata only. No weights downloaded; local fit and role quality remain unmeasured.", width)
 }

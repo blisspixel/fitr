@@ -36,6 +36,12 @@ them more trustworthy. The order is:
 This keeps discovery replaceable. Hugging Face, Ollama, or another index can be
 an adapter later; none becomes the source of truth for quality.
 
+`fitr suggest` is not that live catalog. It projects one fixed reviewed set
+of library names against the same memory selection advise and inventory use.
+Shared or unmeasured memory does not become a fit. An operator ceiling is
+labeled as a ceiling. A pull line is a recipe fitr does not run. The set
+does not grow because a registry search returned something.
+
 ## The one thing worth stealing: NIM's three-tier output
 
 NVIDIA NIM does real hardware-aware selection. Per its

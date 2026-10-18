@@ -18,6 +18,10 @@ BarWidget {
   property var document: null
   property string faultState: ""
   property string problem: ""
+  // Set when statusProcess emits exited. FailedToStart does not. Checked
+  // 2026-10-18 in quickshell-mirror process.cpp at 43d4fa9e and on master:
+  // onErrorOccurred(FailedToStart) emits runningChanged and does not emit exited.
+  property bool statusExitSeen: false
 
   readonly property bool opened: panelLoader.item
     ? panelLoader.item.opened === true
@@ -82,6 +86,7 @@ BarWidget {
       statusProcess.command = [bin, "desktop", "status", "--display", "json", "--role", role]
     else
       statusProcess.command = [bin, "desktop", "status", "--display", "json"]
+    root.statusExitSeen = false
     statusProcess.running = true
   }
 
@@ -141,11 +146,16 @@ BarWidget {
       waitForEnd: true
     }
     onExited: function(exitCode) {
+      root.statusExitSeen = true
       if (exitCode !== 0) {
         root.failStatus("unavailable", "fitr desktop status did not produce a document.")
         return
       }
       root.acceptStatus(statusOut.text)
+    }
+    onRunningChanged: {
+      if (statusProcess.running || root.statusExitSeen) return
+      root.failStatus("unavailable", "fitr desktop status did not start.")
     }
   }
 

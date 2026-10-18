@@ -10,6 +10,13 @@ import (
 
 const SourceScreenSchema = "fitr.analysis.source_screen.v1"
 
+// InstallCommandUnmeasured is the next line for a clear screen or a ready
+// download plan. No runtime install form in this tree is pinned to a checked
+// document, so the line does not guess a Hugging Face pull or a local path.
+// fitr artifact bind still needs a local file and a mapping the receipt does
+// not contain.
+const InstallCommandUnmeasured = "install command is unmeasured: a local file and a mapping are still required for fitr artifact bind, or a runtime whose documented install form is known"
+
 // SourceScreenPolicy filters declarations and a component projection. An
 // operator's accepted architecture names are not runtime capability evidence,
 // and an accepted license identifier is not an interpretation of legal terms.
@@ -58,7 +65,7 @@ func AnalyzeSourceScreen(resolution source.Resolution, policy SourceScreenPolicy
 	}
 	report := SourceScreen{Schema: SourceScreenSchema, SourceSHA256: resolution.ResolutionSHA256,
 		Policy: policy, State: "clear", Runtime: "unmeasured", Quality: "unmeasured",
-		Next: "Review dependencies and license terms, then bind the exact local files and measure the intended runtime configuration."}
+		Next: InstallCommandUnmeasured}
 	gates := []SourceScreenGate{
 		screenPublisher(resolution, policy), screenLicense(resolution.Publisher, policy),
 		screenArchitecture(resolution.ResolutionSHA256, policy, facts), screenComponents(policy, facts),

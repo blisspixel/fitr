@@ -13,10 +13,14 @@ set -eu
 # added 48,640 bytes: 16,248,832 -> 16,297,472. One-session tailor, the
 # usable-input token receipt, notice vocabulary, suggest weight partition,
 # scoring policy v7, and the confirmed-winner projection added 186,368 bytes
-# on the 2026-10-18 dist job: 16,297,472 -> 16,483,840. No new Go dependency
-# was added. This deliberate release-envelope update retains the existing
-# 38,824-byte headroom. CI and releases use this single measured gate.
-max_bytes=16522664
+# on the 2026-10-18 dist job: 16,297,472 -> 16,483,840. Suggest's measured
+# memory selection, the empty-inventory and unmeasured-install next lines,
+# the conversation preset, the role-review command, and the embedded Omarchy
+# status and urgent-colour handlers added 49,664 bytes on the later dist job
+# the same day: 16,483,840 -> 16,533,504. No new Go dependency was added.
+# This deliberate release-envelope update retains the existing 38,824-byte
+# headroom. CI and releases use this single measured gate.
+max_bytes=16572328
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"

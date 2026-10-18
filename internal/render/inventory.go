@@ -174,7 +174,7 @@ func writeEmptyInventory(w io.Writer, inv Inventory, p palette) bool {
 	case "reachable, no models":
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, p.wrap(p.Muted, "  no models installed on this runtime"))
-		fmt.Fprintln(w, p.wrap(p.Muted, "  next      fitr suggest, or pull a model, then: fitr advise <model>"))
+		fmt.Fprintln(w, p.wrap(p.Muted, "  next      fitr suggest (weight projection; KV cache is not estimated)"))
 		return true
 	default:
 		return false
@@ -263,8 +263,8 @@ const (
 	invStateWidth  = 16
 	invCtxWidth    = 5
 	invSizeWidth   = 8
-	// Wide enough for the longest NEXT after shortening: "try a smaller quant",
-	// which is advice rather than a command and so keeps its own words.
+	// Wide enough for a shortened next command. "fitr suggest" renders as
+	// "suggest" and does not name a smaller model.
 	invNextWidth  = 19
 	invNoteIndent = 4
 	invFixed      = 2 + 1 + invStateWidth + 1 + invCtxWidth + 1 + invSizeWidth + 2 + invNextWidth

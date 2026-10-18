@@ -21,8 +21,8 @@ must remain physical. Text and JSON status name the delegated auto session
 so its measured facts remain reachable.
 
 The workload is sealed before the settings are treated as an answer. A preset
-such as repository planning, agentic coding, code review, document research,
-or structured extraction expands into visible mandatory requirements,
+such as conversation, repository planning, agentic coding, code review,
+document research, or structured extraction expands into visible mandatory requirements,
 recommendations, and preferences. The preset name is not the requirement.
 Desired context stays the operator's number: a successful 32768-token run does
 not satisfy a 250000-token goal, and a 59392-token window is not eligible for

@@ -72,7 +72,11 @@ func WriteRoleReview(w io.Writer, report role.ReviewReport, mode string) {
 		Field(w, "  gap", 14, gap, width)
 	}
 	fmt.Fprintln(w)
-	Field(w, "  next", 14, report.Next, width)
+	command, why := roleReviewNext(report)
+	Field(w, "  next", 14, command, width)
+	if why != "" {
+		Field(w, "  why", 14, why, width)
+	}
 	fmt.Fprintln(w)
 	Field(w, "  ", 2, "Battery screening only. Preference bounds are not a joint confidence interval. No automatic adoption.", width)
 }

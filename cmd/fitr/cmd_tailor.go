@@ -58,8 +58,8 @@ is downloaded, and an existing Ollama process is not stopped.
                        fitr tailor start still needs --runtime for a script that
                        already has a matching file. Owned launch outside Windows
                        stops before a session is prepared.
-  --workload       repository-planning, agentic-coding, code-review,
-                   document-research, or structured-extraction
+  --workload       conversation, repository-planning, agentic-coding,
+                   code-review, document-research, or structured-extraction
   --desired-context  tokens the work needs; a smaller --ctx does not satisfy it
   --context-meaning  total-window or usable-input, required with a context goal
   --harness        optional. hermes keeps a 64000 token floor

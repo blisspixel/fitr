@@ -2,8 +2,8 @@ package discovery
 
 import (
 	"errors"
-	"fmt"
 
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/source"
 )
 
@@ -106,16 +106,9 @@ func buildSourcePlan(idea Idea, attachments []SourceAttachment, selectedResoluti
 	if plan.Selected != nil {
 		plan.DownloadPlan = BuildDownloadPlan(plan.Selected)
 		if plan.DownloadPlan != nil && plan.DownloadPlan.Status == "ready" {
-			reqCount := 0
-			for _, f := range plan.DownloadPlan.Files {
-				if f.Required {
-					reqCount++
-				}
-			}
 			plan.Steps = []Step{
 				{Code: "inspect", Text: "Inspect the source metadata and its declared file identities; operator association does not verify the original source claim."},
-				{Code: "download", Text: fmt.Sprintf("Download %d required component files (%d bytes declared) with provider SHA-256 verification bounds.", reqCount, plan.DownloadPlan.TotalRequiredBytes)},
-				{Code: "bind", Text: "Bind downloaded local files and verify whole-file SHA-256 hashes against declared metadata (fitr artifact bind)."},
+				{Code: "install", Text: analysis.InstallCommandUnmeasured},
 				{Code: "runtime", Text: "Bind locally verified bytes to an exact runtime configuration before measuring this candidate."},
 				{Code: "quality", Text: "Declare quality floors and collect task evidence before comparison or adoption."},
 			}

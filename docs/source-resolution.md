@@ -68,7 +68,11 @@ blocked or unresolved gate becomes the next investigation; later gates remain
 `not_checked`. A declaration outside an accepted list is blocked; missing
 evidence is unresolved. A license declared as `other` remains unresolved. No
 popularity statistic or quality score enters this sequence. Clearing all four
-gates does not qualify the candidate for a role.
+gates does not qualify the candidate for a role. The next line then says
+the install command is unmeasured. The receipt has no local path and no
+mapping, so it does not print `fitr artifact bind` as a command it will run,
+and it does not guess a runtime pull. A failing gate still names that gate
+instead.
 
 ## Project components before a complete download
 

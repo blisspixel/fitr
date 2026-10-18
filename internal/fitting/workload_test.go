@@ -276,6 +276,44 @@ func TestPresetDoesNotHideTheContextGoal(t *testing.T) {
 	}
 }
 
+func TestConversationPresetShowsWhatTheShortBatteryCannot(t *testing.T) {
+	if !knownPreset("conversation") {
+		t.Fatal("conversation preset was not accepted")
+	}
+	outcomes, err := presetOutcomes("conversation")
+	if err != nil || len(outcomes) != 1 || outcomes[0] != "instruction_precision" {
+		t.Fatalf("outcomes = %v %v", outcomes, err)
+	}
+	for _, banned := range []string{"coding", "tool_calling", "structured_output"} {
+		for _, outcome := range outcomes {
+			if outcome == banned {
+				t.Fatalf("conversation claimed %s", banned)
+			}
+		}
+	}
+	rows := presetRequirements("conversation", "")
+	var mandatory, recommend bool
+	for _, row := range rows {
+		switch row.Class {
+		case ClassMandatory:
+			mandatory = true
+			if !strings.Contains(row.Detail, "short battery") || !strings.Contains(row.Detail, "multi-turn memory") ||
+				!strings.Contains(row.Detail, "tone") || !strings.Contains(row.Detail, "factual reliability") {
+				t.Fatalf("mandatory = %+v", row)
+			}
+		case ClassRecommendation:
+			recommend = true
+			if !strings.Contains(row.Detail, "--desired-context") || !strings.Contains(row.Detail, "does not substitute") {
+				t.Fatalf("recommendation = %+v", row)
+			}
+		}
+	}
+	spec, _ := presetByName("conversation")
+	if !mandatory || !recommend || spec.populated {
+		t.Fatalf("rows=%+v populated=%t", rows, spec.populated)
+	}
+}
+
 func TestWeightMinimumStopsInsteadOfLowering(t *testing.T) {
 	req := ceilingRequest(t)
 	req.Workload.WeightQuant = "Q3_K_M"
