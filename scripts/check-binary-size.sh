@@ -10,10 +10,13 @@ set -eu
 # boundary probes, and model suggestions added 77,312 bytes:
 # 16,171,520 -> 16,248,832. The guided-fitting recommendation projection
 # (validated records into evidence classes) and the cleanup component grouping
-# added 48,640 bytes: 16,248,832 -> 16,297,472. No new Go dependency was
-# added. This deliberate release-envelope update retains the existing
+# added 48,640 bytes: 16,248,832 -> 16,297,472. One-session tailor, the
+# usable-input token receipt, notice vocabulary, suggest weight partition,
+# scoring policy v7, and the confirmed-winner projection added 186,368 bytes
+# on the 2026-10-18 dist job: 16,297,472 -> 16,483,840. No new Go dependency
+# was added. This deliberate release-envelope update retains the existing
 # 38,824-byte headroom. CI and releases use this single measured gate.
-max_bytes=16336296
+max_bytes=16522664
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"
