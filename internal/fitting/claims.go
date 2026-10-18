@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/blisspixel/fitr/internal/advise"
 	"github.com/blisspixel/fitr/internal/eval"
 )
 
@@ -82,13 +83,24 @@ func FailureLine(outcome eval.CheckOutcome) string {
 	return b.String()
 }
 
+func accountNote(in advise.ConfigurationInput, name, origin string) string {
+	for _, row := range advise.Configuration(in).Values {
+		if row.Name == name && row.Origin == origin {
+			return row.Note
+		}
+	}
+	return ""
+}
+
 // kvClaim states the sealed plan's cache request. The flash-attention boolean
 // is that request. Quantized KV is refused without it. The line is not a
 // report that a running server has flash attention enabled.
 func kvClaim(plan Plan) string {
 	kv := plan.KVCacheType
-	if !plan.KVExplicit {
-		kv += " (owned-runtime default, not a requested setting)"
+	if note := accountNote(advise.ConfigurationInput{PlanKV: &advise.PlanKV{
+		Type: plan.KVCacheType, Flash: plan.FlashAttention, Explicit: plan.KVExplicit,
+	}}, "kv_cache_type", advise.OriginRuntimeDefault); note != "" {
+		kv += " (" + note + ")"
 	}
 	line := fmt.Sprintf("kv %s. Plan records flash attention %t. This record does not set or prove the server.", kv, plan.FlashAttention)
 	if plan.KVCacheType == "q8_0" || plan.KVCacheType == "q4_0" {
@@ -107,8 +119,10 @@ func (plan Plan) Lines(phase string) []string {
 		policy = "reserve passed to an owned child as OLLAMA_GPU_OVERHEAD, with the requested context. The user's other Ollama process is not stopped"
 	}
 	repeats := strconv.Itoa(plan.Repeats)
-	if plan.RepeatsDefaulted {
-		repeats += " (minimum rankable schedule; no repeat count was requested)"
+	if note := accountNote(advise.ConfigurationInput{PlanRepeats: &advise.PlanRepeats{
+		N: plan.Repeats, Defaulted: plan.RepeatsDefaulted,
+	}}, "repeats", advise.OriginRuntimeDefault); note != "" {
+		repeats += " (" + note + ")"
 	}
 	comparison := "non-comparative assessment. A second candidate was not invented"
 	if plan.Comparison == ComparisonComparative {

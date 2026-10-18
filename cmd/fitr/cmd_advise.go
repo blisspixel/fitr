@@ -118,6 +118,7 @@ func initialAdviseInput(ctx context.Context, command adviseCommand) (advise.Inpu
 	in := advise.Input{Model: command.model, Ctx: command.ctxSize}
 	currentFP := device.Detect(ctx, nil)
 	applyAdviseDeviceEvidence(&in, currentFP)
+	applyAdviseConfig(&in, currentFP)
 	if command.backend != "" && command.backend != "auto" {
 		in.Backend = command.backend
 	}
@@ -134,6 +135,11 @@ func initialAdviseInput(ctx context.Context, command adviseCommand) (advise.Inpu
 
 func applyAdviseDeviceEvidence(in *advise.Input, fp device.Fingerprint) {
 	in.SharedMemory = device.SelectMemoryCapacity(fp).Shared
+}
+
+func applyAdviseConfig(in *advise.Input, fp device.Fingerprint) {
+	in.Config = fp.Config
+	in.ConfigSource = fp.ConfigSource
 }
 
 func setAdviseKV(in *advise.Input, kv string) {
@@ -181,6 +187,7 @@ func readBackendAdviseSource(ctx context.Context, command adviseCommand,
 	in.Backend = c.Name()
 	fp := device.DetectFor(ctx, c, command.model)
 	applyAdviseDeviceEvidence(in, fp)
+	applyAdviseConfig(in, fp)
 	selected := device.SelectMemoryCapacity(fp)
 	in.FreeGB = 0
 	if selected.Domain == capacity.DomainAccelerator {
@@ -569,7 +576,7 @@ func writeTuneDiff(a, b *Result) {
 	}
 	if len(boundary) > 0 {
 		fmt.Fprintln(os.Stdout, "  restart boundary (read at process start; fitr will not restart the server):")
-		writeTuneRows(boundary)
+		writeBoundaryRows(boundary, a, b)
 		fmt.Fprintln(os.Stdout, "  these measurements are different configurations. a fresh measurement has to come from a process started with the new value.")
 	}
 	if len(other) > 0 {
@@ -579,6 +586,28 @@ func writeTuneDiff(a, b *Result) {
 	if len(boundary) == 0 && len(other) == 0 {
 		fmt.Fprintln(os.Stdout, "  same fingerprint - quality is `fitr compare`'s job, not a device change")
 	}
+}
+
+func writeBoundaryRows(rows [][3]string, a, b *Result) {
+	for _, row := range rows {
+		left := configurationSide(a.Device, row[0])
+		right := configurationSide(b.Device, row[0])
+		fmt.Fprintf(os.Stdout, "    %-22s  %s  ->  %s\n", terminalText(row[0]), terminalText(left), terminalText(right))
+	}
+}
+
+func configurationSide(fp device.Fingerprint, key string) string {
+	account := advise.Configuration(advise.ConfigurationInput{Config: fp.Config, ConfigSource: fp.ConfigSource})
+	for _, row := range account.Values {
+		if row.Name != key {
+			continue
+		}
+		if row.Value == "" {
+			return row.Origin
+		}
+		return row.Origin + " " + row.Value
+	}
+	return advise.OriginUnobserved
 }
 
 func writeTuneRows(rows [][3]string) {

@@ -62,7 +62,11 @@ type Input struct {
 	Arch    Arch
 	// AuthorSampling is what the artifact declares about sampler settings.
 	AuthorSampling *AuthorSampling
-	Source         string // "GGUF metadata", "Ollama /api/show"
+	// Config and ConfigSource are the serving-runtime settings, when a
+	// fingerprint supplied them. Empty source is historical, not measured.
+	Config       map[string]string
+	ConfigSource string
+	Source       string // "GGUF metadata", "Ollama /api/show"
 	// ResidentB is the server's own allocation (Ollama /api/ps size). Zero
 	// means not observed. A running process is a measurement; file size is
 	// not substituted for it.
@@ -167,6 +171,9 @@ type Report struct {
 	// it declares one. Absent means the file says nothing, which is the common
 	// case and is reported as such rather than filled with a runtime default.
 	AuthorSampling *AuthorSampling `json:"author_sampling,omitempty"`
+	// Configuration is the provenance account for settings this projection
+	// could cite. It is not a ranking and it does not fill a sampler default.
+	Configuration *ConfigurationAccount `json:"configuration,omitempty"`
 }
 
 func (r Report) ExitCode() int {
@@ -301,6 +308,7 @@ func Evaluate(in Input) Report {
 	r.Schema = ReportSchema
 	r.FreeGB = in.FreeGB
 	r.Fit = ContextFit(in)
+	r.Configuration = configurationFrom(in)
 	return r
 }
 
@@ -792,7 +800,11 @@ func Write(w io.Writer, r Report) {
 	for _, g := range r.Gaps {
 		render.Field(w, "  note", adviseLabelWidth, g, width)
 	}
-	if sampling := r.AuthorSampling.Summary(); sampling != "" {
+	if lines := r.Configuration.Lines(); len(lines) > 0 {
+		for _, line := range lines {
+			render.Field(w, "  setting", adviseLabelWidth, line, width)
+		}
+	} else if sampling := r.AuthorSampling.Summary(); sampling != "" {
 		// Printed only when the artifact actually declares settings, which is
 		// uncommon. Saying "declares none" on every ordinary model would be
 		// noise; the JSON carries the absence for anyone who needs it.
