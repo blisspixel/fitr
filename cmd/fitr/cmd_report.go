@@ -770,7 +770,9 @@ func writeThroughputComparison(a, b *Result) {
 	// Throughput: Fieller's interval is the correct one for "how many times
 	// faster". When it cannot be computed honestly (single observation, or
 	// denominator not separated from zero), the ratio prints without an
-	// interval and therefore without a verdict.
+	// interval and therefore without a verdict. A positive cached-token
+	// count fails the uncached seal. An unknown receipt stays unproven.
+	prefillClaimable, prefillUnclaimable := prefillComparisonClaim(a, b)
 	for _, p := range []struct {
 		label       string
 		x, y        stats.Summary
@@ -779,8 +781,7 @@ func writeThroughputComparison(a, b *Result) {
 	}{
 		{label: "decode tok/s", x: a.DecodeSum, y: b.DecodeSum, claimable: true},
 		{label: "prefill tok/s", x: a.PrefillSum, y: b.PrefillSum,
-			claimable:   comparableUncachedPrefill(a) && comparableUncachedPrefill(b),
-			unclaimable: "descriptive only - uncached prefill not proven"},
+			claimable: prefillClaimable, unclaimable: prefillUnclaimable},
 	} {
 		writeThroughputRow(p.label, p.x, p.y, p.claimable, p.unclaimable)
 	}
@@ -820,6 +821,28 @@ func writeBehaviorComparison(a, b *Result) {
 		fmt.Println("            these runs faced different instances.")
 		fmt.Println("  pair with fitr run <model> --seedset shared1  (both models)")
 	}
+}
+
+func prefillComparisonClaim(a, b *Result) (bool, string) {
+	if comparableUncachedPrefill(a) && comparableUncachedPrefill(b) {
+		return true, ""
+	}
+	if prefillSealFailed(a) || prefillSealFailed(b) {
+		return false, "uncached timing seal failed"
+	}
+	return false, "descriptive only - uncached prefill not proven"
+}
+
+func prefillSealFailed(r *Result) bool {
+	if r == nil {
+		return false
+	}
+	for _, sample := range r.Speed {
+		if sample.PrefillContaminated() {
+			return true
+		}
+	}
+	return false
 }
 
 // comparableUncachedPrefill requires every persisted probe to carry an

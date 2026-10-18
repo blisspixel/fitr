@@ -653,7 +653,7 @@ func appendCacheStatusGaps(gaps []EvidenceGap, status cacheStatus, unknownCode, 
 	}
 	if status == cacheHit || status == cacheUnknownAndHit {
 		gaps = append(gaps, gap(hitCode, "performance",
-			label+" observed cached prompt tokens and remains descriptive only", claim))
+			"cached prompt tokens failed the "+label+" uncached timing seal", claim))
 	}
 	return gaps
 }

@@ -144,7 +144,7 @@ A checked box shipped. An unchecked box waits in this order:
 |---|---|
 | Step 7's exit check | An oversized document prompt is refused without shrinking the document, window, or output reserve, on both a legacy Go template and a Jinja template. |
 | Step 8's exit check | A recorded trial through the pinned Pi process, and a recorded native local-model trial of `pi-workspace`. The in-process adapter does not discharge either. |
-| Before another configuration search | The confirmation preflight is in, and a new context experiment seals a seeded permutation of its windows. A confirmation still measures each candidate as one block, so thermal drift can still load onto one candidate. A nonzero cached-token count must still fail any timing that claims to be uncached. A ranked-alternative margin waits until the native chat schema in use actually returns one. Ollama's OpenAI-compatible route documents logprobs as unsupported. Perplexity and true KL stay refused. |
+| Before another configuration search | The confirmation preflight, the sealed context-point permutation, and the uncached-timing seal are in. A nonzero cached-token count fails a prefill or loaded-TTFT claim; unknown cache stays unproven. A confirmation still measures each candidate as one block, so thermal drift can still load onto one candidate. A ranked-alternative margin waits until the native chat schema in use actually returns one. Ollama's OpenAI-compatible route documents logprobs as unsupported. Perplexity and true KL stay refused. |
 | After step 8 | Further checkpoint, resume, and bounded-authority prototypes. They generalize the one harness workflow. Arbitrary executable tasks stay SKIP until Trust C. |
 | Step 9 | The model-set projection. Exact-context `OTHER` is learned from matched allocation receipts and is never a guessed percentage. |
 | Beside the fitting, before any server restart | Read-only tune steps: listener inspection separate from ownership, per-key configuration provenance, an ownership report, then `--no-mutate`, then `tune --scratch` on a fitr-owned instance. |
@@ -1417,9 +1417,10 @@ thermal drift with the candidate, and that bias does not shrink with more
 repeats, so ordering must be randomized rather than merely repeated. A
 new context experiment seals a seeded permutation of its windows before the
 first request. A confirmation still measures each candidate as one block.
-Prompt caching is on by default in
-both engines, which makes a zero cached-token count a cheap mechanical seal on
-a timing being what it claims.
+Prompt caching is on by default in both engines. A zero cached-token count
+is the seal that a prefill or loaded-TTFT timing is what it claims. A
+nonzero count fails that seal. Unknown cache stays unproven. Request TTFT
+does not claim to be uncached.
 
 Only then a search, and a modest one. Methods that need on the order of a
 hundred evaluations do not fit a desktop budget where each evaluation costs
@@ -1430,14 +1431,15 @@ exists. Whatever survives goes through the existing fresh confirmation rather
 than being reported from the data that selected it.
 
 - [x] Confirmation preflight: refuse a comparison the budget cannot resolve,
-      naming the repeat count that would resolve it. The cached-token seal
-      below remains open, and confirmation candidates are still measured as
-      blocks.
+      naming the repeat count that would resolve it. Confirmation candidates
+      are still measured as blocks.
 - [x] Randomize the sealed context-point order and seal that permutation in
       the plan digest, so drift is not loaded onto the last declared window.
       A confirmation still measures each candidate as one block.
-- [ ] Treat a nonzero cached-token count as a failed validity seal for any
-      timing that claims to be uncached.
+- [x] Treat a nonzero cached-token count as a failed validity seal for any
+      timing that claims to be uncached. Unknown cache stays unproven. The
+      observed number remains visible and is not a quality zero. Request
+      TTFT does not claim to be uncached.
 - [ ] A typed contract for start-time-only knobs, so changing one is known to
       require a restart and a fresh measurement rather than being compared
       across a boundary it invalidates.
@@ -1476,10 +1478,10 @@ single-token forced-prefix probe at a fixed seed can then report three finite
 observations: the margin between the first and second returned choice, the
 rate at which two configurations choose the same token at the same position,
 and a divergence over the returned alternatives, named as the truncated
-quantity it is rather than as KL. The confirmation preflight and the
-context-point permutation are sealed. The probe still waits until a
-confirmation measures candidates in a sealed randomized order and the cache
-seal exists.
+quantity it is rather than as KL. The confirmation preflight, the
+context-point permutation, and the uncached-timing seal are in. The probe
+still waits until a confirmation measures candidates in a sealed randomized
+order.
 
 **What it must compare against.** A margin distribution alone says nothing.
 The comparison is a sibling artifact of the same base at higher precision,

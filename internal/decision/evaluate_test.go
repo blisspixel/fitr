@@ -135,6 +135,50 @@ func TestPerformanceRequirementNamesTheExactLatencyState(t *testing.T) {
 	}
 }
 
+func TestCachedPromptTokensFailTheUncachedTimingSeal(t *testing.T) {
+	mean := 100.0
+	observed := analysis.Performance{
+		PrefillTPS: analysis.PerformanceObservation{
+			Estimate: &mean, Status: analysis.StatusAvailable, SampleCount: 3,
+			Supports: []analysis.SupportClaim{analysis.ClaimObservedPrefill},
+		},
+		TTFTSeconds: analysis.PerformanceObservation{
+			Estimate: &mean, Status: analysis.StatusAvailable, SampleCount: 3,
+			Supports: []analysis.SupportClaim{
+				analysis.ClaimObservedRequestTTFT, analysis.ClaimObservedLoadedTTFT,
+			},
+		},
+	}
+	hit := analysis.Report{Performance: observed, Gaps: []analysis.EvidenceGap{
+		{Code: analysis.GapPrefillCacheHit}, {Code: analysis.GapTTFTCacheHit},
+	}}
+	floor, ceiling := 1.0, 1000.0
+	prefill := evaluatePerformance(hit, "prefill", PerformanceRequirement{Metric: MetricPrefillTPS, AtLeast: &floor})
+	loaded := evaluatePerformance(hit, "loaded", PerformanceRequirement{Metric: MetricLoadedTTFT, AtMost: &ceiling})
+	if prefill.State != RequirementBlocked || loaded.State != RequirementBlocked ||
+		!strings.Contains(prefill.Reason, "seal failed") || !strings.Contains(loaded.Reason, "seal failed") {
+		t.Fatalf("cache hit sealed an uncached timing: prefill=%+v loaded=%+v", prefill, loaded)
+	}
+	request := evaluatePerformance(hit, "request", PerformanceRequirement{Metric: MetricRequestTTFT, AtMost: &ceiling})
+	if request.State != RequirementEstablished {
+		t.Fatalf("request TTFT claimed to be uncached: %+v", request)
+	}
+	unknown := analysis.Report{Performance: observed, Gaps: []analysis.EvidenceGap{
+		{Code: analysis.GapPrefillCacheUnknown}, {Code: analysis.GapTTFTCacheUnknown},
+	}}
+	unproven := evaluatePerformance(unknown, "prefill", PerformanceRequirement{Metric: MetricPrefillTPS, AtLeast: &floor})
+	if unproven.State != RequirementUnresolved || strings.Contains(unproven.Reason, "seal failed") {
+		t.Fatalf("unknown cache was a failed seal or a pass: %+v", unproven)
+	}
+	verified := observed
+	verified.PrefillTPS.Supports = append(verified.PrefillTPS.Supports, analysis.ClaimUncachedPrefill)
+	verified.TTFTSeconds.Supports = append(verified.TTFTSeconds.Supports, analysis.ClaimLoadedUncachedTTFT)
+	passed := analysis.Report{Performance: verified}
+	if got := evaluatePerformance(passed, "prefill", PerformanceRequirement{Metric: MetricPrefillTPS, AtLeast: &floor}); got.State != RequirementEstablished {
+		t.Fatalf("verified uncached prefill was refused: %+v", got)
+	}
+}
+
 func TestPerformanceRequirementUsesRepeatedMeasurementUncertainty(t *testing.T) {
 	mean, deviation, maximum := 0.9, 0.1, 1.0
 	report := analysis.Report{Performance: analysis.Performance{TTFTSeconds: analysis.PerformanceObservation{

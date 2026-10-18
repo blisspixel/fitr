@@ -162,8 +162,9 @@ interval - the conservative direction):
 
 Prefill comparison adds an evidence rule before any ratio is allowed: every
 sample on both sides must carry an explicit zero-cache receipt. Unknown cache
-state or any positive cached-token count remains visible descriptively but
-cannot support an uncached-prefill winner claim.
+state remains visible and unproven. A nonzero cached-token count fails the
+uncached timing seal. Either way the means stay visible and cannot support
+an uncached-prefill winner claim, and neither one is a quality zero.
 
     g    = t^2 * (sb^2/nb) / mb^2
     half = (t/|mb|) * sqrt((sa^2/na)(1-g) + R^2(sb^2/nb))

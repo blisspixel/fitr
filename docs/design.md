@@ -313,9 +313,12 @@ so Board does not compare across those presentation-contract changes.
   dense or every layer slides. Unmeasured
   capacity, incomplete weights, or architecture is SKIP, not a name-to-GB
   guess.
-- **Cache state can be unknown.** TTFT and prefill are still observed, but an
-  unknown state or any cache hit cannot prove an uncached timing gate or
-  comparison claim.
+- **Cache state can be unknown.** TTFT and prefill are still observed. An
+  unknown receipt cannot prove an uncached timing gate or comparison claim.
+  A nonzero cached-token count fails the seal on a timing that claims to be
+  uncached. The number stays visible and is not a quality zero. Request TTFT
+  does not make that claim. A loaded cache-hit TTFT is a separate timing and
+  still requires a positive cached-token receipt.
 - **The 32K footprint probe is explicit.** The low-footprint need is scored
   only when the runtime confirms that the effective context equals the
   requested 32K. Older receipts without that fact remain visible but cannot

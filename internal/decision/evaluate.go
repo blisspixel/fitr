@@ -398,6 +398,12 @@ func evaluatePerformance(report analysis.Report, id string, requirement Performa
 		return blockedRequirement(id, "the performance observation is descriptive only", "analysis.performance."+string(requirement.Metric))
 	}
 	if !analysis.Supports(observation, claim) {
+		// A positive cached-token count is contamination of a timing that
+		// claimed to be uncached. Unknown cache is a different gap: the
+		// receipt is missing, so the requirement stays unresolved.
+		if failedUncachedSeal(report, requirement.Metric) {
+			return failedSealRequirement(id, requirement.Metric)
+		}
 		return unresolvedRequirement(id, "the observation does not support the requested latency or throughput state",
 			[]string{string(claim)}, performanceAction(requirement.Metric))
 	}
@@ -459,9 +465,9 @@ func performanceObservation(performance analysis.Performance, metric Performance
 	case MetricDecodeTPS:
 		return performance.DecodeTPS, analysis.ClaimObservedDecode
 	case MetricPrefillTPS:
-		return performance.PrefillTPS, analysis.ClaimObservedPrefill
+		return performance.PrefillTPS, analysis.ClaimUncachedPrefill
 	case MetricLoadedTTFT:
-		return performance.TTFTSeconds, analysis.ClaimObservedLoadedTTFT
+		return performance.TTFTSeconds, analysis.ClaimLoadedUncachedTTFT
 	default:
 		return performance.TTFTSeconds, analysis.ClaimObservedRequestTTFT
 	}
@@ -617,6 +623,33 @@ func behaviorAction(need string) *Action {
 	return &Action{Code: "collect_behavior_evidence", Experiment: "behavior",
 		Argv:   []string{"fitr", "run", currentModelPlaceholder},
 		Reason: "collect planned observations for " + need + " under the same configuration"}
+}
+
+func failedUncachedSeal(report analysis.Report, metric PerformanceMetric) bool {
+	var code analysis.GapCode
+	switch metric {
+	case MetricPrefillTPS:
+		code = analysis.GapPrefillCacheHit
+	case MetricLoadedTTFT:
+		code = analysis.GapTTFTCacheHit
+	default:
+		return false
+	}
+	for _, gap := range report.Gaps {
+		if gap.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func failedSealRequirement(id string, metric PerformanceMetric) RequirementResult {
+	result := blockedRequirement(id, "uncached timing seal failed: cached prompt tokens were observed",
+		"analysis.performance."+string(metric))
+	action := performanceAction(metric)
+	action.Reason = "repeat the measurement; a nonzero cached-token count failed the uncached timing seal"
+	result.NextAction = action
+	return result
 }
 
 func performanceAction(metric PerformanceMetric) *Action {

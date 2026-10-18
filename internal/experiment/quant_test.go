@@ -149,6 +149,32 @@ func TestQuantFrontierWithholdsDominanceWhenFactorsAreIncomparable(t *testing.T)
 	}
 }
 
+func TestUncachedObjectiveRequiresTheZeroCacheClaim(t *testing.T) {
+	mean, deviation := 100.0, 1.0
+	observation := analysis.PerformanceObservation{
+		Estimate: &mean, SD: &deviation, SampleCount: 3, Status: analysis.StatusAvailable,
+		Supports: []analysis.SupportClaim{analysis.ClaimObservedPrefill},
+	}
+	report := analysis.Report{Performance: analysis.Performance{PrefillTPS: observation}}
+	metric := quantMetrics(&record.Record{}, report)["prefill_tps"]
+	if metric.Status == analysis.StatusAvailable || metric.Low != nil || metric.High != nil {
+		t.Fatalf("prefill without the uncached claim was bounded: %+v", metric)
+	}
+	observation.Supports = append(observation.Supports, analysis.ClaimUncachedPrefill)
+	report.Performance.PrefillTPS = observation
+	metric = quantMetrics(&record.Record{}, report)["prefill_tps"]
+	if metric.Status != analysis.StatusAvailable || metric.Low == nil || metric.High == nil {
+		t.Fatalf("verified uncached prefill lost its interval: %+v", metric)
+	}
+	loaded := observation
+	loaded.Supports = []analysis.SupportClaim{analysis.ClaimObservedLoadedTTFT}
+	report.Performance.TTFTSeconds = loaded
+	loadedMetric := quantMetrics(&record.Record{}, report)["loaded_ttft_seconds"]
+	if loadedMetric.Status == analysis.StatusAvailable || loadedMetric.Low != nil {
+		t.Fatalf("loaded TTFT without the uncached claim was bounded: %+v", loadedMetric)
+	}
+}
+
 func TestQuantMetricsDoNotUpgradeDescriptiveResidentEvidence(t *testing.T) {
 	resident := int64(6 * 1024 * 1024 * 1024)
 	report := analysis.Report{Capacity: analysis.Capacity{Resident: &analysis.ResidentObservation{
