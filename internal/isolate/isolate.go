@@ -28,9 +28,15 @@ const (
 
 // Status is whether a verifier can run inside the sandbox. Reason is the
 // enablement step when it cannot. It is not a quality score.
+// Interpreter is the absolute path the probe ran. It is set only when
+// Available is true, and the battery must launch that path rather than
+// searching PATH for the name "python". A machine with /usr/bin/python3 and
+// no python command used to pass this probe and then abort after speed and
+// memory had already been measured.
 type Status struct {
-	Available bool
-	Reason    string
+	Available   bool
+	Reason      string
+	Interpreter string
 }
 
 // Probe checks the sandbox with a one-line interpreter. A missing tool or a
@@ -75,16 +81,37 @@ func probe() Status {
 		}
 		return Status{Reason: "isolated execution is unavailable: bubblewrap did not run the probe (" + detail + ")"}
 	}
-	return Status{Available: true, Reason: "bubblewrap can run generated verifiers without the user's home directory or network"}
+	return Status{
+		Available:   true,
+		Interpreter: python,
+		Reason:      "bubblewrap can run generated verifiers without the user's home directory or network",
+	}
 }
 
 func probePython() (string, error) {
-	for _, path := range []string{"/usr/bin/python3", "/usr/bin/python"} {
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
+	found, err := firstExisting("/usr/bin/python3", "/usr/bin/python")
+	if err != nil {
+		return "", errors.New("/usr/bin/python3 is not installed")
+	}
+	return found, nil
+}
+
+// firstExisting returns the first path that is present. The error names the
+// first candidate so a caller can report the interpreter it required. An
+// empty list is a programmer error, not a missing install.
+func firstExisting(paths ...string) (string, error) {
+	if len(paths) == 0 {
+		return "", errors.New("no interpreter path was checked")
+	}
+	for _, candidate := range paths {
+		if candidate == "" {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
 		}
 	}
-	return "", errors.New("/usr/bin/python3 is not installed")
+	return "", fmt.Errorf("%s is not installed", paths[0])
 }
 
 // Command returns a bubblewrap invocation that runs interpreter with args.

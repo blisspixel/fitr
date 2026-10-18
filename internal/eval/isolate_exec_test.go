@@ -5,10 +5,76 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/blisspixel/fitr/internal/isolate"
 )
+
+func TestIsolatedRunnerUsesTheProbeInterpreterNotPATH(t *testing.T) {
+	t.Setenv("FITR_EXECUTOR_HELPER", "1")
+	helper := installHelperPython(t, t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	previous := isolationStatus
+	isolationStatus = func() isolate.Status {
+		return isolate.Status{Available: true, Reason: "ready", Interpreter: helper}
+	}
+	t.Cleanup(func() { isolationStatus = previous })
+
+	runner, err := resolveTaskRunner(WithIsolatedExecution(context.Background()),
+		[]string{"python", "test.py"}, map[string]string{"test.py": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(helper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(want) {
+		want, err = filepath.Abs(want)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if runner.path != filepath.Clean(want) {
+		t.Fatalf("resolved %s, want probe interpreter %s", runner.path, filepath.Clean(want))
+	}
+}
+
+func TestIsolatedRunnerRefusesAnEmptyProbeInterpreter(t *testing.T) {
+	previous := isolationStatus
+	isolationStatus = func() isolate.Status {
+		return isolate.Status{Available: true, Reason: "ready"}
+	}
+	t.Cleanup(func() { isolationStatus = previous })
+	_, err := resolveTaskRunner(WithIsolatedExecution(context.Background()),
+		[]string{"python", "test.py"}, map[string]string{"test.py": ""})
+	if err == nil || !strings.Contains(err.Error(), "no absolute interpreter") {
+		t.Fatalf("empty probe interpreter = %v", err)
+	}
+}
+
+func TestIsolatedPreflightFailsClosedBeforeSpeedAndKeepsAnUnavailableProbe(t *testing.T) {
+	spec, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := isolationStatus
+	t.Cleanup(func() { isolationStatus = previous })
+	isolationStatus = func() isolate.Status {
+		return isolate.Status{Available: true, Reason: "ready"}
+	}
+	err = PreflightIsolatedRunners(WithIsolatedExecution(context.Background()), spec)
+	if err == nil || !strings.Contains(err.Error(), "no absolute interpreter") {
+		t.Fatalf("preflight = %v", err)
+	}
+	isolationStatus = func() isolate.Status {
+		return isolate.Status{Reason: "isolated execution is unavailable: bubblewrap (bwrap) is not installed"}
+	}
+	if err := PreflightIsolatedRunners(WithIsolatedExecution(context.Background()), spec); err != nil {
+		t.Fatalf("unavailable probe aborted the battery: %v", err)
+	}
+}
 
 func TestIsolationStaysUnavailableWithoutTheRunOptIn(t *testing.T) {
 	previous := isolationStatus

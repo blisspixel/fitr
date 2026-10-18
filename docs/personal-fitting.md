@@ -2,7 +2,12 @@
 
 fitr is a tailor for local AI: it turns a general-purpose model into a tested
 choice for a person's work and machine. The guided entry is `fitr tailor`.
-It seals one plan for the work, the candidates, the context, the effective
+With no subcommand it asks only for what the machine cannot observe, shows
+one preview, and starts inference only after that sealed plan is approved.
+A pipe or `--display json` never reads stdin. `plan`, `start`, `status`,
+`resume`, and `adopt` remain the script surface. Owned launch outside
+Windows stops before a session is prepared and names the endpoint assessment
+as the next step. It seals one plan for the work, the candidates, the context, the effective
 task definitions and one capacity policy, then either measures that plan through an explicit local endpoint or,
 when the policy is a reserve and an owned runtime is approved, hands the same
 settings to `fitr auto`. It does not download models, stop an existing Ollama,
@@ -45,7 +50,12 @@ qualification stay separate. A model that loads and answers a simple prompt
 while failing a required tool or coding workflow stays unqualified. The
 recommendation policy keeps passed, failed and unresolved classes separate.
 Exploration evidence does not certify a winner: the fitting's own collection
-stays unresolved until fresh confirmation resolves it.
+stays unresolved until fresh confirmation resolves it. A fresh confirmation
+certifies only the preselected candidate whose recomputed report is
+confirmed. The other candidates are not projected into that scope. A
+confirmation that retains the incumbent, fails, or does not confirm that
+identity certifies nothing. Document bytes stay on the document record and
+are not read as window tokens.
 A weights-plus-KV projection is not tested long-context quality. Unknown
 runtime overhead, an unverified cache type, a skipped executable test, and a
 small sample stay on the receipt. Conflicting constraints are shown as

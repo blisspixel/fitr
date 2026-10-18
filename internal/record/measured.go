@@ -87,16 +87,22 @@ func (r *Record) addMemoryMeasurement(m *score.Measured) {
 func (r *Record) addCodeMeasurements(m *score.Measured) {
 	if len(r.CodeWrite)+len(r.CodeFix) > 0 {
 		var writeOK, fixOK []bool
+		extractionMiss := true
 		for _, result := range r.CodeWrite {
+			noteCodeDisposition(m, result, &extractionMiss)
 			if pass, measured := eval.MeasuredOutcome(result.Outcome, result.Pass); measured {
 				writeOK = append(writeOK, pass)
 			}
 		}
 		for _, result := range r.CodeFix {
+			noteCodeDisposition(m, result, &extractionMiss)
 			if pass, measured := eval.MeasuredOutcome(result.Outcome, result.Pass); measured {
 				fixOK = append(fixOK, pass)
 			}
 		}
+		// A skip never reaches extraction. Require an attempted trial so a
+		// record that is only SKIP cannot become an extraction miss.
+		m.CodeExtractionMiss = extractionMiss && m.CodeAttempted
 		expected := r.TaskPlan.CodeTrials
 		if expected == 0 && r.SchemaVersion < 5 {
 			expected = r.Repeats * 2
@@ -108,6 +114,15 @@ func (r *Record) addCodeMeasurements(m *score.Measured) {
 		m.CodeFlaky = writeFlakes.Flaky || fixFlakes.Flaky
 		m.CodePasses = writeFlakes.Passes + fixFlakes.Passes
 		m.CodeRepeats = writeFlakes.N + fixFlakes.N
+	}
+}
+
+func noteCodeDisposition(m *score.Measured, result eval.ExecResult, extractionMiss *bool) {
+	if result.Outcome != eval.OutcomeSkipped {
+		m.CodeAttempted = true
+	}
+	if result.Outcome != eval.OutcomeInconclusive || result.Detail != "no executable code was extracted" {
+		*extractionMiss = false
 	}
 }
 
@@ -180,6 +195,9 @@ func (r *Record) addAgenticMeasurements(m *score.Measured) {
 	if r.Agentic != nil {
 		if pass, measured := eval.MeasuredOutcome(r.Agentic.Outcome, r.Agentic.Pass); measured {
 			m.AgenticRan, m.AgenticPass = true, pass
+		}
+		if r.Agentic.Outcome != eval.OutcomeSkipped && r.Agentic.Outcome != "" {
+			m.AgenticAttempted = true
 		}
 		m.AgenticMalformed = r.Agentic.Malformed
 		m.AgenticTurns = r.Agentic.Turns

@@ -491,7 +491,38 @@ func TestTailorCleanupFailureIsNotAModelResult(t *testing.T) {
 	}
 }
 
+func TestTailorReserveUsageNamesTheResidentLimit(t *testing.T) {
+	stdout, _, code := captureCommandOutput(t, func() int {
+		return cmdTailor(context.Background(), []string{"--help"})
+	})
+	if code != exitOK {
+		t.Fatalf("help exit %d", code)
+	}
+	if !reserveUsageNamesMemory(stdout) {
+		t.Fatalf("reserve usage omits --memory-gb:\n%s", stdout)
+	}
+	_, stderr, code := captureCommandOutput(t, func() int {
+		usage()
+		return exitOK
+	})
+	if code != exitOK || !reserveUsageNamesMemory(stderr) {
+		t.Fatalf("root usage omits --memory-gb:\n%s", stderr)
+	}
+}
+
+func reserveUsageNamesMemory(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "--capacity-reserve-gb") && strings.Contains(line, "--capacity-budget-gb") {
+			return strings.Contains(line, "--memory-gb")
+		}
+	}
+	return false
+}
+
 func TestTailorGuide(t *testing.T) {
+	previous := stdinTerminal
+	stdinTerminal = func() bool { return false }
+	t.Cleanup(func() { stdinTerminal = previous })
 	stdout, _, code := captureCommandOutput(t, func() int { return cmdTailor(context.Background(), nil) })
 	if code != exitUsage {
 		t.Fatalf("bare exit %d", code)

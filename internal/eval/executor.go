@@ -116,18 +116,8 @@ func PreflightUnsafeExecutor(spec *Spec) (ExecutorReceipt, error) {
 	if spec == nil {
 		return ExecutorReceipt{}, failure(FailureExecutorPreflight, "spec", errors.New("nil task specification"))
 	}
-	checks := []struct {
-		name   string
-		runner []string
-		files  map[string]string
-	}{
-		{spec.CodeWrite.ID, spec.CodeWrite.Runner, spec.CodeWrite.Files},
-		{spec.CodeFix.ID, spec.CodeFix.Runner, spec.CodeFix.Files},
-		{spec.Tools.ID, spec.Tools.Verify.Runner, spec.Tools.Files},
-		{spec.Agentic.ID, spec.Agentic.Verify.Runner, spec.Agentic.Files},
-	}
 	var receipt ExecutorReceipt
-	for i, check := range checks {
+	for i, check := range executableChecks(spec) {
 		if err := validateTaskRunner(check.runner, check.files); err != nil {
 			return ExecutorReceipt{}, failure(FailureExecutorPreflight, check.name, err)
 		}
@@ -151,6 +141,66 @@ func PreflightUnsafeExecutor(spec *Spec) (ExecutorReceipt, error) {
 		}
 	}
 	return receipt, nil
+}
+
+type executableCheck struct {
+	name   string
+	runner []string
+	files  map[string]string
+}
+
+func executableChecks(spec *Spec) []executableCheck {
+	return []executableCheck{
+		{spec.CodeWrite.ID, spec.CodeWrite.Runner, spec.CodeWrite.Files},
+		{spec.CodeFix.ID, spec.CodeFix.Runner, spec.CodeFix.Files},
+		{spec.Tools.ID, spec.Tools.Verify.Runner, spec.Tools.Files},
+		{spec.Agentic.ID, spec.Agentic.Verify.Runner, spec.Agentic.Files},
+	}
+}
+
+// PreflightIsolatedRunners resolves every executable runner through the
+// sandbox probe's interpreter before speed or memory. The task spec says
+// "python"; LookPath of that name misses /usr/bin/python3, which is the
+// interpreter the probe already ran. Failing here leaves nothing completed.
+// A launch that fails after this preflight is still an executor error and is
+// not rewritten as SKIP. An unavailable probe returns nil: those tasks stay
+// SKIP and the speed and memory phases are kept.
+func PreflightIsolatedRunners(ctx context.Context, spec *Spec) error {
+	if spec == nil {
+		return failure(FailureExecutorPreflight, "spec", errors.New("nil task specification"))
+	}
+	status := isolationStatus()
+	if !status.Available {
+		return nil
+	}
+	if !IsolatedExecutionEnabled(ctx) {
+		return failure(FailureExecutorPreflight, "spec", errors.New("isolated preflight requires an opted-in run"))
+	}
+	var pinned string
+	for i, check := range executableChecks(spec) {
+		if err := validateTaskRunner(check.runner, check.files); err != nil {
+			return failure(FailureExecutorPreflight, check.name, err)
+		}
+		path, err := resolvePythonExecutablePath(ctx, check.runner[0])
+		if err != nil {
+			return failure(FailureExecutorPreflight, check.name, err)
+		}
+		if i == 0 {
+			if _, err := queryPythonVersion(ctx, path); err != nil {
+				return failure(FailureExecutorPreflight, check.name, err)
+			}
+			if _, err := hashInterpreter(path); err != nil {
+				return failure(FailureExecutorPreflight, check.name, err)
+			}
+			pinned = path
+			continue
+		}
+		if path != pinned {
+			return failure(FailureExecutorPreflight, check.name,
+				errors.New("executable tasks resolved to different interpreter identities"))
+		}
+	}
+	return nil
 }
 
 func preflightTaskRunner(argv []string, files map[string]string) error {
@@ -267,6 +317,9 @@ func canonicalRunnerPath(resolved string) (string, error) {
 }
 
 func resolvePythonExecutablePath(ctx context.Context, name string) (string, error) {
+	if IsolatedExecutionEnabled(ctx) {
+		return isolatedProbeInterpreter()
+	}
 	launcher, err := resolveRunnerPath(name)
 	if err != nil {
 		return "", err
@@ -283,6 +336,21 @@ func resolvePythonExecutablePath(ctx context.Context, name string) (string, erro
 	canonical, err := canonicalRunnerPath(reported)
 	if err != nil {
 		return "", fmt.Errorf("resolve Python-reported executable %q: %w", reported, err)
+	}
+	return canonical, nil
+}
+
+// isolatedProbeInterpreter is the absolute path Probe already executed.
+// The spec's runner name is not consulted: LookPath("python") is a second
+// discovery and disagrees with a probe that found only /usr/bin/python3.
+func isolatedProbeInterpreter() (string, error) {
+	status := isolationStatus()
+	if !status.Available || !filepath.IsAbs(status.Interpreter) {
+		return "", errors.New("isolated execution has no absolute interpreter")
+	}
+	canonical, err := canonicalRunnerPath(status.Interpreter)
+	if err != nil {
+		return "", err
 	}
 	return canonical, nil
 }

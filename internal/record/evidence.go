@@ -63,8 +63,12 @@ type completedEvidencePayload struct {
 	// exactly the bytes it signed before this field existed. Every completion
 	// receipt written earlier must keep verifying unchanged.
 	ContextQuality *ContextQuality `json:"context_quality,omitempty"`
-	Scorecard      score.Scorecard `json:"scorecard"`
-	Profile        device.Profile  `json:"profile"`
+	// ContextTokenAccount carries omitempty so a completion that never
+	// attached a token receipt signs the same bytes it signed before the
+	// field existed.
+	ContextTokenAccount *ContextTokenAccount `json:"context_token_account,omitempty"`
+	Scorecard           score.Scorecard      `json:"scorecard"`
+	Profile             device.Profile       `json:"profile"`
 }
 
 // CompleteEvidence seals a finished current-schema run. It must be called exactly
@@ -170,6 +174,10 @@ func (r *Record) validateScorecard(profile device.Profile) error {
 	if err != nil {
 		return fmt.Errorf("hash current scoring policy: %w", err)
 	}
+	legacyV6Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV6())
+	if err != nil {
+		return fmt.Errorf("hash legacy v6 scoring policy: %w", err)
+	}
 	legacyV5Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV5())
 	if err != nil {
 		return fmt.Errorf("hash legacy v5 scoring policy: %w", err)
@@ -186,6 +194,8 @@ func (r *Record) validateScorecard(profile device.Profile) error {
 	switch r.Manifest.Provenance.ScoringPolicySHA256 {
 	case currentHash:
 		expected = score.Score(r.Measured(), profile)
+	case legacyV6Hash:
+		expected = score.ScoreLegacyV6(r.Measured(), profile)
 	case legacyV5Hash:
 		expected = score.ScoreLegacyV5(r.Measured(), profile)
 	case legacyHash:
@@ -216,7 +226,8 @@ func (r *Record) completedEvidenceJSON(profile device.Profile) ([]byte, error) {
 		Refused: r.Refused, Plumbing: r.Plumbing, Rep: r.Rep, Density: r.Density,
 		Contamination: r.Contamination, EvidenceCounts: r.EvidenceCounts,
 		AdaptiveDecisions: r.AdaptiveDecisions, ContextQuality: cloneContextQuality(r.ContextQuality),
-		Scorecard: r.Scorecard, Profile: profile,
+		ContextTokenAccount: cloneContextTokenAccount(r.ContextTokenAccount),
+		Scorecard:           r.Scorecard, Profile: profile,
 	})
 }
 
@@ -234,6 +245,9 @@ func (r *Record) validateDerivedEvidence() error {
 		return err
 	}
 	if err := r.validateContextQuality(); err != nil {
+		return err
+	}
+	if err := r.validateContextTokenAccount(); err != nil {
 		return err
 	}
 	if err := r.validateEvidenceCounts(); err != nil {

@@ -189,12 +189,18 @@ screening scope and rollback limits. Automatic serving changes remain future wor
 
 ## Start with one fitting
 
-`fitr tailor` guides one machine and one piece of work. It seals the role,
+`fitr tailor` guides one machine and one piece of work. With no subcommand
+it asks for the workload, context, outcomes, and memory policy the machine
+cannot observe, then measures only after the sealed plan is approved. A pipe
+or `--display json` does not wait for input. `plan`, `start`, `status`,
+`resume`, and `adopt` remain available for scripts. It seals the role,
 the required outcomes, task definitions, installed candidates, context
 window, and one capacity policy, then measures that plan. One model stays a non-comparative
 assessment. Two to four models, with a reserve and an approved owned runtime,
 use the bounded auto lifecycle. An absolute ceiling is not rewritten into
-that reserve.
+that reserve. A reserve also names `--memory-gb`, the role's resident limit.
+Owned launch outside Windows is refused before a session is prepared. This
+front door does not close the live document-pack or Pi checks.
 
 ```powershell
 fitr tailor plan --role daily --outcome structured_output --candidate qwen3:30b --ctx 32768 --capacity-budget-gb 20
@@ -272,7 +278,7 @@ unresolved dependencies remain explicit. See [cleanup planning](docs/cleanup.md)
 | Local artifact observations | Bounded whole-file hashes for explicit mappings, source comparisons and change detection without runtime promotion | [Artifact binding](docs/artifact-binding.md) |
 | Agent interoperability | Read-only MCP 2026-07-28 candidate review and selected status, official SDK acceptance and an Agent Plugins 1.0.0 package | [Protocol and client limits](docs/agent-interop.md) |
 | Cleanup planning | Read-only bounded storage inventory and aged partial-download review candidates, with no inferred deletion authority | [Cleanup](docs/cleanup.md) |
-| Document context tasks | A sealed document pack at one operating window. `fitr run --context-tiers` collects it directly. Owned fitting collects it beside the battery and confirms it from a fresh plan when the role declares a usable-context floor. A battery record alone cannot clear that floor. The live oversized-prompt refusal is not yet recorded | [Context quality](docs/context-quality.md), [usage](docs/usage.md#document-context-tasks) |
+| Document context tasks | A sealed document pack at one operating window. `fitr run --context-tiers` collects it directly. Owned fitting collects it beside the battery and confirms it from a fresh plan when the role declares a usable-context floor. A battery record alone cannot clear that floor. A 64 KiB pack is not a 64000 usable-input token qualification; that receipt is separate and has no recorded native target. The live oversized-prompt refusal is not yet recorded | [Context quality](docs/context-quality.md), [usage](docs/usage.md#document-context-tasks) |
 | Context experiments | A predeclared exploratory context plan with shared task seeds, point-specific allocation, required-equal factors, and replayable bundles | [Context experiment](docs/usage.md#context-experiment) |
 | Configuration tradeoffs | Conservative frontiers across sealed candidates, optional same-base conversion lineage, and no point-estimate winner when intervals overlap | [Quant experiment](docs/usage.md#quant-configuration-experiment), [calibration](docs/calibration.md) |
 | Fresh confirmation | A sealed candidate set, a fresh shared task seed, full paired runs, and confirmation only when requirements resolve and the objective separates | [Confirmation](docs/usage.md#fresh-configuration-confirmation) |

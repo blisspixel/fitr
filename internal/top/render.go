@@ -231,28 +231,6 @@ func renderLiveProgress(w *lineWriter, canvas *Canvas, state State, live Live, g
 	}
 }
 
-func renderLiveMessages(w *lineWriter, live Live) {
-	for _, warning := range live.Warnings {
-		if !w.line(Span{Text: "warning    ", Role: RoleWarning}, Span{Text: warning, Role: RoleDefault}) {
-			break
-		}
-	}
-	if live.Error != "" {
-		label, role := "error      ", RoleFail
-		if live.Cancelled {
-			label, role = "cancelled  ", RoleWarning
-		}
-		w.line(Span{Text: label, Role: role}, Span{Text: live.Error, Role: RoleDefault})
-	}
-	if live.Completed && !live.Cancelled && live.Error == "" {
-		if !live.Saved {
-			w.line(Span{Text: "UNSAVED", Role: RoleFail}, Span{Text: "  check result directory permissions and free space", Role: RoleWarning})
-		} else {
-			w.line(Span{Text: "Enter opens the saved Result.", Role: RoleAccent})
-		}
-	}
-}
-
 func renderLivePhases(w *lineWriter, live Live, height int) {
 	if len(live.Phases) == 0 || height < 18 {
 		return
@@ -421,6 +399,7 @@ func renderResultPerformance(w *lineWriter, run Run, glyphs Glyphs, compact bool
 	}
 	renderResultCapacity(w, run, compact)
 	renderResultContextTasks(w, run, compact)
+	renderResultTokenAccount(w, run, compact)
 }
 
 // renderResultContextTasks projects the document-task phase. It renders in the
@@ -648,15 +627,6 @@ func residentContextLabel(ctx int) string {
 		return "32K"
 	}
 	return fmt.Sprintf("%d-token", ctx)
-}
-
-func renderResultWarnings(w *lineWriter, run Run) bool {
-	for _, warning := range run.Warnings {
-		if !w.line(Span{Text: "warning    ", Role: RoleWarning}, Span{Text: warning, Role: RoleDefault}) {
-			return false
-		}
-	}
-	return true
 }
 
 func renderResultNext(w *lineWriter, run Run) {
@@ -1232,9 +1202,7 @@ func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
 	w.line(Span{Text: "INVENTORY  installed models, not a ranking" + filterSuffix(state.Filter), Role: RoleHeader})
 	observed := "observed " + state.Snapshot.UpdatedAt.UTC().Format("15:04:05Z") + "; r reload"
 	w.line(Span{Text: observed, Role: RoleMuted})
-	if state.Snapshot.InventoryWarning != "" {
-		w.line(Span{Text: "warning  ", Role: RoleWarning}, Span{Text: state.Snapshot.InventoryWarning, Role: RoleDefault})
-	}
+	renderInventoryNotice(w, state.Snapshot.InventoryWarning)
 	if len(items) == 0 {
 		msg := "no models listed; start a runtime or pull a model"
 		if strings.TrimSpace(state.Filter) != "" {

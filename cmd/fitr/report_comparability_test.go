@@ -87,7 +87,10 @@ func TestBoardReportsTheMissingComparisonEvidence(t *testing.T) {
 					t.Errorf("row counted again as %s: %s", key, stdout)
 				}
 			}
-			if !strings.Contains(stderr, tc.explanation) || (tc.gate != "context" && strings.Contains(stderr, "verified effective context")) {
+			// The notice wraps at the shared width. The explanation is one
+			// sentence, so line breaks are not part of the wording.
+			flat := strings.Join(strings.Fields(stderr), " ")
+			if !strings.Contains(flat, tc.explanation) || (tc.gate != "context" && strings.Contains(flat, "verified effective context")) {
 				t.Errorf("wrong %s exclusion explanation: %s", tc.gate, stderr)
 			}
 		})

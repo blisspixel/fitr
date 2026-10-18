@@ -132,6 +132,12 @@ type TaskPlan struct {
 	// written before this field byte-identical and its signature valid.
 	ContextCells      int    `json:"context_cells,omitempty"`
 	ContextPlanSHA256 string `json:"context_plan_sha256,omitempty"`
+	// TokenAccountCases and TokenAccountPlanSHA256 seal an optional
+	// usable-input token receipt. Both are omitted when no receipt was
+	// planned, so manifests written before this field keep their bytes.
+	// The receipt is not a reading of the UTF-8 byte pack.
+	TokenAccountCases      int    `json:"token_account_cases,omitempty"`
+	TokenAccountPlanSHA256 string `json:"token_account_plan_sha256,omitempty"`
 }
 
 // RunProvenance identifies every mutable definition that can alter a verdict
@@ -224,7 +230,7 @@ func (p RunProvenance) Validate() error {
 
 func (p TaskPlan) Validate() error {
 	if p.SpeedSamples < 0 || p.CodeTrials < 0 || p.CheckTrialsLimit < 0 ||
-		p.ToolTrials < 0 || p.RefusalTrials < 0 || p.AgenticTrials < 0 || p.ContextCells < 0 {
+		p.ToolTrials < 0 || p.RefusalTrials < 0 || p.AgenticTrials < 0 || p.ContextCells < 0 || p.TokenAccountCases < 0 {
 		return errors.New("task plan counts cannot be negative")
 	}
 	if p.AdaptiveChecks && p.CheckTrialsLimit < 1 {
@@ -233,7 +239,7 @@ func (p TaskPlan) Validate() error {
 	// A context phase is planned work in its own right, so a run consisting
 	// only of one is a complete plan rather than an empty one.
 	if p.SpeedSamples+p.CodeTrials+p.CheckTrialsLimit+p.ToolTrials+
-		p.RefusalTrials+p.AgenticTrials+p.ContextCells == 0 && !p.Memory && !p.Plumbing && !p.Withdrawal {
+		p.RefusalTrials+p.AgenticTrials+p.ContextCells+p.TokenAccountCases == 0 && !p.Memory && !p.Plumbing && !p.Withdrawal {
 		return errors.New("task plan is empty")
 	}
 	return nil
@@ -261,6 +267,12 @@ func (p TaskPlan) validateCurrentSeals() error {
 	}
 	if p.ContextCells == 0 && p.ContextPlanSHA256 != "" {
 		return errors.New("current run manifest empty context plan cannot carry a context-plan digest")
+	}
+	if p.TokenAccountCases > 0 && !sha256Digest.MatchString(p.TokenAccountPlanSHA256) {
+		return errors.New("current run manifest token account requires a sealed token-account plan")
+	}
+	if p.TokenAccountCases == 0 && p.TokenAccountPlanSHA256 != "" {
+		return errors.New("current run manifest empty token account cannot carry a token-account digest")
 	}
 	return nil
 }
@@ -360,7 +372,7 @@ type ScoringPolicy struct {
 
 func CurrentScoringPolicy() ScoringPolicy {
 	return ScoringPolicy{
-		Schema:          "fitr.scoring.policy.v6",
+		Schema:          "fitr.scoring.policy.v7",
 		RateInterval:    "clustered_wilson_95_fixed",
 		BoundaryVerdict: "inconclusive", ScorableOutcomes: "pass_fail_only",
 		UnisolatedExecution: "excluded", Contamination: "exclude_measured_claims",
@@ -368,8 +380,14 @@ func CurrentScoringPolicy() ScoringPolicy {
 	}
 }
 
-func legacyScoringPolicyV5() ScoringPolicy {
+func legacyScoringPolicyV6() ScoringPolicy {
 	policy := CurrentScoringPolicy()
+	policy.Schema = "fitr.scoring.policy.v6"
+	return policy
+}
+
+func legacyScoringPolicyV5() ScoringPolicy {
+	policy := legacyScoringPolicyV6()
 	policy.Schema = "fitr.scoring.policy.v5"
 	return policy
 }

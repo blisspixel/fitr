@@ -35,8 +35,68 @@ func Shortlist() []Candidate {
 	}
 }
 
+const (
+	// WeightFits is the group whose registry weight bytes are within the
+	// budget. Weight fit is not resident fit.
+	WeightFits = "fits"
+	// WeightOverBudget is known weight that does not fit. It is labeled and
+	// is not offered ahead of a name that does.
+	WeightOverBudget = "over_budget"
+	// WeightUnmeasured means the size or the budget was missing. It is not
+	// a fit and not a rejection.
+	WeightUnmeasured = "unmeasured"
+)
+
+// Group is one labeled slice of a shortlist.
+type Group struct {
+	Class string
+	Items []Candidate
+}
+
+// Partition splits candidates by weight bytes against a budget in GiB.
+// Catalog MoE preference applies only inside WeightFits. An unknown budget
+// or a length mismatch leaves every name WeightUnmeasured, in the input
+// order, because there is nothing to classify. KV is not estimated.
+func Partition(items []Candidate, weightBytes []int64, budgetGiB float64, cpuOrAPU bool) []Group {
+	if len(weightBytes) != len(items) || budgetGiB <= 0 {
+		if len(items) == 0 {
+			return nil
+		}
+		return []Group{{Class: WeightUnmeasured, Items: append([]Candidate(nil), items...)}}
+	}
+	var fits, over, missing []Candidate
+	for i, item := range items {
+		size := weightBytes[i]
+		if size <= 0 {
+			missing = append(missing, item)
+			continue
+		}
+		project := ProjectWeights(budgetGiB, size)
+		switch {
+		case !project.Known:
+			missing = append(missing, item)
+		case project.WeightsFit:
+			fits = append(fits, item)
+		default:
+			over = append(over, item)
+		}
+	}
+	var groups []Group
+	if len(fits) > 0 {
+		groups = append(groups, Group{Class: WeightFits, Items: Order(fits, cpuOrAPU)})
+	}
+	if len(over) > 0 {
+		groups = append(groups, Group{Class: WeightOverBudget, Items: over})
+	}
+	if len(missing) > 0 {
+		groups = append(groups, Group{Class: WeightUnmeasured, Items: missing})
+	}
+	return groups
+}
+
 // Order puts catalog MoE coding and agent names first on a CPU or APU.
-// Every other machine keeps the shortlist order.
+// Every other machine keeps the shortlist order. Callers that know a budget
+// use Partition; this order is only the preference inside the fitting group.
 func Order(items []Candidate, cpuOrAPU bool) []Candidate {
 	out := append([]Candidate(nil), items...)
 	if !cpuOrAPU {

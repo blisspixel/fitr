@@ -285,17 +285,66 @@ func TestScorecardValidationPreservesSealedV3AuxiliaryLatencyProse(t *testing.T)
 	if err := r.validateScorecard(profile); err != nil {
 		t.Fatalf("sealed v5 scorecard no longer validates: %v", err)
 	}
+	legacyV6Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV6())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Manifest.Provenance.ScoringPolicySHA256 = legacyV6Hash
+	r.Scorecard = score.ScoreLegacyV6(r.Measured(), profile)
+	if err := r.validateScorecard(profile); err != nil {
+		t.Fatalf("sealed v6 scorecard no longer validates: %v", err)
+	}
 	currentHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", CurrentScoringPolicy())
 	if err != nil {
 		t.Fatal(err)
 	}
-	hashes := []string{legacyHash, legacyV4Hash, legacyV5Hash, currentHash}
+	requireDistinctPolicyHashes(t, legacyHash, legacyV4Hash, legacyV5Hash, legacyV6Hash, currentHash)
+}
+
+func requireDistinctPolicyHashes(t *testing.T, hashes ...string) {
+	t.Helper()
 	for i, left := range hashes {
 		for _, right := range hashes[i+1:] {
 			if left == right {
-				t.Fatal("scoring policies v3 through v6 must have distinct receipts")
+				t.Fatal("scoring policies v3 through v7 must have distinct receipts")
 			}
 		}
+	}
+}
+
+func TestPolicyV6KeepsAnExtractionMissAsAMissingWorker(t *testing.T) {
+	profile := device.Profile{Name: "default"}
+	r := &Record{
+		TaskPlan: TaskPlan{CodeTrials: 2},
+		CodeWrite: []eval.ExecResult{{
+			Outcome: eval.OutcomeInconclusive,
+			Detail:  "no executable code was extracted",
+		}},
+		CodeFix: []eval.ExecResult{{
+			Outcome: eval.OutcomeInconclusive,
+			Detail:  "no executable code was extracted",
+		}},
+	}
+	measured := r.Measured()
+	if !measured.CodePlanned || !measured.CodeAttempted || !measured.CodeExtractionMiss || measured.CodeKnown {
+		t.Fatalf("extraction miss was not reconstructed: %+v", measured)
+	}
+	policyHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV6())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Manifest = &RunManifest{Provenance: &RunProvenance{ScoringPolicySHA256: policyHash}}
+	r.Scorecard = score.ScoreLegacyV6(measured, profile)
+	if err := r.validateScorecard(profile); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.Scorecard.Needs["coding"].Why, "isolated execution is unavailable") {
+		t.Fatalf("v6 coding = %s", r.Scorecard.Needs["coding"].Why)
+	}
+	current := score.Score(measured, profile)
+	if strings.Contains(current.Needs["coding"].Why, "isolated execution") ||
+		!strings.Contains(current.Needs["coding"].Why, "no executable code was extracted") {
+		t.Fatalf("current coding = %s", current.Needs["coding"].Why)
 	}
 }
 

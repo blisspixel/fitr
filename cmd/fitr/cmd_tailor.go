@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -11,8 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/blisspixel/fitr/internal/advise"
 	"github.com/blisspixel/fitr/internal/automation"
+	"github.com/blisspixel/fitr/internal/autoruntime"
 	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/fitting"
 	"github.com/blisspixel/fitr/internal/lock"
@@ -23,8 +27,12 @@ import (
 
 const tailorGuide = `fitr tailor: one fitting for this machine and this work
 
+  fitr tailor
+    asks for what this machine cannot observe, shows one sealed plan, and
+    measures only after that plan is approved. A pipe or --display json
+    never waits for input.
   fitr tailor plan --role <name> --outcome <need> --candidate <model> --ctx <tokens>
-    (--capacity-budget-gb <GiB> | --capacity-reserve-gb <GiB>)
+    (--capacity-budget-gb <GiB> | --capacity-reserve-gb <GiB> --memory-gb <GiB>)
   fitr tailor start <session-id> --approve-plan
   fitr tailor status|resume <session-id>
   fitr tailor adopt <session-id> --approve-adoption
@@ -45,7 +53,11 @@ is downloaded, and an existing Ollama process is not stopped.
   --memory-gb      role resident limit when the policy is a reserve
   --scope screen   optional screening; it does not qualify a coder
   --endpoint       optional explicit Ollama URL
-  --approve-owned-runtime  optional; only with a reserve, and start then needs --runtime
+  --approve-owned-runtime  optional; only with a reserve. The one-session door inspects
+                       the installation and writes a new session runtime file.
+                       fitr tailor start still needs --runtime for a script that
+                       already has a matching file. Owned launch outside Windows
+                       stops before a session is prepared.
   --workload       repository-planning, agentic-coding, code-review,
                    document-research, or structured-extraction
   --desired-context  tokens the work needs; a smaller --ctx does not satisfy it
@@ -96,10 +108,23 @@ type tailorHistory struct {
 }
 
 type tailorDeps struct {
-	runPoint      func(context.Context, tailorJob) (string, string, error)
-	history       func(fitting.Plan, string) (tailorHistory, bool)
-	closeEvidence func(fitting.Session) error
-	startOwned    func(context.Context, autoCommand) int
+	runPoint       func(context.Context, tailorJob) (string, string, error)
+	history        func(fitting.Plan, string) (tailorHistory, bool)
+	closeEvidence  func(fitting.Session) error
+	startOwned     func(context.Context, autoCommand) int
+	in             io.Reader
+	prompt         *bufio.Reader
+	interactive    bool
+	ownedSupported func() error
+	inspectRuntime func(context.Context, string, string) (autoruntime.Spec, error)
+	listModels     func(context.Context, string) ([]string, error)
+	memoryLine     func(context.Context) string
+}
+
+// stdinTerminal is replaced by tests so a developer terminal cannot turn the
+// guide check into a prompt. Production uses the real stdin.
+var stdinTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 type tailorView struct {
@@ -112,7 +137,10 @@ type tailorView struct {
 }
 
 func cmdTailor(ctx context.Context, args []string) int {
-	return cmdTailorWith(ctx, args, tailorDeps{})
+	return cmdTailorWith(ctx, args, tailorDeps{
+		in: os.Stdin, interactive: stdinTerminal(),
+		memoryLine: tailorObservedMemory, listModels: tailorListInstalled,
+	})
 }
 
 func cmdTailorWith(ctx context.Context, args []string, deps tailorDeps) int {
@@ -126,12 +154,18 @@ func cmdTailorWith(ctx context.Context, args []string, deps tailorDeps) int {
 		deps.startOwned = startAuto
 	}
 	if len(args) == 0 {
+		if deps.interactive {
+			return tailorSession(ctx, nil, deps)
+		}
 		fmt.Fprintln(os.Stdout, tailorGuide)
 		return exitUsage
 	}
 	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
 		fmt.Fprintln(os.Stdout, tailorGuide)
 		return exitOK
+	}
+	if strings.HasPrefix(args[0], "-") || fitting.ValidSessionID(args[0]) {
+		return tailorSession(ctx, args, deps)
 	}
 	switch args[0] {
 	case "plan":
@@ -153,13 +187,13 @@ func cmdTailorWith(ctx context.Context, args []string, deps tailorDeps) int {
 type tailorPlanFlags struct {
 	role, scope, endpoint, kv, budget, reserve, memory, tiers, rate, display  string
 	workload, meaning, harness, harnessVersion, weightQuant, weightPreference string
-	weightMinimum, modelCard, projected                                       string
+	weightMinimum, modelCard, projected, runtimeExe, models                   string
 	outcomes                                                                  tailorOutcomes
 	candidates                                                                autoCandidates
 	alternatives, permittedKV                                                 tokenList
 	ctxTokens, usableBytes, repeats, desired, minimum, harnessMin             int
 	reserveSystem, reserveOutput, reserveReasoning, concurrency               int
-	noFlash, owned, populated                                                 bool
+	noFlash, owned, populated, approve                                        bool
 }
 
 func tailorPlan(args []string) int {
@@ -167,21 +201,25 @@ func tailorPlan(args []string) int {
 	if !ok {
 		return code
 	}
-	if code, ok = tailorRequiredAnswers(flags.role, flags.outcomes, flags.candidates, flags.ctxTokens, flags.budget, flags.reserve, flags.workload); !ok {
-		return code
-	}
-	if code, ok = tailorContextMeaning(flags); !ok {
-		return code
-	}
-	kind, amount, resident, code, ok := tailorCapacityAmounts(flags.budget, flags.reserve, flags.memory)
-	if !ok {
-		return code
-	}
-	req, code, ok := tailorRequest(flags, kind, amount, resident)
+	req, code, ok := requestFromFlags(flags)
 	if !ok {
 		return code
 	}
 	return sealTailorPlan(req, flags.display)
+}
+
+func requestFromFlags(flags tailorPlanFlags) (fitting.Request, int, bool) {
+	if code, ok := tailorRequiredAnswers(flags.role, flags.outcomes, flags.candidates, flags.ctxTokens, flags.budget, flags.reserve, flags.workload); !ok {
+		return fitting.Request{}, code, false
+	}
+	if code, ok := tailorContextMeaning(flags); !ok {
+		return fitting.Request{}, code, false
+	}
+	kind, amount, resident, code, ok := tailorCapacityAmounts(flags.budget, flags.reserve, flags.memory)
+	if !ok {
+		return fitting.Request{}, code, false
+	}
+	return tailorRequest(flags, kind, amount, resident)
 }
 
 func tailorRequest(flags tailorPlanFlags, kind fitting.CapacityKind, amount, resident int64) (fitting.Request, int, bool) {
@@ -240,15 +278,16 @@ func tailorRequest(flags tailorPlanFlags, kind fitting.CapacityKind, amount, res
 	return req, exitOK, true
 }
 
-func sealTailorPlan(req fitting.Request, display string) int {
+type tailorUsageError struct{ error }
+
+func makeTailorSession(req fitting.Request) (fitting.Session, error) {
 	tasks, err := autoTaskSpec()
 	if err != nil {
-		return fittingFailure(err)
+		return fitting.Session{}, err
 	}
 	plan, err := fitting.Draft(req, tasks)
 	if err != nil {
-		errPrint(err.Error(), "", "fitr tailor --help")
-		return exitUsage
+		return fitting.Session{}, tailorUsageError{err}
 	}
 	sha, err := buildinfo.BinarySHA256()
 	if err != nil {
@@ -259,12 +298,29 @@ func sealTailorPlan(req fitting.Request, display string) int {
 		session.Phase = fitting.PhaseBlocked
 	}
 	if err := (fitting.Store{Results: resultsDir()}).Create(session); err != nil {
-		return fittingFailure(err)
+		return fitting.Session{}, err
+	}
+	return session, nil
+}
+
+func tailorDraftCode(err error) int {
+	var usageErr tailorUsageError
+	if errors.As(err, &usageErr) {
+		errPrint(usageErr.Error(), "", "fitr tailor --help")
+		return exitUsage
+	}
+	return fittingFailure(err)
+}
+
+func sealTailorPlan(req fitting.Request, display string) int {
+	session, err := makeTailorSession(req)
+	if err != nil {
+		return tailorDraftCode(err)
 	}
 	if code := printTailor(session, display); code != exitOK {
 		return code
 	}
-	if plan.Blocked {
+	if session.Plan.Blocked {
 		return exitUnresolved
 	}
 	return exitOK
@@ -660,11 +716,16 @@ func fittingRunOpts(plan fitting.Plan) (runOpts, error) {
 }
 
 func printTailor(session fitting.Session, display string) int {
+	return printTailorLines(session, display, nil)
+}
+
+func printTailorLines(session fitting.Session, display string, extra []string) int {
 	sources, gaps := fittingObservationSources(session)
 	recommendation := session.Recommendation(sources...)
 	lines := append([]string(nil), session.StatusLines(sources...)...)
 	lines = append(lines, gaps...)
 	lines = append(lines, fittingFailureLines(session)...)
+	lines = append(lines, extra...)
 	switch render.Resolve(display) {
 	case "none":
 		return exitOK
@@ -740,11 +801,8 @@ func delegatedObservationSources(session fitting.Session) ([]fitting.Observation
 	}
 	records := record.Store{Dir: resultsDir()}
 	if state.ConfirmationStore != nil && len(state.CompletedConfirmation) > 0 {
-		points, err := autoGroupPoints(journal.Plan, records, state.ConfirmationStore, "confirmation", state.CompletedConfirmation)
-		if err != nil {
-			return nil, append(notes, "fresh confirmation evidence could not be resolved; nothing was certified")
-		}
-		return sourcesFromRecords(points, true), notes
+		sources, extra := confirmedDelegationSources(journal.Plan, state, records, time.Now())
+		return sources, append(notes, extra...)
 	}
 	if state.ExplorationStore != nil && len(state.CompletedExploration) > 0 {
 		points, err := autoGroupPoints(journal.Plan, records, state.ExplorationStore, "exploration", state.CompletedExploration)
@@ -857,6 +915,9 @@ func parseTailorPlan(args []string) (tailorPlanFlags, int, bool) {
 	fs.StringVar(&flags.kv, "kv", "", "requested cache type f16, q8_0, or q4_0; quantized KV records flash attention on the plan and does not set the server")
 	fs.BoolVar(&flags.noFlash, "no-flash-attention", false, "record f16 KV without flash attention on the plan")
 	fs.BoolVar(&flags.owned, "approve-owned-runtime", false, "approve an owned runtime for a reserve policy")
+	fs.BoolVar(&flags.approve, "approve-plan", false, "measure the previewed plan; plan alone still does not start")
+	fs.StringVar(&flags.runtimeExe, "runtime-executable", "", "owned runtime executable to inspect")
+	fs.StringVar(&flags.models, "models", "", "existing Ollama model-store directory")
 	fs.IntVar(&flags.usableBytes, "usable-context-bytes", 0, "document-byte floor; requires context tiers")
 	fs.StringVar(&flags.tiers, "context-tiers", "", "document payload sizes in bytes")
 	fs.StringVar(&flags.rate, "minimum-rate", "", "success-rate floor for outcomes that have one")

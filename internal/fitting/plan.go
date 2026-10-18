@@ -64,6 +64,12 @@ const (
 
 var idPattern = regexp.MustCompile(`^fit-[0-9a-f]{32}$`)
 
+// ValidSessionID reports whether id names one fitting session. The front door
+// uses it to resume that session instead of minting a second plan.
+func ValidSessionID(id string) bool {
+	return idPattern.MatchString(id)
+}
+
 // Request is the person's answers. Zero context is missing, not an 8192 default.
 type Request struct {
 	RoleName            string
@@ -156,6 +162,17 @@ type Session struct {
 	ExecutableSHA256 string  `json:"executable_sha256,omitempty"`
 	ExplorationID    string  `json:"exploration_id,omitempty"`
 	ConfirmationSeed string  `json:"confirmation_seed,omitempty"`
+	// Resume observations let a later invocation detect a changed installation
+	// or inventory. They are not evidence classes, not a recommendation, and
+	// they are not copied into the recommendation receipt. Paths stay here so
+	// the text and JSON receipts can omit them.
+	RuntimeExecutable         string   `json:"runtime_executable,omitempty"`
+	ModelStore                string   `json:"model_store,omitempty"`
+	InspectedExecutableSHA256 string   `json:"inspected_executable_sha256,omitempty"`
+	InspectedLibrariesSHA256  string   `json:"inspected_libraries_sha256,omitempty"`
+	InspectedRuntimeVersion   string   `json:"inspected_runtime_version,omitempty"`
+	InventoryChecked          bool     `json:"inventory_checked,omitempty"`
+	InventoryNames            []string `json:"inventory_names,omitempty"`
 }
 
 // Draft seals a plan from one set of answers. A blocked plan is still sealed:

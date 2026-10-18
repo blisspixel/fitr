@@ -268,6 +268,42 @@ func TestScheduledExecutableTasksNameIsolationBoundary(t *testing.T) {
 	}
 }
 
+func TestExtractionMissIsNotReportedAsAMissingSandbox(t *testing.T) {
+	m := good()
+	m.CodeKnown = false
+	m.CodePlanned = true
+	m.CodeAttempted = true
+	m.CodeExtractionMiss = true
+	m.Reasoning = Pool{Passes: 4, N: 5}
+	why := Score(m, lappy(t)).Needs["coding"].Why
+	if strings.Contains(why, "isolated execution") || !strings.Contains(why, "no executable code was extracted") ||
+		!strings.Contains(why, "reasoning checks 4/5") {
+		t.Fatalf("extraction miss hid the observation: %q", why)
+	}
+	legacy := ScoreLegacyV6(m, lappy(t)).Needs["coding"].Why
+	if !strings.Contains(legacy, "isolated execution is unavailable") {
+		t.Fatalf("policy v6 changed an extraction miss: %q", legacy)
+	}
+
+	bare := Measured{Model: "test", CodePlanned: true, CodeAttempted: true, CodeExtractionMiss: true}
+	if use := Score(bare, lappy(t)).UseFor; strings.Contains(use, "isolated worker") {
+		t.Fatalf("use line blamed a missing worker: %q", use)
+	}
+	unstarted := Score(Measured{Model: "test", CodePlanned: true}, lappy(t))
+	if !strings.Contains(unstarted.Needs["coding"].Why, "isolated execution is unavailable") ||
+		!strings.Contains(unstarted.UseFor, "isolated worker") {
+		t.Fatalf("unstarted coding = %q use %q", unstarted.Needs["coding"].Why, unstarted.UseFor)
+	}
+	attempted := Score(Measured{Model: "test", CodePlanned: true, CodeAttempted: true}, lappy(t)).Needs["coding"].Why
+	if strings.Contains(attempted, "isolated execution") || !strings.Contains(attempted, "did not produce a measured outcome") {
+		t.Fatalf("attempted coding = %q", attempted)
+	}
+	agent := Score(Measured{Model: "test", AgenticPlanned: true, AgenticAttempted: true}, lappy(t)).Needs["unattended_agentic"].Why
+	if strings.Contains(agent, "isolated execution") || !strings.Contains(agent, "did not produce a measured outcome") {
+		t.Fatalf("attempted agent = %q", agent)
+	}
+}
+
 func TestClusteredPoolCannotHideADeadFamily(t *testing.T) {
 	m := good()
 	m.Structured = Pool{Passes: 60, N: 70}

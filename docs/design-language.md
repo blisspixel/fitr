@@ -67,6 +67,28 @@ Terminal states stop it, and pausing the viewport freezes it while measurement
 continues. Set `FITR_REDUCED_MOTION=1` for static status with elapsed-time
 updates. Motion never enters JSON, saved receipts or ordinary CLI reports.
 
+## Notices
+
+Four words name why a line is there. The word is the meaning. Color only
+repeats it: `tip` is dim, `note` uses the default color, `warning` is amber,
+and `error` is red.
+
+| Word | When |
+| --- | --- |
+| `tip` | an optional next step, or good news |
+| `note` | a fact that does not change the reading |
+| `warning` | a caveat that changes how to read a result |
+| `error` | the command did not do what was asked |
+
+`hint:` remains the label for a copyable command after an error. `INCONCLUSIVE`
+remains a verdict word. Cancelled remains its own status word. Inventory JSON
+keeps each sentence in `warnings`. Plain text classifies those sentences:
+suggest, runtime start, accelerator install, and isolated-execution lines are
+tips; the mixture-of-experts ordering fact is a note; a saved file that could
+not be trusted stays a warning. Every notice wraps to the shared width, and
+the continuation sits under the word. `NO_COLOR` and `TERM=dumb` keep the
+words.
+
 ## Discovery and role-library direction
 
 The current discovery cards show role, candidate, `[UNMEASURED]`, a source

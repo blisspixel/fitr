@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -222,7 +223,7 @@ func cmdBoard(ctx context.Context, args []string) int {
 	curDevice := device.Detect(ctx, probeBackend(ctx))
 	groups, order, excluded := groupBoardResults(results, command.current, curDevice)
 	board, visible := buildBoard(groups, order, curDevice, &excluded, command.role)
-	writeBoardExclusions(excluded)
+	writeBoardExclusions(excluded, command.mode)
 	if len(board.Groups) == 0 {
 		if command.role != "" {
 			errPrint("no measured grade for that role inside these fingerprint groups", "",
@@ -448,16 +449,23 @@ func makeBoardRow(result *Result, excluded *boardExclusions) render.BoardRow {
 	}
 }
 
-func writeBoardExclusions(excluded boardExclusions) {
+func writeBoardExclusions(excluded boardExclusions, mode string) {
+	writeBoardExclusionLines(os.Stderr, excluded, render.Width(), mode)
+}
+
+func writeBoardExclusionLines(w io.Writer, excluded boardExclusions, width int, mode string) {
 	for _, category := range excluded.categories() {
-		if category.count > 0 {
-			fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: excluded %d %s from board ranking and claims\n",
-				category.count, category.label)
+		if category.count == 0 {
+			continue
 		}
+		render.WriteNotice(w, render.NoticeWarning, fmt.Sprintf(
+			"INCONCLUSIVE: excluded %d %s from board ranking and claims",
+			category.count, category.label), width, mode)
 	}
 	if excluded.unscored > 0 {
-		fmt.Fprintf(os.Stderr, "! INCONCLUSIVE: %d board row(s) have no reproducible qualification because their scoring profile is unavailable\n",
-			excluded.unscored)
+		render.WriteNotice(w, render.NoticeWarning, fmt.Sprintf(
+			"INCONCLUSIVE: %d board row(s) have no reproducible qualification because their scoring profile is unavailable",
+			excluded.unscored), width, mode)
 	}
 }
 
