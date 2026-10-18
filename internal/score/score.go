@@ -141,13 +141,16 @@ func (v Verdict) Parts() (measure, gate string, detail []string, note string) {
 	return v.Measure, v.Gate, v.Detail, v.Note
 }
 
-// Needs are the independent questions, in display order. user_tasks is not
-// listed: it exists only on runs where ~/.fitr/tasks supplied tasks, and
-// SortedNeeds appends unknown keys at the end.
+// Needs are the independent questions, in display order. Behavioral gates
+// come first, then output health, then resident memory, then speed. That
+// order is not a score and not a rank. user_tasks is not listed: it exists
+// only on runs where ~/.fitr/tasks supplied tasks, and SortedNeeds appends
+// unknown keys at the end.
 var NeedOrder = []string{
-	"fast_and_decent", "coding", "structured_output", "instruction_precision",
-	"uncensored", "tool_calling", "unattended_agentic", "tool_restraint",
-	"low_footprint", "vision", "output_health",
+	"coding", "structured_output", "instruction_precision",
+	"tool_calling", "tool_restraint", "unattended_agentic",
+	"uncensored", "vision", "output_health",
+	"low_footprint", "fast_and_decent",
 }
 
 // LabelWidth is the scorecard's label column. Labels are capped rather than
@@ -1395,6 +1398,33 @@ func round(v float64, places int) float64 {
 		return -float64(int64(-v*p+0.5)) / p
 	}
 	return float64(int64(v*p+0.5)) / p
+}
+
+// QualityNeeds are the behavioral gates. Speed, resident memory, output
+// health, and vision stay outside this list. A speed pass is not a quality
+// pass, and a declared vision capability is not a behavioral result.
+var QualityNeeds = []string{
+	"coding", "structured_output", "instruction_precision",
+	"tool_calling", "tool_restraint", "unattended_agentic",
+	"uncensored",
+}
+
+const (
+	QualityUnmeasuredLead = "quality not measured"
+	QualityUnmeasuredNote = "quality not measured: speed is not a behavioral result"
+)
+
+// QualityMeasured reports whether any behavioral gate passed or failed.
+// Skip, n/a, blocked, and inconclusive are not that outcome. A missing key
+// is not a pass.
+func QualityMeasured(needs map[string]Verdict) bool {
+	for _, need := range QualityNeeds {
+		switch needs[need].State {
+		case Pass, Fail:
+			return true
+		}
+	}
+	return false
 }
 
 // SortedNeeds returns needs in stable display order.

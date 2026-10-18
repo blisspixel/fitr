@@ -234,6 +234,12 @@ func shotTop(context.Context) (string, error) {
 	b.DeviceKey = a.DeviceKey
 	a.Device.GPU, b.Device.GPU = "Demo GPU 24 GB", "Demo GPU 24 GB"
 	a.Device.Runtime, b.Device.Runtime = "llama-server b7000", "llama-server b7000"
+	// Equal timestamps break the tie with StableRunID. That hash covers the
+	// whole record, and a field that differs by operating system reorders the
+	// rows. Pin the times before the seal so the newer run, and its withdrawal
+	// failure, stay selected on every machine.
+	a.StartedAt = "2026-08-19T09:05:00Z"
+	b.StartedAt = "2026-08-19T09:00:00Z"
 	if err := prepareMockEvidence(a); err != nil {
 		return "", err
 	}

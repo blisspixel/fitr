@@ -145,7 +145,7 @@ func TestWideBoardStartsAtDocumentedBreakpoint(t *testing.T) {
 		if got := strings.Contains(plain, "selected evidence"); got != tc.wide {
 			t.Fatalf("width %d wide layout=%v, want %v:\n%s", tc.width, got, tc.wide, plain)
 		}
-		if tc.wide && (!strings.Contains(plain, "sort decode ↓") || !strings.Contains(plain, "│")) {
+		if tc.wide && (!strings.Contains(plain, "sort recent ↓") || !strings.Contains(plain, "│")) {
 			t.Fatalf("width %d lost wide navigation or pane boundary:\n%s", tc.width, plain)
 		}
 	}

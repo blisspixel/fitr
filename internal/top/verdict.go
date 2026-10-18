@@ -1,11 +1,18 @@
 package top
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/blisspixel/fitr/internal/score"
+)
 
 func renderResultVerdicts(w *lineWriter, run Run, width int) {
 	if len(run.Verdicts) == 0 {
 		return
 	}
+	renderQualityGap(w, run, width)
 	w.line(Span{Text: "verdicts", Role: RoleHeader})
 	for _, verdict := range run.Verdicts {
 		label := verdict.Label
@@ -31,4 +38,30 @@ func renderResultVerdicts(w *lineWriter, run Run, width int) {
 			}
 		}
 	}
+}
+
+func renderQualityGap(w *lineWriter, run Run, width int) {
+	if behavioralMeasured(run.Verdicts) {
+		return
+	}
+	if !w.line(Span{Text: score.QualityUnmeasuredLead, Role: RoleWarning}) {
+		return
+	}
+	if width < 40 {
+		return
+	}
+	w.line(Span{Text: strings.TrimPrefix(score.QualityUnmeasuredNote, score.QualityUnmeasuredLead+": "), Role: RoleMuted})
+}
+
+func behavioralMeasured(verdicts []Verdict) bool {
+	for _, verdict := range verdicts {
+		if !slices.Contains(score.QualityNeeds, verdict.Need) {
+			continue
+		}
+		switch strings.ToUpper(strings.TrimSpace(verdict.State)) {
+		case string(score.Pass), string(score.Fail):
+			return true
+		}
+	}
+	return false
 }

@@ -84,6 +84,16 @@ and fail another, and one number cannot say that.
 | **no degenerate output** | five independent loop/repetition signals; length correlates negatively with quality |
 | **your tasks** | `~/.fitr/tasks/*.json` - the built-ins are defaults, your work is the point |
 
+A result lists the behavioral gates, then vision, output health, resident
+memory, and interactive response. The order is display only. When no
+behavioral gate passed or failed, the result says quality was not measured,
+and the speed section stays a separate observation. A declared vision
+capability does not clear that gap. `fitr board` keeps decode visible inside
+one device and configuration block and lists the rows by name. A faster row
+is not the lead, and a count of gates passed is not a rank. The terminal
+monitor's board opens on recent evidence; decode order is a sort the
+operator asks for.
+
 Verdicts are **PASS / FAIL / INCONCLUSIVE / SKIP / n/a / BLKD**. `SKIP` means
 not measured. `INCONCLUSIVE` means an observation exists but its integrity or
 uncertainty cannot support either binary claim.
