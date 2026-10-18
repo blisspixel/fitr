@@ -102,9 +102,12 @@ or use a separately configured native MCP entry for an existing evidence store.
 Do not copy or attach private evidence without the user's authority.
 
 Use `fitr cleanup plan <directory>` for a read-only storage review. Apparent
-bytes are not recoverable space, and aged partial downloads are review
-candidates. Check dependency groups, completed-file integrity and active
-downloads before proposing deletion. The command never deletes files.
+bytes are not recoverable space. Allocated bytes are stat block counts summed
+once per inode, and only when every accepted file reported them; a null value
+is unmeasured, not zero, and is not space a deletion would free. Aged partial
+downloads are review candidates. Check dependency groups, completed-file
+integrity and active downloads before proposing deletion. The command never
+deletes files.
 
 Recommend the smallest experiment that resolves the user's decision. Follow
 the host's existing authorization and the user's budgets before downloads,

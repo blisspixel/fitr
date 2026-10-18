@@ -68,20 +68,29 @@ type Issue struct {
 }
 
 type Plan struct {
-	Schema               string      `json:"schema"`
-	Root                 string      `json:"root"`
-	AsOf                 time.Time   `json:"as_of"`
-	Cutoff               time.Time   `json:"cutoff"`
-	MinAgeDays           int         `json:"min_age_days"`
-	Limits               Limits      `json:"limits"`
-	Complete             bool        `json:"complete"`
-	StopReason           string      `json:"stop_reason,omitempty"`
-	EntriesVisited       int         `json:"entries_visited"`
-	Files                int         `json:"files"`
-	Directories          int         `json:"directories"`
-	LinksSkipped         int         `json:"links_skipped"`
-	SpecialFilesSkipped  int         `json:"special_files_skipped"`
-	ApparentBytes        int64       `json:"apparent_bytes"`
+	Schema              string    `json:"schema"`
+	Root                string    `json:"root"`
+	AsOf                time.Time `json:"as_of"`
+	Cutoff              time.Time `json:"cutoff"`
+	MinAgeDays          int       `json:"min_age_days"`
+	Limits              Limits    `json:"limits"`
+	Complete            bool      `json:"complete"`
+	StopReason          string    `json:"stop_reason,omitempty"`
+	EntriesVisited      int       `json:"entries_visited"`
+	Files               int       `json:"files"`
+	Directories         int       `json:"directories"`
+	LinksSkipped        int       `json:"links_skipped"`
+	SpecialFilesSkipped int       `json:"special_files_skipped"`
+	ApparentBytes       int64     `json:"apparent_bytes"`
+	// AllocatedBytes sums stat's 512-byte block counts once per inode for the
+	// regular files whose lengths this scan accepted. Nil means at least one
+	// of those files did not report a block count or an inode, so the total
+	// is unmeasured. Zero is a measured empty sum, including a walk that
+	// accepted no regular files. The sum is not space a deletion would free:
+	// reflinks, compression and deduplication can share blocks that stat
+	// still counts, and an incomplete plan does not describe files the walk
+	// did not accept.
+	AllocatedBytes       *int64      `json:"allocated_bytes"`
 	TopLevel             []Summary   `json:"top_level"`
 	TopLevelOmitted      int         `json:"top_level_omitted"`
 	Categories           []Summary   `json:"categories"`
@@ -104,11 +113,25 @@ type scanner struct {
 	categories map[string]Summary
 	components map[string]*componentAcc
 	// Hooks allow deterministic tests of filesystem failures and races.
-	lstat     func(string) (os.FileInfo, error)
-	openDir   func(string) (*os.File, error)
-	entryInfo func(string, os.DirEntry) (os.FileInfo, error)
-	queue     dirQueue
-	seq       int
+	lstat      func(string) (os.FileInfo, error)
+	openDir    func(string) (*os.File, error)
+	entryInfo  func(string, os.DirEntry) (os.FileInfo, error)
+	allocation func(os.FileInfo) (int64, uint64, uint64, bool)
+	// allocatedKnown stays true only while every accepted file reported a
+	// block count and an inode. The map records inodes already added so a
+	// second name for the same file does not count its blocks again.
+	allocatedKnown bool
+	allocatedBytes int64
+	inodes         map[inodeKey]struct{}
+	queue          dirQueue
+	seq            int
+}
+
+// inodeKey identifies one file across hard-linked names. It is not a
+// content hash and does not see reflinks, which have distinct inodes.
+type inodeKey struct {
+	dev uint64
+	ino uint64
 }
 
 func Scan(ctx context.Context, directory string, options Options) (Plan, error) {
@@ -180,6 +203,7 @@ func newScanner(ctx context.Context, root *os.Root, absolute string, o Options) 
 		return root.Lstat(path)
 	}
 	return &scanner{ctx: ctx, lstat: root.Lstat, openDir: openDirectory, entryInfo: entryInfo,
+		allocation: observedAllocation, allocatedKnown: true,
 		groups: map[string]Summary{}, categories: map[string]Summary{},
 		components: map[string]*componentAcc{},
 		plan: Plan{Schema: Schema, Root: absolute, AsOf: o.AsOf.UTC(),
@@ -188,7 +212,7 @@ func newScanner(ctx context.Context, root *os.Root, absolute string, o Options) 
 			LargestFiles: []Entry{}, ReviewCandidates: []Entry{}, Issues: []Issue{},
 			Notes: []string{
 				"Read-only plan. REVIEW does not mean safe to delete; usage and dependencies remain unresolved.",
-				"Apparent bytes sum regular file lengths, not recoverable disk space. Hard links, deduplication, compression and sparse files can change physical usage.",
+				"Apparent bytes sum regular file lengths, not recoverable disk space. Hard links, deduplication, compression and sparse files can change physical usage. Allocated bytes, when present, sum stat block counts once per inode among accepted files. Absent allocated bytes were not measured, and neither figure is space a deletion would free.",
 				"Names and modification times are hints, not proof of ownership, inactivity, model quality or obsolescence. No model contents or application references were inspected.",
 				"Observed symbolic links and special files are skipped. Concurrent changes or skipped entries can make this inventory incomplete.",
 				"The deadline is checked between filesystem operations; a stalled filesystem operation can outlast it.",
@@ -441,6 +465,40 @@ func (s *scanner) addFile(path string, info os.FileInfo) {
 		s.plan.ReviewCandidates = keepLargest(s.plan.ReviewCandidates, entry, s.plan.Limits.MaxItems)
 	}
 	s.plan.LargestFiles = keepLargest(s.plan.LargestFiles, entry, s.plan.Limits.MaxItems)
+	s.noteAllocation(info)
+}
+
+// noteAllocation adds one file's stat blocks, once per inode. A missing
+// observation drops the whole total: a sum of only the files that happened
+// to report blocks would look like a measurement of the accepted set.
+func (s *scanner) noteAllocation(info os.FileInfo) {
+	if !s.allocatedKnown {
+		return
+	}
+	blocks, dev, ino, ok := s.allocation(info)
+	if !ok || blocks < 0 {
+		s.forgetAllocation()
+		return
+	}
+	key := inodeKey{dev: dev, ino: ino}
+	if _, seen := s.inodes[key]; seen {
+		return
+	}
+	if blocks > (1<<63-1)-s.allocatedBytes {
+		s.forgetAllocation()
+		return
+	}
+	if s.inodes == nil {
+		s.inodes = map[inodeKey]struct{}{}
+	}
+	s.inodes[key] = struct{}{}
+	s.allocatedBytes += blocks
+}
+
+func (s *scanner) forgetAllocation() {
+	s.allocatedKnown = false
+	s.allocatedBytes = 0
+	s.inodes = nil
 }
 
 func addSummary(summaries map[string]Summary, name string, size int64) {
@@ -469,6 +527,10 @@ func (s *scanner) finish() {
 	}
 	s.plan.Categories = sortedSummaries(s.categories)
 	s.plan.Components = sortedComponents(s.components, s.plan.Limits.MaxItems)
+	if s.allocatedKnown {
+		value := s.allocatedBytes
+		s.plan.AllocatedBytes = &value
+	}
 }
 
 func sortedSummaries(values map[string]Summary) []Summary {
@@ -596,3 +658,12 @@ func sortedComponents(values map[string]*componentAcc, limit int) []Component {
 }
 
 func Bytes(value int64) string { return fmt.Sprintf("%.2f GiB", float64(value)/(1<<30)) }
+
+// AllocatedLine is the text for AllocatedBytes. Unmeasured stays a word so
+// a reader cannot mistake a missing stat block count for zero disk usage.
+func AllocatedLine(value *int64) string {
+	if value == nil {
+		return "unmeasured"
+	}
+	return Bytes(*value) + "; stat blocks once per inode, not space a deletion would free"
+}
