@@ -170,7 +170,9 @@ func TestExperimentQuantAppliesDecisionSpecAndEmitsExploratoryChoice(t *testing.
 		return renderQuantExperiment(report, "plain")
 	})
 	if code != exitOK || !strings.Contains(plain, "CONSERVATIVE FRONTIER") ||
-		!strings.Contains(plain, "configuration_comparison") {
+		!strings.Contains(plain, "configuration_comparison") ||
+		!strings.Contains(plain, "self-against-self baseline was not measured") ||
+		!strings.Contains(plain, "cache dtype") {
 		t.Fatalf("plain quant report exit=%d output=%s", code, plain)
 	}
 }

@@ -721,7 +721,27 @@ func writeQuantExperimentText(report experiment.QuantReport) {
 	fmt.Fprintf(os.Stdout, "  %-12s %s\n", "spec", terminalText(report.SpecName))
 	writeQuantCandidates(report.Candidates)
 	writeQuantFrontier(report.Frontier)
+	writeQuantHealth(report.Health)
 	writeQuantConclusion(report)
+}
+
+func writeQuantHealth(health experiment.QuantHealth) {
+	if health.Schema == "" {
+		return
+	}
+	fmt.Fprintln(os.Stdout, "\nQUANT HEALTH")
+	fmt.Fprintf(os.Stdout, "  %-12s %s\n", health.State, terminalText(health.Reason))
+	if health.CacheDtype != "" {
+		fmt.Fprintf(os.Stdout, "  %-12s %s\n", "cache dtype", terminalText(health.CacheDtype))
+	}
+	for _, need := range health.Needs {
+		mark := "descriptive"
+		if need.AboveSelf {
+			mark = "above self"
+		}
+		fmt.Fprintf(os.Stdout, "  %-12s %s  left %d  right %d\n",
+			mark, terminalText(need.Need), need.LeftOnly, need.RightOnly)
+	}
 }
 
 func writeQuantCandidates(candidates []experiment.QuantCandidate) {
