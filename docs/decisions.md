@@ -206,9 +206,12 @@ those fields in an untyped universal map.
 
 A decision spec may name a requested reasoning effort. An empty effort is
 omitted, not filled with a model default. The evaluation keeps that request
-and stays unresolved, because application was not observed. A capability
-declaration, API acceptance, elapsed time, output length, and a self-report
-are not an applied mode. Two such runs cannot certify an effort comparison.
+and stays unresolved, because application was not observed. `fitr decide`
+prints that request and `application unknown` on the text page. An omitted
+effort is printed as omitted. A capability declaration, API acceptance,
+elapsed time, output length, and a self-report are not an applied mode. Two
+such runs cannot certify an effort comparison. A next-action code with no
+command is printed as a code, not as an experiment to run.
 
 ## Objective and next evidence
 

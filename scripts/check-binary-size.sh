@@ -22,8 +22,12 @@ set -eu
 # unobserved, and process-environment values, added 56,320 bytes on the
 # following dist job: 16,533,504 -> 16,589,824. No new Go dependency was
 # added. This deliberate release-envelope update retains the existing
-# 38,824-byte headroom. CI and releases use this single measured gate.
-max_bytes=16628648
+# 38,824-byte headroom. The decision text page for a requested reasoning
+# effort, and printing a next-action code instead of a blank experiment,
+# added 38,912 bytes on the 2026-10-18 dist job: 16,589,824 -> 16,628,736.
+# No new Go dependency was added. The same headroom stays.
+# CI and releases use this single measured gate.
+max_bytes=16667560
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"
