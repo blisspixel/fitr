@@ -104,6 +104,9 @@ func parseRunCommand(args []string, supplied render.Display) (runCommand, int, b
 	reportError := func(message, note, hint string) { backendError(supplied, message, note, hint) }
 	if err := fs.Parse(permute(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
+			if supplied == nil {
+				writeFlagHelp(os.Stdout, fs)
+			}
 			return runCommand{}, exitOK, false
 		}
 		if supplied != nil {
@@ -149,11 +152,15 @@ type runFlags struct {
 }
 
 func newRunFlagSet(supplied render.Display) (*flag.FlagSet, *runFlags) {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	var fs *flag.FlagSet
 	if supplied != nil {
+		// The full-screen path reparses the same args. Help was already
+		// answered, and a flag error is reported by the caller.
+		fs = flag.NewFlagSet("run", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
+		fs.Usage = func() {}
 	} else {
-		fs.SetOutput(os.Stderr)
+		fs = commandFlags("run")
 	}
 	flags := &runFlags{}
 	flags.quick = fs.Bool("quick", false, "speed, memory, and plumbing; executable tasks use bubblewrap on Linux when it is available")

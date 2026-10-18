@@ -21,10 +21,11 @@ func TestMCPCommandRejectsExecutionAndPathArguments(t *testing.T) {
 func TestMCPCommandHelpAndTransport(t *testing.T) {
 	t.Setenv("FITR_RESULTS", t.TempDir())
 	var output, diagnostic bytes.Buffer
-	if code := runMCP(t.Context(), []string{"--help"}, io.NopCloser(strings.NewReader("")), &output, &diagnostic); code != exitOK || output.Len() != 0 || !strings.Contains(diagnostic.String(), "2026-07-28") {
-		t.Fatalf("help code=%d", code)
+	if code := runMCP(t.Context(), []string{"--help"}, io.NopCloser(strings.NewReader("")), &output, &diagnostic); code != exitOK || diagnostic.Len() != 0 || !strings.Contains(output.String(), "2026-07-28") {
+		t.Fatalf("help code=%d output=%s diagnostic=%s", code, output.String(), diagnostic.String())
 	}
 	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fitr_roles_list","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}` + "\n"
+	output.Reset()
 	diagnostic.Reset()
 	if code := runMCP(t.Context(), []string{"serve"}, io.NopCloser(strings.NewReader(input)), &output, &diagnostic); code != exitOK || diagnostic.Len() != 0 || !strings.Contains(output.String(), `"structuredContent"`) {
 		t.Fatalf("serve code=%d out=%s diagnostic=%s", code, output.String(), diagnostic.String())

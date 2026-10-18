@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -28,8 +27,7 @@ import (
 // Never automatic: the JSON in ~/.fitr is local storage; HTML is what you
 // share, and it contains a hardware fingerprint.
 func cmdExport(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("export", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("export")
 	out := fs.String("out", "", "HTML path (default: <results>/<model>.html)")
 	retonrFlag := fs.Bool("retonr", false, "also write opt-in evidence JSON for the retonr sister project")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -103,8 +101,7 @@ type viewCommand struct {
 }
 
 func parseViewCommand(args []string) (viewCommand, int, bool) {
-	fs := flag.NewFlagSet("view", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("view")
 	viewFull := fs.Bool("full", false, "with --display json, emit the complete sealed result record instead of the scorecard")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -248,8 +245,7 @@ type boardCommand struct {
 }
 
 func parseBoardCommand(args []string) (boardCommand, int, bool) {
-	fs := flag.NewFlagSet("board", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("board")
 	current := fs.Bool("current", false, "only this machine, including its measured context variants")
 	full := fs.Bool("full", false, "with --display json, emit the complete sealed result records instead of the reported columns")
 	role := fs.String("role", "", "coding or agent: keep rows with that measured grade inside each fingerprint group")
@@ -568,7 +564,7 @@ func (excluded *boardExclusions) addComparisonError(err error) {
 // ---------------------------------------------------------------- compare
 func cmdCompare(ctx context.Context, args []string) int {
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
-		fmt.Fprintln(os.Stderr, "usage: fitr compare <model-a> <model-b>")
+		writeAskedHelp(os.Stdout, "usage: fitr compare <model-a> <model-b>")
 		return exitOK
 	}
 	if len(args) != 2 {

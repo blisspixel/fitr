@@ -1,0 +1,49 @@
+usage: fitr run <model>
+  [--quick|--full|--checks-only]
+  --allow-unsafe-exec run unisolated
+    built-in executable diagnostics;
+    observations remain INCONCLUSIVE
+  --backend
+    auto|ollama|llama-server|openai
+  --capacity-budget-gb seal an
+    operator-supplied safe memory
+    budget; never inferred from nominal
+    capacity
+  --capacity-reserve-gb subtract an
+    explicit reserve from current
+    available memory and seal the exact
+    formula
+  --checks-only generated checks only
+    for paired hardware calibration
+  --context-tiers two to four increasing
+    payload sizes in bytes (2048 to
+    65536), measuring how well a long
+    document is used at --ctx. There is
+    no default: the tiers are sealed
+    into the evidence, so the operator
+    states what was tested
+  --ctx request context (default 8192).
+    Apply an advise num_ctx remedy here.
+  --display auto|rich|plain|json|none
+  --full adds the long-horizon agent
+    task; executable tasks use
+    bubblewrap on Linux when it is
+    available
+  --html write a self-contained HTML
+    artifact next to the JSON
+  --k repeats per noisy task
+  --profile device profile (default:
+    auto-match)
+  --pull pull the model first if it is
+    not installed (Ollama; supports
+    hf.co/... and Hugging Face
+    repository URLs)
+  --q quiet level
+  --quick speed, memory, and plumbing;
+    executable tasks use bubblewrap on
+    Linux when it is available
+  --seedset pin the generated-instance
+    seed set; two runs sharing a seedset
+    face IDENTICAL task instances,
+    enabling a paired comparison
+  --v verbose

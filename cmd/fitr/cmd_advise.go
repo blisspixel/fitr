@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -65,8 +64,7 @@ type adviseCommand struct {
 }
 
 func parseAdviseCommand(args []string) (adviseCommand, int, bool) {
-	fs := flag.NewFlagSet("advise", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("advise")
 	vram := fs.Float64("vram-gb", -1, "GPU or unified-memory planning budget in GB")
 	ctxSize := fs.Int("ctx", 0, "requested context length (default: model's max)")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
@@ -406,8 +404,7 @@ type applyCommand struct {
 }
 
 func parseApplyCommand(args []string) (applyCommand, int, bool) {
-	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("apply")
 	ctxSize := fs.Int("ctx", 0, "context to persist (default: latest result, else 4096 as the worked example)")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
@@ -497,8 +494,7 @@ func writeApplyPlan(mode, model string, plan advise.ApplyPlan) int {
 // throughput-only is not enough. Until fitr can restart a server, tune
 // prints the request-level knobs and diffs two observed fingerprints.
 func cmdTune(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("tune", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("tune")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code
 	}

@@ -602,10 +602,14 @@ func TestAdviseLoadWithoutModelIsUsage(t *testing.T) {
 }
 
 func TestUsageMentionsAdvise(t *testing.T) {
-	got, _ := captureTopStderr(t, func() int {
+	t.Setenv("FITR_WIDTH", "80")
+	got, stderr, code := captureCommandOutput(t, func() int {
 		usage()
 		return exitOK
 	})
+	if code != exitOK || stderr != "" {
+		t.Fatalf("usage exit=%d stderr=%q", code, stderr)
+	}
 	if !strings.Contains(got, "fitr advise") {
 		t.Fatalf("usage must list advise:\n%s", got)
 	}

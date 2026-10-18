@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -15,15 +14,14 @@ import (
 
 func cmdCleanup(ctx context.Context, args []string) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(os.Stderr, "usage: fitr cleanup plan <directory> [--min-age-days 7] [--display MODE]")
-		fmt.Fprintln(os.Stderr, "Read-only storage inventory. REVIEW candidates require usage and dependency checks.")
+		writeAskedHelp(os.Stdout, "usage: fitr cleanup plan <directory> [--min-age-days 7] [--display MODE]\nRead-only storage inventory. REVIEW candidates require usage and dependency checks.")
 		return exitOK
 	}
 	if args[0] != "plan" {
 		errPrint("unknown cleanup action", render.SingleLine(args[0]), "use fitr cleanup plan <directory>")
 		return exitUsage
 	}
-	fs := flag.NewFlagSet("cleanup plan", flag.ContinueOnError)
+	fs := commandFlags("cleanup plan")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	minimumAge := fs.Int("min-age-days", 7, "review incomplete downloads last modified at least this many days ago")
 	if code, ok := parseCommandFlags(fs, args[1:]); !ok {

@@ -1,0 +1,102 @@
+fitr 0.11.4 - evidence for what local AI works on this machine
+
+usage:
+  fitr
+    installed models, evidence, next command
+  fitr <model>
+    named advise (same as fitr advise <model>)
+  fitr run <model>
+    measure one exact configuration
+  fitr board
+    compare saved results on this machine
+  fitr role
+    what a model is for, and whether evidence holds
+
+measure:
+  fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]
+  fitr run <model> [--quick|--full|--checks-only] [-k N] [--ctx N] [--profile P]
+    [--display MODE] [--html]
+  fitr run <model> --context-tiers <bytes,bytes[,...]> [--ctx N]
+  fitr diag <model>
+  fitr doctor <model> [-n N]
+  fitr suggest [model] [--size-gb N]
+  fitr top [--view live|result|board|history|inventory]
+  fitr top view [model|result.json]
+  fitr top run <model> [run flags]
+  fitr top history [path|clear --yes]
+
+compare:
+  fitr compare <model-a> <model-b>
+  fitr tune [model-a model-b]
+  fitr calibrate <model-a> <model-b> [--out PATH] [--lineage PATH]
+  fitr calibrate merge <pair.json>... [--out PATH]
+  fitr decide [model|result.json] --spec decision.json [--display MODE]
+  fitr experiment context <model> --ctx 4096,8192,... [-k N]
+  fitr experiment quant <result.json> <result.json>... --spec decision.json
+    [--lineage conversion.json]
+  fitr experiment confirm <model-a> <model-b> --spec decision.json [--ctx N] [-k
+    N]
+  fitr experiment workload <model> [-n N] [--ctx N] [--workflow pi-workspace]
+    [--backend B]
+  fitr experiment serving <model> [--concurrency N] [-n N] [--warmup N] [--ctx
+    N] [--backend B]
+  fitr view [model|result.json] [--display MODE]
+  fitr export <model> [--out PATH] [--retonr]
+  fitr apply [model] [--ctx N]
+
+roles and tailoring:
+  fitr role init <name> --quality <need> --memory-gb <limit> [--ctx N]
+  fitr role define <role.json> | list | show <name> | review <name>
+  fitr role attach <name> <result.json> | detach <name> <evidence-sha256>
+  fitr role confirm <name|bundle.json> | adopt <name> <bundle.json> | status
+    <name> | rollback <name>
+  fitr auto runtime <ollama.exe> --models <directory> --out runtime.json
+  fitr auto start <role> --mode establish|improve --runtime runtime.json
+    --candidate <model> --candidate <model>
+  fitr auto status|resume|adopt <session-id>
+  fitr tailor plan --role <name> --outcome <need> --candidate <model> --ctx N
+    (--capacity-budget-gb N | --capacity-reserve-gb N --memory-gb N)
+  fitr tailor start|status|resume|adopt <session-id>
+  fitr discover add <source> --role <role> [--model <reference>] [--harness
+    <name>]
+  fitr discover list|plan [--role <role>] [--display MODE]
+
+desktop and integrations:
+  fitr desktop status [--role NAME] [--display MODE]
+  fitr desktop benchmark [--role NAME] [--confirm] [--display MODE]
+  fitr desktop install [--plugins-dir DIR]
+  fitr desktop remove [--plugins-dir DIR] --yes
+  fitr mcp serve
+  fitr source resolve hf --repo <owner/model> --revision <revision> --file
+    <path> --out <receipt.json>
+  fitr source show <receipt.json> [--display MODE]
+
+maintenance:
+  fitr device
+  fitr profiles [new [name]]
+  fitr update [--check] [--reinstall]
+  fitr artifact bind --source <resolution.json> --mapping <local-files.json>
+    --out <artifact.json>
+  fitr artifact show <artifact.json> [--display MODE]
+  fitr cleanup plan <directory> [--min-age-days N] [--display MODE]
+
+flags:
+  --display auto|rich|plain|json|none
+    output mode (default auto)
+  -k
+    repeats per noisy task (default 3; 1 quick; 5 checks-only)
+
+fitr help <command> prints that command's flags.
+fitr help experiment context prints one experiment form.
+
+environment:
+  FITR_OPENAI_URL
+    OpenAI-compatible endpoint
+  FITR_OPENAI_API_KEY
+    bearer token; kept out of command history and process arguments
+  FITR_OPENAI_MODEL_SHA256
+    independently obtained model digest required for measured OpenAI-compatible
+      runs
+
+exit codes:
+  0 eligible/ok 1 error 2 usage 3 disproven 4 unresolved 130 interrupted

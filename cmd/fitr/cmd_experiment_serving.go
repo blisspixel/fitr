@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,8 +67,7 @@ func parseServingCommand(args []string) (servingCommand, int, bool) {
 		warmup:      2,
 		ctx:         4096,
 	}
-	fs := flag.NewFlagSet("experiment serving", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("experiment serving")
 	fs.StringVar(&cmd.mode, "display", cmd.mode, "auto|rich|plain|json|none")
 	fs.StringVar(&cmd.backend, "backend", cmd.backend, "auto|ollama|llama-server|openai")
 	fs.IntVar(&cmd.concurrency, "concurrency", cmd.concurrency, "declared concurrent requests / workers")

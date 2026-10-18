@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -48,7 +47,7 @@ func cmdExperiment(ctx context.Context, args []string) int {
 	}
 	switch args[0] {
 	case "-h", "--help", "help":
-		fmt.Fprint(os.Stderr, experimentUsage)
+		writeAskedHelp(os.Stdout, experimentUsage)
 		return exitOK
 	case "context":
 		return cmdExperimentContext(ctx, args[1:])
@@ -97,8 +96,7 @@ func cmdExperimentConfirm(ctx context.Context, args []string) int {
 }
 
 func parseConfirmationCommand(args []string) (confirmationCommand, int, bool) {
-	fs := flag.NewFlagSet("experiment confirm", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("experiment confirm")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	profile := fs.String("profile", "", "device profile (default: auto-match)")
@@ -266,8 +264,7 @@ func workloadBundlePath(path string) bool {
 }
 
 func parseWorkloadCommand(args []string) (workloadCommand, int, bool) {
-	fs := flag.NewFlagSet("experiment workload", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("experiment workload")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	trials := fs.Int("n", 3, "predeclared workflow trials")
@@ -392,8 +389,7 @@ func verifyWorkloadBindings(ctx context.Context, backend llm.Backend, plan workl
 }
 
 func cmdExperimentQuant(args []string) int {
-	fs := flag.NewFlagSet("experiment quant", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("experiment quant")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	specPath := fs.String("spec", "", "decision specification JSON")
 	lineagePath := fs.String("lineage", "", "same-base conversion manifest JSON")
@@ -478,8 +474,7 @@ type contextExperimentCommand struct {
 }
 
 func parseContextExperimentCommand(args []string) (contextExperimentCommand, int, bool) {
-	fs := flag.NewFlagSet("experiment context", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := commandFlags("experiment context")
 	mode := fs.String("display", "auto", "auto|rich|plain|json|none")
 	contextsArg := fs.String("ctx", "", "comma-separated requested contexts for a live exploratory plan")
 	repeats := fs.Int("k", 3, "performance samples per context point")

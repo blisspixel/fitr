@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -42,7 +41,7 @@ type autoCommand struct {
 
 func cmdAuto(ctx context.Context, args []string) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(os.Stdout, `fitr auto: bounded local role experiments
+		writeAskedHelp(os.Stdout, `fitr auto: bounded local role experiments
 
   fitr auto runtime <ollama.exe> --models <directory> --out runtime.json
   fitr auto start <role> --mode establish|improve --runtime runtime.json
@@ -95,7 +94,7 @@ func parseAutoCommand(args []string) (autoCommand, int, bool) {
 		errPrint("unknown auto action", c.action, "fitr auto --help")
 		return c, exitUsage, false
 	}
-	fs := flag.NewFlagSet("auto "+c.action, flag.ContinueOnError)
+	fs := commandFlags("auto " + c.action)
 	fs.StringVar(&c.display, "display", "auto", "auto|rich|plain|json|none")
 	if c.action == "start" {
 		fs.StringVar(&c.mode, "mode", "", "establish an unselected role, or improve its current selection")
@@ -149,7 +148,7 @@ func finishAutoStart(command *autoCommand, tierText string) (int, bool) {
 }
 
 func cmdAutoRuntime(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("auto runtime", flag.ContinueOnError)
+	fs := commandFlags("auto runtime")
 	models := fs.String("models", "", "existing Ollama model-store directory")
 	out := fs.String("out", "", "new runtime specification path")
 	if code, ok := parseCommandFlags(fs, args); !ok {
