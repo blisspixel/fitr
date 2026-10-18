@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/blisspixel/fitr/internal/advise"
+	"github.com/blisspixel/fitr/internal/analysis"
 	"github.com/blisspixel/fitr/internal/buildinfo"
 	"github.com/blisspixel/fitr/internal/contextquality"
 	"github.com/blisspixel/fitr/internal/device"
@@ -439,6 +440,7 @@ func finishRunCommand(ctx context.Context, c llm.Backend, supplied render.Displa
 			disp.Note("could not write HTML: "+htmlErr.Error(), "warn")
 		}
 	}
+	render.MarkRunCard(disp)
 	disp.Result(res.Scorecard, meta)
 	if htmlErr != nil && supplied == nil {
 		errPrint("could not write HTML: "+htmlErr.Error(), "", "")
@@ -463,33 +465,70 @@ func writeRunNextSteps(ctx context.Context, c llm.Backend, command runCommand,
 	if htmlFile != "" {
 		fmt.Fprintf(os.Stderr, "  html   %s\n", terminalText(htmlFile))
 	}
-	fmt.Fprintln(os.Stderr, "  next   fitr board")
-	writeRunContextHint(ctx, c, command, res)
-	if !command.html {
-		fmt.Fprintf(os.Stderr, "         fitr export %s   for a shareable HTML scorecard\n", terminalText(res.Model))
+	// The card already printed NextActions[0]. A second next, especially
+	// fitr board, contradicts that command when the result cannot be ranked.
+	if runCardNext(res) == "" && resultRankable(res) {
+		fmt.Fprintln(os.Stderr, "  next   fitr board")
 	}
-	if req := eval.ResolvedCtx(command.numCtx); req != eval.NumCtx {
-		fmt.Fprintf(os.Stderr, "         fitr apply %s   to persist num_ctx=%d on the server\n", terminalText(res.Model), req)
-	}
-	if hint := retonr.Hint(res.Model); hint != "" {
-		fmt.Fprintf(os.Stderr, "         %s\n", terminalText(hint))
-	}
-	if command.reps < 3 {
-		fmt.Fprintf(os.Stderr, "         fitr run %s -k 3   for a rankable result\n", terminalText(res.Model))
+	for _, line := range runAlsoLines(ctx, c, command, res) {
+		fmt.Fprintf(os.Stderr, "  also   %s\n", line)
 	}
 }
 
-func writeRunContextHint(ctx context.Context, c llm.Backend, command runCommand, res *Result) {
+func runCardNext(res *Result) string {
+	if res == nil {
+		return ""
+	}
+	meta := resultMeta(res, res.Profile)
+	if meta.Analysis == nil || len(meta.Analysis.NextActions) == 0 {
+		return ""
+	}
+	action := meta.Analysis.NextActions[0]
+	if action.Code == analysis.ActionOpenBoard && !resultRankable(res) {
+		return ""
+	}
+	return analysis.FormatArgv(action.Argv, presentationModelLabel(res.Model))
+}
+
+func resultRankable(res *Result) bool {
+	if res == nil || res.Repeats < 3 || len(res.Contamination) > 0 || res.EvidenceIntegrityIssue() != "" {
+		return false
+	}
+	_, err := res.ComparableDeviceKey()
+	return err == nil
+}
+
+func runAlsoLines(ctx context.Context, c llm.Backend, command runCommand, res *Result) []string {
+	var lines []string
+	if line := runContextAlso(ctx, c, command, res); line != "" {
+		lines = append(lines, line)
+	}
+	if !command.html {
+		lines = append(lines, fmt.Sprintf("fitr export %s   for a shareable HTML scorecard", terminalText(res.Model)))
+	}
+	if req := eval.ResolvedCtx(command.numCtx); req != eval.NumCtx {
+		lines = append(lines, fmt.Sprintf("fitr apply %s   to persist num_ctx=%d on the server", terminalText(res.Model), req))
+	}
+	if hint := retonr.Hint(res.Model); hint != "" {
+		lines = append(lines, terminalText(hint))
+	}
+	if command.reps < 3 {
+		lines = append(lines, fmt.Sprintf("fitr run %s -k 3   for a rankable result", terminalText(res.Model)))
+	}
+	return lines
+}
+
+func runContextAlso(ctx context.Context, c llm.Backend, command runCommand, res *Result) string {
 	requested := eval.ResolvedCtx(command.numCtx)
 	fit := largerFittingContext(ctx, c, res.Model, res.Device, requested)
 	if fit <= 0 {
-		return
+		return ""
 	}
 	sentence := fitting.UntestedContextProjection(fit, requested)
 	if sentence == "" {
-		return
+		return ""
 	}
-	fmt.Fprintf(os.Stderr, "         fitr run %s --ctx %d   %s\n", terminalText(res.Model), fit, sentence)
+	return fmt.Sprintf("fitr run %s --ctx %d   %s", terminalText(res.Model), fit, sentence)
 }
 
 func execute(ctx context.Context, c llm.Backend, model string, opts runOpts,

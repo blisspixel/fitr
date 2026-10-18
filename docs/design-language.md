@@ -61,7 +61,12 @@ original explanation; no missing evidence is promoted.
 
 Cyan emphasizes focus and active work, amber marks gaps and warnings, green
 marks accepted outcomes, and red marks failures. Each state also has a text
-label. The live TUI adds a four-frame ASCII activity marker while a run is
+label. The run card's use-for line follows that palette: green when the line
+names accepted work, amber when it names a gap, and the default ink for
+calibration evidence. Cyan stays on the next command. The card printed at the
+end of a run has one next action. It collapses evidence limits to a count and
+points at `fitr view`. `fitr view`, HTML, and JSON keep every limit. The live
+TUI adds a four-frame ASCII activity marker while a run is
 active. It indicates activity, not percentage complete or healthy output.
 Terminal states stop it, and pausing the viewport freezes it while measurement
 continues. Set `FITR_REDUCED_MOTION=1` for static status with elapsed-time

@@ -337,7 +337,7 @@ func renderCompactVerdicts(w *lineWriter, run Run) {
 func renderResultIdentity(w *lineWriter, run Run, glyphs Glyphs) {
 	w.line(Span{Text: "RESULT  ", Role: RoleHeader}, Span{Text: run.Model, Role: RoleAccent})
 	if run.UseFor != "" {
-		w.line(Span{Text: "use for    ", Role: RoleMuted}, Span{Text: run.UseFor, Role: RoleAccent})
+		w.line(Span{Text: "use for    ", Role: RoleMuted}, Span{Text: run.UseFor, Role: useForRole(run)})
 	}
 	build := strings.TrimSpace(strings.Join([]string{run.ParamSize, run.Quant, run.Family}, " "))
 	w.line(Span{Text: "build      ", Role: RoleMuted}, Span{Text: build + glyphs.Dot + fmt.Sprintf("ctx %d", run.Context), Role: RoleDefault})

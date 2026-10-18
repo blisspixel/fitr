@@ -127,6 +127,37 @@ func TestBoardCurrentDoesNotCountExcludedOtherMachines(t *testing.T) {
 	}
 }
 
+func TestEmptyBoardHintIsACommand(t *testing.T) {
+	previous := machineErrors
+	machineErrors = false
+	t.Cleanup(func() { machineErrors = previous })
+	stderr, code := captureTopStderr(t, func() int {
+		return emptyBoardResult(boardExclusions{fingerprint: 1}, nil)
+	})
+	if code != exitError || strings.Contains(stderr, "resolve the reported") || strings.Contains(stderr, "fitr board") {
+		t.Fatalf("empty board hint exit=%d:\n%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "hint: fitr run <model>") {
+		t.Fatalf("empty board hint is not a command:\n%s", stderr)
+	}
+}
+
+func TestEmptyBoardHintUsesTheMeasuredNextCommand(t *testing.T) {
+	previous := machineErrors
+	machineErrors = false
+	t.Cleanup(func() { machineErrors = previous })
+	contaminated := reportGateFixture(t, "contaminated")
+	stderr, code := captureTopStderr(t, func() int {
+		return emptyBoardResult(boardExclusions{contaminated: 1}, []*Result{contaminated})
+	})
+	if code != exitError || strings.Contains(stderr, "resolve the reported") || strings.Contains(stderr, "fitr board") {
+		t.Fatalf("empty board hint exit=%d:\n%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "hint: fitr run contaminated") {
+		t.Fatalf("empty board hint did not name the measured model:\n%s", stderr)
+	}
+}
+
 func TestEmptyBoardNamesEachMissingEvidenceClass(t *testing.T) {
 	for _, tc := range []struct {
 		excluded boardExclusions
@@ -143,7 +174,7 @@ func TestEmptyBoardNamesEachMissingEvidenceClass(t *testing.T) {
 		{boardExclusions{}, "no results for this machine"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
-			stderr, code := captureTopStderr(t, func() int { return emptyBoardResult(tc.excluded) })
+			stderr, code := captureTopStderr(t, func() int { return emptyBoardResult(tc.excluded, nil) })
 			if code != exitError || !strings.Contains(stderr, tc.want) {
 				t.Fatalf("empty board exit=%d missing %q: %s", code, tc.want, stderr)
 			}

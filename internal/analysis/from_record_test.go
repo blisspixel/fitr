@@ -733,6 +733,17 @@ func TestDirectDiagnosesPreserveReceiptStateAndNextExperiment(t *testing.T) {
 	}
 }
 
+func TestUnrankableRecordDoesNotOpenTheBoard(t *testing.T) {
+	result := handRecord(validUncachedSamples(3))
+	result.DeviceV2 = nil
+	actions := fromValidatedRecord(result).NextActions
+	for _, action := range actions {
+		if action.Code == ActionOpenBoard || strings.Contains(strings.Join(action.Argv, " "), "board") {
+			t.Fatalf("unrankable record opened the board: %+v", actions)
+		}
+	}
+}
+
 func TestNextActionPriorityAndTemplates(t *testing.T) {
 	tests := []struct {
 		name      string

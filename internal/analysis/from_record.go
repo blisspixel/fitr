@@ -877,7 +877,25 @@ func nextActionsFrom(result *record.Record, displayOnly bool) []Action {
 			Argv:   runActionArgv(result),
 			Reason: "measure the standard behavior and performance battery"}
 	}
+	// A comparison board can only rank a result that can enter one. Offering
+	// the board for an excluded record sends the reader to an empty error.
+	if action.Code == ActionOpenBoard && !boardComparable(result) {
+		return nil
+	}
 	return []Action{action}
+}
+
+func boardComparable(result *record.Record) bool {
+	// Repeats and contamination already select a different action. What is
+	// left is whether this record can enter a comparison at all. An integrity
+	// failure never reaches here through FromRecord: that path returns no
+	// actions. Checking the contract again would also drop the board action
+	// from an extraction fixture that has a comparison key but is not signed.
+	if result == nil || result.Repeats < 3 || len(result.Contamination) > 0 {
+		return false
+	}
+	_, err := result.ComparableDeviceKey()
+	return err == nil
 }
 
 func runActionArgv(result *record.Record) []string {

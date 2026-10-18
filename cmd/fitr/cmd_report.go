@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/blisspixel/fitr/internal/analysis"
@@ -227,7 +228,7 @@ func cmdBoard(ctx context.Context, args []string) int {
 				"rows stay inside the group they were measured in. The role library is still open.")
 			return exitOK
 		}
-		return emptyBoardResult(excluded)
+		return emptyBoardResult(excluded, results)
 	}
 	if render.Resolve(command.mode) == "json" {
 		writeBoardJSON(board, visible, curDevice.Key(), command.full, excluded)
@@ -465,7 +466,7 @@ func writeBoardExclusionLines(w io.Writer, excluded boardExclusions, width int, 
 	}
 }
 
-func emptyBoardResult(excluded boardExclusions) int {
+func emptyBoardResult(excluded boardExclusions, results []*Result) int {
 	var reasons []string
 	for _, category := range excluded.categories() {
 		if category.count > 0 {
@@ -480,9 +481,48 @@ func emptyBoardResult(excluded boardExclusions) int {
 	if len(reasons) == 1 {
 		detail = "all matching results " + reasons[0]
 	}
-	errPrint("no conclusive results for this machine", detail,
-		"resolve the reported evidence gaps before re-running")
+	// The board just refused these rows. The hint has to be a command that
+	// can produce a rankable result, never another trip through fitr board.
+	errPrint("no conclusive results for this machine", detail, boardFollowUp(results))
 	return exitError
+}
+
+func boardFollowUp(results []*Result) string {
+	fallback := ""
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		label := presentationModelLabel(result.Model)
+		if label == "" {
+			continue
+		}
+		if fallback == "" {
+			ctx := result.ContextSize()
+			if ctx <= 0 {
+				ctx = eval.NumCtx
+			}
+			fallback = analysis.FormatArgv([]string{
+				"fitr", "run", label, "--ctx", strconv.Itoa(ctx),
+			}, "")
+		}
+		report, err := analysis.FromRecord(result)
+		if err != nil {
+			continue
+		}
+		for _, action := range report.NextActions {
+			if action.Code == analysis.ActionOpenBoard {
+				continue
+			}
+			if command := analysis.FormatArgv(action.Argv, label); command != "" {
+				return command
+			}
+		}
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return "fitr run <model>"
 }
 
 func writeBoardJSON(board render.Board, visible map[string][]*Result, current string,
