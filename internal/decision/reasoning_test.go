@@ -42,7 +42,10 @@ func TestRequestedEffortStaysUnresolved(t *testing.T) {
 		t.Fatalf("an unobserved effort became eligible: %+v", evaluation)
 	}
 	if evaluation.Reasoning == nil || evaluation.Reasoning.Requested != "low" ||
-		evaluation.Reasoning.Application != "unknown" || strings.Contains(evaluation.Reasoning.Note, "xhigh") {
+		evaluation.Reasoning.Application != "unknown" || evaluation.Reasoning.Provenance != applicationUnobserved ||
+		evaluation.Reasoning.Comparison != effortComparisonUnqualified ||
+		evaluation.Reasoning.MissingAction != reasoningActionCode ||
+		strings.Contains(evaluation.Reasoning.Note, "xhigh") {
 		t.Fatalf("requested effort was not retained: %+v", evaluation.Reasoning)
 	}
 	joined := evaluation.Gaps

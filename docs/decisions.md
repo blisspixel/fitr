@@ -210,8 +210,28 @@ and stays unresolved, because application was not observed. `fitr decide`
 prints that request and `application unknown` on the text page. An omitted
 effort is printed as omitted. A capability declaration, API acceptance,
 elapsed time, output length, and a self-report are not an applied mode. Two
-such runs cannot certify an effort comparison. A next-action code with no
-command is printed as a code, not as an experiment to run.
+such runs cannot certify an effort comparison. The only application value
+a current runtime can seal is `unknown`, and its provenance is that
+application was not observed. `observed`, `unsupported`, and `ignored` are
+rejected at the seal. Elapsed time, output length, a capability flag, and a
+self-report cannot write them.
+
+The text page names that comparison as not qualified and prints
+`record_reasoning_application`. That code is not a command. A next-action
+code with no command is printed as a code, not as an experiment to run.
+
+An omitted effort and an explicit effort do not pool. An unknown template
+and a digested template do not pool. A legacy record that lacks the field
+stays uncompared. It does not become a default effort or an empty digest.
+That identity is not the device fingerprint.
+
+A paired comparison qualifies only when the task, the reserves, and the
+budget are the same on both legs. A fast variant that fails a mandatory
+outcome stays `quality-failed`. Shrinking a reserve does not turn that pair
+into a pass. Output-limit truncation and bounded no-progress stay their own
+states, distinct from a wrong answer and from a pass. Incomplete, refused,
+and transport-failed stay distinct from a quality failure. None of this
+certifies that a reasoning effort was applied.
 
 ## Objective and next evidence
 

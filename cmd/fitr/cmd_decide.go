@@ -133,6 +133,12 @@ func writeDecisionReasoning(evaluation decision.Evaluation) {
 	fmt.Fprintln(os.Stdout, "\nREASONING")
 	fmt.Fprintf(os.Stdout, "  %-12s %s\n", "requested", terminalText(requested))
 	fmt.Fprintf(os.Stdout, "  %-12s %s\n", "application", terminalText(account.Application))
+	if account.Comparison != "" {
+		fmt.Fprintf(os.Stdout, "  %-12s %s\n", "comparison", terminalText(account.Comparison))
+	}
+	if account.MissingAction != "" {
+		fmt.Fprintf(os.Stdout, "  %-12s %s\n", "action", terminalText(account.MissingAction))
+	}
 	if account.Note != "" {
 		fmt.Fprintf(os.Stdout, "  %-12s %s\n", "note", terminalText(account.Note))
 	}

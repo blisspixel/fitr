@@ -59,6 +59,9 @@ func TestDecideTextNamesRequestedEffortAndDoesNotFillADefault(t *testing.T) {
 	if code != exitUnresolved || !decisionField(output, "requested", "low") || !decisionField(output, "application", "unknown") || !strings.Contains(output, "record_reasoning_application") || strings.Contains(output, "\n  experiment \n") {
 		t.Fatalf("requested effort was not named: exit=%d output=%q", code, output)
 	}
+	if !strings.Contains(output, "effort comparison is not qualified") {
+		t.Fatalf("effort comparison was not named: %s", output)
+	}
 	if decisionField(output, "requested", "xhigh") || decisionField(output, "application", "observed") {
 		t.Fatalf("effort was certified or filled with a default: %s", output)
 	}
