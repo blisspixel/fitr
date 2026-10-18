@@ -3,7 +3,18 @@ package top
 import (
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestTUIEmptyInventoryDoesNotInviteAPull(t *testing.T) {
+	state := NewState(Snapshot{UpdatedAt: time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)})
+	state.View = ViewInventory
+	state.Width, state.Height = 100, 24
+	got := Render(state, DefaultGlyphs(true)).Plain()
+	if strings.Contains(got, "pull") || !strings.Contains(got, "fitr suggest") {
+		t.Fatalf("empty inventory:\n%s", got)
+	}
+}
 
 func TestTUIInventoryUsesTheSameNoticeWords(t *testing.T) {
 	suggest := renderInventoryPlain(t, "fitr suggest names models for this machine before a download")

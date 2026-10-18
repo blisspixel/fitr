@@ -1205,7 +1205,7 @@ func renderInventory(canvas *Canvas, state State, glyphs Glyphs) {
 	w.line(Span{Text: observed, Role: RoleMuted})
 	renderInventoryNotice(w, state.Snapshot.InventoryWarning)
 	if len(items) == 0 {
-		msg := "no models listed; start a runtime or pull a model"
+		msg := "no models listed; fitr suggest (weight projection; KV cache is not estimated)"
 		if strings.TrimSpace(state.Filter) != "" {
 			msg = emptyFilterMessage(state)
 		}

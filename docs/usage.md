@@ -560,6 +560,10 @@ artifact size for one named model, not the budget. KV is not estimated.
 Ollama library recipe fitr does not run, and only when the reachable runtime
 is Ollama or no runtime is reachable. Another reachable runtime leaves the
 install command unmeasured. A discovery failure is not an empty runtime.
+When the inventory is empty, reachable or not, the next command is
+`fitr suggest`. The reachable line calls that a weight projection and says
+KV cache is not estimated. It does not offer a pull, a model name, or
+`fitr advise` in place of the projection.
 
 Model arguments are exact, apart from the explicit `name` and `name:latest`
 equivalence. Long names may be filtered and selected in `fitr top`, but

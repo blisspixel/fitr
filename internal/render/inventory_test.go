@@ -95,6 +95,40 @@ func TestShortNextDropsWhatTheRowAlreadyShows(t *testing.T) {
 	}
 }
 
+func TestReachableEmptyInventorySuggestsBeforeAPull(t *testing.T) {
+	unreachable := inventoryText(t, Inventory{Fitr: "0.6.0", Empty: "none reachable"})
+	reachable := inventoryText(t, Inventory{
+		Fitr: "0.6.0", Empty: "reachable, no models",
+		RuntimeKind: "ollama", RuntimeURL: "http://127.0.0.1:11434",
+	})
+	if strings.Contains(reachable, "pull") || emptyNextCommand(unreachable) != "fitr suggest" || emptyNextCommand(reachable) != "fitr suggest" {
+		t.Fatalf("unreachable %q\nreachable:\n%s", emptyNextCommand(unreachable), reachable)
+	}
+	if !strings.Contains(reachable, "weight projection") || !strings.Contains(reachable, "KV cache is not estimated") {
+		t.Fatalf("projection clause missing:\n%s", reachable)
+	}
+	if strings.Contains(reachable, "GiB") || strings.Contains(reachable, "fitr advise") || strings.Contains(reachable, "fitr run") {
+		t.Fatalf("reachable empty offered a substitute:\n%s", reachable)
+	}
+}
+
+func inventoryText(t *testing.T, inv Inventory) string {
+	t.Helper()
+	var out strings.Builder
+	WriteInventory(&out, inv, "plain")
+	return out.String()
+}
+
+func emptyNextCommand(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "next" && fields[1] == "fitr" {
+			return fields[1] + " " + strings.TrimRight(fields[2], ",:;")
+		}
+	}
+	return ""
+}
+
 func TestWriteInventoryEmptyRuntime(t *testing.T) {
 	var out strings.Builder
 	WriteInventory(&out, Inventory{Fitr: "0.6.0", Empty: "none reachable"}, "plain")

@@ -174,7 +174,7 @@ func writeEmptyInventory(w io.Writer, inv Inventory, p palette) bool {
 	case "reachable, no models":
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, p.wrap(p.Muted, "  no models installed on this runtime"))
-		fmt.Fprintln(w, p.wrap(p.Muted, "  next      fitr suggest, or pull a model, then: fitr advise <model>"))
+		fmt.Fprintln(w, p.wrap(p.Muted, "  next      fitr suggest (weight projection; KV cache is not estimated)"))
 		return true
 	default:
 		return false
