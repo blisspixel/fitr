@@ -2165,6 +2165,39 @@ func TestTuneDiffsNumCtx(t *testing.T) {
 	if !strings.Contains(got, "8192") || !strings.Contains(got, "->") || !strings.Contains(got, "4096") {
 		t.Fatalf("tune must show the ctx delta:\n%s", got)
 	}
+	if strings.Contains(got, "restart boundary") {
+		t.Fatalf("a request context change was called a process restart:\n%s", got)
+	}
+}
+
+func TestTuneNamesAStartTimeBoundary(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "aa", "bb"
+	a.Device.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "f16"}
+	b.Device.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "q8_0"}
+	for _, r := range []*Result{a, b} {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := os.Stdout
+	or, ow, _ := os.Pipe()
+	os.Stdout = ow
+	code := cmdTune(context.Background(), []string{"aa", "bb"})
+	ow.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(or)
+	got := string(out)
+	if code != exitOK || !strings.Contains(got, "restart boundary") || !strings.Contains(got, "fresh measurement") ||
+		!strings.Contains(got, "OLLAMA_KV_CACHE_TYPE") {
+		t.Fatalf("code = %d, start-time boundary missing:\n%s", code, got)
+	}
 }
 
 func TestResultNumCtxFallsBackToDefault(t *testing.T) {

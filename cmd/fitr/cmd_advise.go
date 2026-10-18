@@ -489,10 +489,13 @@ func writeApplyPlan(mode, model string, plan advise.ApplyPlan) int {
 }
 
 // ---------------------------------------------------------------- tune
-// cmdTune does not run a sweep. llama-bench already owns throughput-only
-// points, and a documented flash-attention quality regression is why
-// throughput-only is not enough. Until fitr can restart a server, tune
-// prints the request-level knobs and diffs two observed fingerprints.
+// cmdTune does not run a sweep and does not restart the server.
+// llama-bench already owns throughput-only points, and a documented
+// flash-attention quality regression is why throughput-only is not enough.
+// Request knobs are printed separately from start-time knobs. A start-time
+// difference between two saved results is a restart boundary: those
+// measurements are different configurations, and a fresh measurement has
+// to come from a process started with the new value.
 func cmdTune(ctx context.Context, args []string) int {
 	fs := commandFlags("tune")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -502,22 +505,7 @@ func cmdTune(ctx context.Context, args []string) int {
 		errPrint("tune diffs two saved results", "received an incomplete model pair", "fitr tune  or  fitr tune <model-a> <model-b>")
 		return exitUsage
 	}
-	fmt.Fprint(os.Stdout, `  request-level knobs (no server restart):
-    num_ctx / --ctx-size     KV cache size; this is what advise already names
-    num_batch / -b           prefill chunk; quality can move with it
-    num_gpu / -ngl           offload; partial GPU is a RAM benchmark wearing a GPU badge
-
-  server-level (needs a restart fitr will not orchestrate):
-    OLLAMA_FLASH_ATTENTION   documented quality regression at some settings
-    OLLAMA_KV_CACHE_TYPE     f16 vs q8_0 vs q4_0; changes the fingerprint
-
-  measure a point: set the knob, then
-    fitr run <model> [--ctx N]
-    fitr compare <a> <b>
-  score quality + degeneracy + throughput jointly. llama-bench already owns
-  throughput-only sweeps. Persist a measured ctx with fitr apply.
-
-`)
+	writeServingKnobs()
 	if fs.NArg() == 0 {
 		fmt.Fprintln(os.Stdout, "  next   fitr tune <model-a> <model-b>   to diff two saved fingerprints")
 		return exitOK
@@ -534,19 +522,69 @@ func cmdTune(ctx context.Context, args []string) int {
 		return exitUsage
 	}
 	fmt.Fprintf(os.Stdout, "  %s  vs  %s\n", terminalText(a.Model), terminalText(b.Model))
-	d := a.Device.Diff(b.Device)
-	if ca, cb := resultNumCtx(a), resultNumCtx(b); ca != cb {
-		d = append([][3]string{{"num_ctx", strconv.Itoa(ca), strconv.Itoa(cb)}}, d...)
-	}
-	if len(d) == 0 {
-		fmt.Fprintln(os.Stdout, "  same fingerprint - quality is `fitr compare`'s job, not a device change")
-		return exitOK
-	}
-	fmt.Fprintln(os.Stdout, "  fingerprint diffs (these runs are not comparable):")
-	for _, x := range d {
-		fmt.Fprintf(os.Stdout, "    %-22s  %s  ->  %s\n", terminalText(x[0]), terminalText(emptyDash(x[1])), terminalText(emptyDash(x[2])))
-	}
+	writeTuneDiff(a, b)
 	return exitOK
+}
+
+func writeServingKnobs() {
+	fmt.Fprintln(os.Stdout, "  request-level knobs (no server restart):")
+	for _, knob := range device.ServingKnobs() {
+		if knob.Scope == device.KnobRequest {
+			fmt.Fprintf(os.Stdout, "    %-24s %s\n", knob.Name, knob.Note)
+		}
+	}
+	fmt.Fprintln(os.Stdout, "\n  start-time knobs (read at process start; fitr will not restart the server):")
+	for _, knob := range device.ServingKnobs() {
+		if knob.Scope == device.KnobStart {
+			fmt.Fprintf(os.Stdout, "    %-24s %s\n", knob.Name, knob.Note)
+		}
+	}
+	fmt.Fprint(os.Stdout, `
+  measure a point: set the knob, then
+    fitr run <model> [--ctx N]
+    fitr compare <a> <b>
+  score quality + degeneracy + throughput jointly. llama-bench already owns
+  throughput-only sweeps. Persist a measured ctx with fitr apply.
+
+`)
+}
+
+func writeTuneDiff(a, b *Result) {
+	rows := a.Device.Diff(b.Device)
+	if ca, cb := resultNumCtx(a), resultNumCtx(b); ca != cb {
+		rows = append([][3]string{{"num_ctx", strconv.Itoa(ca), strconv.Itoa(cb)}}, rows...)
+	}
+	startNames := map[string]bool{}
+	for _, name := range device.StartBoundary(a.Device.Config, b.Device.Config) {
+		startNames[name] = true
+	}
+	var boundary, other [][3]string
+	for _, row := range rows {
+		key := strings.TrimPrefix(row[0], "config.")
+		if startNames[key] {
+			boundary = append(boundary, [3]string{key, row[1], row[2]})
+			continue
+		}
+		other = append(other, row)
+	}
+	if len(boundary) > 0 {
+		fmt.Fprintln(os.Stdout, "  restart boundary (read at process start; fitr will not restart the server):")
+		writeTuneRows(boundary)
+		fmt.Fprintln(os.Stdout, "  these measurements are different configurations. a fresh measurement has to come from a process started with the new value.")
+	}
+	if len(other) > 0 {
+		fmt.Fprintln(os.Stdout, "  fingerprint diffs (these runs are not comparable):")
+		writeTuneRows(other)
+	}
+	if len(boundary) == 0 && len(other) == 0 {
+		fmt.Fprintln(os.Stdout, "  same fingerprint - quality is `fitr compare`'s job, not a device change")
+	}
+}
+
+func writeTuneRows(rows [][3]string) {
+	for _, row := range rows {
+		fmt.Fprintf(os.Stdout, "    %-22s  %s  ->  %s\n", terminalText(row[0]), terminalText(emptyDash(row[1])), terminalText(emptyDash(row[2])))
+	}
 }
 
 func adviseTimings(model, artifactDigest string, current device.Fingerprint) []advise.SavedTiming {

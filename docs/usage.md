@@ -269,7 +269,7 @@ of installed RAM as an unconditional model budget.
 | `fitr [model]` / `fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]` | no model: inventory. With a model: does it fit, and if not, which flag to try |
 | `fitr suggest [model] [--size-gb N] [--ceiling-gb N]` | project one fixed reviewed library set; shared or unmeasured memory is not a fit; `--ceiling-gb` is an operator ceiling, not a measured resident budget; a pull line is a recipe |
 | `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |
-| `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
+| `fitr tune [a b]` | print request and start-time knobs; a start-time difference is a restart boundary and needs a fresh measurement; fitr does not restart the server |
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
 | `fitr view [model\|result.json] [--display MODE] [--full]` | reopen a saved result; `--full` emits the complete sealed record only with JSON display |
 | `fitr board [--current] [--display MODE] [--full]` | compare by device; `--full` emits complete sealed records only with JSON display |
