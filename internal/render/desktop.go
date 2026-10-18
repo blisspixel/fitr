@@ -8,30 +8,35 @@ import (
 	"github.com/blisspixel/fitr/internal/desktop"
 )
 
+// desktopLabelWidth clears the longest status label, "Evidence freshness".
+// A width of 20 is that label plus the two-space gutter, so the value was
+// concatenated onto the word.
+const desktopLabelWidth = 22
+
 // WriteDesktopStatus prints a status document. It does not interpret fit,
 // freshness, or requirements beyond the strings the projection already chose.
 func WriteDesktopStatus(w io.Writer, status desktop.Status, mode string) {
 	p, _ := inventoryStyle(Resolve(mode) == "rich")
 	width := Width()
 	fmt.Fprintf(w, "  %s\n", p.wrap(p.Head, "fitr / desktop"))
-	Field(w, "  state", 20, status.State, width)
+	Field(w, "  state", desktopLabelWidth, status.State, width)
 	if status.Role != "" {
-		Field(w, "  role", 20, status.Role, width)
+		Field(w, "  role", desktopLabelWidth, status.Role, width)
 	}
 	for _, name := range status.Roles {
-		Field(w, "  choose", 20, name, width)
+		Field(w, "  choose", desktopLabelWidth, name, width)
 	}
 	for _, row := range status.Rows {
-		Field(w, "  "+row.Label, 20, row.Value+" ("+row.State+")", width)
+		Field(w, "  "+row.Label, desktopLabelWidth, row.Value+" ("+row.State+")", width)
 	}
 	for _, item := range status.Unresolved {
-		Field(w, "  unresolved", 20, item.ID+": "+item.State, width)
+		Field(w, "  unresolved", desktopLabelWidth, item.ID+": "+item.State, width)
 	}
 	if status.Next.Text != "" {
-		Field(w, "  next", 20, status.Next.Text, width)
+		Field(w, "  next", desktopLabelWidth, status.Next.Text, width)
 	}
 	if status.Next.Reason != "" {
-		Field(w, "  because", 20, status.Next.Reason, width)
+		Field(w, "  because", desktopLabelWidth, status.Next.Reason, width)
 	}
 	fmt.Fprintln(w)
 	for _, limit := range status.Limits {

@@ -370,6 +370,9 @@ type textDisplay struct {
 	pal      palette
 	g        glyphs
 	rich     bool
+	// collapseLimits is set only for the card printed at the end of a run.
+	// fitr view, screenshots, HTML, and JSON keep every limit.
+	collapseLimits bool
 }
 
 func (d *textDisplay) Phase(name, detail string) {
@@ -534,7 +537,7 @@ func (d *textDisplay) resultHeader(w io.Writer, sc score.Scorecard, m Meta, widt
 	if m.Calibration {
 		useFor = "calibration evidence only - not a standalone product verdict"
 	}
-	d.headerField(w, "use for", useFor, width, d.pal.Accent)
+	d.headerField(w, "use for", useFor, width, d.useForStyle(useFor, m.Calibration))
 	deviceParts := make([]string, 0, 3)
 	if gpu := SingleLine(m.GPU); gpu != "" {
 		deviceParts = append(deviceParts, gpu)
@@ -880,9 +883,7 @@ func (d *textDisplay) resultAnalysis(w io.Writer, m Meta, model string, width in
 	for _, diagnosis := range report.Diagnoses {
 		writeDiagnosis(w, d, diagnosis, model, width)
 	}
-	for _, gap := range report.Gaps {
-		d.headerField(w, "limit", analysis.GapLabel(gap.Code)+": "+gap.Message, width, d.pal.Muted)
-	}
+	d.writeLimits(w, report, model, width)
 	if len(report.NextActions) == 0 {
 		return
 	}

@@ -135,9 +135,15 @@ for the other report states. Processing failures exit 1, usage errors exit 2,
 and cancellation exits 130.
 
 `role status` reports `unselected`, `qualified` or `stale`. It exits 0 only for
-`qualified`; unselected and stale selections exit 4. JSON output includes the
-attempt count and `last_attempt`, whose action may be `started`, `completed`,
-`failed` or `cancelled`. A completed attempt need not have a confirmed result.
+`qualified`; unselected and stale selections exit 4. Plain text adds a `fitted`
+line for a current qualification and a `refit` line for a stale selection.
+Those words are display-only. The JSON status is unchanged and remains the
+source of the sentence: role, resolved model, the selected run's start or the
+selection's own evaluation time, and the selection expiry. It does not add an
+operating window. JSON output includes the attempt count and `last_attempt`,
+whose action may be `started`, `completed`, `failed` or `cancelled`. A
+completed attempt need not have a confirmed result. A failed challenger does
+not replace a qualified incumbent.
 
 ## Expiry, interruption and evidence changes
 

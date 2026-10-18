@@ -165,6 +165,8 @@ type htmlData struct {
 	Model               string
 	SizeLine            string
 	UseFor              string
+	UseForClass         string
+	Mark                template.HTML
 	Profile             string
 	Uncalibrated        bool
 	DeviceKey           string
@@ -208,30 +210,14 @@ type htmlData struct {
 	Next                string
 }
 
-const artifactCSS = `:root{--bg:#0f1419;--fg:#e6edf3;--muted:#8b949e;--pass:#3fb950;--fail:#f85149;--skip:#8b949e;--blkd:#d29922;--line:#30363d;--card:#161b22}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-main{max-width:54rem;margin:0 auto;padding:2rem 1.25rem 4rem}
-h1{font-size:1.15rem;font-weight:600;margin:0 0 .35rem}
-.sub{color:var(--muted);margin:0 0 1rem}
-.banner{border:1px solid var(--line);background:var(--card);padding:.8rem 1rem;margin:0 0 1.25rem;color:var(--muted)}
-.banner strong{color:var(--fg);font-weight:600}
-h2{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:1.6rem 0 .5rem;font-weight:600}
-table{width:100%;border-collapse:collapse}
-th,td{text-align:left;vertical-align:top;padding:.4rem .5rem .4rem 0;border-bottom:1px solid var(--line)}
-th{color:var(--muted);font-weight:500}
-.k{color:var(--muted);width:11rem;white-space:nowrap}
-.pass{color:var(--pass)} .fail{color:var(--fail)} .skip{color:var(--skip)} .blkd{color:var(--blkd)}
-.use{color:#d2a8ff}
-.warn{color:var(--blkd)}
-footer{margin-top:2rem;color:var(--muted);font-size:.8rem}
-@media print{body{background:#fff;color:#111} .banner,.pass,.fail,.skip,.blkd,.use,.warn,footer,.sub,th,.k{color:inherit}}`
+var scorecardStyles = template.CSS(mustScorecardCSS())
 
 var artifactTmpl = template.Must(template.New("artifact").Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <title>{{.Title}}</title>
 <style>{{.CSS}}</style>
 </head>
@@ -240,7 +226,7 @@ var artifactTmpl = template.Must(template.New("artifact").Parse(`<!DOCTYPE html>
 <h1>{{.Model}}</h1>
 <p class="sub">{{.SizeLine}} · profile {{.Profile}}{{if .Uncalibrated}} (uncalibrated){{end}}{{if .Wall}} · {{.Wall}}{{end}}</p>
 {{if .Artifact}}<p class="sub">{{.Artifact}}</p>{{end}}
-<p class="use">{{.UseFor}}</p>
+{{if .UseForClass}}<p class="{{.UseForClass}}">{{.UseFor}}</p>{{else}}<p>{{.UseFor}}</p>{{end}}
 
 <div class="banner"><strong>A number without its device is meaningless.</strong>
 Do not rank this result against a different device/config ID. Change the GPU, driver, runtime, KV dtype, or request context and these numbers are void.</div>
@@ -348,7 +334,7 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 {{end}}
 
 {{if .Next}}
-<p class="sub">next <span class="use">{{.Next}}</span></p>
+<p class="sub">next {{.Next}}</p>
 {{end}}
 {{if .Claims}}
 <h2>Workload claims</h2>
@@ -357,10 +343,12 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 </ul>
 {{end}}
 <footer>
-fitr {{.Version}} · schema {{.Schema}} · {{.Level}} · {{.StartedAt}}<br>
+<p><button type="button" data-theme-choice="dark">Dark</button><button type="button" data-theme-choice="light">Light</button><button type="button" data-theme-choice="system">System</button></p>
+<span class="mark">{{.Mark}}</span>fitr {{.Version}} scorecard · schema {{.Schema}} · {{.Level}} · {{.StartedAt}}<br>
 Written only because you asked (fitr export / fitr run --html). Never uploaded. Contains an opaque device ID and allowlisted comparison configuration.
 </footer>
 </main>
+` + scorecardThemeScript + `
 </body>
 </html>
 `))
@@ -377,7 +365,7 @@ func htmlDataFrom(a Artifact) htmlData {
 	a.Meta = resolvedMeta(a.Meta)
 	d := baseHTMLData(a)
 	d.NumCtx = htmlContext(a.Meta)
-	d.RAM = htmlRAM(a.Device.RAMGb)
+	d.RAM = htmlKnown(htmlRAM(a.Device.RAMGb))
 	d.SizeLine = htmlSizeLine(a.Meta)
 	if a.WallSeconds > 0 {
 		d.Wall = fmt.Sprintf("%.0fs", a.WallSeconds)
@@ -573,21 +561,27 @@ func htmlDescriptive(value string, observation analysis.PerformanceObservation) 
 }
 
 func baseHTMLData(a Artifact) htmlData {
+	useFor := UseForLabel(a.Scorecard.UseFor)
+	if a.Meta.Calibration {
+		useFor = "calibration evidence only - not a standalone product verdict"
+	}
 	return htmlData{
-		CSS:           template.CSS(artifactCSS),
+		CSS:           scorecardStyles,
 		Title:         "fitr · " + a.Model,
 		Model:         a.Model,
-		UseFor:        UseForLabel(a.Scorecard.UseFor),
-		Profile:       a.Profile,
+		UseFor:        useFor,
+		UseForClass:   htmlUseForClass(useFor, a.Meta.Calibration),
+		Mark:          template.HTML(scorecardMark),
+		Profile:       htmlKnown(a.Profile),
 		TTFTLabel:     "TTFT",
 		Uncalibrated:  a.Profile == "default",
-		DeviceKey:     a.DeviceKey,
-		OS:            a.Device.OS,
-		CPU:           a.Device.CPU,
-		GPU:           a.Device.GPU,
-		Driver:        strings.TrimSpace(a.Device.GPUDriver + " " + a.Device.GPUDriverDate),
-		Runtime:       a.Device.Runtime,
-		Inference:     a.Device.InferenceDevice,
+		DeviceKey:     htmlKnown(a.DeviceKey),
+		OS:            htmlKnown(a.Device.OS),
+		CPU:           htmlKnown(a.Device.CPU),
+		GPU:           htmlKnown(a.Device.GPU),
+		Driver:        htmlKnown(strings.TrimSpace(a.Device.GPUDriver + " " + a.Device.GPUDriverDate)),
+		Runtime:       htmlKnown(a.Device.Runtime),
+		Inference:     htmlKnown(a.Device.InferenceDevice),
 		GPUBackend:    a.Device.GPUBackend,
 		Contamination: a.Contamination,
 		StartedAt:     a.StartedAt,
@@ -613,6 +607,24 @@ func htmlContext(meta Meta) string {
 		return fmt.Sprintf("%d requested, effective %s", meta.NumCtx, meta.ContextState)
 	default:
 		return strconv.Itoa(meta.NumCtx)
+	}
+}
+
+func htmlKnown(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return value
+}
+
+func htmlUseForClass(text string, calibration bool) string {
+	switch UseForTone(text, calibration) {
+	case UseForPass:
+		return "pass"
+	case UseForWarn:
+		return "warn"
+	default:
+		return ""
 	}
 }
 

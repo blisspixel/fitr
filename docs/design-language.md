@@ -61,7 +61,15 @@ original explanation; no missing evidence is promoted.
 
 Cyan emphasizes focus and active work, amber marks gaps and warnings, green
 marks accepted outcomes, and red marks failures. Each state also has a text
-label. The live TUI adds a four-frame ASCII activity marker while a run is
+label. The run card's use-for line follows that palette: green when the line
+names accepted work, amber when it names a gap, and the default ink for
+calibration evidence. Cyan stays on the next command. The card printed at the
+end of a run has one next action. It collapses evidence limits to a count and
+points at `fitr view`. `fitr view`, HTML, and JSON keep every limit. The shareable HTML scorecard uses the same roles. It opens on the house
+dark palette and can switch to the house light palette or the system palette.
+Empty device cells say unknown. The mark takes the accent color.
+The live
+TUI adds a four-frame ASCII activity marker while a run is
 active. It indicates activity, not percentage complete or healthy output.
 Terminal states stop it, and pausing the viewport freezes it while measurement
 continues. Set `FITR_REDUCED_MOTION=1` for static status with elapsed-time
@@ -105,9 +113,15 @@ each candidate's requirements, preference bounds and evidence gaps. Failed
 quality remains visible beside a qualifying candidate. Explicit JSON carries
 the full definition and receipts. `role status` leads with the selected model,
 current qualification and expiry, then shows the latest attempt independently.
-A failed challenger must not visually become a failed incumbent. Stale and
-unselected roles retain a clear review action. Operational fallback and
-multi-role placement views remain future work.
+A current qualification adds one static line. The word `fitted` is green, the
+model is default ink, and the measured and review dates are dim. A stale
+selection says `refit` in amber and keeps the review command. Unmeasured,
+unresolved and failed selections do not borrow either word. A failed
+challenger stays on the attempt row and does not replace a qualified
+incumbent. The line is absent from JSON, uses no glyph, and does not state a
+context window the status record does not carry. The result view repeats it
+only on the run that selection names. Operational fallback and multi-role
+placement views remain future work.
 Avoid a hero score that mixes model quality, speed, fit and popularity.
 
 Auto status uses the same field alignment and cyan focus as role views. Role,

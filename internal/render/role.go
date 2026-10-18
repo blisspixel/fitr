@@ -104,6 +104,7 @@ func WriteRoleSelection(w io.Writer, status role.SelectionStatus, mode string) {
 	fmt.Fprintf(w, "  %s\n", p.wrap(style, strings.ToUpper(SingleLine(status.State))))
 	fmt.Fprintf(w, "  %s\n", p.wrap(p.Muted, strings.Repeat("-", width-4)))
 	fmt.Fprintln(w)
+	writeSelectionSignature(w, p, status, width)
 	if status.Selection != nil {
 		Field(w, "  model", 13, status.Selection.Selected.Model.Resolved, width)
 		Field(w, "  expires", 13, status.Selection.ExpiresAt, width)

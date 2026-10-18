@@ -179,6 +179,17 @@ type Snapshot struct {
 	// InventoryWarning qualifies runtime status when loaded/context state could
 	// not be observed. Empty means the status probe succeeded.
 	InventoryWarning string `json:"inventory_warning,omitempty"`
+	// Signatures are display-only fitted and refit lines. Role status JSON
+	// already carries the qualification, so this slice stays out of the
+	// presentation snapshot.
+	Signatures []Signature `json:"-" presentation:"local"`
+}
+
+// Signature is one role-status sentence placed on the run it names.
+type Signature struct {
+	Word  string
+	Body  string
+	RunID string
 }
 
 // Sort selects the ordering used inside each board group and in history.

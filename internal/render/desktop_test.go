@@ -22,3 +22,17 @@ func TestDesktopStatusPrintsUnmeasuredWithoutReplacingIt(t *testing.T) {
 		t.Fatalf("%s", output)
 	}
 }
+
+func TestDesktopEvidenceFreshnessKeepsItsValue(t *testing.T) {
+	var buf bytes.Buffer
+	WriteDesktopStatus(&buf, desktop.Status{
+		State: desktop.StateEmpty,
+		Rows: []desktop.Row{{
+			Label: "Evidence freshness", Value: "unknown", State: "unmeasured",
+		}},
+	}, "plain")
+	output := buf.String()
+	if strings.Contains(output, "freshnessunknown") || !strings.Contains(output, "unknown (unmeasured)") {
+		t.Fatalf("freshness label collided with its value:\n%s", output)
+	}
+}

@@ -198,7 +198,10 @@ func shotSelection(context.Context) (string, error) {
 	render.WriteRoleSelection(os.Stdout, role.SelectionStatus{
 		Role: "daily-driver", State: "qualified", Scope: "battery_screening", Attempts: 2,
 		Selection: &role.SelectionReceipt{
-			Selected:  role.ConfirmationPoint{Model: record.ModelIdentity{Resolved: "daily-model:q5"}},
+			Selected: role.ConfirmationPoint{
+				Model:     record.ModelIdentity{Resolved: "daily-model:q5"},
+				StartedAt: "2026-09-01T00:00:00Z",
+			},
 			ExpiresAt: "2026-10-05T00:00:00Z",
 		},
 		LastAttempt: &role.LifecycleAttemptStatus{Action: "failed", At: "2026-09-05T12:00:00Z"},

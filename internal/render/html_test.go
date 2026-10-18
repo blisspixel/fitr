@@ -291,8 +291,12 @@ func TestHTMLEscapesUntrustedStrings(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	if strings.Contains(got, "<script>") {
-		t.Fatal("unescaped <script> in model name would execute in a browser")
+	if strings.Count(got, "<script>") != 1 || strings.Contains(got, "<script>alert") {
+		t.Fatal("unescaped model script would execute in a browser")
+	}
+	script := got[strings.Index(got, "<script>"):strings.Index(got, "</script>")]
+	if strings.Contains(script, "qwen3") || strings.Contains(script, "alert") {
+		t.Fatal("the static theme script included result text")
 	}
 	if !strings.Contains(got, "&lt;script&gt;") {
 		t.Fatal("model name must appear escaped")

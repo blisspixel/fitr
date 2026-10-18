@@ -112,11 +112,8 @@ func TestContextHintStaysQuietForAutomaticNVIDIAUnifiedCapacity(t *testing.T) {
 func TestRunContextHintCallsTheWiderWindowUntested(t *testing.T) {
 	backend := &archBackend{runIntegrationBackend: &runIntegrationBackend{}, kvs: llama8BKVs(), size: 5 << 30}
 	res := &Result{Model: "qwen3:30b", Device: device.Fingerprint{VRAMGb: 24, VRAMSource: "nvidia-smi", Config: map[string]string{}}}
-	stderr, _ := captureTopStderr(t, func() int {
-		writeRunContextHint(context.Background(), backend, runCommand{runOpts: runOpts{numCtx: 32768}}, res)
-		return 0
-	})
-	if !strings.Contains(stderr, "untested projection") || strings.Contains(stderr, "this device fits") {
-		t.Fatalf("wider window was not labeled as an untested projection:\n%s", stderr)
+	got := runContextAlso(context.Background(), backend, runCommand{runOpts: runOpts{numCtx: 32768}}, res)
+	if !strings.Contains(got, "untested projection") || strings.Contains(got, "this device fits") {
+		t.Fatalf("wider window was not labeled as an untested projection:\n%s", got)
 	}
 }
