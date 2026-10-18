@@ -70,6 +70,7 @@ type QuantReport struct {
 	Lineage    QuantLineage     `json:"lineage"`
 	Candidates []QuantCandidate `json:"candidates"`
 	Frontier   QuantFrontier    `json:"frontier"`
+	Health     QuantHealth      `json:"health"`
 	Objective  *QuantObjective  `json:"objective,omitempty"`
 	Gaps       []string         `json:"gaps,omitempty"`
 	NextAction *Action          `json:"next_action,omitempty"`
@@ -108,6 +109,7 @@ func analyzeQuant(results []*record.Record, spec decision.DecisionSpec,
 		report.Candidates = append(report.Candidates, candidate)
 	}
 	report.Lineage = assessQuantLineage(report.Candidates, conversion)
+	report.Health = quantHealth(results)
 	report.Frontier = quantFrontier(report.Candidates, report.Comparison.Ready)
 	report.Objective = evaluateQuantObjective(report.Candidates, report.Comparison, spec.Objective, stage)
 	report.Gaps, report.NextAction = quantGapsAndAction(report)

@@ -1500,10 +1500,15 @@ their output statistics sat inside the healthy range. Surface heuristics could
 not have caught them; running the tasks did. Any health signal added here
 supplements the behavioral battery and does not replace it.
 
-- [ ] Paired quant comparison using the evidence already available: behavioral
+- [x] Paired quant comparison using the evidence already available: behavioral
       families, degeneration statistics, structured-output and tool-channel
       failure rates, with the cache dtype treated as part of the configuration
       rather than an afterthought, and a mandatory self-against-self baseline.
+      An absent `OLLAMA_KV_CACHE_TYPE` is not the same configuration. A need
+      is above that floor only when the repeated artifact measured the need
+      and the family sign test separates a larger discordant count. The
+      result is a configuration difference, not a ranking and not a
+      quantization attribution. Inconclusive checks stay out of the fail count.
 - [ ] A ranked-alternatives probe, once the sealed-plan shape above exists.
       Margin, same-choice rate and truncated divergence, each reported as a
       finite observation at declared positions rather than as a model-wide

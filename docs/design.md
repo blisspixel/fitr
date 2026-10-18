@@ -212,7 +212,12 @@ for another. fitr also does not compute perplexity or KL divergence from a
 serving response. Those quantities need teacher-forced scoring over the full
 vocabulary, and no local serving API provides it. A capped alternative list
 is not KL. A decision spec refuses `perplexity`, `kl_divergence`, and `kld`
-by name. See [decisions](decisions.md).
+by name. See [decisions](decisions.md). A quant experiment's health
+projection uses the behavioral families, repetition statistics, and
+structured-output and tool-channel counts the records already store. It
+withholds that comparison when the cache dtype was not measured or differs,
+and it does not call a need above the noise floor without a self-against-self
+repeat of one artifact. The method is in [statistics](statistics.md).
 
 ---
 

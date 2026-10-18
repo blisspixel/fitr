@@ -151,6 +151,16 @@ sealed same-base lineage receipt binds both runtime-bound artifact digests,
 directional quant attribution is INCONCLUSIVE. `fitr calibrate --lineage`
 attaches that receipt; `fitr compare` still does not. IQ and unknown schemes also SKIP dtype ordering.
 
+`fitr experiment quant` projects the same family directions, the sealed
+repetition statistics, and structured-output and tool-channel counts. A need
+is above its self floor only when every run carries the same measured
+`OLLAMA_KV_CACHE_TYPE`, one artifact was repeated on shared scorable
+instances, and that need's discordant family count is larger than the repeat
+and separable by the sign test above. An absent cache dtype is not the same
+configuration. Inconclusive and skipped checks stay out of the fail count.
+The projection is a configuration difference, not a quantization attribution
+and not a ranking. Lineage stays the separate receipt above.
+
 ## 5. Ratios of means: Fieller's theorem
 
 "Model A is 1.6x faster" needs an interval, and the ratio of two noisy
