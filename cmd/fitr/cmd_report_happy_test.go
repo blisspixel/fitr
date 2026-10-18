@@ -33,7 +33,7 @@ func TestCompareReportsCompatibleMeasuredRuns(t *testing.T) {
 	}
 }
 
-func TestCompareKeepsUnprovenUncachedPrefillDescriptive(t *testing.T) {
+func TestCompareFailsTheUncachedPrefillSeal(t *testing.T) {
 	t.Setenv("FITR_RESULTS", t.TempDir())
 	a, b := golden(t), golden(t)
 	a.Model, a.Scorecard.Model = "first", "first"
@@ -60,8 +60,8 @@ func TestCompareKeepsUnprovenUncachedPrefillDescriptive(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("compare exit=%d\n%s", code, out)
 	}
-	if !strings.Contains(out, "prefill tok/s") || !strings.Contains(out, "uncached prefill not proven") {
-		t.Fatalf("comparison hid the descriptive prefill caveat:\n%s", out)
+	if !strings.Contains(out, "prefill tok/s") || !strings.Contains(out, "uncached timing seal failed") {
+		t.Fatalf("comparison hid the failed uncached seal:\n%s", out)
 	}
 	prefillLine := ""
 	for line := range strings.SplitSeq(out, "\n") {

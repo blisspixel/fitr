@@ -66,8 +66,9 @@ func feasibleRequirement(requirement decision.Requirement, tasks *eval.Spec, rep
 		}
 	}
 	// Every currently accepted decision performance metric has an observed
-	// estimate in this full battery. Loaded TTFT also needs actual /ps proof;
-	// it does not claim an uncached prompt and cannot bypass that later guard.
+	// estimate in this full battery. Prefill and loaded TTFT claim an
+	// uncached prompt. A nonzero cached-token count fails that seal at
+	// evaluation; this preflight does not treat the declaration as a pass.
 	return nil
 }
 

@@ -263,11 +263,12 @@ func conversionQuant(conversion *calibration.ConversionManifest, digest string) 
 func quantMetrics(result *record.Record, report analysis.Report) map[string]MetricEstimate {
 	metrics := map[string]MetricEstimate{
 		"decode_tps":           metricFromPerformance("decode_tps", report.Performance.DecodeTPS),
-		"prefill_tps":          metricFromPerformance("prefill_tps", report.Performance.PrefillTPS),
+		"prefill_tps":          sealedUncachedMetric("prefill_tps", report.Performance.PrefillTPS, analysis.ClaimUncachedPrefill),
 		"request_ttft_seconds": metricFromPerformance("request_ttft_seconds", report.Performance.TTFTSeconds),
 	}
-	if analysis.Supports(report.Performance.TTFTSeconds, analysis.ClaimObservedLoadedTTFT) {
-		metrics["loaded_ttft_seconds"] = metricFromPerformance("loaded_ttft_seconds", report.Performance.TTFTSeconds)
+	ttft := report.Performance.TTFTSeconds
+	if analysis.Supports(ttft, analysis.ClaimObservedLoadedTTFT) || analysis.Supports(ttft, analysis.ClaimLoadedUncachedTTFT) {
+		metrics["loaded_ttft_seconds"] = sealedUncachedMetric("loaded_ttft_seconds", ttft, analysis.ClaimLoadedUncachedTTFT)
 	}
 	if report.Capacity.Resident != nil && report.Capacity.Resident.Estimate != nil {
 		metrics["resident_bytes"] = metricFromResident(report.Capacity.Resident)
@@ -277,6 +278,23 @@ func quantMetrics(result *record.Record, report analysis.Report) map[string]Metr
 			analysis.UnitBytes, "manifest.model.size_bytes")
 	}
 	return metrics
+}
+
+// sealedUncachedMetric keeps a prefill or loaded-TTFT number visible and
+// withholds its interval unless the observation carries the uncached claim.
+// A nonzero cached-token count and an unknown receipt both miss that claim.
+// Decision evaluation names the positive count as a failed seal and leaves
+// an unknown receipt unresolved.
+func sealedUncachedMetric(code string, observation analysis.PerformanceObservation, claim analysis.SupportClaim) MetricEstimate {
+	metric := metricFromPerformance(code, observation)
+	if analysis.Supports(observation, claim) {
+		return metric
+	}
+	if metric.Status == analysis.StatusAvailable {
+		metric.Status = analysis.StatusDescriptiveOnly
+	}
+	metric.Low, metric.High = nil, nil
+	return metric
 }
 
 func metricFromPerformance(code string, observation analysis.PerformanceObservation) MetricEstimate {

@@ -168,7 +168,11 @@ Supported metrics are:
 - `loaded_ttft_seconds`
 
 Every performance requirement has exactly one `at_least` or `at_most` bound.
-Loaded TTFT requires the gated request's residency support claim. A fast
+`prefill_tps` and `loaded_ttft_seconds` claim an uncached prompt. A nonzero
+cached-token count fails that seal: the number stays visible and is not a
+quality zero, and the requirement is blocked. An unknown cache receipt stays
+unresolved instead. `request_ttft_seconds` does not claim to be uncached.
+Loaded TTFT also requires the gated request's residency support claim. A fast
 request with unknown residency remains visible but cannot establish loaded
 responsiveness. When repeated measurements carry a standard deviation, the
 95 percent t interval must clear the bound. A point estimate on the preferred

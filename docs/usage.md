@@ -598,9 +598,10 @@ good loaded responsiveness while paying a large runtime-unloaded startup cost.
 - **Request TTFT** is wall time from the gated request start to the first
   non-empty streamed chunk. It is labeled **Loaded TTFT** only when that
   request has a runtime residency receipt showing no material reload. Its
-  cache state is reported separately. Unknown residency, unknown cache state,
-  or a cache hit remains an observation but cannot prove the loaded-uncached
-  responsiveness gate.
+  cache state is reported separately. Unknown residency or unknown cache
+  state remains an observation and cannot prove the loaded-uncached gate.
+  A nonzero cached-token count fails that seal. The number stays visible
+  and is not a quality zero.
 - **Runtime-unloaded TTFT** is wall time from a request made after fitr unloaded
   the model to the first non-empty streamed chunk. It is not machine-cold or
   disk-cold because the operating system may still cache model pages.
@@ -610,8 +611,9 @@ good loaded responsiveness while paying a large runtime-unloaded startup cost.
   protocol provides it. It is not inferred by subtracting TTFT observations.
 - **Prefill** describes input-token processing and matters for long prompts,
   retrieval, and repeated agent histories. A gate or comparison requires an
-  explicit zero-cache receipt for every sample; unknown state or any positive
-  cached-token count remains descriptive only.
+  explicit zero-cache receipt for every sample. Unknown cache state stays
+  unproven. A nonzero cached-token count fails the uncached timing seal.
+  The observed rate stays visible and is not a quality zero.
 - **Decode** describes generated-token streaming after prompt processing.
 - **Resident** is observed loaded allocation when the runtime reports it.
 - **Accelerator allocation** is the runtime-classified byte count at that same
@@ -755,7 +757,8 @@ bounds, and trailing JSON are rejected. Behavior rate requirements use the
 same family-clustered interval as the scorer. Repeats of one scenario family
 cannot impersonate independent evidence, and unavailable planned observations
 cannot establish a requirement. `loaded_ttft_seconds` requires its exact
-residency-supported claim; a request-TTFT number is not relabeled.
+residency-supported claim and an uncached prompt; a request-TTFT number is
+not relabeled, and a nonzero cached-token count fails the uncached seal.
 Profile-bound speed and footprint screening rows are not accepted as behavior
 requirements. Express those needs as typed performance and capacity limits.
 
