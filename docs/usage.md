@@ -267,6 +267,7 @@ of installed RAM as an unconditional model budget.
 | `fitr run <model> [--quick\|--full\|--checks-only] [-k N] [--ctx N] [--capacity-budget-gb N\|--capacity-reserve-gb N]` | measure a model; optionally seal an explicit safe-capacity policy before loading; checks-only runs the generated battery for calibration |
 | `fitr run <model> --context-tiers <bytes,bytes[,...]> [--ctx N]` | collect one document-task phase at a fixed window instead of the ordinary battery; Ollama only; see [context quality](context-quality.md) |
 | `fitr [model]` / `fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]` | no model: inventory. With a model: does it fit, and if not, which flag to try |
+| `fitr suggest [model] [--size-gb N] [--ceiling-gb N]` | project one fixed reviewed library set; shared or unmeasured memory is not a fit; `--ceiling-gb` is an operator ceiling, not a measured resident budget; a pull line is a recipe |
 | `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |
 | `fitr tune [a b]` | print request-level knobs; diff two saved fingerprints |
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
@@ -542,6 +543,23 @@ A measured run at a non-default ctx asks `fitr apply` until the server is
 already serving that window. Unmeasured is a candidate, never a
 recommendation. Color does not carry the state. `fitr <model>` is named
 advise; inventory does not `Show()` every blob or pull anything.
+When installed weights exceed a trusted discrete budget, that row's next
+command is `fitr suggest`. It does not name a smaller model.
+
+`fitr suggest` projects one fixed reviewed set of library names. The review
+date is printed with the set. A catalog tag is not a measured purpose, and
+the set is not a search. The budget is the same memory selection advise and
+inventory use. A shared, empty, or zero selection classifies nothing: those
+names stay unmeasured, resident fit stays unmeasured, and no pull line is
+printed. `--ceiling-gb` is the only way to project weights in that case, and
+the output calls it an operator ceiling, not a measured resident budget. On
+a trusted discrete accelerator the measured budget still classifies, and the
+output says an operator ceiling was not the classifier. `--size-gb` is an
+artifact size for one named model, not the budget. KV is not estimated.
+`ollama pull` appears only for a name in the fitting group, only as an
+Ollama library recipe fitr does not run, and only when the reachable runtime
+is Ollama or no runtime is reachable. Another reachable runtime leaves the
+install command unmeasured. A discovery failure is not an empty runtime.
 
 Model arguments are exact, apart from the explicit `name` and `name:latest`
 equivalence. Long names may be filtered and selected in `fitr top`, but

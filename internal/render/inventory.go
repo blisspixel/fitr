@@ -263,8 +263,8 @@ const (
 	invStateWidth  = 16
 	invCtxWidth    = 5
 	invSizeWidth   = 8
-	// Wide enough for the longest NEXT after shortening: "try a smaller quant",
-	// which is advice rather than a command and so keeps its own words.
+	// Wide enough for a shortened next command. "fitr suggest" renders as
+	// "suggest" and does not name a smaller model.
 	invNextWidth  = 19
 	invNoteIndent = 4
 	invFixed      = 2 + 1 + invStateWidth + 1 + invCtxWidth + 1 + invSizeWidth + 2 + invNextWidth

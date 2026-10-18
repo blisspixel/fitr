@@ -19,7 +19,7 @@ measure:
   fitr run <model> --context-tiers <bytes,bytes[,...]> [--ctx N]
   fitr diag <model>
   fitr doctor <model> [-n N]
-  fitr suggest [model] [--size-gb N]
+  fitr suggest [model] [--size-gb N] [--ceiling-gb N]
   fitr top [--view live|result|board|history|inventory]
   fitr top view [model|result.json]
   fitr top run <model> [run flags]

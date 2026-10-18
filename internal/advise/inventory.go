@@ -183,7 +183,7 @@ func classify(tag InstalledModel, isLoaded bool, evidence []InventoryEvidence, q
 	case weightsExceed:
 		row.State = StateIncompatible
 		row.Note = fmt.Sprintf("weights %.1f GiB exceed %s", float64(tag.Size)/GiB, memoryBudget(q.HaveGB, q.HaveSrc))
-		row.Next = "try a smaller quant"
+		row.Next = "fitr suggest"
 	default:
 		row.State = StateUnproven
 		row.Next = "fitr advise " + shellModel(tag.Name)

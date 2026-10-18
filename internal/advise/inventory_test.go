@@ -308,7 +308,7 @@ func TestJoinIncompatibleFromWeightsAlone(t *testing.T) {
 		HaveGB: 16, HaveSrc: "nvidia-smi",
 	})
 	row := table.Rows[0]
-	if row.State != StateIncompatible || row.Next != "try a smaller quant" {
+	if row.State != StateIncompatible || row.Next != "fitr suggest" || strings.Contains(row.Next, "try a smaller quant") {
 		t.Fatalf("incompatible = %+v", row)
 	}
 	if strings.Contains(row.Next, "fitr run") {
