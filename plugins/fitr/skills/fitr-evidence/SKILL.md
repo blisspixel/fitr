@@ -109,7 +109,8 @@ downloads are review candidates. File integrity stays `unmeasured`, including
 when a similarly named file sits beside a partial. That is not a completed
 copy and not a deletion decision. A component group is filenames within one
 directory. The same name elsewhere is not the same artifact, and `ownership`
-stays `unmeasured`. Check dependency groups and active
+stays `unmeasured`. A similar checkpoint name is not a successor. `successor`
+stays `unmeasured` until a source, revision, runtime, and role result say otherwise. Check dependency groups and active
 downloads before proposing deletion. The command never deletes files.
 
 Recommend the smallest experiment that resolves the user's decision. Follow

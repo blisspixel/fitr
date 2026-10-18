@@ -33,6 +33,8 @@ shard name in another directory is a separate group, and `ownership` stays
 `unmeasured`. The directory is not an owner, and a repeated name is not a
 shared dependency.
 No newer model or faster configuration qualifies as a replacement from this scan.
+`successor_claims` and each component's `successor` stay `unmeasured`. A similar
+checkpoint name is not a source, revision, runtime, or quality successor.
 Establish acceptable outputs and role coverage before retiring an incumbent.
 
 The scan visits at most 250,000 entries, descends at most 64 levels and checks a

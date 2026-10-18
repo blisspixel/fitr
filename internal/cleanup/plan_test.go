@@ -82,6 +82,27 @@ func TestSameShardNameInTwoDirectoriesIsNotOneOwner(t *testing.T) {
 	}
 }
 
+func TestSimilarCheckpointNamesAreNotASuccessor(t *testing.T) {
+	root := t.TempDir()
+	fixtureFile(t, root, "models/llama-q4.gguf", 100, testNow)
+	fixtureFile(t, root, "models/llama-q5.gguf", 110, testNow)
+	plan, err := Scan(t.Context(), root, testOptions())
+	if err != nil || !plan.Complete || plan.SuccessorClaims != SuccessorUnmeasured {
+		t.Fatalf("successor claims = %q err=%v", plan.SuccessorClaims, err)
+	}
+	components := map[string]Component{}
+	for _, component := range plan.Components {
+		components[component.Name] = component
+	}
+	q4, q5 := components["models/llama-q4.gguf"], components["models/llama-q5.gguf"]
+	if q4.Files != 1 || q5.Files != 1 || q4.Successor != SuccessorUnmeasured || q5.Successor != SuccessorUnmeasured {
+		t.Fatalf("a similar quant name became a successor: q4=%+v q5=%+v", q4, q5)
+	}
+	if SuccessorLine("") != "unmeasured; a similar name is not a replacement" {
+		t.Fatal("blank successor text became a claim")
+	}
+}
+
 func TestScanInventoryPreservesDependenciesAndReviewsOnlyAgedDownloads(t *testing.T) {
 	root := t.TempDir()
 	old, recent := testNow.AddDate(0, 0, -8), testNow.Add(-time.Hour)
