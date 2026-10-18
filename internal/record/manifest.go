@@ -372,7 +372,7 @@ type ScoringPolicy struct {
 
 func CurrentScoringPolicy() ScoringPolicy {
 	return ScoringPolicy{
-		Schema:          "fitr.scoring.policy.v7",
+		Schema:          "fitr.scoring.policy.v8",
 		RateInterval:    "clustered_wilson_95_fixed",
 		BoundaryVerdict: "inconclusive", ScorableOutcomes: "pass_fail_only",
 		UnisolatedExecution: "excluded", Contamination: "exclude_measured_claims",
@@ -380,8 +380,14 @@ func CurrentScoringPolicy() ScoringPolicy {
 	}
 }
 
-func legacyScoringPolicyV6() ScoringPolicy {
+func legacyScoringPolicyV7() ScoringPolicy {
 	policy := CurrentScoringPolicy()
+	policy.Schema = "fitr.scoring.policy.v7"
+	return policy
+}
+
+func legacyScoringPolicyV6() ScoringPolicy {
+	policy := legacyScoringPolicyV7()
 	policy.Schema = "fitr.scoring.policy.v6"
 	return policy
 }

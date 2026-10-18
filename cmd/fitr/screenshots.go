@@ -412,7 +412,10 @@ func validationRunFixture() Result {
 			Repeats: 3, Looped: true, Ended: "stopped_without_done", Sequence: "KRWKWKWKW",
 			MaxPromptTok: 1020, DeadCalls: 1, FilesWrote: []string{"prices.txt"},
 		},
-		Agentic: &eval.ToolLoopResult{Outcome: eval.OutcomeSkipped, Ended: "unsafe_execution_disabled"},
+		Agentic: &eval.ToolLoopResult{
+			Outcome: eval.OutcomeSkipped, Ended: "isolated_execution_unavailable",
+			Detail: validationIsolationSkip,
+		},
 	}
 	res.ModelMeta = ollama.ModelInfo{
 		Name: "qwen3-coder:30b", Size: 18556700761,
@@ -425,15 +428,24 @@ func validationRunFixture() Result {
 	res.ModelMeta.Details.ParameterSize = "30.5B"
 	res.ModelMeta.Details.QuantizationLevel = "Q4_K_M"
 	res.ModelMeta.Details.Family = "qwen3moe"
+	// The pictured host is the Windows RTX 4090 validation. fitr run opts into
+	// the sandbox, and that operating system records this probe reason. Policy
+	// v8 repeats one shared reason, so a retired flag sentence would show a
+	// line the recorder no longer writes.
 	for range 3 {
 		res.CodeWrite = append(res.CodeWrite, eval.ExecResult{Outcome: eval.OutcomeSkipped,
-			Detail: "disabled: generated code execution requires --allow-unsafe-exec and remains unverified"})
+			Detail: validationIsolationSkip})
 		res.CodeFix = append(res.CodeFix, eval.ExecResult{Outcome: eval.OutcomeSkipped,
-			Detail: "disabled: generated code execution requires --allow-unsafe-exec and remains unverified"})
+			Detail: validationIsolationSkip})
 		res.Tools = append(res.Tools, eval.ToolLoopResult{Outcome: eval.OutcomeSkipped, Ended: "unsafe_execution_disabled"})
 	}
 	return res
 }
+
+// validationIsolationSkip is the non-Linux probe reason from isolate.Probe.
+// It stays a literal so the README image does not follow the machine that
+// regenerates it.
+const validationIsolationSkip = "isolated execution needs bubblewrap on Linux"
 
 func addValidationChecks(res *Result, spec *eval.Spec) {
 	failures := map[int]map[string]bool{

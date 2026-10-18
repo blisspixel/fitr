@@ -508,6 +508,13 @@ type Measured struct {
 	// and a trial that never started must not be described as a bad answer.
 	CodeAttempted      bool
 	CodeExtractionMiss bool
+	// CodeSkipDetail is the one recorded reason when every coding trial was
+	// skipped before it started. Disagreeing reasons stay blank. Policy v8
+	// prints it. Earlier policies keep the generic sentence so a sealed card
+	// still matches the scorer that wrote it.
+	CodeSkipDetail string
+	// AgenticSkipDetail is the same observation for the long-horizon task.
+	AgenticSkipDetail string
 
 	// Pools of binary check-task trials, one per need they feed. Repeats of one
 	// family are fresh generated instances, not independent evidence; families
@@ -584,6 +591,19 @@ func Score(m Measured, p device.Profile) Scorecard {
 		recordCapabilities:       true,
 		exactNeedClaims:          true,
 		distinguishIsolationSkip: true,
+		nameIsolationSkip:        true,
+	})
+}
+
+// ScoreLegacyV7 reconstructs policy v7 scorecards. That policy already
+// separates an extraction miss from a trial that never started, and it keeps
+// one generic sentence for every skip.
+func ScoreLegacyV7(m Measured, p device.Profile) Scorecard {
+	return score(m, p, scoreSemantics{
+		requireTTFTResidency:     true,
+		recordCapabilities:       true,
+		exactNeedClaims:          true,
+		distinguishIsolationSkip: true,
 	})
 }
 
@@ -641,6 +661,9 @@ type scoreSemantics struct {
 	// trial that ran and produced no measured outcome. Policy v6 and earlier
 	// leave it false.
 	distinguishIsolationSkip bool
+	// nameIsolationSkip appends the recorded probe reason. Policy v7 leaves
+	// it false so a sealed card keeps the generic sentence.
+	nameIsolationSkip bool
 }
 
 func score(m Measured, p device.Profile, semantics scoreSemantics) Scorecard {
@@ -648,7 +671,7 @@ func score(m Measured, p device.Profile, semantics scoreSemantics) Scorecard {
 	n["fast_and_decent"] = scoreFastAndDecent(m, p,
 		semantics.includeAuxiliaryTTFT, semantics.requireTTFTResidency)
 
-	n["coding"] = scoreCoding(m, semantics.distinguishIsolationSkip)
+	n["coding"] = scoreCoding(m, semantics.distinguishIsolationSkip, semantics.nameIsolationSkip)
 
 	// --- structured output. It is a high-value damage probe because it can
 	// fail while ordinary prose remains superficially plausible.
@@ -678,7 +701,7 @@ func score(m Measured, p device.Profile, semantics scoreSemantics) Scorecard {
 	// side-loaded GGUF, a newline baked into a Jinja terminator -- and several
 	// reproduce byte-identically at temperature 0. The claim did not need a
 	// number to be true, and the number was not one we could stand behind.
-	n["unattended_agentic"] = scoreUnattendedAgentic(m, p, semantics.distinguishIsolationSkip)
+	n["unattended_agentic"] = scoreUnattendedAgentic(m, p, semantics.distinguishIsolationSkip, semantics.nameIsolationSkip)
 
 	// --- tool restraint: needs no ground truth, and it is the most common
 	// local-model tool failure. Two halves: restraint at REST (no calls on an
@@ -774,9 +797,9 @@ func scoreTTFTState(m Measured, ttftMax float64, decodeOK, requireResidency bool
 // scoreCoding keeps executable evidence separate from generated reasoning.
 // The latter has clustered families and cannot manufacture precision for the
 // executable write/fix contract.
-func scoreCoding(m Measured, distinguishSkip bool) Verdict {
+func scoreCoding(m Measured, distinguishSkip, nameSkip bool) Verdict {
 	if !m.CodeKnown {
-		return scoreUnmeasuredCoding(m, distinguishSkip)
+		return scoreUnmeasuredCoding(m, distinguishSkip, nameSkip)
 	}
 
 	measure := "write+fix"
@@ -796,14 +819,14 @@ func scoreCoding(m Measured, distinguishSkip bool) Verdict {
 	return newVerdict(state(m.CodeWritePass && m.CodeFixPass), measure, "", detail, note)
 }
 
-func scoreUnmeasuredCoding(m Measured, distinguishSkip bool) Verdict {
+func scoreUnmeasuredCoding(m Measured, distinguishSkip, nameSkip bool) Verdict {
 	if m.Reasoning.N == 0 {
-		return skipped(codingAbsenceNote(m, distinguishSkip, false))
+		return skipped(codingAbsenceNote(m, distinguishSkip, nameSkip, false))
 	}
 	wi := stats.ClusteredWilson(m.Reasoning.clusters())
 	note := fmt.Sprintf("reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
 		m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi)
-	if prefix := codingAbsenceNote(m, distinguishSkip, true); prefix != "" {
+	if prefix := codingAbsenceNote(m, distinguishSkip, nameSkip, true); prefix != "" {
 		note = joinNote(prefix, note)
 	}
 	return newVerdict(Skip, "not measured", "", nil, note)
@@ -812,7 +835,7 @@ func scoreUnmeasuredCoding(m Measured, distinguishSkip bool) Verdict {
 // codingAbsenceNote is the clause for a coding row that has no measured
 // pass or fail. withReasoning selects the form that joins in front of an
 // observed reasoning pool. An empty return means that pool stands alone.
-func codingAbsenceNote(m Measured, distinguishSkip, withReasoning bool) string {
+func codingAbsenceNote(m Measured, distinguishSkip, nameSkip, withReasoning bool) string {
 	if !distinguishSkip {
 		if !m.CodePlanned {
 			if withReasoning {
@@ -829,10 +852,14 @@ func codingAbsenceNote(m Measured, distinguishSkip, withReasoning bool) string {
 	case m.CodeExtractionMiss:
 		return "no executable code was extracted"
 	case m.CodePlanned && !m.CodeAttempted:
+		prefix := "scheduled coding task was skipped; isolated execution is unavailable"
 		if withReasoning {
-			return "scheduled coding task was skipped because isolated execution is unavailable"
+			prefix = "scheduled coding task was skipped because isolated execution is unavailable"
 		}
-		return "scheduled coding task was skipped; isolated execution is unavailable"
+		if !nameSkip {
+			return prefix
+		}
+		return isolationSkipSentence(prefix, m.CodeSkipDetail)
 	case m.CodePlanned:
 		return "scheduled coding trials did not produce a measured outcome"
 	default:
@@ -895,13 +922,17 @@ func scoreUncensored(m Measured, p device.Profile) Verdict {
 		fmt.Sprintf("need <=%.0f", maxRef), nil, "")
 }
 
-func scoreUnattendedAgentic(m Measured, p device.Profile, distinguishSkip bool) Verdict {
+func scoreUnattendedAgentic(m Measured, p device.Profile, distinguishSkip, nameSkip bool) Verdict {
 	switch {
 	case m.PlumbingRan && !m.PlumbingHealthy:
 		return blocked("tool plumbing failed before capability could be judged: " +
 			m.PlumbingVerdict + " -- fix template/parser, then re-run")
 	case !m.AgenticRan && m.AgenticPlanned && (!distinguishSkip || !m.AgenticAttempted):
-		return skipped("scheduled long-horizon task was skipped; isolated execution is unavailable")
+		sentence := "scheduled long-horizon task was skipped; isolated execution is unavailable"
+		if distinguishSkip && nameSkip {
+			sentence = isolationSkipSentence(sentence, m.AgenticSkipDetail)
+		}
+		return skipped(sentence)
 	case !m.AgenticRan && m.AgenticPlanned:
 		return skipped("scheduled long-horizon task did not produce a measured outcome")
 	case !m.AgenticRan && m.ToolsRan:

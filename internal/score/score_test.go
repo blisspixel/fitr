@@ -304,6 +304,42 @@ func TestExtractionMissIsNotReportedAsAMissingSandbox(t *testing.T) {
 	}
 }
 
+func TestIsolationSkipNamesTheRecordedReason(t *testing.T) {
+	missing := Score(Measured{
+		Model: "test", CodePlanned: true,
+		CodeSkipDetail: "isolated execution is unavailable: bubblewrap (bwrap) is not installed",
+	}, lappy(t))
+	why := missing.Needs["coding"].Why
+	if missing.Needs["coding"].State != Skip || !strings.Contains(why, "install bubblewrap") ||
+		!strings.Contains(why, "fitr doctor") || !strings.Contains(why, "isolated execution is unavailable") {
+		t.Fatalf("missing bubblewrap = %s %q", missing.Needs["coding"].State, why)
+	}
+	if !strings.Contains(missing.UseFor, "isolated worker") {
+		t.Fatalf("use line dropped the missing worker: %q", missing.UseFor)
+	}
+	other := Score(Measured{
+		Model: "test", CodePlanned: true,
+		CodeSkipDetail: "isolated execution needs bubblewrap on Linux",
+	}, lappy(t)).Needs["coding"].Why
+	if !strings.Contains(other, "other results are unaffected") || strings.Contains(other, "install bubblewrap") {
+		t.Fatalf("other OS = %q", other)
+	}
+	legacy := ScoreLegacyV7(Measured{
+		Model: "test", CodePlanned: true,
+		CodeSkipDetail: "isolated execution is unavailable: bubblewrap (bwrap) is not installed",
+	}, lappy(t)).Needs["coding"].Why
+	if strings.Contains(legacy, "install bubblewrap") || !strings.Contains(legacy, "isolated execution is unavailable") {
+		t.Fatalf("policy v7 named a package: %q", legacy)
+	}
+	agent := Score(Measured{
+		Model: "test", AgenticPlanned: true,
+		AgenticSkipDetail: "isolated execution is unavailable: bubblewrap (bwrap) is not installed",
+	}, lappy(t)).Needs["unattended_agentic"].Why
+	if !strings.Contains(agent, "install bubblewrap") || !strings.Contains(agent, "isolated execution is unavailable") {
+		t.Fatalf("agent skip = %q", agent)
+	}
+}
+
 func TestClusteredPoolCannotHideADeadFamily(t *testing.T) {
 	m := good()
 	m.Structured = Pool{Passes: 60, N: 70}

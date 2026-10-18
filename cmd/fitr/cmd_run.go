@@ -653,11 +653,7 @@ func (run *runExecution) loadDefinition() error {
 	} else if eval.IsolatedExecutionEnabled(run.ctx) {
 		run.display.Note("generated code runs in bubblewrap with no network and no home directory", "")
 	} else if run.opts.level != "checks" {
-		detail := "generated-code execution is disabled by default; coding and executable agent tasks are SKIP"
-		if run.opts.isolatedExec {
-			detail += " (" + isolate.Probe().Reason + ")"
-		}
-		run.display.Note(detail, "")
+		run.display.Note(executionDisabledNote(run.opts.isolatedExec), "")
 	}
 	return run.loadUserChecks()
 }
