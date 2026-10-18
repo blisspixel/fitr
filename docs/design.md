@@ -208,7 +208,11 @@ Single-family quant content is useful as a warning about **label ≠ file**. It
 is not a recipe for fitr. fitr will not ingest KL, top-1 agreement, or
 publisher size tables; will not join artifacts on `Q4_K_M`; will not pick a
 universal sweet-spot quant; and will not let one architecture's curve speak
-for another.
+for another. fitr also does not compute perplexity or KL divergence from a
+serving response. Those quantities need teacher-forced scoring over the full
+vocabulary, and no local serving API provides it. A capped alternative list
+is not KL. A decision spec refuses `perplexity`, `kl_divergence`, and `kld`
+by name. See [decisions](decisions.md).
 
 ---
 

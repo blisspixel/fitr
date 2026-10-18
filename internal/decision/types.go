@@ -136,6 +136,9 @@ func (s DecisionSpec) Validate() error {
 		if metric == "" {
 			return errors.New("decision objective metric is required")
 		}
+		if err := refusedScoringError(s.Objective.Metric); err != nil {
+			return err
+		}
 		if metric != s.Objective.Metric || !supportedObjectiveMetric(metric) {
 			return fmt.Errorf("unsupported decision objective metric %q", s.Objective.Metric)
 		}
@@ -234,6 +237,20 @@ func (r BehaviorRequirement) validate() error {
 	return nil
 }
 
+// refusedScoringError names the quantities a serving API cannot score.
+// Perplexity and KL divergence need teacher-forced probabilities over the
+// full vocabulary. A capped alternative list is not that score, and fitr
+// does not approximate it or shell out to another binary. A misspelling
+// stays an ordinary unsupported-metric rejection.
+func refusedScoringError(metric string) error {
+	switch metric {
+	case "perplexity", "kl_divergence", "kld":
+		return fmt.Errorf("refused decision metric %q: perplexity and KL divergence need teacher-forced scoring over the full vocabulary, and no local serving API provides it. fitr does not approximate either one", metric)
+	default:
+		return nil
+	}
+}
+
 func supportedObjectiveMetric(metric string) bool {
 	switch metric {
 	case "decode_tps", "prefill_tps", "request_ttft_seconds", "loaded_ttft_seconds",
@@ -275,6 +292,9 @@ func (r PerformanceRequirement) validate() error {
 	switch r.Metric {
 	case MetricDecodeTPS, MetricPrefillTPS, MetricRequestTTFT, MetricLoadedTTFT:
 	default:
+		if err := refusedScoringError(string(r.Metric)); err != nil {
+			return err
+		}
 		return fmt.Errorf("unsupported performance metric %q", r.Metric)
 	}
 	if (r.AtLeast == nil) == (r.AtMost == nil) {

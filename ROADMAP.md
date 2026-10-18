@@ -1508,8 +1508,14 @@ supplements the behavioral battery and does not replace it.
       Margin, same-choice rate and truncated divergence, each reported as a
       finite observation at declared positions rather than as a model-wide
       score.
-- [ ] Refuse perplexity and KL divergence explicitly in the documentation, so
-      their absence reads as a boundary rather than an omission.
+- [x] Refuse perplexity and KL divergence explicitly in the documentation, so
+      their absence reads as a boundary rather than an omission. The exact
+      names `perplexity`, `kl_divergence`, and `kld` are refused decision
+      metrics. They need teacher-forced scoring over the full vocabulary,
+      which no local serving API provides. fitr does not approximate them
+      and does not shell out. A misspelled name stays an ordinary rejection.
+      The boundary is in [decisions](docs/decisions.md) and
+      [design](docs/design.md).
 
 ## Later: loop extensions
 

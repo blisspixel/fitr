@@ -223,6 +223,14 @@ Configuration comparison currently accepts `decode_tps`, `prefill_tps`,
 `artifact_bytes` as objective metrics. An unknown or misspelled metric is
 rejected instead of becoming a permanently unresolved experiment.
 
+Perplexity and KL divergence are refused, not omitted. The exact objective
+or performance names `perplexity`, `kl_divergence`, and `kld` need
+teacher-forced scoring over the full vocabulary. No local serving API
+provides that score. fitr does not approximate either quantity, and it does
+not shell out to another binary to obtain one. A capped list of alternatives
+is not KL. A published KL ladder is not a result on this machine. A
+misspelled name stays an ordinary rejection.
+
 For an unresolved evaluation, fitr selects at most one next action in this
 order:
 
