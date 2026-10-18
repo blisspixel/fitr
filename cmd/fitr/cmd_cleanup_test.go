@@ -59,6 +59,29 @@ func TestCleanupCommandReadOnlyAndDisplayModes(t *testing.T) {
 	}
 }
 
+func TestCleanupDeleteDoesNotRemoveAnExperimentOwnedFile(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "experiments", "fitr-owned", "model.gguf")
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("weights"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"delete", "remove", "quarantine", "apply"} {
+		output, code := captureTopStderr(t, func() int {
+			return cmdCleanup(t.Context(), []string{action, file})
+		})
+		if code != exitUsage || !strings.Contains(output, "unknown cleanup action") {
+			t.Fatalf("%s: code=%d output=%s", action, code, output)
+		}
+		data, err := os.ReadFile(file)
+		if err != nil || string(data) != "weights" {
+			t.Fatalf("%s removed the experiment-owned file: %v", action, err)
+		}
+	}
+}
+
 func TestCleanupCommandArgumentsAndIncompleteStatus(t *testing.T) {
 	root := t.TempDir()
 	for _, args := range [][]string{{"delete"}, {"plan"}, {"plan", root, "extra"}, {"plan", root, "--display=invalid"}, {"plan", root, "--min-age-days=-1"}, {"plan", root, "--min-age-days=36501"}, {"plan", root, "--unknown"}} {

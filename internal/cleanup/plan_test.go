@@ -36,6 +36,50 @@ func fixtureFile(t *testing.T, root, path string, size int, modified time.Time) 
 
 func testOptions() Options { return Options{AsOf: testNow, MinAgeDays: 7, Limits: DefaultLimits()} }
 
+func TestSecondScanIsTheRevalidationAndRemovesNothing(t *testing.T) {
+	root := t.TempDir()
+	owned := "experiments/fitr-owned/model.gguf"
+	partial := "experiments/fitr-owned/model.incomplete"
+	fixtureFile(t, root, owned, 40, testNow.AddDate(0, 0, -8))
+	fixtureFile(t, root, partial, 12, testNow.AddDate(0, 0, -8))
+	first, err := Scan(t.Context(), root, testOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Revalidate(t.Context(), root, testOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range []Plan{first, second} {
+		joined := strings.Join(plan.Notes, " ")
+		if !strings.Contains(joined, "fitr will not delete") ||
+			!strings.Contains(joined, "does not describe unvisited files") ||
+			!strings.Contains(joined, "directory is not an owner") {
+			t.Fatalf("preview omitted the retention rule: %s", joined)
+		}
+		if plan.Components != nil {
+			for _, component := range plan.Components {
+				if component.Ownership != OwnershipUnmeasured {
+					t.Fatalf("ownership became a claim: %+v", component)
+				}
+			}
+		}
+	}
+	for _, name := range []string{owned, partial} {
+		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatalf("revalidation removed %s: %v", name, err)
+		}
+		want := int64(40)
+		if strings.HasSuffix(name, ".incomplete") {
+			want = 12
+		}
+		if info.Size() != want {
+			t.Fatalf("%s size = %d", name, info.Size())
+		}
+	}
+}
+
 // Files that name one artifact are grouped so a human reviews a shard set and
 // its projector or adapter together. The role is a filename hint, never a
 // reading of the contents or proof that the group is safe to remove.

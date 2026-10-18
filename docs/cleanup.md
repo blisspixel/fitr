@@ -60,4 +60,9 @@ and other applications may change storage during or after the scan.
 
 Cleanup planning is an optional stage in the discovery loop. It provides storage
 evidence for a human decision. Dependency-aware retirement, quarantine and deletion
-are not implemented.
+are not implemented. `fitr cleanup` has no action other than `plan`. A second
+scan of the same tree is the revalidation, and it writes another plan. fitr
+will not delete, rename, or truncate. The scope is the entries that walk
+accepted. An incomplete plan does not describe unvisited files. Shared-component
+ownership stays unmeasured, and the directory is not an owner. A path that
+looks experiment-owned is still a user file to this command.
