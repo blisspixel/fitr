@@ -19,10 +19,13 @@ type ReasoningRequest struct {
 // applied. A capability flag, API acceptance, elapsed time, output length,
 // and a self-report are not that protocol.
 type ReasoningAccount struct {
-	Schema      string `json:"schema"`
-	Requested   string `json:"requested,omitempty"`
-	Application string `json:"application"`
-	Note        string `json:"note"`
+	Schema        string `json:"schema"`
+	Requested     string `json:"requested,omitempty"`
+	Application   string `json:"application"`
+	Provenance    string `json:"provenance,omitempty"`
+	Comparison    string `json:"comparison,omitempty"`
+	MissingAction string `json:"missing_action,omitempty"`
+	Note          string `json:"note"`
 }
 
 func (r *ReasoningRequest) validate() error {
@@ -49,7 +52,7 @@ func reasoningRequirement(spec DecisionSpec) (RequirementResult, ReasoningAccoun
 		Reason:  account.Note,
 		Missing: []string{"an observation that the requested effort was applied"},
 		NextAction: &Action{
-			Code:   "record_reasoning_application",
+			Code:   reasoningActionCode,
 			Reason: "record whether the requested effort was applied. a capability flag is not that observation",
 		},
 	}, account, true
@@ -72,10 +75,18 @@ func reasoningAccount(requested string) ReasoningAccount {
 	if requested == "" {
 		note += " an omitted effort is not filled with a default."
 	}
-	return ReasoningAccount{
+	account := ReasoningAccount{
 		Schema: ReasoningAccountSchema, Requested: requested,
-		Application: "unknown", Note: note,
+		Application: "unknown", Provenance: applicationUnobserved,
+		Comparison: effortComparisonUnqualified, MissingAction: reasoningActionCode,
+		Note: note,
 	}
+	if err := SealApplication(account.Application, account.Provenance); err != nil {
+		// The constructor only builds the one sealable value. A failure here
+		// means that value drifted, so the note must not read as certified.
+		account.Note = err.Error()
+	}
+	return account
 }
 
 // CertifyEffortComparison refuses every pair. No accepted provenance records
