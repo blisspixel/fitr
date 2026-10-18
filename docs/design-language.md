@@ -113,9 +113,15 @@ each candidate's requirements, preference bounds and evidence gaps. Failed
 quality remains visible beside a qualifying candidate. Explicit JSON carries
 the full definition and receipts. `role status` leads with the selected model,
 current qualification and expiry, then shows the latest attempt independently.
-A failed challenger must not visually become a failed incumbent. Stale and
-unselected roles retain a clear review action. Operational fallback and
-multi-role placement views remain future work.
+A current qualification adds one static line. The word `fitted` is green, the
+model is default ink, and the measured and review dates are dim. A stale
+selection says `refit` in amber and keeps the review command. Unmeasured,
+unresolved and failed selections do not borrow either word. A failed
+challenger stays on the attempt row and does not replace a qualified
+incumbent. The line is absent from JSON, uses no glyph, and does not state a
+context window the status record does not carry. The result view repeats it
+only on the run that selection names. Operational fallback and multi-role
+placement views remain future work.
 Avoid a hero score that mixes model quality, speed, fit and popularity.
 
 Auto status uses the same field alignment and cyan focus as role views. Role,

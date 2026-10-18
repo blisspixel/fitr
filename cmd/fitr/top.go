@@ -704,7 +704,12 @@ func loadTopSnapshot(candidate *string) (top.Snapshot, []record.FileWarning, err
 	if err != nil {
 		return top.Snapshot{}, history.Warnings, err
 	}
-	return buildTopSnapshotWithBoard(records, current.Records), history.Warnings, nil
+	snapshot := buildTopSnapshotWithBoard(records, current.Records)
+	if snapshot.UpdatedAt.IsZero() {
+		snapshot.UpdatedAt = time.Now().UTC()
+	}
+	attachRoleSignatures(&snapshot)
+	return snapshot, history.Warnings, nil
 }
 
 func addTopCandidate(store record.Store, records []*Result, candidate *string) ([]*Result, error) {

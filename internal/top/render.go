@@ -272,10 +272,10 @@ func renderResult(canvas *Canvas, state State, glyphs Glyphs) {
 		return
 	}
 	if canvas.Height < 32 {
-		renderCompactResult(w, run, glyphs)
+		renderCompactResult(w, state.Snapshot, run, glyphs)
 		return
 	}
-	renderResultIdentity(w, run, glyphs)
+	renderResultIdentity(w, state.Snapshot, run, glyphs)
 	renderWorkloadClaims(w, run.Claims)
 	renderResultVerdicts(w, run, canvas.Width)
 	renderResultNext(w, run)
@@ -284,8 +284,8 @@ func renderResult(canvas *Canvas, state State, glyphs Glyphs) {
 	renderResultWarnings(w, run)
 }
 
-func renderCompactResult(w *lineWriter, run Run, glyphs Glyphs) {
-	renderResultIdentity(w, run, glyphs)
+func renderCompactResult(w *lineWriter, snapshot Snapshot, run Run, glyphs Glyphs) {
+	renderResultIdentity(w, snapshot, run, glyphs)
 	renderWorkloadClaims(w, run.Claims)
 	renderCompactVerdicts(w, run)
 	renderResultNext(w, run)
@@ -334,11 +334,12 @@ func renderCompactVerdicts(w *lineWriter, run Run) {
 	}
 }
 
-func renderResultIdentity(w *lineWriter, run Run, glyphs Glyphs) {
+func renderResultIdentity(w *lineWriter, snapshot Snapshot, run Run, glyphs Glyphs) {
 	w.line(Span{Text: "RESULT  ", Role: RoleHeader}, Span{Text: run.Model, Role: RoleAccent})
 	if run.UseFor != "" {
 		w.line(Span{Text: "use for    ", Role: RoleMuted}, Span{Text: run.UseFor, Role: useForRole(run)})
 	}
+	renderRunSignature(w, snapshot, run)
 	build := strings.TrimSpace(strings.Join([]string{run.ParamSize, run.Quant, run.Family}, " "))
 	w.line(Span{Text: "build      ", Role: RoleMuted}, Span{Text: build + glyphs.Dot + fmt.Sprintf("ctx %d", run.Context), Role: RoleDefault})
 	if identity := runArtifactLine(run, glyphs); identity != "" {
