@@ -48,7 +48,11 @@ ranking. Unobserved serving-runtime configuration is the same: a new run
 cannot pool with an observed one, or with another unobserved daemon, until
 the daemon is actually read. Historical records sealed before that provenance
 existed keep their original key. Change the driver and your old numbers are
-explicitly void.
+explicitly void. A start-time setting such as `OLLAMA_FLASH_ATTENTION` or
+`OLLAMA_KV_CACHE_TYPE` is read when the serving process starts. A difference
+between two results is a restart boundary, and a fresh measurement has to come
+from a process started with the new value. fitr does not restart that process.
+A request knob such as `num_ctx` is not that boundary.
 
 The new Linux AMD APU GTT mapping-limit source contributes the optional
 `memory_capacity_kind` to fingerprint v2 comparison material. Equal numeric

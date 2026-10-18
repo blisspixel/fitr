@@ -144,7 +144,7 @@ A checked box shipped. An unchecked box waits in this order:
 |---|---|
 | Step 7's exit check | An oversized document prompt is refused without shrinking the document, window, or output reserve, on both a legacy Go template and a Jinja template. |
 | Step 8's exit check | A recorded trial through the pinned Pi process, and a recorded native local-model trial of `pi-workspace`. The in-process adapter does not discharge either. |
-| Before another configuration search | The confirmation preflight, the sealed context-point permutation, and the uncached-timing seal are in. A nonzero cached-token count fails a prefill or loaded-TTFT claim; unknown cache stays unproven. A confirmation still measures each candidate as one block, so thermal drift can still load onto one candidate. A ranked-alternative margin waits until the native chat schema in use actually returns one. Ollama's OpenAI-compatible route documents logprobs as unsupported. Perplexity and true KL stay refused. |
+| Before another configuration search | The confirmation preflight, the sealed context-point permutation, the uncached-timing seal, and the start-time knob contract are in. A start-time difference is a restart boundary and needs a fresh measurement from a process started with the new value. fitr does not restart the server. Request knobs, including num_ctx, are not that boundary. A nonzero cached-token count fails a prefill or loaded-TTFT claim; unknown cache stays unproven. A confirmation still measures each candidate as one block, so thermal drift can still load onto one candidate. A ranked-alternative margin waits until the native chat schema in use actually returns one. Ollama's OpenAI-compatible route documents logprobs as unsupported. Perplexity and true KL stay refused. |
 | After step 8 | Further checkpoint, resume, and bounded-authority prototypes. They generalize the one harness workflow. Arbitrary executable tasks stay SKIP until Trust C. |
 | Step 9 | The model-set projection. Exact-context `OTHER` is learned from matched allocation receipts and is never a guessed percentage. |
 | Beside the fitting, before any server restart | Read-only tune steps: listener inspection separate from ownership, per-key configuration provenance, an ownership report, then `--no-mutate`, then `tune --scratch` on a fitr-owned instance. |
@@ -1440,9 +1440,11 @@ than being reported from the data that selected it.
       timing that claims to be uncached. Unknown cache stays unproven. The
       observed number remains visible and is not a quality zero. Request
       TTFT does not claim to be uncached.
-- [ ] A typed contract for start-time-only knobs, so changing one is known to
-      require a restart and a fresh measurement rather than being compared
-      across a boundary it invalidates.
+- [x] A typed contract for start-time-only knobs. A difference is a restart
+      boundary and needs a fresh measurement from a process started with the
+      new value. fitr does not restart the server. Request knobs, including
+      num_ctx, are not that boundary. A confirmation still measures each
+      candidate as one block.
 - [ ] A recommended-configuration artifact with per-value provenance: which
       values were measured here, which were declared by the artifact, and which
       are a runtime default nobody chose. Nothing in the ecosystem currently
