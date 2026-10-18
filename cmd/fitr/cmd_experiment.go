@@ -28,7 +28,7 @@ const experimentUsage = `usage:
   fitr experiment context <context-bundle.json> [--display MODE]
   fitr experiment context <result.json> <result.json>... [--display MODE]
   fitr experiment quant <result.json> <result.json>... --spec decision.json [--lineage conversion.json]
-  fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N]
+  fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N] [--min-gap F] [--noise-from result.json]
   fitr experiment confirm <confirmation-bundle.json> [--display MODE]
   fitr experiment workload <model> [-n 3] [--ctx N] [--workflow pi-workspace] [--backend B]
   fitr experiment workload <workload-bundle.json> [--display MODE]
@@ -67,6 +67,7 @@ func cmdExperiment(ctx context.Context, args []string) int {
 
 type confirmationCommand struct {
 	mode, backend, profile, specPath string
+	minGap, noiseFrom                string
 	repeats, ctx                     int
 	positional                       []string
 }
@@ -101,6 +102,8 @@ func parseConfirmationCommand(args []string) (confirmationCommand, int, bool) {
 	backend := fs.String("backend", "auto", "auto|ollama|llama-server|openai")
 	profile := fs.String("profile", "", "device profile (default: auto-match)")
 	specPath := fs.String("spec", "", "confirmation decision specification JSON")
+	minGap := fs.String("min-gap", "", "relative gap the budget must be able to separate, such as 0.08")
+	noiseFrom := fs.String("noise-from", "", "sealed result supplying this device's coefficient of variation")
 	repeats := fs.Int("k", 3, "fresh samples and task repeats per candidate")
 	requestedContext := fs.Int("ctx", 8192, "requested context tokens")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -112,6 +115,7 @@ func parseConfirmationCommand(args []string) (confirmationCommand, int, bool) {
 	}
 	return confirmationCommand{
 		mode: *mode, backend: *backend, profile: *profile, specPath: *specPath,
+		minGap: *minGap, noiseFrom: *noiseFrom,
 		repeats: *repeats, ctx: *requestedContext, positional: append([]string(nil), fs.Args()...),
 	}, exitOK, true
 }
@@ -125,6 +129,7 @@ func confirmationBundlePath(path string) bool {
 
 func reopenConfirmationBundle(path string, command confirmationCommand) int {
 	if command.backend != "auto" || command.profile != "" || command.specPath != "" ||
+		command.minGap != "" || command.noiseFrom != "" ||
 		command.repeats != 3 || command.ctx != 8192 {
 		errPrint("live confirmation flags cannot be applied to a saved bundle", path,
 			"remove live flags or start a new confirmation experiment")
@@ -145,6 +150,10 @@ func runConfirmationExperiment(ctx context.Context, command confirmationCommand)
 		errPrint("could not load confirmation spec: "+err.Error(), command.specPath, "fix the spec and retry")
 		return exitUsage
 	}
+	gap, noise, code, ok := loadConfirmationNoise(spec, command)
+	if !ok {
+		return code
+	}
 	models := append([]string(nil), command.positional...)
 	for index := range models {
 		models[index] = normalizeModelRef(models[index])
@@ -164,6 +173,9 @@ func runConfirmationExperiment(ctx context.Context, command confirmationCommand)
 		identities = append(identities, resolved.Identity)
 	}
 	fingerprint := device.Detect(ctx, backend)
+	if code, ok = applyConfirmationBudget(objectiveMetric(spec), gap, noise, fingerprint, command.repeats); !ok {
+		return code
+	}
 	plan, err := experiment.NewConfirmationPlan(identities, fingerprint.Key(), spec, command.ctx, command.repeats)
 	if err != nil {
 		errPrint("could not create confirmation plan: "+err.Error(), "", "use a confirm-level spec and distinct candidates")

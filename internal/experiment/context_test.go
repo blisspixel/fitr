@@ -234,7 +234,7 @@ func sealedContextRecord(t *testing.T, requested int, binding *record.Experiment
 	t.Helper()
 	return sealedExperimentRecordForLevel(t, requested, binding, started,
 		"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-		"Q5_K_M", 20, seedSet, "quick")
+		"Q5_K_M", []float64{20}, seedSet, "quick")
 }
 
 func sealedExperimentRecord(t *testing.T, requested int, binding *record.ExperimentBinding, started,
@@ -246,12 +246,12 @@ func sealedExperimentRecord(t *testing.T, requested int, binding *record.Experim
 func sealedExperimentRecordWithSeed(t *testing.T, requested int, binding *record.ExperimentBinding, started,
 	artifactDigest, quant string, decodeTPS float64, seedSet string) *record.Record {
 	t.Helper()
-	return sealedExperimentRecordForLevel(t, requested, binding, started, artifactDigest, quant, decodeTPS,
-		seedSet, "full")
+	return sealedExperimentRecordForLevel(t, requested, binding, started, artifactDigest, quant,
+		[]float64{decodeTPS}, seedSet, "full")
 }
 
 func sealedExperimentRecordForLevel(t *testing.T, requested int, binding *record.ExperimentBinding, started,
-	artifactDigest, quant string, decodeTPS float64, seedSet, level string) *record.Record {
+	artifactDigest, quant string, decode []float64, seedSet, level string) *record.Record {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "record", "testdata", "schema5-signed-v0.9.8.json"))
 	if err != nil {
@@ -271,7 +271,7 @@ func sealedExperimentRecordForLevel(t *testing.T, requested int, binding *record
 		result.SeedSet = seedSet
 	}
 	result.ModelMeta.Details.QuantizationLevel = quant
-	prepareContextMeasurements(t, &result, requested, decodeTPS)
+	prepareContextMeasurements(t, &result, requested, decode)
 	provenance, err := record.NewRunProvenance(oldProvenance.TaskSetSHA256, oldProvenance.SpecSHA256,
 		profile, record.CurrentScoringPolicy(), record.SoftwareReceipt{
 			FitrVersion: oldProvenance.FitrVersion, SoftwareBuildSHA256: oldProvenance.SoftwareBuildSHA256,
@@ -290,8 +290,11 @@ func sealedExperimentRecordForLevel(t *testing.T, requested int, binding *record
 	return &result
 }
 
-func prepareContextMeasurements(t *testing.T, result *record.Record, requested int, decodeTPS float64) {
+func prepareContextMeasurements(t *testing.T, result *record.Record, requested int, decode []float64) {
 	t.Helper()
+	if len(decode) == 0 {
+		t.Fatal("decode samples are required")
+	}
 	effective := requested
 	fingerprint, err := device.NewFingerprintV2(result.Device, device.ContextVerification{
 		RequestedTokens: requested, EffectiveTokens: &effective,
@@ -305,15 +308,21 @@ func prepareContextMeasurements(t *testing.T, result *record.Record, requested i
 	if err != nil {
 		t.Fatal(err)
 	}
-	sample := eval.SpeedResult{
-		DecodeTPS: decodeTPS, TTFT: 0.5, PrefillTPS: 200, FirstOutputObserved: true,
-		GatedCacheKnown: true, GatedPromptTok: 100, PrefillCacheKnown: true, PromptTok: 100,
-		GatedLoadKnown: true, GatedResidencyKnown: true, GatedResident: true,
+	samples := make([]eval.SpeedResult, len(decode))
+	ttft := make([]float64, len(decode))
+	prefill := make([]float64, len(decode))
+	for i, value := range decode {
+		samples[i] = eval.SpeedResult{
+			DecodeTPS: value, TTFT: 0.5, PrefillTPS: 200, FirstOutputObserved: true,
+			GatedCacheKnown: true, GatedPromptTok: 100, PrefillCacheKnown: true, PromptTok: 100,
+			GatedLoadKnown: true, GatedResidencyKnown: true, GatedResident: true,
+		}
+		ttft[i], prefill[i] = 0.5, 200
 	}
-	result.Speed = []eval.SpeedResult{sample}
-	result.DecodeSum, result.TTFTSum = stats.MeanSD([]float64{decodeTPS}), stats.MeanSD([]float64{0.5})
-	result.PrefillSum = stats.MeanSD([]float64{200})
-	result.TaskPlan.SpeedSamples, result.TaskPlan.Memory = 1, true
+	result.Speed = samples
+	result.DecodeSum, result.TTFTSum = stats.MeanSD(decode), stats.MeanSD(ttft)
+	result.PrefillSum = stats.MeanSD(prefill)
+	result.TaskPlan.SpeedSamples, result.TaskPlan.Memory = len(decode), true
 	for index := range result.Checks {
 		if result.Checks[index].Origin == "" {
 			result.Checks[index].Origin = "builtin"

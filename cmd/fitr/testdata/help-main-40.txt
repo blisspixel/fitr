@@ -53,7 +53,8 @@ compare:
     conversion.json]
   fitr experiment confirm <model-a>
     <model-b> --spec decision.json
-    [--ctx N] [-k N]
+    [--ctx N] [-k N] [--min-gap F]
+    [--noise-from result.json]
   fitr experiment workload <model> [-n
     N] [--ctx N] [--workflow
     pi-workspace] [--backend B]

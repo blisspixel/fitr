@@ -175,6 +175,35 @@ an interval, and any numbers printed from it would be fiction. fitr reports
 "no interval" and shows the bare ratio unclaimed. The old quadrature
 propagation (hyperfine's method) survives only as that fallback display.
 
+## 5a. A confirmation budget that cannot separate
+
+A timed `fitr experiment confirm` objective is decided by non-overlapping
+95% Student-t intervals, the rule in `establishedBetter`. That rule is
+stricter than a 5% test of the difference, and it used to be discovered
+only after the repeats were spent.
+
+Before inference, a decode, prefill, or TTFT objective now requires the
+relative gap the operator wants the budget to be able to separate and one
+claimable sealed result for the coefficient of variation. The variation has
+to come from that metric, on the same device fingerprint, at the same
+requested and verified effective context. Prefill variation has to be an
+uncached observation. Loaded TTFT variation has to be a loaded uncached
+observation. A display-only result cannot supply it. The 1.6 percent
+figure elsewhere in the roadmap is one device's observation and is not a
+default.
+
+The relative half-width is `t_{n-1} * cv / sqrt(n)`. Expected intervals
+separate only when that half-width is below 1 and the declared ratio exceeds
+`(1+half)/(1-half)`. Twice the half-width is a slightly easier bar and is
+not the rule. At 1.6 percent variation, three repeats have about a four
+percent half-width, and an eight percent gap still overlaps; four repeats
+is the smallest supported budget that separates it. When no count from 3 to
+20 separates the gap, the command says so and does not invent a larger plan.
+
+The refusal does not say the gap was measured. It does not randomize point
+order, and it does not replace the cached-token rule on an uncached timing
+claim. `fitr compare` still uses Fieller for a ratio of means.
+
 ## 6. Fixed denominators and sealed schedules
 
 Current runs execute every task spec in every requested round. Before

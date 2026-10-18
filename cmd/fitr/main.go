@@ -245,7 +245,7 @@ func takesValue(flagArg string) bool {
 		"weight-quant", "weight-preference", "weight-minimum", "workload", "model-card",
 		"reserve-system-tokens", "reserve-output-tokens", "reserve-reasoning-tokens",
 		"projected-resident-gb", "concurrency", "alternative-ctx", "kv-permitted",
-		"warmup", "plugins-dir", "size-gb", "ceiling-gb":
+		"warmup", "plugins-dir", "size-gb", "ceiling-gb", "min-gap", "noise-from":
 		return true
 	}
 	return false
