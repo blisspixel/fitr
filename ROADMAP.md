@@ -66,6 +66,7 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.11.2 | Guided fitting previews fixed requirements and task definitions, reuses run or owned auto collection, and keeps endpoint assessments unresolved. Checked byte conversion, endpoint identity, private check diagnoses and exact-context memory probes. |
 | Shipped | 0.11.3 | A read-only Omarchy Quattro bar widget over sealed role and analysis evidence, installed and removed only by `fitr desktop`, with a confirmed local-only benchmark gate. Session acceptance on a running Omarchy shell remains open. |
 | Shipped | 0.11.4 | Listener evidence, scan order, boundary probes, and Linux execution corrections. A sandbox that does not start is an error. |
+| Shipped | 0.11.5 | Configuration provenance, an uncertified reasoning-effort comparison, cleanup that scans again and does not delete, a named missing sandbox, and a recorded external-reference pack that does not launch a harness. Live oversized-prompt, Pi-process, native local-model, overnight sizing, and Omarchy session checks remain open. |
 | Now | 0.11 | Rows 7 and 8 stay open for those live checks. The next build is the model-set experiment. |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Later | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -1590,6 +1591,7 @@ These features must preserve the evidence contract.
 | 0.11.2 | Guided fitting and evidence/privacy corrections; live oversized-prompt and Pi-process acceptance remain open. |
 | 0.11.3 | Read-only Omarchy bar widget and `fitr desktop` status, install, remove and confirmed local benchmark; Omarchy session acceptance remains open. |
 | 0.11.4 | Listener evidence, scan order, boundary probes, and Linux execution corrections. A sandbox that does not start is an error. |
+| 0.11.5 | Configuration provenance, an uncertified reasoning-effort comparison, cleanup that scans again and does not delete, a named missing sandbox, and a recorded external-reference pack that does not launch a harness. Live oversized-prompt, Pi-process, native local-model, overnight sizing, and Omarchy session checks remain open. |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).
