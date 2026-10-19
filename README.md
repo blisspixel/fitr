@@ -94,7 +94,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.11.3" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.11.5" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 
