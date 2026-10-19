@@ -162,8 +162,11 @@ lists it.
 
 Saving a file under the plugin directory is not a reliable reload on Omarchy
 4 with Quickshell 0.3.1: `Qt.clearComponentCache` is not exposed
-(omacom/omarchy issue 8555). Restart the shell after install or after a QML
-change until a real session shows otherwise.
+(omacom/omarchy issue 8555). On 2026-10-19, Omarchy 4.0.5 with Quickshell
+0.3.2 (`2b4501a`), `rescanPlugins` left the previous chip in place and a
+shell restart loaded the replacement. A later `shell.json` setting change
+was picked up without a second restart. Restart the shell after install or
+after a QML change.
 
 ## What has been checked, and what has not
 
@@ -174,6 +177,7 @@ change until a real session shows otherwise.
 | Published 0.11.3 | The first release that embeds the plugin. The release workflow runs the built-binary script above; that is not session acceptance |
 | Real Omarchy, 2026-10-12 | Not a session. On Omarchy 4.0.4 the installed `fitr 0.11.3` binary installed the embedded plugin into a temporary directory. `omarchy plugin validate` exited 0. `qmllint` exited 0 and warned about dynamic members. The running bar was not changed |
 | Real Omarchy, 2026-10-18 | Partial. Omarchy 4.0.5-1, Quickshell 0.3.2 (`2b4501a`), published `fitr 0.11.5`. The record is below. A qualified selection was not on this machine, and no allowlisted benchmark was started |
+| Real Omarchy, 2026-10-19 | Partial. The published `fitr 0.11.6` binary on the same host. The short chip and panel were seen. A qualified selection was not rendered, and no allowlisted benchmark was started |
 
 A green CI run, including the built-binary script, does not accept the
 rendered panel. The 2026-10-18 session is the first running-bar record. It
@@ -248,6 +252,31 @@ session has not been accepted. 0.11.6 changes that sentence so it points at
 this record and leaves those two checks open. 0.11.6 also shortens the chip
 to the state word and stops the panel from printing every row and the limit
 sentences. That later panel was not part of this session.
+
+### Session on 2026-10-19
+
+The published 0.11.6 Linux amd64 binary from the release receipt was
+installed on Omarchy 4.0.5-1 with Quickshell 0.3.2 (`2b4501a`). The theme
+was Hackerman. `fitr desktop install` left `shell.json` unchanged.
+
+`rescanPlugins` left the previous chip in place, still showing `empty`.
+`omarchy restart shell` loaded this binary's plugin. With no role stored,
+the chip was gone.
+
+A temporary role store, named from the bar entry and kept out of the user's
+results, showed the chip word `unresolved` in the theme urgent colour
+`#50f872`, with the shell's open underline. The panel showed that word
+large, the resolved model, the next sentence, and the two gap lines in the
+same colour and in bold. It did not print the limit sentences, the seven
+status rows, or a run control. Locality was not proven.
+
+A status command that exited 1 showed the chip word `unavailable` and the
+sentence "fitr desktop status did not produce a document."
+
+The bar entry was restored to the id only. The chip was gone again. Summon
+and hide were shell IPC. A pointer event was not injected. No qualified
+selection was rendered, and no allowlisted run was started. A vertical bar
+was not checked.
 
 ## What this still does not establish
 
