@@ -4,10 +4,48 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-10-19. The 0.11.6 receipt below covers its exact tagged
+Last updated: 2026-10-19. The 0.11.7 receipt below covers its exact tagged
 revision and downloaded assets. Historical sections retain their original
 candidates, including older metadata-only source receipts. 0.11.4 shipped
 without a measurement receipt in this file.
+
+### 0.11.7 release receipt
+
+Release [0.11.7](https://github.com/blisspixel/fitr/releases/tag/v0.11.7)
+is bound to commit `cee81dcb22b1ba2ffc18befeb7e297da691652ba`.
+[Main CI 39288448635](https://github.com/blisspixel/fitr/actions/runs/39288448635)
+passed with **80.61% aggregate coverage** (29876/37062 statements). The
+[release workflow 39289535435](https://github.com/blisspixel/fitr/actions/runs/39289535435)
+measured **80.61%** (29877/37062 statements) and repeated race, lint with
+golangci-lint v2.14.0, govulncheck v1.7.0 on Go 1.27.2 with no vulnerabilities
+found, fourteen fuzz smoke targets including the external-reference verifier,
+the 1600-line cap, six binary builds, deterministic rebuild, and all three
+installer jobs. It uploaded ten verified assets into the owner draft. The
+owner published the release on October 19 UTC. The tag is annotated and
+SSH-signed.
+
+[Native acceptance 39288623809](https://github.com/blisspixel/fitr/actions/runs/39288623809)
+passed the installed-binary loop on Linux amd64 and macOS arm64 against
+checksum-pinned llama-server b10700 and both pinned GGUF artifacts.
+
+All ten downloaded public assets passed the checksum manifest. The Windows
+amd64 executable is **16,756,224 bytes**, below the shared **16,793,512-byte**
+ceiling, and was built with go1.27.2 from the tagged revision with
+`vcs.modified=false`. The downloaded Linux amd64 executable reports
+`fitr 0.11.7` with the same build identity. Public Windows SHA-256:
+`130538077730a31ce27b9cca7256a2f0e7fc687beed0d19fd8525789a38fd4c2`.
+Manifest SHA-256:
+`9167c8a599602aceb3d47d08047c6815954a46ebcaf7e655f3dc4348f709a20f`.
+
+This receipt does not accept a live oversized-prompt refusal on a legacy Go
+template and a Jinja template, a recorded Pi process, a native local-model
+pi-workspace trial, or an overnight pack's wall time, disk, and resolved
+count. It does not accept a rendered qualified selection or an allowlisted
+benchmark click. It does not accept native Phoenix model-loading. Scoring
+policy v9 stores a coding extraction miss as INCONCLUSIVE. The plain column
+prints INCL. A trial that never started stays SKIP. A sealed policy v8 card
+keeps the SKIP tag. The official MCP SDK job runs on CPython 3.15.0, and mcp
+stays at 2.2.0. The published 0.11.6 bar session was not repeated.
 
 ### 0.11.6 release receipt
 
