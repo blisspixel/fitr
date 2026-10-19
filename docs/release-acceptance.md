@@ -41,9 +41,14 @@ This receipt does not accept a live oversized-prompt refusal on a legacy Go
 template and a Jinja template, a recorded Pi process, a native local-model
 pi-workspace trial, or an overnight pack's wall time, disk, and resolved
 count. It does not accept a rendered qualified selection or an allowlisted
-benchmark click. The shorter bar chip shipped in this revision. It was not
-exercised as a published binary on a running Omarchy session. The partial
-session of the published 0.11.5 binary remains in the section below.
+benchmark click. The shorter bar chip shipped in this revision. The release
+workflow did not exercise it. After publication, a session of this binary
+on Omarchy 4.0.5 showed the hidden empty chip, the state word, and the
+short panel. A shell restart was required before that chip replaced the
+previous one. The note is in [the Omarchy bar](omarchy.md). That session
+does not accept a rendered qualified selection or an allowlisted click.
+The partial session of the published 0.11.5 binary remains in the section
+below.
 
 ### 0.11.5 release receipt
 
