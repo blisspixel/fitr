@@ -135,7 +135,7 @@ connect even when it recognizes the plugin package.
 [`scripts/mcp_sdk_acceptance.py`](../scripts/mcp_sdk_acceptance.py) runs a built
 fitr executable through the official Python SDK **`mcp==2.2.0`**. Its
 [test-only lock](../scripts/mcp-sdk-requirements.txt) pins every dependency and
-accepted wheel hash for CPython 3.14. These packages do not become Go runtime or
+accepted wheel hash for CPython 3.15. These packages do not become Go runtime or
 plugin dependencies. This lock targets Linux x64, macOS arm64 and Windows x64,
 matching the CI matrix. It does not support Intel macOS because the pinned
 [cryptography release](https://pypi.org/pypi/cryptography/50.0.1/json) has no
@@ -225,10 +225,17 @@ separate [native raw-wire smoke](../scripts/mcp-acceptance.py) checks the child'
 exit status. SDK acceptance does not test cancellation races or every protocol
 feature; existing Go protocol fixtures cover those narrower server contracts.
 
-Run from the repository using Go 1.27.2. Official SDK acceptance uses CPython 3.14.8. The locked binary wheels are cp314, and pydantic-core 2.46.5 publishes no CPython 3.15 wheel, so this job does not follow the 3.15 reference-test pin. The September 13 receipt above used CPython 3.14.7. On Linux x64/macOS arm64:
+Run from the repository using Go 1.27.2. Official SDK acceptance uses CPython
+3.15.0. cffi, pydantic-core, rpds-py, and pywin32 are locked to their cp315
+wheels. cryptography stays on the 50.0.1 abi3 wheels, which the regular
+CPython 3.15 build selects. pydantic 2.14.1 requires pydantic-core 2.50.1;
+mcp and mcp-types stay at 2.2.0. A free-threaded 3.15 build is outside this
+lock, because cryptography 50.0.1 publishes no cp315t wheel. The September 13
+receipt above used CPython 3.14.7 and records that candidate, not this pin.
+On Linux x64/macOS arm64:
 
 ```bash
-python3.14 -m venv .agents/mcp-sdk-venv
+python3.15 -m venv .agents/mcp-sdk-venv
 .agents/mcp-sdk-venv/bin/python -I -m pip install --require-hashes -r scripts/mcp-sdk-requirements.txt
 .agents/mcp-sdk-venv/bin/python -I -m pip check
 go build -o .agents/fitr-sdk ./cmd/fitr

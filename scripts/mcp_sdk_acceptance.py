@@ -531,8 +531,8 @@ async def run_case(binary, version, mode, fixture):
 def installed_dependencies():
     require(sys.flags.isolated == 1, "run acceptance with the isolated venv interpreter: python -I")
     require(sys.prefix != sys.base_prefix, "acceptance requires an isolated virtual environment")
-    require(platform.python_implementation() == "CPython" and sys.version_info[:2] == (3, 14),
-            "acceptance lock requires CPython 3.14")
+    require(platform.python_implementation() == "CPython" and sys.version_info[:2] == (3, 15),
+            "acceptance lock requires CPython 3.15")
     result = {}
     for name, wanted in re.findall(r"^([a-z0-9-]+)==([^;\s]+)", LOCK.read_text(encoding="utf-8"), re.MULTILINE):
         if name == "pywin32" and sys.platform != "win32":
