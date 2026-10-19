@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "blisspixel",
   "license": "Apache-2.0",
-  "description": "Read-only Omarchy bar for sealed local evidence: model, role, context, measured and estimated fit, freshness, unresolved requirements, and the next action.",
+  "description": "One state word for a declared role. The panel names the model, the gaps, and the next action.",
   "kinds": ["bar-widget"],
   "entryPoints": { "barWidget": "BarWidget.qml" },
   "barWidget": {

@@ -87,7 +87,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(320))
+    contentWidth: panel.fittedContentWidth(Style.space(240))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
 
     PanelKeyCatcher {
@@ -101,31 +101,52 @@ Panel {
         width: parent.width
         spacing: Style.space(8)
 
+        // The click asks what the evidence state is. The word is the answer.
+        // Rows, limit sentences, and a control that cannot run stay in the
+        // status document and off this surface.
         Text {
           width: parent.width
           wrapMode: Text.WordWrap
-          text: root.hostWidget && root.hostWidget.problem && !root.hostWidget.document
-            ? root.hostWidget.problem
-            : "fitr evidence"
+          text: {
+            var host = root.hostWidget
+            var doc = host ? host.document : null
+            if (doc && doc.state) return String(doc.state)
+            if (host && host.faultState) return String(host.faultState)
+            return ""
+          }
+          color: root.urgent(text) ? root.urgentColor() : root.barForeground
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.displayLarge
+          font.bold: root.urgent(text)
+        }
+
+        Text {
+          width: parent.width
+          wrapMode: Text.WordWrap
+          visible: text !== ""
+          text: {
+            var host = root.hostWidget
+            if (host && host.problem && !host.document) return String(host.problem)
+            var doc = host ? host.document : null
+            return doc && doc.model ? String(doc.model) : ""
+          }
           color: root.barForeground
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.subtitle
-          font.bold: true
         }
 
-        Repeater {
-          model: root.hostWidget && root.hostWidget.document && root.hostWidget.document.rows
-            ? root.hostWidget.document.rows : []
-          delegate: Text {
-            required property var modelData
-            width: content.width
-            wrapMode: Text.WordWrap
-            text: String(modelData.label || "") + ": " + String(modelData.value || "") + " (" + String(modelData.state || "") + ")"
-            color: root.urgent(modelData.state) ? root.urgentColor() : root.barForeground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.subtitle
-            font.bold: root.urgent(modelData.state)
+        Text {
+          width: parent.width
+          wrapMode: Text.WordWrap
+          visible: text !== ""
+          text: {
+            var doc = root.hostWidget ? root.hostWidget.document : null
+            if (!doc || !doc.next) return ""
+            return String(doc.next.reason || doc.next.text || "")
           }
+          color: root.barForeground
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.subtitle
         }
 
         Repeater {
@@ -135,8 +156,11 @@ Panel {
             required property var modelData
             width: content.width
             wrapMode: Text.WordWrap
-            text: "Unresolved " + String(modelData.id || "") + ": " + String(modelData.state || "")
-              + (modelData.reason ? " " + String(modelData.reason) : "")
+            text: {
+              var id = String(modelData.id || "")
+              var reason = modelData.reason ? String(modelData.reason) : ""
+              return reason !== "" ? id + ": " + reason : id
+            }
             color: root.urgent(modelData.state) ? root.urgentColor() : root.barForeground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.subtitle
@@ -147,35 +171,8 @@ Panel {
         Text {
           width: parent.width
           wrapMode: Text.WordWrap
-          color: root.barForeground
-          font.family: root.bar ? root.bar.fontFamily : Style.font.family
-          font.pixelSize: Style.font.subtitle
-          text: {
-            var doc = root.hostWidget ? root.hostWidget.document : null
-            if (!doc || !doc.next) return "Opening this panel does not download models, reconfigure serving, or call a model."
-            return String(doc.next.reason || doc.next.text || "No next action is recorded.")
-          }
-        }
-
-        Repeater {
-          model: root.hostWidget && root.hostWidget.document && root.hostWidget.document.limits
-            ? root.hostWidget.document.limits : []
-          delegate: Text {
-            required property string modelData
-            width: content.width
-            wrapMode: Text.WordWrap
-            text: modelData
-            color: root.barForeground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.subtitle
-          }
-        }
-
-        Text {
-          width: parent.width
-          wrapMode: Text.WordWrap
-          text: !root.requestMeasurement ? "Request measurement"
-            : (root.measurementReady() ? "Run local measurement" : "Measurement stays displayed. Locality is not proven.")
+          visible: root.measurementReady()
+          text: root.requestMeasurement ? "Confirm" : "Run"
           color: root.barForeground
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.subtitle

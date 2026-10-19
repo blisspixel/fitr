@@ -340,8 +340,9 @@ marketplace listing, and it is not the native desktop application described
 in the interface direction. The built binary's install, status and removal
 are checked in CI. A published 0.11.5 binary has been run on Omarchy 4.0.5:
 empty, unresolved, and unavailable states, theme urgent colour, and
-install and remove. A qualified selection and an allowlisted benchmark click
-are still open. Details are in [the Omarchy bar](docs/omarchy.md).
+install and remove. 0.11.6 keeps the chip to one state word. A qualified
+selection and an allowlisted benchmark click are still open. Details are in
+[the Omarchy bar](docs/omarchy.md).
 
 ## Why the evidence is useful
 

@@ -1,12 +1,17 @@
 # Omarchy bar
 
 The Omarchy surface is a thin Quattro bar widget and a detail panel around
-fitr's existing JSON contracts. It shows, for one declared role, the resolved
-model, requested and effective context, estimated fit, measured fit, evidence
-freshness, unresolved requirements, and the next action.
+fitr's existing JSON contracts. The chip is one state word. It is hidden when
+no role is stored, and it is hidden on a vertical bar because that edge is
+28px wide and this widget has no icon. The panel names that state, the model
+when one is resolved, the unresolved reasons, and the next sentence. A run
+control appears only when the status document says a local run is proven, and
+the second click is the confirmation.
 
 Backend decisions stay in fitr. The widget prints strings. It does not score,
-rank configurations, or turn a missing observation into a number.
+rank configurations, or turn a missing observation into a number. The status
+document still carries every row and the limit sentences. The panel does not
+print them.
 
 The widget ships embedded in the fitr binary from 0.11.3. A published
 0.11.5 binary has been exercised on a running Omarchy 4.0.5 session. The
@@ -240,8 +245,9 @@ as that click.
 
 The published 0.11.5 asset's embedded plugin readme still says a running
 session has not been accepted. 0.11.6 changes that sentence so it points at
-this record and leaves those two checks open. 0.11.6 does not repeat the
-session.
+this record and leaves those two checks open. 0.11.6 also shortens the chip
+to the state word and stops the panel from printing every row and the limit
+sentences. That later panel was not part of this session.
 
 ## What this still does not establish
 

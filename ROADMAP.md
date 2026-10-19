@@ -67,7 +67,7 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.11.3 | A read-only Omarchy Quattro bar widget over sealed role and analysis evidence, installed and removed only by `fitr desktop`, with a confirmed local-only benchmark gate. Session acceptance on a running Omarchy shell remains open. |
 | Shipped | 0.11.4 | Listener evidence, scan order, boundary probes, and Linux execution corrections. A sandbox that does not start is an error. |
 | Shipped | 0.11.5 | Configuration provenance, an uncertified reasoning-effort comparison, cleanup that scans again and does not delete, a named missing sandbox, and a recorded external-reference pack that does not launch a harness. Live oversized-prompt, Pi-process, native local-model, overnight sizing, and Omarchy session checks remain open. |
-| Shipped | 0.11.6 | Records the partial Omarchy 4.0.5 session of the published 0.11.5 binary, and the embedded plugin readme points at that record. The session was not repeated on this binary. A qualified selection and an allowlisted click remain open. |
+| Shipped | 0.11.6 | Records the partial Omarchy 4.0.5 session of the published 0.11.5 binary, and the embedded plugin readme points at that record. The bar chip is one state word and hides when no role is stored. The panel keeps the model, the gaps, and the next action. The session was not repeated on this binary. A qualified selection and an allowlisted click remain open. |
 | Now | 0.11 | Rows 7 and 8 stay open for those live checks. The next build is the model-set experiment. |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Later | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
@@ -83,9 +83,9 @@ surfaces. It does not close rows 7 through 12, it is not in the build order
 below, and it is not the native desktop application in the interface
 direction. A session of the published 0.11.5 binary on Omarchy 4.0.5
 recorded empty, unresolved, and unavailable panel states and the theme
-urgent colour. 0.11.6 writes that session down. A rendered qualified
-selection and an allowlisted benchmark click remain open. See
-[the Omarchy bar](docs/omarchy.md).
+urgent colour. 0.11.6 writes that session down and keeps the bar chip to
+one state word. A rendered qualified selection and an allowlisted
+benchmark click remain open. See [the Omarchy bar](docs/omarchy.md).
 
 Linux AMD APU capacity now distinguishes a positively identified GTT mapping
 limit from the BIOS VRAM carve-out and a safe model budget. Historical evidence
@@ -1596,7 +1596,7 @@ These features must preserve the evidence contract.
 | 0.11.3 | Read-only Omarchy bar widget and `fitr desktop` status, install, remove and confirmed local benchmark; Omarchy session acceptance remains open. |
 | 0.11.4 | Listener evidence, scan order, boundary probes, and Linux execution corrections. A sandbox that does not start is an error. |
 | 0.11.5 | Configuration provenance, an uncertified reasoning-effort comparison, cleanup that scans again and does not delete, a named missing sandbox, and a recorded external-reference pack that does not launch a harness. Live oversized-prompt, Pi-process, native local-model, overnight sizing, and Omarchy session checks remain open. |
-| 0.11.6 | Records the partial Omarchy 4.0.5 session of the published 0.11.5 binary, and the embedded plugin readme points at that record. The session was not repeated on this binary. A qualified selection and an allowlisted click remain open. |
+| 0.11.6 | Records the partial Omarchy 4.0.5 session of the published 0.11.5 binary, and the embedded plugin readme points at that record. The bar chip is one state word and hides when no role is stored. The panel keeps the model, the gaps, and the next action. The session was not repeated on this binary. A qualified selection and an allowlisted click remain open. |
 
 Release notes and artifacts are on the
 [GitHub releases page](https://github.com/blisspixel/fitr/releases).
