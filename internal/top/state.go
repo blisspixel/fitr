@@ -780,6 +780,7 @@ func cloneSnapshot(in Snapshot) Snapshot {
 	out.History = cloneRuns(in.History)
 	out.Inventory = slices.Clone(in.Inventory)
 	out.Signatures = slices.Clone(in.Signatures)
+	out.ReferenceNotes = slices.Clone(in.ReferenceNotes)
 	return out
 }
 

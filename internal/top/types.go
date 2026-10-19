@@ -179,6 +179,9 @@ type Snapshot struct {
 	// InventoryWarning qualifies runtime status when loaded/context state could
 	// not be observed. Empty means the status probe succeeded.
 	InventoryWarning string `json:"inventory_warning,omitempty"`
+	// ReferenceNotes are external-pack regressions. They are not board rows
+	// and they do not enter a fit, performance, role, or global score.
+	ReferenceNotes []string `json:"reference_notes,omitempty"`
 	// Signatures are display-only fitted and refit lines. Role status JSON
 	// already carries the qualification, so this slice stays out of the
 	// presentation snapshot.

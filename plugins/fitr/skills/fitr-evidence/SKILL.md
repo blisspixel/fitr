@@ -55,6 +55,7 @@ A local hash or source match remains runtime-unbound and cannot establish fit,
 task quality, projector compatibility or adoption authority.
 
 Validate a saved workload bundle with `fitr experiment workload <bundle.json>`.
+`fitr experiment reference` seals an external coding pack from a recorded verifier file. That pack does not launch a harness and does not feed FIT, PERFORMANCE, a role floor, or a global score.
 Use `fitr view <result.json>` for ordinary run evidence and
 `fitr decide <result.json> --spec <role.json>` for declared requirements.
 Explain accepted, rejected, timeout, infrastructure and unresolved outcomes

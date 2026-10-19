@@ -51,6 +51,7 @@ compare:
   fitr experiment confirm <model-a> <model-b> --spec decision.json [--ctx N] [-k N] [--min-gap F] [--noise-from result.json]
   fitr experiment workload <model> [-n N] [--ctx N] [--workflow pi-workspace] [--backend B]
   fitr experiment serving <model> [--concurrency N] [-n N] [--warmup N] [--ctx N] [--backend B]
+  fitr experiment reference plan|run seals a recorded external pack; it does not launch one
   fitr view [model|result.json] [--display MODE]
   fitr export <model> [--out PATH] [--retonr]
   fitr apply [model] [--ctx N]

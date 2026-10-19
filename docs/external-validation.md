@@ -68,6 +68,12 @@ does not grade itself, but a second model is still a heuristic observer rather
 than ground truth. fitr should report agreement, disagreement, abstention, and
 known calibration error separately from deterministic correctness.
 
+`fitr experiment reference` is the `external_reference` pack. It seals a
+frozen instance-id subset and derives a rate from a recorded verifier file.
+That file is not fresh evidence, and the pack does not enter a FIT,
+PERFORMANCE, role, or global claim. See
+[workload evidence](workload-evidence.md#external-reference-pack).
+
 ## Development and CI
 
 Repository tests must stay deterministic, offline, and free of user secrets.

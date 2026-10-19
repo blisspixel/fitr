@@ -68,6 +68,7 @@ itself.
 | Files and exclusion | `internal/atomicfile`, `internal/boundedio`, `internal/lock` | One way to write, one way to bound a read, one way to lock. |
 | Long-context document pack | `internal/contextquality` (pure plan, generate, verify, analyze), `internal/eval/contexttask.go` (submission), `internal/record/context_quality.go` (sealing), `fitr run --context-tiers` (direct collection), owned fitting in `cmd/fitr` | CLI, JSON, HTML and the TUI project the sealed phase; its wording is derived once in `internal/analysis`. Owned fitting seals one schedule for every candidate and confirms the byte floor from a fresh plan. The battery and the document pack stay separate records. See `docs/context-quality.md`. |
 | Bounded validated work | `internal/workload`, `fitr experiment workload` | `policy-repair` is the default contract. `--workflow pi-workspace` seals `fitr.pi-session.v1` against the pinned Pi 0.85.1 split-summary schedule and does not launch Pi. A Harbor reward is not the receipt. See `docs/workload-evidence.md`. |
+| External reference pack | `internal/reference`, `fitr experiment reference` | Seals the frozen SWE-rebench instance-id subset and derives a rate from recorded verifier output. It does not launch a harness or a container. The pack does not feed FIT, PERFORMANCE, a role floor, or a global score. A native sizing receipt stays open. See `docs/workload-evidence.md`. |
 | Omarchy bar projection | `internal/desktop`, `plugins/omarchy`, `fitr desktop` | Read-only status over role review, selection status, and analysis. The QML widget does not score. A benchmark starts only from `fitr desktop benchmark --confirm` after a fresh allowlist check. See `docs/omarchy.md`. |
 
 New value-taking CLI flags also belong in `takesValue` in `cmd/fitr/main.go`.
@@ -126,7 +127,7 @@ package before believing it, and never edit a test on the strength of a single
 red run on Windows.
 
 `.github/workflows/ci.yml` is the authority on the full gate set and on every
-tool version. It additionally runs the race detector, thirteen fuzz smoke targets, a
+tool version. It additionally runs the race detector, fourteen fuzz smoke targets, a
 1600-line cap on non-test `.go` files, a measured binary size cap in `dist`, a
 deterministic-rebuild comparison, installer smokes on three operating systems, and
 `govulncheck`. Take Go and linter versions from `go.mod` and that workflow, not
