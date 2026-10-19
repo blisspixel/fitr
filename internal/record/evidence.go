@@ -170,51 +170,43 @@ func (r *Record) validateScorecard(profile device.Profile) error {
 	if r.Manifest == nil || r.Manifest.Provenance == nil {
 		return errors.New("persisted scorecard has no scoring policy receipt")
 	}
-	currentHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", CurrentScoringPolicy())
+	expected, err := scorecardForPolicy(r.Manifest.Provenance.ScoringPolicySHA256, r.Measured(), profile)
 	if err != nil {
-		return fmt.Errorf("hash current scoring policy: %w", err)
-	}
-	legacyV7Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV7())
-	if err != nil {
-		return fmt.Errorf("hash legacy v7 scoring policy: %w", err)
-	}
-	legacyV6Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV6())
-	if err != nil {
-		return fmt.Errorf("hash legacy v6 scoring policy: %w", err)
-	}
-	legacyV5Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV5())
-	if err != nil {
-		return fmt.Errorf("hash legacy v5 scoring policy: %w", err)
-	}
-	legacyHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV3())
-	if err != nil {
-		return fmt.Errorf("hash legacy scoring policy: %w", err)
-	}
-	legacyV4Hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV4())
-	if err != nil {
-		return fmt.Errorf("hash legacy v4 scoring policy: %w", err)
-	}
-	var expected score.Scorecard
-	switch r.Manifest.Provenance.ScoringPolicySHA256 {
-	case currentHash:
-		expected = score.Score(r.Measured(), profile)
-	case legacyV7Hash:
-		expected = score.ScoreLegacyV7(r.Measured(), profile)
-	case legacyV6Hash:
-		expected = score.ScoreLegacyV6(r.Measured(), profile)
-	case legacyV5Hash:
-		expected = score.ScoreLegacyV5(r.Measured(), profile)
-	case legacyHash:
-		expected = score.ScoreLegacyV3(r.Measured(), profile)
-	case legacyV4Hash:
-		expected = score.ScoreLegacyV4(r.Measured(), profile)
-	default:
-		return errors.New("persisted scorecard uses an unsupported scoring policy")
+		return err
 	}
 	if !reflect.DeepEqual(expected, r.Scorecard) {
 		return errors.New("persisted scorecard does not match sealed raw evidence and profile")
 	}
 	return nil
+}
+
+// scorecardForPolicy rebuilds the card the sealed policy would have written.
+// The table is the one dispatch. A new policy must be added here, and a hash
+// that matches none of them stays unsupported. Inlining each hash kept
+// validateScorecard over the statement limit.
+func scorecardForPolicy(got string, measured score.Measured, profile device.Profile) (score.Scorecard, error) {
+	scorers := []struct {
+		policy ScoringPolicy
+		score  func(score.Measured, device.Profile) score.Scorecard
+	}{
+		{CurrentScoringPolicy(), score.Score},
+		{legacyScoringPolicyV8(), score.ScoreLegacyV8},
+		{legacyScoringPolicyV7(), score.ScoreLegacyV7},
+		{legacyScoringPolicyV6(), score.ScoreLegacyV6},
+		{legacyScoringPolicyV5(), score.ScoreLegacyV5},
+		{legacyScoringPolicyV3(), score.ScoreLegacyV3},
+		{legacyScoringPolicyV4(), score.ScoreLegacyV4},
+	}
+	for _, item := range scorers {
+		hash, err := canonicalJSONDigest("fitr.scoring-policy.v1", item.policy)
+		if err != nil {
+			return score.Scorecard{}, fmt.Errorf("hash scoring policy %s: %w", item.policy.Schema, err)
+		}
+		if hash == got {
+			return item.score(measured, profile), nil
+		}
+	}
+	return score.Scorecard{}, errors.New("persisted scorecard uses an unsupported scoring policy")
 }
 
 func (r *Record) completedEvidenceJSON(profile device.Profile) ([]byte, error) {

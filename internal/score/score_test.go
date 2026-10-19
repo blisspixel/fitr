@@ -275,10 +275,12 @@ func TestExtractionMissIsNotReportedAsAMissingSandbox(t *testing.T) {
 	m.CodeAttempted = true
 	m.CodeExtractionMiss = true
 	m.Reasoning = Pool{Passes: 4, N: 5}
-	why := Score(m, lappy(t)).Needs["coding"].Why
-	if strings.Contains(why, "isolated execution") || !strings.Contains(why, "no executable code was extracted") ||
+	verdict := Score(m, lappy(t)).Needs["coding"]
+	why := verdict.Why
+	if verdict.State != Inconclusive || strings.Contains(why, "isolated execution") ||
+		strings.Contains(why, "not measured") || !strings.Contains(why, "no executable code was extracted") ||
 		!strings.Contains(why, "reasoning checks 4/5") {
-		t.Fatalf("extraction miss hid the observation: %q", why)
+		t.Fatalf("extraction miss hid the observation: %s %q", verdict.State, why)
 	}
 	legacy := ScoreLegacyV6(m, lappy(t)).Needs["coding"].Why
 	if !strings.Contains(legacy, "isolated execution is unavailable") {
@@ -286,8 +288,16 @@ func TestExtractionMissIsNotReportedAsAMissingSandbox(t *testing.T) {
 	}
 
 	bare := Measured{Model: "test", CodePlanned: true, CodeAttempted: true, CodeExtractionMiss: true}
-	if use := Score(bare, lappy(t)).UseFor; strings.Contains(use, "isolated worker") {
-		t.Fatalf("use line blamed a missing worker: %q", use)
+	bareCard := Score(bare, lappy(t))
+	if bareCard.Needs["coding"].State != Inconclusive || strings.Contains(bareCard.Needs["coding"].Why, "not measured") ||
+		strings.Contains(bareCard.UseFor, "isolated worker") {
+		t.Fatalf("use line blamed a missing worker: %s %q use %q",
+			bareCard.Needs["coding"].State, bareCard.Needs["coding"].Why, bareCard.UseFor)
+	}
+	legacyV8 := ScoreLegacyV8(m, lappy(t)).Needs["coding"]
+	if legacyV8.State != Skip || !strings.Contains(legacyV8.Why, "not measured") ||
+		!strings.Contains(legacyV8.Why, "no executable code was extracted") {
+		t.Fatalf("policy v8 changed an extraction miss tag: %s %q", legacyV8.State, legacyV8.Why)
 	}
 	unstarted := Score(Measured{Model: "test", CodePlanned: true}, lappy(t))
 	if !strings.Contains(unstarted.Needs["coding"].Why, "isolated execution is unavailable") ||
