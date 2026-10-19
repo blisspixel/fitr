@@ -709,6 +709,7 @@ func loadTopSnapshot(candidate *string) (top.Snapshot, []record.FileWarning, err
 		snapshot.UpdatedAt = time.Now().UTC()
 	}
 	attachRoleSignatures(&snapshot)
+	snapshot.ReferenceNotes = referenceBoardNotes()
 	return snapshot, history.Warnings, nil
 }
 

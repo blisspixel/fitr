@@ -61,6 +61,9 @@ compare:
   fitr experiment serving <model>
     [--concurrency N] [-n N] [--warmup
     N] [--ctx N] [--backend B]
+  fitr experiment reference plan|run
+    seals a recorded external pack; it
+    does not launch one
   fitr view [model|result.json]
     [--display MODE]
   fitr export <model> [--out PATH]

@@ -360,3 +360,44 @@ DATA BOUNDARY
 
 No single score is produced. A configuration earns only the capabilities and
 workflow states its independent evidence supports.
+
+## External reference pack
+
+`fitr experiment reference plan` seals one frozen subset before any verifier
+file is read. The subset is 24 instance identifiers and calendar dates from
+nebius/SWE-rebench revision `89cdfbab4ab1bd8f5a658bb212d1b63624f4f881`, split
+`filtered`, created in April 2025, ordered by instance id. Checked 2026-10-18
+against the datasets-server filter: `partial` was false and the month had 39
+rows. These are the first 24. The dataset is CC-BY-4.0 (Nebius). Problem
+statements, patches, tests, commits, and image names are not stored. Image
+digests are whatever sha256 the operator supplies. fitr does not fetch images
+and does not treat an image name as a digest.
+
+`fitr experiment reference run` accepts a recorded verifier file only after
+preflight. Preflight refuses when the sealed token estimate does not fit the
+declared wall budget, the declared disk need exceeds the disk budget, served
+context is below the sealed cap, the operator declares the GPU busy or another
+model resident, or the live worker probe is unavailable. Those GPU and
+residency fields are declarations, not device probes. The worker probe is
+`isolate.Probe`. On a machine without bubblewrap it refuses before the verifier
+file is read. A ceiling division that would overflow stays unmeasured and is
+refused, rather than wrapping into a budget that appears to fit.
+
+Each row's outcome is the verifier verdict. An agent claim is stored only so
+the result can show that it was ignored. Harness, environment, and timeout
+rows are counted and kept out of the Wilson denominator. A task whose creation
+date is before the artifact's declared release date is `possibly_contaminated`
+and is reported in its own rate. A date fitr cannot read stays unmeasured and
+enters neither rate. A task created on the release day is not labeled
+contaminated. Two results compare only when the manifest digest, the harness
+binding, and the seed set match. The pair reports discordant counts through
+the existing exact sign test. Fewer than six discordant pairs do not separate
+at alpha 0.05. More than two saved runs in one series are not reduced to a
+chosen pair.
+
+This pack does not establish a live resolved count, a wall time, or a disk
+measurement. It does not launch mini-swe-agent, Docker, Podman, or a model.
+It does not prove that a benchmark container was unprivileged, had no host
+mount, or had no network. It does not issue a core behavioral PASS or FAIL.
+It does not feed FIT, PERFORMANCE, a role floor, or a global score. A recorded
+verifier file is not fresh evidence. The native sizing receipt remains open.

@@ -213,8 +213,12 @@ func cmdBoard(ctx context.Context, args []string) int {
 	if !ok {
 		return code
 	}
+	notes := referenceBoardNotes()
 	results, err := loadResults()
 	if err != nil || len(results) == 0 {
+		if len(notes) > 0 {
+			return writeOnlyReferenceNotes(command.mode, notes)
+		}
 		errPrint("no results yet", "", "run one first: fitr run <model>")
 		return exitError
 	}
@@ -231,10 +235,24 @@ func cmdBoard(ctx context.Context, args []string) int {
 		return emptyBoardResult(excluded, results)
 	}
 	if render.Resolve(command.mode) == "json" {
-		writeBoardJSON(board, visible, curDevice.Key(), command.full, excluded)
+		writeBoardJSON(board, visible, curDevice.Key(), command.full, excluded, notes)
 		return exitOK
 	}
 	render.WriteBoard(os.Stdout, board, command.mode)
+	if render.Resolve(command.mode) != "none" {
+		writeReferenceNoteLines(notes)
+	}
+	return exitOK
+}
+
+func writeOnlyReferenceNotes(mode string, notes []string) int {
+	if render.Resolve(mode) == "none" {
+		return exitOK
+	}
+	if render.Resolve(mode) == "json" {
+		return writeJSONValue(map[string]any{"schema": "fitr.board.v1", "reference_notes": notes})
+	}
+	writeReferenceNoteLines(notes)
 	return exitOK
 }
 
@@ -538,7 +556,7 @@ func boardFollowUp(results []*Result) string {
 }
 
 func writeBoardJSON(board render.Board, visible map[string][]*Result, current string,
-	full bool, excluded boardExclusions) {
+	full bool, excluded boardExclusions, notes []string) {
 	// Default to what the board reports, not the sealed records behind it.
 	// The records are an order of magnitude larger, grow without bound in
 	// the number of models, and none of the extra fields appear on screen.
@@ -554,6 +572,9 @@ func writeBoardJSON(board render.Board, visible map[string][]*Result, current st
 		if category.count > 0 && category.key != "" {
 			payload[category.key] = category.count
 		}
+	}
+	if len(notes) > 0 {
+		payload["reference_notes"] = notes
 	}
 	b, _ := json.Marshal(payload)
 	fmt.Println(string(b))

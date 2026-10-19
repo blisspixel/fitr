@@ -287,6 +287,7 @@ of installed RAM as an unconditional model budget.
 | `fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N] [--min-gap F] [--noise-from result.json]` | seal the selected candidate set and confirm only a separated objective; a timed objective refuses, before inference, a repeat budget that cannot separate the declared gap |
 | `fitr experiment workload <model> [-n 3] [--ctx N] [--workflow pi-workspace]` | run policy-repair, or the pinned pi-workspace session. pi-workspace does not launch Pi |
 | `fitr experiment serving <model> [--concurrency N] [-n N]` | measure throughput, client-side queueing, server duration and tail latency distributions at a declared concurrency |
+| `fitr experiment reference plan\|run` | seal the frozen external-reference subset, or accept a recorded verifier file after preflight. It does not launch a harness. See [workload evidence](workload-evidence.md#external-reference-pack) |
 | `fitr discover add <source> --role <role> [--model <reference>]` | capture a private, unmeasured model or harness idea |
 | `fitr discover list\|plan [--role <role>]` | inspect the private inbox or draft next evidence steps without network access |
 | `fitr discover attach-source <idea-id> <receipt.json>` | copy validated source metadata into a private association; keep the idea unmeasured |

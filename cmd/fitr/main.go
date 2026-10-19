@@ -245,7 +245,12 @@ func takesValue(flagArg string) bool {
 		"weight-quant", "weight-preference", "weight-minimum", "workload", "model-card",
 		"reserve-system-tokens", "reserve-output-tokens", "reserve-reasoning-tokens",
 		"projected-resident-gb", "concurrency", "alternative-ctx", "kv-permitted",
-		"warmup", "plugins-dir", "size-gb", "ceiling-gb", "min-gap", "noise-from":
+		"warmup", "plugins-dir", "size-gb", "ceiling-gb", "min-gap", "noise-from",
+		"images", "harness-name", "harness-config", "steps", "task-wall",
+		"wall-budget", "disk-budget", "required-disk", "prefill", "decode",
+		"prompt-tokens", "completion-tokens", "artifact", "artifact-release",
+		"quant", "runtime-build", "device-key", "plan", "verifier", "conditions",
+		"gpu-busy", "other-model", "served-context":
 		return true
 	}
 	return false

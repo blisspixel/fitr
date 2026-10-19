@@ -84,6 +84,7 @@ func TestPublicCommandHelpIsSuccessful(t *testing.T) {
 		{"experiment quant", func() int { return cmdExperiment(ctx, []string{"quant", "--help"}) }},
 		{"experiment confirm", func() int { return cmdExperiment(ctx, []string{"confirm", "--help"}) }},
 		{"experiment workload", func() int { return cmdExperiment(ctx, []string{"workload", "--help"}) }},
+		{"experiment reference", func() int { return cmdExperiment(ctx, []string{"reference", "--help"}) }},
 		{"screenshots", func() int { return cmdScreenshots(ctx, []string{"--help"}) }},
 	}
 	for _, width := range []string{"80", "40"} {

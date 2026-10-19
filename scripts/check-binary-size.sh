@@ -25,9 +25,12 @@ set -eu
 # 38,824-byte headroom. The decision text page for a requested reasoning
 # effort, and printing a next-action code instead of a blank experiment,
 # added 38,912 bytes on the 2026-10-18 dist job: 16,589,824 -> 16,628,736.
+# No new Go dependency was added. The same headroom stays. The recorded
+# external reference pack, its command, and the board and history note
+# added 125,952 bytes on the 2026-10-19 dist job: 16,628,736 -> 16,754,688.
 # No new Go dependency was added. The same headroom stays.
 # CI and releases use this single measured gate.
-max_bytes=16667560
+max_bytes=16793512
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"

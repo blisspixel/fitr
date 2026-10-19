@@ -1101,6 +1101,7 @@ func renderHistory(canvas *Canvas, state State, glyphs Glyphs) {
 	if len(runs) == 0 {
 		w.line(Span{Text: "HISTORY", Role: RoleHeader})
 		w.line(Span{Text: emptyFilterMessage(state), Role: RoleMuted})
+		writeReferenceNotes(w, state.Snapshot.ReferenceNotes)
 		return
 	}
 	if canvas.Width >= 120 && canvas.Height >= 22 {
@@ -1108,6 +1109,7 @@ func renderHistory(canvas *Canvas, state State, glyphs Glyphs) {
 		return
 	}
 	w.line(Span{Text: fmt.Sprintf("HISTORY  %d run(s)  sort %s%s", len(runs), state.HistorySort, filterSuffix(state.Filter)), Role: RoleHeader})
+	writeReferenceNotes(w, state.Snapshot.ReferenceNotes)
 	offset := min(state.Offset[ViewHistory], max(len(runs)-1, 0))
 	for _, run := range runs[offset:] {
 		selected := run.ID == state.Selected[ViewHistory]
@@ -1152,6 +1154,7 @@ func renderWideHistory(canvas *Canvas, state State, glyphs Glyphs, runs []Run) {
 		Span{Text: fmt.Sprintf("HISTORY  %d run(s)", len(runs)), Role: RoleHeader},
 		Span{Text: fmt.Sprintf("  sort %s%s", state.HistorySort, filterSuffix(state.Filter)), Role: RoleMuted},
 	)
+	writeReferenceNotes(w, state.Snapshot.ReferenceNotes)
 	w.line(Span{Text: strings.Repeat(glyphs.Horizontal, canvas.Width), Role: RoleMuted})
 	leftWidth := max(min(canvas.Width*58/100, 72), 56)
 	left := wideHistoryList(runs, state, leftWidth, glyphs)
