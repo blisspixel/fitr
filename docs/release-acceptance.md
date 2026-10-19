@@ -38,8 +38,45 @@ Manifest SHA-256:
 
 This receipt does not accept a live oversized-prompt refusal on a legacy Go
 template and a Jinja template, a recorded Pi process, a native local-model
-pi-workspace trial, an overnight pack's wall time, disk, and resolved count,
-or a running Omarchy session.
+pi-workspace trial, or an overnight pack's wall time, disk, and resolved
+count. The Omarchy session below is partial.
+
+#### Omarchy session, 2026-10-18
+
+On Omarchy 4.0.5-1 with Quickshell 0.3.2 (`2b4501a`), the published Linux
+amd64 binary was installed over the marked plugin directory and the shell was
+restarted. SHA-256
+`09a67954aba9328645b1c084037d678edb6d7775a94f69e19613908d0585a589`. The binary
+reports `fitr 0.11.5`, go1.27.2, `vcs.modified=false`, revision
+`44604a3d541542c4c5c4e1e054921c28e2b62f21`. `omarchy plugin validate` exited 0.
+`qmllint` exited 0 with the shell's `qs.Ui` and `qs.Commons` import path, and
+warned about host-injected members and nested unqualified ids. The embedded
+QML has no hex colour literal.
+
+The machine's result store has no role. Summon showed `empty` on the bar and
+the same unmeasured rows in the panel. Toggle, hide, and Escape opened or
+closed that panel. Toggle is the left-click handler, invoked through shell
+IPC. A pointer event was not injected. Two temporary roles and no role
+setting showed `unresolved` and the sentence that the desktop does not choose
+among roles. One named role with an attached sealed run stayed unresolved.
+Its urgent rows were bold, kept the word `unresolved`, and used the theme
+`red`: `#50f872` on Hackerman and `#d20f39` on Catppuccin Latte. The theme
+was restored to Hackerman. A missing command and a status exit of 1 both
+showed `unavailable`, with "did not start" and "did not produce a document."
+Neither was a quality zero.
+
+`fitr desktop benchmark --confirm` on the empty store, and the same command
+with a non-loopback `OLLAMA_BASE_URL`, each exited 4 with `started` false.
+No panel state had a proven local run, so the second click did not start
+one. This machine has no qualified selection, and none was written for the
+panel. Disable, enable, Omarchy's remove of the hand-made folder, and
+`fitr desktop remove --yes` behaved as [the Omarchy bar](omarchy.md)
+describes. `fitr desktop` did not edit `shell.json`. The plugin was enabled
+again from this binary, and the bar read `empty`.
+
+This session does not accept a rendered qualified selection or an allowlisted
+benchmark click. It does not accept native Phoenix model-loading. The full
+note is in [the Omarchy bar](omarchy.md).
 
 ### 0.11.3 release receipt
 

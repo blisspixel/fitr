@@ -8,9 +8,9 @@ freshness, unresolved requirements, and the next action.
 Backend decisions stay in fitr. The widget prints strings. It does not score,
 rank configurations, or turn a missing observation into a number.
 
-The widget ships embedded in the fitr binary from 0.11.3. This document is
-not a claim that a real Omarchy session has accepted the panel; the checks
-that establish that are listed below and are still open.
+The widget ships embedded in the fitr binary from 0.11.3. A published
+0.11.5 binary has been exercised on a running Omarchy 4.0.5 session. The
+checks that session recorded, and the two it left open, are listed below.
 
 ## What the panel reads
 
@@ -41,16 +41,18 @@ state. It is not a quality zero. Urgent rows take `bar.urgent` when the host
 bar exposes it. That property is `Commons.Color.bar.active` on Omarchy
 quattro `shell/plugins/bar/Bar.qml`, read 2026-10-18. Otherwise the row keeps
 `barForeground`. The state word stays in the text and the row is bold, so the
-urgency does not depend on the colour. A light theme and a dark theme on a
-running bar have not been compared. That check stays with the open session
-acceptance.
+urgency does not depend on the colour. On 2026-10-18 a running bar showed
+that on Hackerman and on Catppuccin Latte. The sampled urgent pixels were
+each theme's `red` (`#50f872` and `#d20f39`). The row text still carried
+`unresolved`, and those rows were bold. The plugin source contained no hex
+literal. Details are in the session record below.
 
 A status process that stops without `exited` did not start. Quickshell emits `runningChanged` and does not emit `exited`
 for `QProcess::FailedToStart`. Checked 2026-10-18 in quickshell-mirror
 `process.cpp` at `43d4fa9e883cb03239b3d578c9c57070f4fbd281`, and the same two
 signals were still the master behavior that day. The bar then says
-`unavailable` instead of `?`. A live Omarchy bar has not shown this yet.
-That check stays with the open session acceptance.
+`unavailable` instead of `?`. The same session showed that sentence for a
+missing command, and a different unavailable sentence when status exited 1.
 
 ## What the panel does not do
 
@@ -165,11 +167,81 @@ change until a real session shows otherwise.
 | Go tests of `internal/desktop`, `plugins/omarchy`, the renderer, and `fitr desktop` | Projection rules, the benchmark allowlist, marker install and remove, and that the QML source does not contain a shell string, a URL, or a benchmark inside `open()` |
 | `scripts/check-desktop-plugin.sh` on a built binary | That binary can install its embed into a temp directory, emit an empty `fitr.desktop.status.v1`, and remove the marked directory. CI and the release workflow run this on the Linux amd64 dist binary |
 | Published 0.11.3 | The first release that embeds the plugin. The release workflow runs the built-binary script above; that is not session acceptance |
-| Real Omarchy | Not accepted. On 2026-10-12, Omarchy 4.0.4, the installed `fitr 0.11.3` binary installed the embedded plugin into a temporary directory. `omarchy plugin validate` exited 0. `qmllint` with the shell's `qs.Ui` and `qs.Commons` import path exited 0 and warned about dynamic panel members and nested unqualified ids. The widget was not enabled, the shell was not restarted, and the panel was not summoned, clicked, or removed on the running bar |
+| Real Omarchy, 2026-10-12 | Not a session. On Omarchy 4.0.4 the installed `fitr 0.11.3` binary installed the embedded plugin into a temporary directory. `omarchy plugin validate` exited 0. `qmllint` exited 0 and warned about dynamic members. The running bar was not changed |
+| Real Omarchy, 2026-10-18 | Partial. Omarchy 4.0.5-1, Quickshell 0.3.2 (`2b4501a`), published `fitr 0.11.5`. The record is below. A qualified selection was not on this machine, and no allowlisted benchmark was started |
 
 A green CI run, including the built-binary script, does not accept the
-rendered panel. Do not describe the widget as working on Omarchy until those
-session checks have been recorded.
+rendered panel. The 2026-10-18 session is the first running-bar record. It
+does not by itself make the widget a measurement, and it leaves the two
+checks named below open.
+
+### Session on 2026-10-18
+
+The binary was the published `fitr-linux-amd64` asset from
+[0.11.5](https://github.com/blisspixel/fitr/releases/tag/v0.11.5). SHA-256
+`09a67954aba9328645b1c084037d678edb6d7775a94f69e19613908d0585a589` matched
+`SHA256SUMS`. It reports `fitr 0.11.5`, built with go1.27.2, `vcs.modified=false`,
+revision `44604a3d541542c4c5c4e1e054921c28e2b62f21`. It replaced the `fitr`
+on `PATH`. The previous binary was kept beside it. `fitr desktop install`
+wrote plugin 0.1.0 over the existing marked directory and left `shell.json`
+unchanged. `omarchy plugin validate` exited 0. `qmllint` from
+`/usr/lib/qt6/bin/qmllint`, with an import root that exposes `qs.Ui` and
+`qs.Commons`, exited 0. It warned about host-injected members and unqualified
+ids in nested delegates. Neither QML file contains a hex colour literal.
+
+The shell was restarted once after that install. Summon, toggle, hide, and
+Escape were then used on the running bar. Toggle is the widget's left-click
+handler, called through the shell IPC. A pointer event was not injected.
+Escape closed the panel. The machine's own result store has no role, and the
+bar read `empty`. The open panel repeated that status document: unmeasured
+rows, unknown freshness, and the sentence that no role is stored. It did not
+show a quality zero.
+
+A temporary role store, separate from that result directory, supplied the
+other documents through the widget's `fitrCommand` setting. Two roles and no
+`role` setting put `unresolved` on the bar and "Name one role. The desktop
+does not choose among roles." in the panel. The row states stayed
+unmeasured. Naming one role, with one attached sealed run and its history
+twin, left the role unresolved. The role row and the unresolved requirement
+rows were bold and used the shell urgent colour. On Hackerman those pixels
+matched `#50f872`, that theme's `red`, which `Color.bar.active` uses when
+`bar.active` is absent. On Catppuccin Latte they matched `#d20f39`. The
+previous panel literal `#c45c26` was not the row colour. The theme was put
+back to Hackerman. The attached run did not become a qualified selection.
+This machine has no qualified selection, and none was written for the panel.
+
+A missing `fitrCommand` put `unavailable` on the bar and "fitr desktop status
+did not start." in the panel. A command that exited 1 put `unavailable` on
+the bar and "fitr desktop status did not produce a document." in the panel.
+Neither state was a quality zero.
+
+`fitr desktop benchmark --confirm` on the empty store exited 4 with
+`started` false and the reason that no proven local measurement is available.
+The same command with `OLLAMA_BASE_URL` set to a non-loopback address exited
+4 with `started` false and the ambient-route reason. That refusal is the
+release binary's plan. The running shell was not given that variable, and no
+panel state had `local_proven`, so the second click was not an allowlisted
+start. The panel showed "Request measurement" and no fitr process was
+running. An allowlisted local run from the panel remains open.
+
+`omarchy plugin disable` listed the widget disabled, and
+`omarchy plugin enable dev.fitr.evidence --section right` listed it enabled.
+`omarchy plugin remove --yes` unloaded it and moved the hand-made directory
+to a dot backup beside the plugins directory. A following `fitr desktop install`
+and `fitr desktop remove --yes` left `shell.json` unchanged, deleted only the
+marked directory, and left both the plugins parent and that Omarchy backup in
+place. The 0.11.5 plugin was installed and enabled again afterwards, and the
+bar again read `empty`.
+
+Still open after this session: a rendered qualified selection, and a second
+click that starts an allowlisted local run. The off-host refusal inside a
+panel process whose own environment carries the remote URL is the same gate
+as that click.
+
+The published 0.11.5 asset's embedded plugin readme still says a running
+session has not been accepted. 0.11.6 changes that sentence so it points at
+this record and leaves those two checks open. 0.11.6 does not repeat the
+session.
 
 ## What this still does not establish
 
