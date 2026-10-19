@@ -1,4 +1,4 @@
-fitr 0.11.6 - evidence for what local AI
+fitr 0.11.7 - evidence for what local AI
   works on this machine
 
 usage:
