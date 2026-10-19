@@ -1,8 +1,10 @@
 # fitr evidence
 
 Read-only Omarchy Quattro bar widget for sealed local evidence. Plugin version
-0.1.0, embedded in fitr from 0.11.3. It is not listed on the Omarchy
-marketplace, and it has not yet been accepted on a running Omarchy session.
+0.1.0, embedded in fitr from 0.11.3. The chip is one state word. The panel
+names the model, the gaps, and the next action. It is not listed on the
+Omarchy marketplace. A running-session record lives in the fitr docs. A
+qualified selection and an allowlisted benchmark click are still open.
 
 The widget shows the model, role, requested context, measured and estimated
 fit, evidence freshness, unresolved requirements, and the next action. Those

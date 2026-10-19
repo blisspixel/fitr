@@ -29,13 +29,22 @@ BarWidget {
   readonly property bool popoutSwitchClosing: panelLoader.item
     ? panelLoader.item.popoutSwitchClosing === true
     : false
+  // The chip is the state word. A model name is the panel's job, and a
+  // question mark would read as a score. Empty means no role is stored, so
+  // the slot collapses the way omarchy.agents does when it has nothing to
+  // report. A vertical bar is 28px and this widget has no icon, so the word
+  // stays off that edge instead of clipping.
   readonly property string barText: {
-    if (document && document.model)
-      return String(document.model)
-    if (document && document.state)
+    if (faultState) return faultState
+    if (document && document.state && String(document.state) !== "empty")
       return String(document.state)
-    return faultState || "?"
+    return ""
   }
+  readonly property bool barUrgent: {
+    var panel = panelLoader.item
+    return panel && panel.urgent ? panel.urgent(barText) : false
+  }
+  visible: barText !== "" && !(root.bar && root.bar.vertical)
 
   function open() {
     if (panelLoader.item) panelLoader.item.open()
@@ -189,7 +198,9 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: root.barText
-    tooltipText: "Open fitr evidence"
+    active: root.barUrgent
+    // The panel is the detail. A tooltip would repeat the chip.
+    tooltipText: ""
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
     }

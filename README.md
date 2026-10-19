@@ -94,7 +94,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.11.5" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.11.6" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 
@@ -338,8 +338,10 @@ URL in the environment.
 The widget ships in the fitr binary from 0.11.3. It is not an Omarchy
 marketplace listing, and it is not the native desktop application described
 in the interface direction. The built binary's install, status and removal
-are checked in CI; the rendered panel has not yet been accepted on a running
-Omarchy session. Details and the remaining session checks are in
+are checked in CI. A published 0.11.5 binary has been run on Omarchy 4.0.5:
+empty, unresolved, and unavailable states, theme urgent colour, and
+install and remove. 0.11.6 keeps the chip to one state word. A qualified
+selection and an allowlisted benchmark click are still open. Details are in
 [the Omarchy bar](docs/omarchy.md).
 
 ## Why the evidence is useful

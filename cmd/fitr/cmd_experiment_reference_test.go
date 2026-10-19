@@ -31,7 +31,10 @@ func TestReferencePlanSealsAndRunRefusesBeforeTheVerifier(t *testing.T) {
 		t.Fatal(err)
 	}
 	conditions := filepath.Join(root, "conditions.json")
-	if err := os.WriteFile(conditions, []byte(`{"schema":"fitr.external-reference.conditions.v1","gpu_busy":false,"other_model":false,"served_context":8192}`), 0o600); err != nil {
+	// A declared busy GPU refuses on every machine. The confinement sentence
+	// depends on the host probe, which succeeds wherever bubblewrap runs, and
+	// that sentence is covered by TestUnavailableProbeRefuses.
+	if err := os.WriteFile(conditions, []byte(`{"schema":"fitr.external-reference.conditions.v1","gpu_busy":true,"other_model":false,"served_context":8192}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	missing := filepath.Join(root, "missing-verifier.json")
@@ -40,7 +43,7 @@ func TestReferencePlanSealsAndRunRefusesBeforeTheVerifier(t *testing.T) {
 			"reference", "run", "--plan", planPath, "--verifier", missing, "--conditions", conditions, "--display", "plain",
 		})
 	})
-	if runCode != exitError || !strings.Contains(stderr, "confinement probe") {
+	if runCode != exitError || !strings.Contains(stderr, "GPU is busy") || !strings.Contains(stderr, "no verifier file was accepted") {
 		t.Fatalf("run exit %d\n%s", runCode, stderr)
 	}
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {

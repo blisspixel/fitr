@@ -76,13 +76,44 @@ func TestQMLStaysReadOnlyUntilAnExplicitBenchmark(t *testing.T) {
 	}
 }
 
+func TestPanelIsAGlance(t *testing.T) {
+	panel := string(mustPayload(t, "Panel.qml"))
+	bar := string(mustPayload(t, "BarWidget.qml"))
+	for _, gone := range []string{
+		"This status reads sealed local evidence.",
+		"Opening this panel does not download",
+		"Request measurement",
+		"Measurement stays displayed",
+		"document.limits",
+	} {
+		if strings.Contains(panel, gone) {
+			t.Fatalf("panel still lectures with %q", gone)
+		}
+	}
+	if strings.Contains(bar, "document.model") {
+		t.Fatal("bar chip uses the model name")
+	}
+	if !strings.Contains(bar, `!== "empty"`) {
+		t.Fatal("an empty role still occupies the bar")
+	}
+	if !strings.Contains(bar, "active: root.barUrgent") {
+		t.Fatal("an urgent state does not take the shell urgent colour on the chip")
+	}
+	if !strings.Contains(panel, "visible: root.measurementReady()") {
+		t.Fatal("a run control is offered when locality is not proven")
+	}
+	if !strings.Contains(bar, "root.bar.vertical") {
+		t.Fatal("a vertical bar still paints the state word into a 28px slot")
+	}
+}
+
 func TestUrgentRowsFollowTheShellAndStayBold(t *testing.T) {
 	panel := string(mustPayload(t, "Panel.qml"))
 	bar := string(mustPayload(t, "BarWidget.qml"))
 	if strings.Contains(panel, "#") || strings.Contains(bar, "#") {
 		t.Fatal("qml still has a colour literal")
 	}
-	if strings.Count(panel, "font.bold: root.urgent(modelData.state)") != 2 || !strings.Contains(panel, "root.bar.urgent") {
+	if strings.Count(panel, "font.bold: root.urgent(modelData.state)") != 1 || !strings.Contains(panel, "font.bold: root.urgent(text)") || !strings.Contains(panel, "root.bar.urgent") {
 		t.Fatal("urgent rows do not take the shell colour and weight")
 	}
 }
