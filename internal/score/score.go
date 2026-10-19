@@ -31,10 +31,12 @@ import (
 	"github.com/blisspixel/fitr/internal/stats"
 )
 
-// State is a verdict. SKIP means "not measured" and must NEVER read as failure;
-// NA means no behavioral verdict applies, which is not a deficiency.
-// INCONCLUSIVE means a measurement exists but an integrity problem excludes it
-// from PASS and FAIL claims.
+// State is a verdict. SKIP means the measurement was not run and must never
+// read as failure. NA means no behavioral verdict applies, which is not a
+// deficiency. INCONCLUSIVE means an observation exists but its integrity or
+// uncertainty cannot support a PASS or FAIL claim. It is not a quality zero.
+// An integrity exclusion and an extraction miss share that state. The note
+// keeps them distinct.
 type State string
 
 const (
@@ -506,6 +508,8 @@ type Measured struct {
 	// inconclusive because no code was extracted. Neither is a pass or a
 	// fail. An extraction miss must not be described as a missing sandbox,
 	// and a trial that never started must not be described as a bad answer.
+	// Policy v9 gives the extraction miss the INCONCLUSIVE need tag. Policy
+	// v8 keeps SKIP and distinguishes the two cases by sentence only.
 	CodeAttempted      bool
 	CodeExtractionMiss bool
 	// CodeSkipDetail is the one recorded reason when every coding trial was
@@ -587,6 +591,21 @@ type Scorecard struct {
 
 func Score(m Measured, p device.Profile) Scorecard {
 	return score(m, p, scoreSemantics{
+		requireTTFTResidency:       true,
+		recordCapabilities:         true,
+		exactNeedClaims:            true,
+		distinguishIsolationSkip:   true,
+		nameIsolationSkip:          true,
+		extractionMissInconclusive: true,
+	})
+}
+
+// ScoreLegacyV8 reconstructs policy v8 scorecards. That policy names the
+// recorded probe reason and gives an extraction miss its own sentence. The
+// need tag stays SKIP, so a sealed v8 card still matches the scorer that
+// wrote it. Policy v9 is the one that changes the tag.
+func ScoreLegacyV8(m Measured, p device.Profile) Scorecard {
+	return score(m, p, scoreSemantics{
 		requireTTFTResidency:     true,
 		recordCapabilities:       true,
 		exactNeedClaims:          true,
@@ -664,6 +683,9 @@ type scoreSemantics struct {
 	// nameIsolationSkip appends the recorded probe reason. Policy v7 leaves
 	// it false so a sealed card keeps the generic sentence.
 	nameIsolationSkip bool
+	// extractionMissInconclusive gives a trial that ran and extracted no
+	// code the INCONCLUSIVE tag. Policy v8 leaves it false.
+	extractionMissInconclusive bool
 }
 
 func score(m Measured, p device.Profile, semantics scoreSemantics) Scorecard {
@@ -671,7 +693,8 @@ func score(m Measured, p device.Profile, semantics scoreSemantics) Scorecard {
 	n["fast_and_decent"] = scoreFastAndDecent(m, p,
 		semantics.includeAuxiliaryTTFT, semantics.requireTTFTResidency)
 
-	n["coding"] = scoreCoding(m, semantics.distinguishIsolationSkip, semantics.nameIsolationSkip)
+	n["coding"] = scoreCoding(m, semantics.distinguishIsolationSkip, semantics.nameIsolationSkip,
+		semantics.extractionMissInconclusive)
 
 	// --- structured output. It is a high-value damage probe because it can
 	// fail while ordinary prose remains superficially plausible.
@@ -797,9 +820,9 @@ func scoreTTFTState(m Measured, ttftMax float64, decodeOK, requireResidency bool
 // scoreCoding keeps executable evidence separate from generated reasoning.
 // The latter has clustered families and cannot manufacture precision for the
 // executable write/fix contract.
-func scoreCoding(m Measured, distinguishSkip, nameSkip bool) Verdict {
+func scoreCoding(m Measured, distinguishSkip, nameSkip, extractionMissInconclusive bool) Verdict {
 	if !m.CodeKnown {
-		return scoreUnmeasuredCoding(m, distinguishSkip, nameSkip)
+		return scoreUnmeasuredCoding(m, distinguishSkip, nameSkip, extractionMissInconclusive)
 	}
 
 	measure := "write+fix"
@@ -819,15 +842,26 @@ func scoreCoding(m Measured, distinguishSkip, nameSkip bool) Verdict {
 	return newVerdict(state(m.CodeWritePass && m.CodeFixPass), measure, "", detail, note)
 }
 
-func scoreUnmeasuredCoding(m Measured, distinguishSkip, nameSkip bool) Verdict {
+func scoreUnmeasuredCoding(m Measured, distinguishSkip, nameSkip, extractionMissInconclusive bool) Verdict {
+	// The flag is meaningful only after the sentence itself names the miss.
+	// Policy v6 still describes that trial as a missing worker, and that
+	// sentence must not pick up the later tag.
+	miss := extractionMissInconclusive && distinguishSkip && m.CodeExtractionMiss
 	if m.Reasoning.N == 0 {
-		return skipped(codingAbsenceNote(m, distinguishSkip, nameSkip, false))
+		note := codingAbsenceNote(m, distinguishSkip, nameSkip, false)
+		if miss {
+			return newVerdict(Inconclusive, "", "", nil, note)
+		}
+		return skipped(note)
 	}
 	wi := stats.ClusteredWilson(m.Reasoning.clusters())
 	note := fmt.Sprintf("reasoning checks %d/%d [%.2f-%.2f] observed, not a coding verdict",
 		m.Reasoning.Passes, m.Reasoning.N, wi.Lo, wi.Hi)
 	if prefix := codingAbsenceNote(m, distinguishSkip, nameSkip, true); prefix != "" {
 		note = joinNote(prefix, note)
+	}
+	if miss {
+		return newVerdict(Inconclusive, "", "", nil, note)
 	}
 	return newVerdict(Skip, "not measured", "", nil, note)
 }

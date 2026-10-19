@@ -29,15 +29,19 @@ as SKIP.
 
 An isolated trial that ran and extracted no code is inconclusive. The coding
 row says that no executable code was extracted. It does not say the sandbox
-was unavailable. A trial that never started because the sandbox probe failed
-still says isolated execution is unavailable. When every such trial recorded
-the same probe reason, the row repeats it. A missing bubblewrap package names
-that package and points at `fitr doctor`. macOS and Windows say scoring
-generated code needs bubblewrap on Linux and that other results are
-unaffected. The progress note says the same thing, and it does not call that
-skip a default the operator forgot. Policy v6 cards keep the older sentence.
-Policy v7 keeps one generic unavailable sentence for every skip. New results
-use `fitr.scoring.policy.v8`.
+was unavailable. Policy v9 stores that need as INCONCLUSIVE: a response was
+observed and it cannot support pass or fail, so SKIP would claim the
+measurement never ran. The plain column prints that state as INCL so the tag
+column stays aligned. The stored state remains INCONCLUSIVE. Policy v8 keeps
+the same sentence and the SKIP tag. A trial that never started because the
+sandbox probe failed still says isolated execution is unavailable, and its
+tag stays SKIP. When every such trial recorded the same probe reason, the
+row repeats it. A missing bubblewrap package names that package and points
+at `fitr doctor`. macOS and Windows say scoring generated code needs
+bubblewrap on Linux and that other results are unaffected. The progress note
+says the same thing, and it does not call that skip a default the operator
+forgot. Policy v6 cards keep the older sentence. Policy v7 keeps one generic
+unavailable sentence for every skip. New results use `fitr.scoring.policy.v9`.
 
 `--allow-unsafe-exec` is a separate path. It preflights the interpreter and
 requires a successful exit plus an exact final verifier receipt, but generated

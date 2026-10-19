@@ -304,7 +304,7 @@ func TestScorecardValidationPreservesSealedV3AuxiliaryLatencyProse(t *testing.T)
 func TestScoringPolicyHashesStayDistinct(t *testing.T) {
 	policies := []ScoringPolicy{
 		legacyScoringPolicyV3(), legacyScoringPolicyV4(), legacyScoringPolicyV5(),
-		legacyScoringPolicyV6(), legacyScoringPolicyV7(), CurrentScoringPolicy(),
+		legacyScoringPolicyV6(), legacyScoringPolicyV7(), legacyScoringPolicyV8(), CurrentScoringPolicy(),
 	}
 	hashes := make([]string, 0, len(policies))
 	for _, policy := range policies {
@@ -322,7 +322,7 @@ func requireDistinctPolicyHashes(t *testing.T, hashes ...string) {
 	for i, left := range hashes {
 		for _, right := range hashes[i+1:] {
 			if left == right {
-				t.Fatal("scoring policies v3 through v8 must have distinct receipts")
+				t.Fatal("scoring policies v3 through v9 must have distinct receipts")
 			}
 		}
 	}
@@ -361,6 +361,40 @@ func TestPolicyV6KeepsAnExtractionMissAsAMissingWorker(t *testing.T) {
 	if strings.Contains(current.Needs["coding"].Why, "isolated execution") ||
 		!strings.Contains(current.Needs["coding"].Why, "no executable code was extracted") {
 		t.Fatalf("current coding = %s", current.Needs["coding"].Why)
+	}
+}
+
+func TestPolicyV8KeepsAnExtractionMissAsSkip(t *testing.T) {
+	profile := device.Profile{Name: "default"}
+	r := &Record{
+		TaskPlan: TaskPlan{CodeTrials: 2},
+		CodeWrite: []eval.ExecResult{{
+			Outcome: eval.OutcomeInconclusive,
+			Detail:  "no executable code was extracted",
+		}},
+		CodeFix: []eval.ExecResult{{
+			Outcome: eval.OutcomeInconclusive,
+			Detail:  "no executable code was extracted",
+		}},
+	}
+	measured := r.Measured()
+	policyHash, err := canonicalJSONDigest("fitr.scoring-policy.v1", legacyScoringPolicyV8())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Manifest = &RunManifest{Provenance: &RunProvenance{ScoringPolicySHA256: policyHash}}
+	r.Scorecard = score.ScoreLegacyV8(measured, profile)
+	if err := r.validateScorecard(profile); err != nil {
+		t.Fatal(err)
+	}
+	sealed := r.Scorecard.Needs["coding"]
+	if sealed.State != score.Skip || !strings.Contains(sealed.Why, "no executable code was extracted") ||
+		strings.Contains(sealed.Why, "isolated execution") {
+		t.Fatalf("v8 coding = %s %s", sealed.State, sealed.Why)
+	}
+	current := score.Score(measured, profile).Needs["coding"]
+	if current.State != score.Inconclusive || current.Why != "no executable code was extracted" {
+		t.Fatalf("current coding = %s %s", current.State, current.Why)
 	}
 }
 

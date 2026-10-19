@@ -277,10 +277,10 @@ bytes and derives only the non-accelerator remainder. On unified-memory systems
 that arithmetic does not identify exclusive pools, spill, layer placement, or
 host traffic.
 
-New results use `fitr.scoring.policy.v8`. Policy v4 keeps auxiliary latency
+New results use `fitr.scoring.policy.v9`. Policy v4 keeps auxiliary latency
 states out of behavior-verdict prose; v5 additionally requires the gated
 request's own residency receipt before a loaded-TTFT gate can clear. Sealed
-schema-6 results written with policies v3 through v7 are reconstructed with
+schema-6 results written with policies v3 through v8 are reconstructed with
 their original scorers and remain valid. Policy v6 separates declared
 capability availability from behavioral PASS and replaces broad need labels
 with the exact evidence each row establishes. Policy v6 also describes every
@@ -289,8 +289,13 @@ worker. Policy v7 keeps that sentence for a trial that never started, and
 uses a different sentence when the trial ran and extracted no code or
 otherwise produced no measured outcome. Policy v8 appends the recorded probe
 reason when every skipped trial shares one, so a missing package is not the
-same sentence as another operating system. The policy hashes are different,
-so Board does not compare across those presentation-contract changes.
+same sentence as another operating system. Policy v8 still stores both that
+skip and an extraction miss as SKIP. Policy v9 keeps the sentences and stores
+the extraction miss as INCONCLUSIVE, because an observation exists and cannot
+support a binary claim. A trial that never started stays SKIP. The plain
+column abbreviates the stored INCONCLUSIVE state to INCL. The policy hashes
+are different, so Board does not compare across those presentation-contract
+changes.
 
 - **Small, heterogeneous battery.** The default battery has 22 generated task
   specs across 16 families and five measured needs. Each need has its own
