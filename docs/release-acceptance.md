@@ -4,9 +4,42 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-10-10. The 0.11.3 receipt below covers its exact tagged
+Last updated: 2026-10-19. The 0.11.5 receipt below covers its exact tagged
 revision and downloaded assets. Historical sections retain their original
-candidates, including older metadata-only source receipts.
+candidates, including older metadata-only source receipts. 0.11.4 shipped
+without a measurement receipt in this file.
+
+### 0.11.5 release receipt
+
+Release [0.11.5](https://github.com/blisspixel/fitr/releases/tag/v0.11.5)
+is bound to commit `44604a3d541542c4c5c4e1e054921c28e2b62f21`.
+[Main CI 39185290384](https://github.com/blisspixel/fitr/actions/runs/39185290384)
+passed with **80.61% aggregate coverage** (29879/37068 statements). The
+[release workflow 39185742681](https://github.com/blisspixel/fitr/actions/runs/39185742681)
+measured **80.60%** (29876/37068 statements) and repeated race, lint with
+golangci-lint v2.14.0, govulncheck v1.7.0 on Go 1.27.2 with no vulnerabilities
+found, fourteen fuzz smoke targets including the external-reference verifier,
+the 1600-line cap, six binary builds, deterministic rebuild, and all three
+installer jobs. It uploaded ten verified assets into the owner draft. The
+owner published the release on October 19 UTC. The tag is annotated and has
+no SSH signature.
+
+[Native acceptance 39185317048](https://github.com/blisspixel/fitr/actions/runs/39185317048)
+passed the installed-binary loop on Linux amd64 and macOS arm64 against
+checksum-pinned llama-server b10700 and both pinned GGUF artifacts.
+
+All ten downloaded public assets passed the checksum manifest. The Windows
+amd64 executable reports `fitr 0.11.5`, was built with go1.27.2 from the
+tagged revision with `vcs.modified=false`, and is **16,754,176 bytes**, below
+the shared **16,793,512-byte** ceiling. Public Windows SHA-256:
+`8e8a75630b8531ea32940092b39f2c8b82f388d93d6a9e4d97ff3dff4c47f79f`.
+Manifest SHA-256:
+`7c0953b24ffe63747f70aac5bd26ffed795e013209637b0f52694f80cbbe8fa6`.
+
+This receipt does not accept a live oversized-prompt refusal on a legacy Go
+template and a Jinja template, a recorded Pi process, a native local-model
+pi-workspace trial, an overnight pack's wall time, disk, and resolved count,
+or a running Omarchy session.
 
 ### 0.11.3 release receipt
 
