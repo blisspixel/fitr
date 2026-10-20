@@ -4,10 +4,50 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-10-19. The 0.11.7 receipt below covers its exact tagged
+Last updated: 2026-10-20. The 0.11.8 receipt below covers its exact tagged
 revision and downloaded assets. Historical sections retain their original
 candidates, including older metadata-only source receipts. 0.11.4 shipped
 without a measurement receipt in this file.
+
+### 0.11.8 release receipt
+
+Release [0.11.8](https://github.com/blisspixel/fitr/releases/tag/v0.11.8)
+is bound to commit `eb25802f5d37933222eeea31fb064123dbe4851c`.
+[Main CI 39487808815](https://github.com/blisspixel/fitr/actions/runs/39487808815)
+passed with **80.83% aggregate coverage** (30270/37451 statements). The
+[release workflow 39488777231](https://github.com/blisspixel/fitr/actions/runs/39488777231)
+measured **80.83%** (30271/37451 statements) and repeated race, lint with
+golangci-lint v2.14.0, govulncheck v1.7.0 on Go 1.27.2 with no vulnerabilities
+found, fifteen fuzz smoke targets including the token condition plan decoder,
+the 1600-line cap, six binary builds, deterministic rebuild, and all three
+installer jobs. It uploaded ten verified assets into the owner draft. The
+owner published the release on October 20 UTC. The tag is annotated and
+SSH-signed.
+
+[Native acceptance 39487850457](https://github.com/blisspixel/fitr/actions/runs/39487850457)
+passed the installed-binary loop on Linux amd64 and macOS arm64 against
+checksum-pinned llama-server b10700 and both pinned GGUF artifacts. The
+installed binary reported `fitr 0.11.8`.
+
+All ten downloaded public assets passed the checksum manifest. The Windows
+amd64 executable is **16,858,624 bytes**, below the shared **16,897,448-byte**
+ceiling, and was built with go1.27.2 from the tagged revision with
+`vcs.modified=false`. It reports `fitr 0.11.8`. The release build checked
+that the Linux amd64 binary prints the same version. Public Windows SHA-256:
+`8b84ab3dc33a24b31552593907b074de2f3a50a8efde489fd7c7a258c7d24669`.
+Manifest SHA-256:
+`8abe537e84b85748a0bfb868720752e84596367351004fd0310798c97af72e52`.
+
+This receipt does not accept a live oversized-prompt refusal on a legacy Go
+template and a Jinja template, a recorded Pi process, a native local-model
+pi-workspace trial, or an overnight pack's wall time, disk, and resolved
+count. It does not accept a rendered qualified selection or an allowlisted
+benchmark click. It does not accept native Phoenix model-loading. New
+pi-workspace plans seal fitr.pi-preservation.v1 and read the corrected port
+from the task file. Historical plans keep six checks. Token conditions are a
+separate unsubmitted receipt, fitr.context-token-account.v2. The request
+budget stays seven, and a second reopen is not sealed. This receipt does not
+launch Pi.
 
 ### 0.11.7 release receipt
 
