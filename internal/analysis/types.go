@@ -530,7 +530,10 @@ type Report struct {
 	// TokenAccount is absent unless a usable-input token receipt was attached.
 	// A document-pack phase does not fill it.
 	TokenAccount *TokenAccount `json:"token_account,omitempty"`
-	Gaps         []EvidenceGap `json:"gaps,omitempty"`
-	Diagnoses    []Diagnosis   `json:"diagnoses,omitempty"`
-	NextActions  []Action      `json:"next_actions"`
+	// TokenConditions is absent unless a matched-condition receipt was attached.
+	// A v1 token account and a document pack do not fill it.
+	TokenConditions *TokenConditions `json:"token_conditions,omitempty"`
+	Gaps            []EvidenceGap    `json:"gaps,omitempty"`
+	Diagnoses       []Diagnosis      `json:"diagnoses,omitempty"`
+	NextActions     []Action         `json:"next_actions"`
 }

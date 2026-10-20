@@ -48,7 +48,7 @@ func NewPiPlan(model record.ModelIdentity, deviceKey string, trials, timeoutSeco
 	if err := ValidatePlanBounds(trials, piRequestBudget, timeoutSeconds, requestedContext); err != nil {
 		return nil, err
 	}
-	contract, err := piWorkspaceContract()
+	contract, err := piPreservedContract()
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func NewPiPlan(model record.ModelIdentity, deviceKey string, trials, timeoutSeco
 		Model: model, DeviceKey: deviceKey, Trials: trials, MaxTurns: piRequestBudget,
 		TimeoutSeconds: timeoutSeconds, RequestedContext: requestedContext, Retention: RetainHashesAndVerifier,
 		Contract: &contract, Driver: &driver, Provider: provider, RequestBudget: piRequestBudget,
-		PiSchedule: &schedule,
+		PiSchedule: &schedule, Preservation: preservationPointer(),
 	}
 	digest, err := planDigest(plan)
 	if err != nil {
@@ -101,7 +101,12 @@ func validatePiPlan(plan Plan) error {
 	if plan.Contract != nil && harborReward(plan.Contract) {
 		return errors.New("a Harbor reward is not the pi-workspace receipt")
 	}
-	return nil
+	return validatePiPreservation(plan)
+}
+
+func preservationPointer() *PreservationSchedule {
+	pinned := pinnedPreservation()
+	return &pinned
 }
 
 func harborReward(contract *WorkflowContract) bool {
@@ -114,38 +119,21 @@ func harborReward(contract *WorkflowContract) bool {
 }
 
 func validateForeignPiFields(plan Plan) error {
-	if plan.Driver != nil || plan.Provider != "" || plan.RequestBudget != 0 || plan.PiSchedule != nil {
+	if plan.Driver != nil || plan.Provider != "" || plan.RequestBudget != 0 || plan.PiSchedule != nil || plan.Preservation != nil {
 		return errors.New("workload plan carries a pi session it does not run")
 	}
 	return nil
-}
-
-func piWorkspaceContract() (WorkflowContract, error) {
-	scenario, err := hashValue("fitr.workload.scenario.v1", struct {
-		Prompt string            `json:"prompt"`
-		Files  map[string]string `json:"files"`
-		Done   string            `json:"done"`
-	}{piPrompt, map[string]string{piNoteFile: piNoteBody, piTaskFile: piTaskOpen}, piTaskDone})
-	if err != nil {
-		return WorkflowContract{}, err
-	}
-	tools, err := hashValue("fitr.workload.tools.v1", piWorkspaceTools())
-	if err != nil {
-		return WorkflowContract{}, err
-	}
-	return WorkflowContract{
-		Schema: "fitr.workload.contract.v1", ScenarioSHA256: scenario, ToolsSHA256: tools,
-		Verifier: piVerifierID, Proof: EvidenceIndependent, Authority: "virtual-workspace-files-only",
-		Isolation: "harness-capability-boundary", RetryPolicy: "one-attempt-no-retry",
-		ApprovalPolicy: "unsupported", ContextPolicy: "requested-only",
-		CompactionPolicy: "forced-split-summary",
-	}, nil
 }
 
 func piContractSupported(contract *WorkflowContract) bool {
 	if contract == nil || harborReward(contract) {
 		return false
 	}
-	expected, err := piWorkspaceContract()
-	return err == nil && *contract == expected
+	for _, candidate := range []func() (WorkflowContract, error){piPreservedContract, piHistoricalContract} {
+		expected, err := candidate()
+		if err == nil && *contract == expected {
+			return true
+		}
+	}
+	return false
 }

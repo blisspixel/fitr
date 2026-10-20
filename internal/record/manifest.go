@@ -138,6 +138,12 @@ type TaskPlan struct {
 	// The receipt is not a reading of the UTF-8 byte pack.
 	TokenAccountCases      int    `json:"token_account_cases,omitempty"`
 	TokenAccountPlanSHA256 string `json:"token_account_plan_sha256,omitempty"`
+	// TokenConditionCases and TokenConditionPlanSHA256 seal the matched
+	// condition receipt. Both are omitted when that receipt was not planned,
+	// so manifests written before this field keep their bytes. The v1 token
+	// account does not fill these fields.
+	TokenConditionCases      int    `json:"token_condition_cases,omitempty"`
+	TokenConditionPlanSHA256 string `json:"token_condition_plan_sha256,omitempty"`
 }
 
 // RunProvenance identifies every mutable definition that can alter a verdict
@@ -230,7 +236,7 @@ func (p RunProvenance) Validate() error {
 
 func (p TaskPlan) Validate() error {
 	if p.SpeedSamples < 0 || p.CodeTrials < 0 || p.CheckTrialsLimit < 0 ||
-		p.ToolTrials < 0 || p.RefusalTrials < 0 || p.AgenticTrials < 0 || p.ContextCells < 0 || p.TokenAccountCases < 0 {
+		p.ToolTrials < 0 || p.RefusalTrials < 0 || p.AgenticTrials < 0 || p.ContextCells < 0 || p.TokenAccountCases < 0 || p.TokenConditionCases < 0 {
 		return errors.New("task plan counts cannot be negative")
 	}
 	if p.AdaptiveChecks && p.CheckTrialsLimit < 1 {
@@ -239,7 +245,7 @@ func (p TaskPlan) Validate() error {
 	// A context phase is planned work in its own right, so a run consisting
 	// only of one is a complete plan rather than an empty one.
 	if p.SpeedSamples+p.CodeTrials+p.CheckTrialsLimit+p.ToolTrials+
-		p.RefusalTrials+p.AgenticTrials+p.ContextCells+p.TokenAccountCases == 0 && !p.Memory && !p.Plumbing && !p.Withdrawal {
+		p.RefusalTrials+p.AgenticTrials+p.ContextCells+p.TokenAccountCases+p.TokenConditionCases == 0 && !p.Memory && !p.Plumbing && !p.Withdrawal {
 		return errors.New("task plan is empty")
 	}
 	return nil
@@ -273,6 +279,12 @@ func (p TaskPlan) validateCurrentSeals() error {
 	}
 	if p.TokenAccountCases == 0 && p.TokenAccountPlanSHA256 != "" {
 		return errors.New("current run manifest empty token account cannot carry a token-account digest")
+	}
+	if p.TokenConditionCases > 0 && !sha256Digest.MatchString(p.TokenConditionPlanSHA256) {
+		return errors.New("current run manifest token conditions require a sealed condition plan")
+	}
+	if p.TokenConditionCases == 0 && p.TokenConditionPlanSHA256 != "" {
+		return errors.New("current run manifest empty token conditions cannot carry a condition-plan digest")
 	}
 	return nil
 }

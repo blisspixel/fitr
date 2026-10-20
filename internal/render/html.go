@@ -198,6 +198,7 @@ type htmlData struct {
 	Claims              []string
 	ContextTasks        *htmlContextTasks
 	TokenAccount        *htmlTokenAccount
+	TokenConditions     *htmlTokenAccount
 	Accelerator         string
 	NonAccelerator      string
 	PlacementNote       string
@@ -327,6 +328,15 @@ Do not rank this result against a different device/config ID. Change the GPU, dr
 <p class="sub">{{.Next}}</p>
 {{end}}
 
+{{with .TokenConditions}}
+<h2>Token conditions</h2>
+<table>
+{{range .Rows}}<tr><th class="k">{{.K}}</th><td>{{.V}}</td></tr>{{end}}
+</table>
+<p class="sub">{{.Reason}}</p>
+<p class="sub">{{.Next}}</p>
+{{end}}
+
 {{if .RepeatsWarn}}
 <p class="warn">Single-sample run - one trial cannot establish a stable rate; re-run with -k 3 before comparing a close result.</p>
 {{end}}
@@ -402,7 +412,7 @@ func htmlDataFrom(a Artifact) htmlData {
 		}
 		d.CapacityFacts = htmlCapacityFacts(a.Meta.Analysis.Capacity)
 		d.ContextTasks = htmlContextTasksFrom(a.Meta.Analysis.ContextTasks)
-		d.TokenAccount = htmlTokenAccountFrom(a.Meta.Analysis.TokenAccount)
+		setHTMLTokenReceipts(&d, a.Meta.Analysis)
 	}
 	d.Claims = append([]string(nil), a.Claims...)
 	d.Decode, d.Prefill, d.TTFT = htmlPerformance(a.Meta, g)

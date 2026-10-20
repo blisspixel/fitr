@@ -215,7 +215,35 @@ own observation: unmeasured memory is not spare room and is not a hardware cap.
 No live target has been recorded. fitr does not submit this schedule to a
 runtime yet, and a `--context-tiers` run does not fill the receipt. Absent
 64000, 128000 and 250000 results stay untested. This receipt does not certify
-Pi, Hermes, compaction, arbitrary coding or operational authority.
+Pi, Hermes, compaction, arbitrary coding or operational authority. A v1 case
+id is not a v2 cell, and the two schemas do not decode as each other.
+
+## Matched-condition receipt
+
+`fitr.context-token-account.v2` is a separate receipt from v1 and from the
+byte pack. v2 binds the condition name and the pack digest into the cell id,
+so two packs that share a target, sequence, family, position and seed are
+different cells when the condition or the pack differs. The conditions, in
+order, are `focused_baseline`, `unrelated_filler`, `topical_distractor`,
+`stale_corrected` and `answer_absent`. A retrieval-policy digest adds one
+`retrieval_policy` cell and changes only that cell. The focused pack is
+shorter than the unrelated pack and is not padded. The answer token
+`kestrel-44` is absent from the answer-absent pack. The stale pack contains
+both the withdrawn code and the corrected code.
+
+The claim is derived when the receipt is attached and derived again on load.
+A required quality failure stays visible beside a sibling that is missing
+counts. A pass whose payload is below the sealed target is refused, and the
+displayed target stays the sealed integer. An all-pass result is a fixed
+battery. Its uncertainty sentence is `fixed battery; not a confidence
+interval or a maximum context`. CLI, JSON, HTML and the terminal monitor
+project that derived report. A record that cannot support a claim about its
+artifact keeps the receipt descriptive.
+
+fitr does not submit this schedule to a runtime. A `--context-tiers` run does
+not fill it. No 64000, 128000 or 250000 native result is recorded here. This
+receipt does not close the oversized-prompt check and does not certify Pi,
+Hermes, compaction or operational authority.
 
 ## Remaining connected acceptance
 

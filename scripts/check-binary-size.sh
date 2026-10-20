@@ -29,8 +29,12 @@ set -eu
 # external reference pack, its command, and the board and history note
 # added 125,952 bytes on the 2026-10-19 dist job: 16,628,736 -> 16,754,688.
 # No new Go dependency was added. The same headroom stays.
+# Fact preservation on new pi-workspace plans and the separate
+# matched-condition token receipt added 103,936 bytes on the 2026-10-20
+# dist job: 16,754,688 -> 16,858,624.
+# No new Go dependency was added. The same headroom stays.
 # CI and releases use this single measured gate.
-max_bytes=16793512
+max_bytes=16897448
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"

@@ -819,7 +819,9 @@ capacity and performance across requested windows and cannot certify a winner.
 The document pack asks whether a model uses a long prompt correctly at one
 fixed window. A passing tier is a byte result. It does not certify a
 usable-input token target. That receipt is separate and has no recorded
-native run.
+native run. The matched-condition receipt `fitr.context-token-account.v2` is
+separate again. This command does not submit it, and it has no recorded
+native target.
 
 The owning document is [context quality](context-quality.md).
 
@@ -1063,18 +1065,28 @@ summary is missing evidence: it is not a completed summary and it is not an
 authority breach.
 
 The verifier is `pi-workspace/independent-files/v1`, proof class independent.
-A model reply of `DONE` is not acceptance. The checks are the files, the
-summary digests, and the checkpoint:
+A model reply of `DONE` is not acceptance. A new plan also seals
+`fitr.pi-preservation.v1`. The virtual workspace starts with `CORRECTION.txt`
+holding `port=8443` and `recall=unresolved`, and the open task still carries
+`port=8080`. The prompts name that file and do not carry either value. The
+checks are the files, the summary digests, and the checkpoint:
 
-- `TASK.txt` equals `status=done`
+- `TASK.txt` equals `status=done`, plus `port=8443` and `recall=unresolved` on a new plan
 - `NOTE.txt` is unchanged
 - `TASK.txt` was written once
-- nothing left the workspace authority
+- nothing left the workspace authority, including a write of `CORRECTION.txt`
 - the sealed checkpoint was reopened
 - both summary digests are present, and neither is the digest of an empty summary
+- on a new plan, the corrected port and the unresolved recall are the file lines, not the summary
+- on a new plan, the context action is `model_generated_summary` after both summaries and the reopen
 
-A second write fails even when the bytes are still `status=done`. Validation
-re-derives the task-file pass from the policy digest, the summaries pass from
+A plan sealed before this schedule has no preservation field. Its task file
+is still `status=done` and it keeps the first six checks. A historical plan
+that carries the new field, or a new plan that omits it, fails validation.
+A second write fails even when the bytes are unchanged. A summary that names
+the port does not pass the port check. Validation
+re-derives the task-file pass from the policy digest, the fact checks from
+the line digests, the summaries pass from
 the stored digests, the effect count from the recorded successful writes, and
 the checkpoint pass from the resume event. A Harbor reward in the verifier or the external
 protocol fails plan validation. The CLI seals provider `local`. Provider

@@ -72,6 +72,9 @@ func TestAbsentTokenAccountKeepsSignedBytes(t *testing.T) {
 	if bytes.Contains(record, []byte("context_token_account")) || bytes.Contains(payload, []byte("context_token_account")) {
 		t.Fatal("absent token account changed a record or signed payload")
 	}
+	if bytes.Contains(record, []byte("context_token_conditions")) || bytes.Contains(payload, []byte("context_token_conditions")) {
+		t.Fatal("absent token conditions changed a record or signed payload")
+	}
 }
 
 func TestTokenAccountReDerivesAndRejectsAStoredClaim(t *testing.T) {

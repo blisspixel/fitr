@@ -67,8 +67,12 @@ type completedEvidencePayload struct {
 	// attached a token receipt signs the same bytes it signed before the
 	// field existed.
 	ContextTokenAccount *ContextTokenAccount `json:"context_token_account,omitempty"`
-	Scorecard           score.Scorecard      `json:"scorecard"`
-	Profile             device.Profile       `json:"profile"`
+	// ContextTokenConditions carries omitempty so a completion that never
+	// attached a condition receipt signs the same bytes it signed before the
+	// field existed.
+	ContextTokenConditions *ContextTokenConditions `json:"context_token_conditions,omitempty"`
+	Scorecard              score.Scorecard         `json:"scorecard"`
+	Profile                device.Profile          `json:"profile"`
 }
 
 // CompleteEvidence seals a finished current-schema run. It must be called exactly
@@ -224,8 +228,9 @@ func (r *Record) completedEvidenceJSON(profile device.Profile) ([]byte, error) {
 		Refused: r.Refused, Plumbing: r.Plumbing, Rep: r.Rep, Density: r.Density,
 		Contamination: r.Contamination, EvidenceCounts: r.EvidenceCounts,
 		AdaptiveDecisions: r.AdaptiveDecisions, ContextQuality: cloneContextQuality(r.ContextQuality),
-		ContextTokenAccount: cloneContextTokenAccount(r.ContextTokenAccount),
-		Scorecard:           r.Scorecard, Profile: profile,
+		ContextTokenAccount:    cloneContextTokenAccount(r.ContextTokenAccount),
+		ContextTokenConditions: cloneContextTokenConditions(r.ContextTokenConditions),
+		Scorecard:              r.Scorecard, Profile: profile,
 	})
 }
 
@@ -246,6 +251,9 @@ func (r *Record) validateDerivedEvidence() error {
 		return err
 	}
 	if err := r.validateContextTokenAccount(); err != nil {
+		return err
+	}
+	if err := r.validateContextTokenConditions(); err != nil {
 		return err
 	}
 	if err := r.validateEvidenceCounts(); err != nil {

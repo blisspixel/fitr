@@ -407,6 +407,7 @@ func renderResultPerformance(w *lineWriter, run Run, glyphs Glyphs, compact bool
 	renderResultCapacity(w, run, compact)
 	renderResultContextTasks(w, run, compact)
 	renderResultTokenAccount(w, run, compact)
+	renderResultTokenConditions(w, run, compact)
 }
 
 // renderResultContextTasks projects the document-task phase. It renders in the

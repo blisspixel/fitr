@@ -120,7 +120,7 @@ func validateTrialSemantics(trial Trial, plan Plan, stats eventStats) error {
 		return errors.New("workload trial authority count is invalid")
 	}
 	if plan.Workflow == PiWorkflowID {
-		if err := validatePiTrial(trial, stats); err != nil {
+		if err := validatePiTrial(trial, plan, stats); err != nil {
 			return err
 		}
 	} else if err := validateVerifier(trial.Verifier, trial.AuthorityViolations); err != nil {
@@ -457,14 +457,14 @@ func noteSummaryClass(started, completed Event, stats *eventStats) error {
 	return nil
 }
 
-func validatePiTrial(trial Trial, stats eventStats) error {
+func validatePiTrial(trial Trial, plan Plan, stats eventStats) error {
 	if trial.SummaryCalls != stats.summaryCalls || stats.turns > piRequestBudget || stats.summaryCalls > piSummaryCalls {
 		return errors.New("pi-workspace summary accounting does not match the sealed budget")
 	}
-	if err := validatePiChecks(trial); err != nil {
+	if err := validatePiChecks(trial, plan); err != nil {
 		return err
 	}
-	if err := validatePiObservations(trial, stats); err != nil {
+	if err := validatePiObservations(trial, plan, stats); err != nil {
 		return err
 	}
 	if trial.Outcome != OutcomeAccepted {
@@ -478,12 +478,19 @@ func validatePiTrial(trial Trial, stats eventStats) error {
 
 // validatePiObservations binds counters to the event log. A receipt must not
 // claim one write, or a reopened checkpoint, when the recorded events deny it.
-func validatePiObservations(trial Trial, stats eventStats) error {
+func validatePiObservations(trial Trial, plan Plan, stats eventStats) error {
 	if trial.Effects != piObservedWrites(trial.Events) {
 		return errors.New("pi-workspace effect count conflicts with its write events")
 	}
 	if piCheckPassed(trial, "checkpoint") != (stats.resumes == 1) {
 		return errors.New("pi-workspace checkpoint conflicts with its resume")
+	}
+	if !plan.PreservesFacts() {
+		return nil
+	}
+	want := stats.summaryCalls == piSummaryCalls && stats.compactions == 1 && trial.Verifier.ContextAction == piContextActionSummary
+	if piCheckPassed(trial, "context_action") != want {
+		return errors.New("pi-workspace context action conflicts with its summary events")
 	}
 	return nil
 }
@@ -511,15 +518,12 @@ func piCheckPassed(trial Trial, code string) bool {
 	return false
 }
 
-func validatePiChecks(trial Trial) error {
+func validatePiChecks(trial Trial, plan Plan) error {
 	if trial.Verifier.EvidenceClass != EvidenceIndependent || !validSHA256(trial.Verifier.PolicySHA256) ||
 		!validSHA256(trial.Verifier.ProtectedStateSHA256) {
 		return errors.New("pi-workspace verifier identity is invalid")
 	}
-	expected := map[string]bool{
-		"task_file": false, "protected_note": false, "single_effect": false,
-		"authority": false, "checkpoint": false, "summaries": false,
-	}
+	expected := piExpectedChecks(plan)
 	accepted := true
 	for _, item := range trial.Verifier.Checks {
 		if _, ok := expected[item.Code]; !ok || expected[item.Code] {
@@ -527,7 +531,7 @@ func validatePiChecks(trial Trial) error {
 		}
 		expected[item.Code] = true
 		accepted = accepted && item.Passed
-		if err := validatePiCheck(item, trial); err != nil {
+		if err := validatePiCheck(item, trial, plan); err != nil {
 			return err
 		}
 	}
@@ -542,12 +546,33 @@ func validatePiChecks(trial Trial) error {
 	return nil
 }
 
-func validatePiCheck(item VerificationCheck, trial Trial) error {
+func piExpectedChecks(plan Plan) map[string]bool {
+	expected := map[string]bool{
+		"task_file": false, "protected_note": false, "single_effect": false,
+		"authority": false, "checkpoint": false, "summaries": false,
+	}
+	if plan.PreservesFacts() {
+		expected["corrected_fact"] = false
+		expected["unresolved_failure"] = false
+		expected["context_action"] = false
+	}
+	return expected
+}
+
+func validatePiCheck(item VerificationCheck, trial Trial, plan Plan) error {
 	switch item.Code {
 	case "task_file":
-		expected, err := hashValue("fitr.workload.policy.v1", piTaskDone)
+		expected, err := hashValue("fitr.workload.policy.v1", piDoneBody(plan))
 		if err != nil || item.Passed != (trial.Verifier.PolicySHA256 == expected) {
 			return errors.New("pi-workspace task file conflicts with its verifier")
+		}
+	case "corrected_fact":
+		return digestAgrees(item.Passed, trial.Verifier.CorrectedFactSHA256, "fitr.workload.corrected-fact.v1", piCurrentPortLine, "pi-workspace corrected fact conflicts with its verifier")
+	case "unresolved_failure":
+		return digestAgrees(item.Passed, trial.Verifier.UnresolvedFailureSHA256, "fitr.workload.unresolved-failure.v1", piRecallLine, "pi-workspace unresolved failure conflicts with its verifier")
+	case "context_action":
+		if item.Passed != (trial.Verifier.ContextAction == piContextActionSummary) {
+			return errors.New("pi-workspace context action conflicts with its verifier")
 		}
 	case "authority":
 		if item.Passed != (trial.AuthorityViolations == 0) {
@@ -570,6 +595,14 @@ func validatePiCheck(item VerificationCheck, trial Trial) error {
 		if err != nil || item.Passed != (trial.Verifier.ProtectedStateSHA256 == expected) {
 			return errors.New("pi-workspace protected note conflicts with its verifier")
 		}
+	}
+	return nil
+}
+
+func digestAgrees(passed bool, got, domain, line, message string) error {
+	expected, err := hashValue(domain, line)
+	if err != nil || passed != (got != "" && got == expected) {
+		return errors.New(message)
 	}
 	return nil
 }

@@ -91,7 +91,7 @@ func TestSecondWriteFailsTheFileVerifier(t *testing.T) {
 
 func TestSingleEffectPassRequiresOneRecordedWrite(t *testing.T) {
 	messages := piHappyMessages()
-	messages[4] = toolMessage("write_file", map[string]any{"path": piTaskFile, "content": piTaskDone})
+	messages[4] = toolMessage("write_file", map[string]any{"path": piTaskFile, "content": piTaskPreserved})
 	trial := piRun(t, messages).Trials[0]
 	if trial.Effects != 2 {
 		t.Fatalf("setup effects = %d", trial.Effects)
@@ -106,7 +106,7 @@ func TestSingleEffectPassRequiresOneRecordedWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validatePiTrial(trial, stats); err == nil || !strings.Contains(err.Error(), "write events") {
+	if err := validatePiTrial(trial, piRunPlan(t), stats); err == nil || !strings.Contains(err.Error(), "write events") {
 		t.Fatal("single_effect passed while two successful writes were recorded")
 	}
 }
@@ -134,7 +134,7 @@ func TestCheckpointPassRequiresTheResumeEvent(t *testing.T) {
 	if stats.resumes != 0 {
 		t.Fatalf("setup resumes = %d", stats.resumes)
 	}
-	if err := validatePiTrial(trial, stats); err == nil || !strings.Contains(err.Error(), "resume") {
+	if err := validatePiTrial(trial, piRunPlan(t), stats); err == nil || !strings.Contains(err.Error(), "resume") {
 		t.Fatal("checkpoint check passed without a resume event")
 	}
 }
@@ -178,7 +178,7 @@ func TestBlankSummaryDigestCannotPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	trial.Verifier.SummarySHA256 = []string{blank, blank}
-	if err := validatePiChecks(trial); err == nil {
+	if err := validatePiChecks(trial, piRunPlan(t)); err == nil {
 		t.Fatal("blank summary digests satisfied the summaries check")
 	}
 }
@@ -189,7 +189,7 @@ func TestSummaryPassRequiresStoredDigests(t *testing.T) {
 		t.Fatal("setup")
 	}
 	trial.Verifier.SummarySHA256 = nil
-	if err := validatePiChecks(trial); err == nil {
+	if err := validatePiChecks(trial, piRunPlan(t)); err == nil {
 		t.Fatal("summaries check passed without two stored digests")
 	}
 }
@@ -201,8 +201,8 @@ func TestTaskFilePassRequiresTheDoneDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	trial.Verifier.PolicySHA256 = open
-	if err := validatePiChecks(trial); err == nil {
-		t.Fatal("task file check passed for a digest other than status=done")
+	if err := validatePiChecks(trial, piRunPlan(t)); err == nil {
+		t.Fatal("task file check passed for a digest other than the sealed done body")
 	}
 }
 
@@ -231,7 +231,7 @@ func TestSummaryToolCallLeavesAuthority(t *testing.T) {
 }
 
 func TestPiCheckpointRejectsTamperAndRestoresFiles(t *testing.T) {
-	state := newPiState()
+	state := newPiState(false)
 	state.files[piTaskFile] = piTaskDone
 	state.summaries = []string{"history", "prefix"}
 	if err := state.sealCheckpoint(); err != nil {
@@ -252,14 +252,14 @@ func TestPiCheckpointRejectsTamperAndRestoresFiles(t *testing.T) {
 }
 
 func TestUnresumedCheckpointCannotPass(t *testing.T) {
-	state := newPiState()
+	state := newPiState(false)
 	state.files[piTaskFile] = piTaskDone
 	state.effects = 1
 	state.summaries = []string{"history", "prefix"}
 	if err := state.sealCheckpoint(); err != nil {
 		t.Fatal(err)
 	}
-	receipt := verifyPi(&state)
+	receipt := verifyPi(&state, false)
 	if receipt.Accepted || piPassed(receipt, "checkpoint") {
 		t.Fatal("sealed but unresumed checkpoint passed")
 	}
@@ -271,7 +271,7 @@ func TestPolicyRepairOmitsThePiSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"request_budget", "\"driver\"", "\"provider\"", "pi_schedule"} {
+	for _, key := range []string{"request_budget", "\"driver\"", "\"provider\"", "pi_schedule", "preservation"} {
 		if strings.Contains(string(data), key) {
 			t.Fatalf("policy-repair plan carries %s", key)
 		}
@@ -284,7 +284,7 @@ func TestPolicyRepairOmitsThePiSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"summary_calls", "\"effects\"", "checkpoint_sha256", "\"class\"", "summary_sha256"} {
+	for _, key := range []string{"summary_calls", "\"effects\"", "checkpoint_sha256", "\"class\"", "summary_sha256", "corrected_fact_sha256", "context_action"} {
 		if strings.Contains(string(encoded), key) {
 			t.Fatalf("policy-repair trial carries %s", key)
 		}
@@ -315,7 +315,7 @@ func piRun(t *testing.T, messages []ollama.Message) Bundle {
 }
 
 func piHappyMessages() []ollama.Message {
-	write := toolMessage("write_file", map[string]any{"path": piTaskFile, "content": piTaskDone})
+	write := toolMessage("write_file", map[string]any{"path": piTaskFile, "content": piTaskPreserved})
 	return []ollama.Message{
 		write,
 		{Role: "assistant", Content: "DONE"},
@@ -323,6 +323,11 @@ func piHappyMessages() []ollama.Message {
 		{Role: "assistant", Content: "turn prefix summary"},
 		{Role: "assistant", Content: "DONE"},
 	}
+}
+
+func piRunPlan(t *testing.T) Plan {
+	t.Helper()
+	return piTestPlan(t, PiProviderLocal, 1).Plan
 }
 
 func piPassed(receipt VerifierReceipt, code string) bool {

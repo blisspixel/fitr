@@ -285,11 +285,11 @@ explicit. See [cleanup planning](docs/cleanup.md).
 | Local artifact observations | Bounded whole-file hashes for explicit mappings, source comparisons and change detection without runtime promotion | [Artifact binding](docs/artifact-binding.md) |
 | Agent interoperability | Read-only MCP 2026-07-28 candidate review and selected status, official SDK acceptance and an Agent Plugins 1.0.0 package | [Protocol and client limits](docs/agent-interop.md) |
 | Cleanup planning | Read-only bounded storage inventory and aged partial-download review candidates, with no inferred deletion authority | [Cleanup](docs/cleanup.md) |
-| Document context tasks | A sealed document pack at one operating window. `fitr run --context-tiers` collects it directly. Owned fitting collects it beside the battery and confirms it from a fresh plan when the role declares a usable-context floor. A battery record alone cannot clear that floor. A 64 KiB pack is not a 64000 usable-input token qualification; that receipt is separate and has no recorded native target. The live oversized-prompt refusal is not yet recorded | [Context quality](docs/context-quality.md), [usage](docs/usage.md#document-context-tasks) |
+| Document context tasks | A sealed document pack at one operating window. `fitr run --context-tiers` collects it directly. Owned fitting collects it beside the battery and confirms it from a fresh plan when the role declares a usable-context floor. A battery record alone cannot clear that floor. A 64 KiB pack is not a 64000 usable-input token qualification; that receipt is separate and has no recorded native target. The matched-condition receipt is separate again, is not submitted to a runtime, and has no recorded native target. The live oversized-prompt refusal is not yet recorded | [Context quality](docs/context-quality.md), [usage](docs/usage.md#document-context-tasks) |
 | Context experiments | A predeclared exploratory context plan with shared task seeds, point-specific allocation, required-equal factors, and replayable bundles | [Context experiment](docs/usage.md#context-experiment) |
 | Configuration tradeoffs | Conservative frontiers across sealed candidates, optional same-base conversion lineage, and no point-estimate winner when intervals overlap | [Quant experiment](docs/usage.md#quant-configuration-experiment), [calibration](docs/calibration.md) |
 | Fresh confirmation | A sealed candidate set, a fresh shared task seed, full paired runs, and confirmation only when requirements resolve and the objective separates | [Confirmation](docs/usage.md#fresh-configuration-confirmation) |
-| Validated work | Sealed workflow contracts, typed proof classes, per-trial timing, fixed policy-repair tools, and one pinned `pi-workspace` session with an independent file verifier. The session does not launch Pi. A Harbor reward is not the receipt | [Validated work](docs/usage.md#validated-work-experiment), [workload evidence](docs/workload-evidence.md) |
+| Validated work | Sealed workflow contracts, typed proof classes, per-trial timing, fixed policy-repair tools, and one pinned `pi-workspace` session with an independent file verifier. A new plan seals fact preservation against the file. A historical plan keeps its six checks. The session does not launch Pi. A Harbor reward is not the receipt | [Validated work](docs/usage.md#validated-work-experiment), [workload evidence](docs/workload-evidence.md) |
 
 The broader 1.0 thesis has seven evidence layers:
 
@@ -309,8 +309,10 @@ diagnoses, typed context and configuration experiments, a collectable
 document-task scorecard, fresh confirmation, one bounded validated-work
 contract, a pinned pi-workspace session adapter, and a serving-concurrency
 experiment are implemented. The serving result stays outside ordinary rankings.
-The pi-workspace adapter does not launch Pi. A recorded Pi process and a
-recorded native local-model trial of that session remain open. Broader causal
+The pi-workspace adapter does not launch Pi. A new plan checks the corrected
+port and the unresolved recall in the file, and a historical plan keeps its
+six checks. A recorded Pi process and a recorded native local-model trial of
+that session remain open. Broader causal
 explanation, model-set and soak experiments, and declared workload coverage
 remain pre-1.0 work. The [roadmap](ROADMAP.md) is the dependency order.
 
