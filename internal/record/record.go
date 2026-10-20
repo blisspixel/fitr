@@ -77,6 +77,10 @@ type Record struct {
 	// omitted when no receipt was attached, so records written before it
 	// stay byte-identical. A byte-pack phase does not fill this field.
 	ContextTokenAccount *ContextTokenAccount `json:"context_token_account,omitempty"`
+	// ContextTokenConditions is the matched-condition receipt. It is omitted
+	// when no receipt was attached, so records written before it stay
+	// byte-identical. A v1 token account does not fill this field.
+	ContextTokenConditions *ContextTokenConditions `json:"context_token_conditions,omitempty"`
 
 	Scorecard score.Scorecard `json:"scorecard"`
 
@@ -174,6 +178,9 @@ func (r *Record) ValidateEvidenceContract() error {
 	}
 	if r.ContextTokenAccount != nil && r.SchemaVersion < EvidenceSchemaVersion {
 		return errors.New("legacy result cannot carry a token account")
+	}
+	if r.ContextTokenConditions != nil && r.SchemaVersion < EvidenceSchemaVersion {
+		return errors.New("legacy result cannot carry token conditions")
 	}
 	if r.SchemaVersion < EvidenceSchemaVersion {
 		return nil

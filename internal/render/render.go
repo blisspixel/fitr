@@ -514,6 +514,7 @@ func (d *textDisplay) Result(sc score.Scorecard, m Meta) {
 	d.resultCapacity(w, m, width)
 	d.resultContextTasks(w, m.Analysis, width)
 	d.resultTokenAccount(w, m.Analysis, width)
+	d.resultTokenConditions(w, m.Analysis, width)
 	d.resultAnalysis(w, m, sc.Model, width)
 	d.resultEvidenceNotes(w, m, width)
 	fmt.Fprintln(w, rule)

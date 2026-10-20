@@ -348,6 +348,13 @@ func TestIsolationSkipNamesTheRecordedReason(t *testing.T) {
 	if !strings.Contains(agent, "install bubblewrap") || !strings.Contains(agent, "isolated execution is unavailable") {
 		t.Fatalf("agent skip = %q", agent)
 	}
+	recorded := Score(Measured{
+		Model: "test", CodePlanned: true,
+		CodeSkipDetail: "sandbox helper exited",
+	}, lappy(t)).Needs["coding"].Why
+	if !strings.Contains(recorded, "sandbox helper exited") || strings.Contains(recorded, "install bubblewrap") {
+		t.Fatalf("recorded reason = %q", recorded)
+	}
 }
 
 func TestClusteredPoolCannotHideADeadFamily(t *testing.T) {

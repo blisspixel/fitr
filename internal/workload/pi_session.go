@@ -25,17 +25,20 @@ type piState struct {
 	summaryCalls int
 }
 
-func newPiState() piState {
+func newPiState(preserved bool) piState {
 	note, _ := hashValue("fitr.workload.protected.v1", piNoteBody)
-	return piState{
-		files: map[string]string{piNoteFile: piNoteBody, piTaskFile: piTaskOpen},
-		seen:  map[string]int{}, noteSHA: note,
+	task := piTaskOpen
+	files := map[string]string{piNoteFile: piNoteBody, piTaskFile: task}
+	if preserved {
+		files[piTaskFile] = piTaskPreservedOpen
+		files[piCorrectionFile] = piCorrectionBody
 	}
+	return piState{files: files, seen: map[string]int{}, noteSHA: note}
 }
 
 func (sealed *SealedPlan) runPiTrial(ctx context.Context, backend llm.Backend, index int) (Trial, error) {
 	recorder := newEventRecorder()
-	state := newPiState()
+	state := newPiState(sealed.Plan.PreservesFacts())
 	recorder.add(EventScenarioReleased, "harness", "released", "", map[string]any{
 		"workflow": PiWorkflowID, "version": WorkflowVersion, "trial": index,
 	})
@@ -52,7 +55,7 @@ func (sealed *SealedPlan) runPiTrial(ctx context.Context, backend llm.Backend, i
 	if recorder.err != nil {
 		return Trial{}, recorder.err
 	}
-	receipt := verifyPi(&state)
+	receipt := verifyPi(&state, sealed.Plan.PreservesFacts())
 	return sealed.finishPiTrial(recorder, execution, receipt, state, index)
 }
 
@@ -81,14 +84,15 @@ func (sealed *SealedPlan) finishPiTrial(recorder *eventRecorder, execution workf
 
 func executePiSession(ctx context.Context, backend llm.Backend, plan Plan, state *piState, recorder *eventRecorder) (workflowExecution, error) {
 	execution := workflowExecution{}
-	messages := []ollama.Message{{Role: "user", Content: piPrompt}}
+	ordinary, summary, reopen := piSessionPrompts(plan)
+	messages := []ollama.Message{{Role: "user", Content: ordinary}}
 	if !piOrdinaryTurns(ctx, backend, plan, state, recorder, &execution, &messages) {
 		return execution, nil
 	}
-	if !piSummaryTurns(ctx, backend, plan, state, recorder, &execution, messages) {
+	if !piSummaryTurns(ctx, backend, plan, state, recorder, &execution, messages, summary) {
 		return execution, nil
 	}
-	return piReopenTurn(ctx, backend, plan, state, recorder, execution)
+	return piReopenTurn(ctx, backend, plan, state, recorder, execution, ordinary, reopen)
 }
 
 func piOrdinaryTurns(ctx context.Context, backend llm.Backend, plan Plan, state *piState, recorder *eventRecorder, execution *workflowExecution, messages *[]ollama.Message) bool {
@@ -106,9 +110,9 @@ func piOrdinaryTurns(ctx context.Context, backend llm.Backend, plan Plan, state 
 	return true
 }
 
-func piSummaryTurns(ctx context.Context, backend llm.Backend, plan Plan, state *piState, recorder *eventRecorder, execution *workflowExecution, messages []ollama.Message) bool {
+func piSummaryTurns(ctx context.Context, backend llm.Backend, plan Plan, state *piState, recorder *eventRecorder, execution *workflowExecution, messages []ollama.Message, summaryPrompt string) bool {
 	for index := 1; index <= piSummaryCalls; index++ {
-		prompt := piSummaryPrompt
+		prompt := summaryPrompt
 		if index > 1 && len(state.summaries) > 0 {
 			prompt += "\n\nPrevious summary:\n" + state.summaries[len(state.summaries)-1]
 		}
@@ -120,7 +124,7 @@ func piSummaryTurns(ctx context.Context, backend llm.Backend, plan Plan, state *
 	return true
 }
 
-func piReopenTurn(ctx context.Context, backend llm.Backend, plan Plan, state *piState, recorder *eventRecorder, execution workflowExecution) (workflowExecution, error) {
+func piReopenTurn(ctx context.Context, backend llm.Backend, plan Plan, state *piState, recorder *eventRecorder, execution workflowExecution, ordinary, reopen string) (workflowExecution, error) {
 	if err := state.sealCheckpoint(); err != nil {
 		return execution, err
 	}
@@ -132,11 +136,11 @@ func piReopenTurn(ctx context.Context, backend llm.Backend, plan Plan, state *pi
 		return execution, err
 	}
 	recorder.add(EventCheckpointResumed, "harness", "resumed", "", nil)
-	messages := []ollama.Message{{Role: "user", Content: piPrompt}}
+	messages := []ollama.Message{{Role: "user", Content: ordinary}}
 	for _, summary := range state.summaries {
 		messages = append(messages, ollama.Message{Role: "user", Content: "Summary:\n" + summary})
 	}
-	messages = append(messages, ollama.Message{Role: "user", Content: piReopenPrompt})
+	messages = append(messages, ollama.Message{Role: "user", Content: reopen})
 	message, ok := piModelRequest(ctx, backend, plan, state, recorder, &execution, messages, "", true)
 	if !ok {
 		return execution, nil

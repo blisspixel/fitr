@@ -212,6 +212,19 @@ model; `docs/release-acceptance.md` owns acceptance receipts; one `docs/<topic>.
 owns each subsystem. Do not add a second document for a topic that already has
 an owner, and do not let the roadmap make planned behavior read as shipped.
 
+Before closing an issue, or merging a change whose closing keywords would
+close it, comment on that issue. Say what changed, link the commit or pull
+request, and say which checks ran and what they showed. Link a longer receipt
+instead of pasting logs. Keep unit and CI results, native measurements,
+release artifacts, and named-host acceptance distinct. A merge does not prove
+a release, a deployment, or live acceptance. `docs/release-acceptance.md`
+holds a release receipt. Do not start a second evidence store.
+
+If acceptance is still unmet, leave the issue open. A narrower close needs
+the scope change written down and a link to the issue that still carries the
+remaining work. A duplicate or not-planned close names the canonical issue or
+decision and does not claim the work shipped.
+
 A finding that outlives the session belongs in the issue tracker, not in a
 summary. If you find a defect while doing something else, file it with enough
 detail to act on months later, then carry on with the task you were given.

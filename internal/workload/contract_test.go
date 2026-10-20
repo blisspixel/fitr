@@ -22,6 +22,16 @@ func TestEvidenceClassesDoNotPromoteWorkerOrProtocolSuccess(t *testing.T) {
 	}
 }
 
+func TestContractSupportRejectsNilAndUnknownWorkflow(t *testing.T) {
+	if (*WorkflowContract)(nil).SupportedForWorkflow(WorkflowID) {
+		t.Fatal("a nil contract supported a workflow")
+	}
+	contract := policyRepairContract()
+	if contract.SupportedForWorkflow("nope") {
+		t.Fatal("an unknown workflow accepted the policy-repair contract")
+	}
+}
+
 func TestWorkloadContractCannotDriftEvenWithRehashedPlan(t *testing.T) {
 	sealed := workloadTestPlan(t, 1)
 	sealed.Plan.Contract.Authority = "host-filesystem"

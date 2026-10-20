@@ -53,6 +53,9 @@ type Plan struct {
 	Provider      string           `json:"provider,omitempty"`
 	RequestBudget int              `json:"request_budget,omitempty"`
 	PiSchedule    *SessionSchedule `json:"pi_schedule,omitempty"`
+	// Preservation is set only on a new pi-workspace plan. A historical plan
+	// leaves it empty, so that plan's bytes and its six checks stay valid.
+	Preservation *PreservationSchedule `json:"preservation,omitempty"`
 }
 
 // SessionDriver is the harness identity a pi-workspace plan seals before any
@@ -141,6 +144,11 @@ type VerifierReceipt struct {
 	// Summary digests are the observation behind the summaries check.
 	// Empty on policy-repair receipts, so those signed bytes stay stable.
 	SummarySHA256 []string `json:"summary_sha256,omitempty"`
+	// Fact digests and the context action are observations behind the
+	// preservation checks. Empty on every receipt that did not seal them.
+	CorrectedFactSHA256     string `json:"corrected_fact_sha256,omitempty"`
+	UnresolvedFailureSHA256 string `json:"unresolved_failure_sha256,omitempty"`
+	ContextAction           string `json:"context_action,omitempty"`
 }
 
 type Trial struct {

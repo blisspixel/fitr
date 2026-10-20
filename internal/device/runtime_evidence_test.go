@@ -2,12 +2,14 @@ package device
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/blisspixel/fitr/internal/listen"
 	"github.com/blisspixel/fitr/internal/ollama"
 )
 
@@ -198,6 +200,13 @@ func TestObserveOllamaConfigDoesNotTreatProcessEnvAsTheDaemon(t *testing.T) {
 // can pin flash attention where no shell fitr can read has ever seen it.
 // Publishing a shell value, or a value from a log no listener has open, put
 // a setting the daemon never had into the comparability key.
+func TestRemoteEndpointIsUnobservedConfiguration(t *testing.T) {
+	got, err := readListenerEnviron("http://example.test:11434")
+	if got != nil || !errors.Is(err, listen.ErrUnobserved) {
+		t.Fatalf("remote listener config = %v %v", got, err)
+	}
+}
+
 func TestServerLogConfigNeverFallsBackToThisProcessEnvironment(t *testing.T) {
 	root := t.TempDir()
 	var path string

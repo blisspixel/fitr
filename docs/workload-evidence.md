@@ -39,9 +39,22 @@ Compaction time is only the checkpoint seal itself, so summary generation is
 not counted twice.
 
 The independent verifier reads the virtual workspace, not the model's `DONE`.
-Acceptance requires `TASK.txt` written once to `status=done`, an unchanged
-`NOTE.txt`, no authority breach, both summary digests, and a reopened
-checkpoint. A blank summary is absent evidence and is not hashed into a digest
+A plan sealed before fact preservation keeps that contract: `TASK.txt` written
+once to `status=done`, an unchanged `NOTE.txt`, no authority breach, both
+summary digests, and a reopened checkpoint. A new plan seals
+`fitr.pi-preservation.v1` beside it. The workspace starts with
+`CORRECTION.txt` (`port=8443` and `recall=unresolved`) and an open task that
+still says `port=8080`. The prompts name the correction file and do not carry
+either port. Acceptance then also requires the single `port=8443` line and the
+`recall=unresolved` line in `TASK.txt`, and `context_action` equal to
+`model_generated_summary` only when both summary calls completed and the
+checkpoint reopened. A summary that mentions the port does not pass
+`corrected_fact`. A resolved recall does not pass `unresolved_failure`.
+Writing `CORRECTION.txt` leaves authority. The budget stays seven, and a
+second reopen cycle is not sealed. A historical plan that carries the new
+field, or a new plan that omits it, fails validation.
+
+A blank summary is absent evidence and is not hashed into a digest
 the check can accept. A digest of the empty string cannot pass validation.
 A second write fails `single_effect` even when the content is unchanged.
 Validation re-derives the
@@ -250,13 +263,14 @@ It also proves that already-committed side effects were not duplicated.
 
 The current tool-loop `Compacted` field observes only that reported prompt
 tokens later became smaller. That can reflect truncation, accounting changes,
-runtime policy, or deliberate compaction. The safe name is `observed
-prompt-token contraction` until an explicit context-action receipt and a
-state-preservation verifier exist.
+runtime policy, or deliberate compaction. The safe name for that field remains
+`observed prompt-token contraction`. The pi-workspace preservation schedule is
+a separate receipt. It does not reinterpret `Compacted`.
 
-Dynamic-context tests should distinguish relevant facts, distractors, stale
-and current facts, late-arriving facts, context actions, and verified
-preservation. A context that fits is not automatically a context that helps.
+The sealed pi-workspace schedule distinguishes the corrected port, the
+unresolved recall, and one model-generated summary action. It does not cover
+late-arriving facts, a second compaction cycle, or a context that merely fits.
+A context that fits is not automatically a context that helps.
 
 ## Operational evidence
 
