@@ -33,11 +33,10 @@ Each role has its own requirements and preferences. A coding agent, daily
 driver and classifier need different fittings. Quality requirements come
 first; speed and resource preferences help choose among models that meet them.
 See [personal fitting](docs/personal-fitting.md) for `fitr tailor`, usable
-context, compaction, and harness scorecards. 0.11.7 stores a coding
-extraction miss as INCONCLUSIVE. A trial that never started stays SKIP. A
-sealed policy v8 card keeps the SKIP tag, and the plain column prints the
-new state as INCL. The live oversized-prompt, Pi process, and native
-local-model checks remain open.
+context, compaction, and harness scorecards. 0.11.8 seals fact preservation
+on new pi-workspace plans and a matched-condition token receipt that is not
+submitted to a runtime. A historical pi plan keeps its six checks. The live
+oversized-prompt, Pi process, and native local-model checks remain open.
 
 <img src="docs/assets/top.svg?v=0.11.3" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
@@ -97,7 +96,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.11.7" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.11.8" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 
