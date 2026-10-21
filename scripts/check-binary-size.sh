@@ -33,6 +33,8 @@ set -eu
 # matched-condition token receipt added 103,936 bytes on the 2026-10-20
 # dist job: 16,754,688 -> 16,858,624.
 # No new Go dependency was added. The same headroom stays.
+# Go 1.27.3 is the toolchain after GO-2026-6809 in crypto/x509. The cap
+# stays at this 1.27.2 measurement until a dist job records a different size.
 # CI and releases use this single measured gate.
 max_bytes=16897448
 dist_dir="${1:-dist}"

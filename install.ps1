@@ -111,7 +111,7 @@ if ($gotBinary) {
     }
     $go = Get-Command go -ErrorAction SilentlyContinue
     if (-not $go) {
-        Stop-Fitr "download failed" $url "no GitHub release yet and no Go on PATH; install Go 1.27.2+ or clone and 'go install ./cmd/fitr'"
+        Stop-Fitr "download failed" $url "no GitHub release yet and no Go on PATH; install Go 1.27.3+ or clone and 'go install ./cmd/fitr'"
     }
     Write-Host "  no release binary; building with Go -> $BinDir"
     $prevGobin = $env:GOBIN
@@ -121,7 +121,7 @@ if ($gotBinary) {
         if ($LASTEXITCODE -ne 0) { throw "go install exited $LASTEXITCODE" }
     } catch {
         $env:GOBIN = $prevGobin
-        Stop-Fitr "go install failed" $_.Exception.Message "needs Go 1.27.2+; or git clone https://github.com/$Repo and 'go install ./cmd/fitr'"
+        Stop-Fitr "go install failed" $_.Exception.Message "needs Go 1.27.3+; or git clone https://github.com/$Repo and 'go install ./cmd/fitr'"
     }
     $env:GOBIN = $prevGobin
 }

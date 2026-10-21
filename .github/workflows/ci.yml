@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.27.2' }
+        with: { go-version: '1.27.3' }
       # No Ollama needed: every test here is pure logic. The tests that would
       # need a model are the ones you run locally against your own hardware.
       - run: gofmt -w .
@@ -81,7 +81,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.27.2' }
+        with: { go-version: '1.27.3' }
       - run: make dist
       # Deterministic, not reproducible. This rebuilds the same target in the
       # same job, on the same runner, from the same checkout and toolchain, so
@@ -133,7 +133,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.27.2' }
+        with: { go-version: '1.27.3' }
       - name: repository coverage gate
         run: sh scripts/check-coverage.sh 80
 
@@ -174,7 +174,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.27.2' }
+        with: { go-version: '1.27.3' }
       # cp315 wheels. pydantic 2.14.1 requires pydantic-core 2.50.1, which
       # publishes a CPython 3.15 build. Checked on PyPI 2026-10-19. 3.15.0
       # is the current 3.15 release, same pin as reference-python.
@@ -334,7 +334,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.27.2' }
+        with: { go-version: '1.27.3' }
       - name: reachable Go vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
       - name: terminal renderer fuzz smoke
@@ -367,6 +367,8 @@ jobs:
         run: go test ./internal/reference -run='^$' -fuzz=FuzzDecodeVerifier -fuzztime=20000x -parallel=4
       - name: token condition plan fuzz smoke
         run: go test ./internal/contextquality -run='^$' -fuzz=FuzzDecodeTokenConditionPlan -fuzztime=20000x -parallel=4
+      - name: context overflow parser fuzz smoke
+        run: go test ./internal/ollama -run='^$' -fuzz=FuzzParseContextOverflow -fuzztime=20000x -parallel=4
 
       - name: static analysis
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0

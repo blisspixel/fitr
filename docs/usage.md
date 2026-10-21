@@ -27,7 +27,7 @@ release's `SHA256SUMS` file. A missing checksum tool, manifest, or asset entry
 is an error. `FITR_NO_VERIFY=1` is an explicit unsafe opt-out for environments
 where verification is impossible.
 
-From source (Go 1.27.2+):
+From source (Go 1.27.3+):
 
 ```bash
 git clone https://github.com/blisspixel/fitr && cd fitr
@@ -812,7 +812,7 @@ confirmation uses a new plan. `fitr role confirm` does not collect it.
 
 A model served by Ollama's MLX runner is refused before the plan is sealed:
 that runner silently reduces the output reserve the qualification rests on.
-Native acceptance for an oversized-prompt refusal still needs a real runtime.
+One Go-template refusal on Ollama 0.40.4 is recorded in [context quality](context-quality.md). The Jinja half is still open.
 
 This is not [the context experiment](#context-experiment). That command maps
 capacity and performance across requested windows and cannot certify a winner.

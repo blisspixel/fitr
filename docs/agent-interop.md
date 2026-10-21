@@ -225,7 +225,7 @@ separate [native raw-wire smoke](../scripts/mcp-acceptance.py) checks the child'
 exit status. SDK acceptance does not test cancellation races or every protocol
 feature; existing Go protocol fixtures cover those narrower server contracts.
 
-Run from the repository using Go 1.27.2. Official SDK acceptance uses CPython
+Run from the repository using Go 1.27.3. Official SDK acceptance uses CPython
 3.15.0. cffi, pydantic-core, rpds-py, and pywin32 are locked to their cp315
 wheels. cryptography stays on the 50.0.1 abi3 wheels, which the regular
 CPython 3.15 build selects. pydantic 2.14.1 requires pydantic-core 2.50.1;

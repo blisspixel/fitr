@@ -16,7 +16,7 @@ phase. Personal roles and decision specifications consume this scorecard via
 Owned fitting collects the phase beside the battery and confirms the byte
 floor from a fresh plan when the role declares that floor and the operator
 passes `--context-tiers`. `fitr role confirm` does not collect the pack.
-The live oversized-prompt refusal remains open. See
+One Go-template refusal is recorded below. The Jinja half remains open. See
 [Remaining connected acceptance](#remaining-connected-acceptance).
 
 ## What the document pack measures
@@ -158,14 +158,26 @@ still carry their own diagnostics. None of these become model-quality zeroes.
 
 The runtime refusing an oversized prompt is none of those. It is the behavior
 the pack is built to elicit, and it is recognized specifically rather than as
-any HTTP 400: llama.cpp answers with `exceed_context_size_error` carrying the
-prompt size and the per-slot context it enforced, and Ollama copies that body
-verbatim into its own error string, so both layers are decoded strictly and
-anything that does not match exactly stays an ordinary transport fault. A
-recognized refusal is a context limit, which fails its own cell. Read as
-transport it was unavailable instead, and one unavailable cell suppresses the
-verified prefix for the whole phase, so a model that refused correctly lost
-the evidence its smaller tiers had already earned.
+any HTTP 400. llama.cpp answers with `exceed_context_size_error` carrying
+`n_prompt_tokens` and the per-slot `n_ctx` it enforced. When Ollama forwards
+that JSON, both layers are decoded strictly. Ollama 0.40.4 (tag commit
+`45e6011815c74acde6a346512856b69dd79dd22b`) does not forward the JSON.
+`extractLlamaServerErrorMessage` keeps the runner message, and the HTTP body
+is `{"error":"<message>"}`. That message is a measured refusal only when it is
+exactly the sentence llama.cpp commit
+`339f3242c761f16c27e5ffcde1d35dcc31933a55` formats in
+`tools/server/server-context.cpp` from `n_tokens` and `n_ctx`:
+`request (%d tokens) exceeds the available context size (%d tokens), try increasing it`.
+The neighboring sentence
+`input (%d tokens) is larger than the max context size (%d tokens). skipping`
+is a different branch and stays a transport fault. A decoded JSON document of
+another type stays a transport fault even when its message text contains the
+sentence. A leading zero, a zero count, an overflowing count, or extra words
+stay a transport fault too. A recognized refusal is a context limit, which
+fails its own cell. Read as transport it was unavailable instead, and one
+unavailable cell suppresses the verified prefix for the whole phase, so a
+model that refused correctly lost the evidence its smaller tiers had already
+earned.
 
 The reported window is the runtime's per-slot context, which is the server's
 total divided by its slot count rather than the figure it was started with.
@@ -263,12 +275,32 @@ the exploration schedule. Fresh confirmation seals a new schedule from its own
 seed and will not reuse the exploration digest. A battery record alone cannot
 clear the floor. `fitr role confirm` does not collect the pack. Missing
 accounting blocks qualification, which the reserve gate already enforces.
-The live oversized-prompt check remains the open exit for this step. See the
-[roadmap](../ROADMAP.md#immediate-build-order).
+The Jinja half of the oversized-prompt check remains the open exit for this
+step. See the [roadmap](../ROADMAP.md#immediate-build-order).
+
+One Go-template run is recorded. On 2026-10-20, against Ollama 0.40.4 that
+was already running, `fitr run llama2-uncensored:latest --ctx 2048
+--context-tiers 2048,8192` kept the sealed window at 2048 tokens, the reserve
+at 128, and the payloads at 2048 and 8192 bytes. The phase finished in 9.0s.
+The effective context was reported as 2048 and verified. All 18 cells reached
+a terminal outcome and none were unavailable. The 2048-byte tier was answered
+and failed `invalid_json` on every cell, so the phase has no verified prefix.
+The 8192-byte tier was `context_limit` on every cell, and those observations
+retain no answer. Immediately before that run, `/api/show` for the same model
+returned a 55-character Modelfile template with Go markers and no Jinja
+markers. A separate `/api/generate` of a 40000-character prompt, with
+`truncate` and `shift` set false and `num_ctx` 2048, returned HTTP 400
+`{"error":"request (8023 tokens) exceeds the available context size (2048 tokens), try increasing it"}`.
+The signed run record stores the dispositions, not that HTTP body, and it does
+not store the template text. This does not measure a Jinja template.
+`--context-tiers` does not target llama-server. A failing `invalid_json` tier
+is not a verified prefix. The run does not certify Pi, a native local-model
+trial, or a usable-input token target.
 
 Native acceptance must show that an oversized prompt is refused without
-shrinking the document, window or reserve. Two runtime details shape that test.
-The refusal is raised by llama-server, not by Ollama's own pre-flight, because
+shrinking the document, window or reserve, on both template kinds. Two runtime
+details shape that test. The refusal is raised by llama-server, not by
+Ollama's own pre-flight, because
 `truncate:false` bypasses the Go-side length check entirely; the classifier
 above matches that overflow error specifically rather than any HTTP 400, and
 acceptance should assert the resulting context-limit disposition rather than a

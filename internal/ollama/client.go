@@ -267,13 +267,17 @@ func AsContextOverflow(err error) (*ContextOverflow, bool) {
 	return nil, false
 }
 
-// parseContextOverflow reads llama.cpp's typed overflow refusal.
+// parseContextOverflow reads one of llama.cpp's two exact overflow receipts.
 //
-// Ollama does not interpret this error. It reads the runner's body verbatim
-// into api.StatusError and may append its own out-of-memory line, so the
-// runner's JSON arrives nested inside Ollama's error string rather than as a
-// field of it. Both layers are decoded strictly and anything that does not
-// match exactly is left to the caller as an ordinary transport error, so a
+// The typed receipt is exceed_context_size_error with n_prompt_tokens and a
+// per-slot n_ctx. Ollama nests that JSON inside its error string and may
+// append a runner status line. Both layers are decoded strictly.
+//
+// When that document does not decode, the line may instead be the runner's
+// message sentence. That sentence is accepted only by
+// parseContextOverflowSentence. A decoded JSON document is never scanned for
+// it: a different error type stays a transport error even if its message
+// text contains the same words. Anything else stays a transport error, so a
 // changed upstream shape degrades to today's behavior instead of inventing a
 // window.
 func parseContextOverflow(status int, body string) (*ContextOverflow, bool) {
@@ -287,7 +291,7 @@ func parseContextOverflow(status int, body string) (*ContextOverflow, bool) {
 	if decodesStrictly([]byte(body), &envelope) && envelope.Error != "" {
 		nested = strings.TrimSpace(envelope.Error)
 	}
-	// statusErrorMessage may append a runner status line after the JSON.
+	// statusErrorMessage may append a runner status line after the receipt.
 	if cut := strings.IndexByte(nested, '\n'); cut >= 0 {
 		nested = strings.TrimSpace(nested[:cut])
 	}
@@ -299,7 +303,7 @@ func parseContextOverflow(status int, body string) (*ContextOverflow, bool) {
 		} `json:"error"`
 	}
 	if !decodesStrictly([]byte(nested), &runner) {
-		return nil, false
+		return parseContextOverflowSentence(nested)
 	}
 	if runner.Error.Type != contextOverflowErrorType {
 		return nil, false

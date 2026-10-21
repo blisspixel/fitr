@@ -35,8 +35,9 @@ first; speed and resource preferences help choose among models that meet them.
 See [personal fitting](docs/personal-fitting.md) for `fitr tailor`, usable
 context, compaction, and harness scorecards. 0.11.8 seals fact preservation
 on new pi-workspace plans and a matched-condition token receipt that is not
-submitted to a runtime. A historical pi plan keeps its six checks. The live
-oversized-prompt, Pi process, and native local-model checks remain open.
+submitted to a runtime. A historical pi plan keeps its six checks. The
+Jinja half of the oversized-prompt check, the Pi process, and the native
+local-model check remain open.
 
 <img src="docs/assets/top.svg?v=0.11.3" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
@@ -284,7 +285,7 @@ explicit. See [cleanup planning](docs/cleanup.md).
 | Local artifact observations | Bounded whole-file hashes for explicit mappings, source comparisons and change detection without runtime promotion | [Artifact binding](docs/artifact-binding.md) |
 | Agent interoperability | Read-only MCP 2026-07-28 candidate review and selected status, official SDK acceptance and an Agent Plugins 1.0.0 package | [Protocol and client limits](docs/agent-interop.md) |
 | Cleanup planning | Read-only bounded storage inventory and aged partial-download review candidates, with no inferred deletion authority | [Cleanup](docs/cleanup.md) |
-| Document context tasks | A sealed document pack at one operating window. `fitr run --context-tiers` collects it directly. Owned fitting collects it beside the battery and confirms it from a fresh plan when the role declares a usable-context floor. A battery record alone cannot clear that floor. A 64 KiB pack is not a 64000 usable-input token qualification; that receipt is separate and has no recorded native target. The matched-condition receipt is separate again, is not submitted to a runtime, and has no recorded native target. The live oversized-prompt refusal is not yet recorded | [Context quality](docs/context-quality.md), [usage](docs/usage.md#document-context-tasks) |
+| Document context tasks | A sealed document pack at one operating window. `fitr run --context-tiers` collects it directly. Owned fitting collects it beside the battery and confirms it from a fresh plan when the role declares a usable-context floor. A battery record alone cannot clear that floor. A 64 KiB pack is not a 64000 usable-input token qualification; that receipt is separate and has no recorded native target. The matched-condition receipt is separate again, is not submitted to a runtime, and has no recorded native target. One Go-template run on Ollama 0.40.4 recorded an 8192-byte tier as context_limit without lowering the window or reserve. The Jinja template check is not recorded | [Context quality](docs/context-quality.md), [usage](docs/usage.md#document-context-tasks) |
 | Context experiments | A predeclared exploratory context plan with shared task seeds, point-specific allocation, required-equal factors, and replayable bundles | [Context experiment](docs/usage.md#context-experiment) |
 | Configuration tradeoffs | Conservative frontiers across sealed candidates, optional same-base conversion lineage, and no point-estimate winner when intervals overlap | [Quant experiment](docs/usage.md#quant-configuration-experiment), [calibration](docs/calibration.md) |
 | Fresh confirmation | A sealed candidate set, a fresh shared task seed, full paired runs, and confirmation only when requirements resolve and the objective separates | [Confirmation](docs/usage.md#fresh-configuration-confirmation) |
