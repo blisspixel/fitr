@@ -4,10 +4,55 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-10-21. The 0.11.9 receipt below covers its exact tagged
+Last updated: 2026-10-21. The 0.11.10 receipt below covers its exact tagged
 revision and downloaded assets. Historical sections retain their original
 candidates, including older metadata-only source receipts. 0.11.4 shipped
 without a measurement receipt in this file.
+
+### 0.11.10 release receipt
+
+Release [0.11.10](https://github.com/blisspixel/fitr/releases/tag/v0.11.10)
+is bound to commit `fb507ac70db3a5ecb84d525099a770bda51775e0`.
+[Main CI 39541818872](https://github.com/blisspixel/fitr/actions/runs/39541818872)
+passed with **80.85% aggregate coverage** (30298/37475 statements). The
+[release workflow 39542422661](https://github.com/blisspixel/fitr/actions/runs/39542422661)
+measured **80.85%** (30299/37475 statements) and repeated race, lint with
+golangci-lint v2.14.0, govulncheck v1.7.0 on Go 1.27.3 with no vulnerabilities
+found, sixteen fuzz smoke targets including the GGUF metadata reader seeded
+with the published recurrent-layer prefix, the 1600-line cap, six binary
+builds, deterministic rebuild, and all three installer jobs. It uploaded ten
+verified assets into the owner draft. The owner published the release on
+October 21 UTC. The tag is annotated and SSH-signed.
+
+[Native acceptance 39541921041](https://github.com/blisspixel/fitr/actions/runs/39541921041)
+passed the installed-binary loop on Linux amd64 and macOS arm64 against
+checksum-pinned llama-server b10700 and both pinned GGUF artifacts. Each
+run recorded result_count=4 and status=pass. The installed binary reported
+`fitr 0.11.10`.
+
+All ten downloaded public assets passed the checksum manifest. The Windows
+amd64 executable is **16,862,208 bytes**, below the shared **16,897,448-byte**
+ceiling, and was built with go1.27.3 from the tagged revision with
+`vcs.modified=false`. It reports `fitr 0.11.10`. The release build checked
+that the Linux amd64 binary prints the same version. Public Windows SHA-256:
+`af94a9e06d80c90807e8f151129327da221cc60fd37790d11d13bf4fc2ba7d76`.
+Manifest SHA-256:
+`5072b1c16802edefd2128717493c543f443819add90fc052b28da4219269c1be`.
+
+The retained header is the first 2048 bytes of a published Qwen3.5 GGUF.
+Its boolean array matches llama.cpp
+`4a89937354190cef5a97baf8eeb17336105eb72d`: 18 recurrent decoder layers,
+6 full-attention decoder layers, and one non-recurrent prediction slot.
+Fixed state is 20201472 bytes and stays constant as context grows. Source
+screening of the truncated prefix stays unresolved. The prediction-slot KV
+tensor, sequence planes, and a measured resident total stay outside the
+projection. Native acceptance did not measure that resident total. This
+receipt does not accept the Jinja half of the oversized-prompt check, a
+recorded Pi process, a native local-model pi-workspace trial, or an
+overnight pack's wall time, disk, and resolved count. It does not accept a
+rendered qualified selection or an allowlisted benchmark click. It does not
+accept native Phoenix model-loading. It does not add a catalog, a delete
+path, Streamable HTTP, or A2A. It is not 1.0.
 
 ### 0.11.9 release receipt
 
