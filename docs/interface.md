@@ -110,7 +110,7 @@ and disabled when it obscures measurements or causes avoidable CPU use.
 
 [tcell v3](https://github.com/gdamore/tcell/tree/v3.4.2) is the terminal
 adapter. It provides cell rendering, input, resize events, and restoration on
-the repository's Go 1.27.2 floor, including native Windows resize handling. A
+the repository's Go 1.27.3 floor, including native Windows resize handling. A
 renderer-neutral canvas and pure state reducer sit above it; fitr does not use
 tcell's widget layer. This keeps the interaction contract testable without a
 terminal and reusable by later native clients.

@@ -167,10 +167,10 @@ elif have go; then
   gover=$VERSION
   echo "  no release binary; building with Go -> $BIN_DIR"
   GOBIN="$BIN_DIR" go install "github.com/$REPO/cmd/fitr@$gover" || \
-    err "go install failed" "needs Go 1.27.2+" "git clone https://github.com/$REPO && cd fitr && make install"
+    err "go install failed" "needs Go 1.27.3+" "git clone https://github.com/$REPO && cd fitr && make install"
 else
   err "could not fetch a binary" "$url" \
-    "install curl (or Go 1.27.2+), or clone and 'make install'"
+    "install curl (or Go 1.27.3+), or clone and 'make install'"
 fi
 
 echo "  installed: $BIN_DIR/$bin"
