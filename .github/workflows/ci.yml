@@ -367,6 +367,8 @@ jobs:
         run: go test ./internal/reference -run='^$' -fuzz=FuzzDecodeVerifier -fuzztime=20000x -parallel=4
       - name: token condition plan fuzz smoke
         run: go test ./internal/contextquality -run='^$' -fuzz=FuzzDecodeTokenConditionPlan -fuzztime=20000x -parallel=4
+      - name: context overflow parser fuzz smoke
+        run: go test ./internal/ollama -run='^$' -fuzz=FuzzParseContextOverflow -fuzztime=20000x -parallel=4
 
       - name: static analysis
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0

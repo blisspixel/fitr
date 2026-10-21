@@ -2,8 +2,10 @@ package ollama
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -44,9 +46,9 @@ func TestContextOverflowIsReadThroughOllamasErrorEnvelope(t *testing.T) {
 	}
 }
 
-// Anything that is not exactly this refusal stays an ordinary transport error.
-// A changed upstream shape must degrade to the previous behavior rather than
-// produce a window fitr never observed.
+// Anything that is not one of the two exact receipts stays an ordinary
+// transport error. A changed upstream shape must degrade to the previous
+// behavior rather than produce a window fitr never observed.
 func TestOnlyTheExactOverflowRefusalIsRecognized(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -73,6 +75,117 @@ func TestOnlyTheExactOverflowRefusalIsRecognized(t *testing.T) {
 		},
 		{name: "not json", status: 400, body: "the request exceeds the available context size"},
 		{name: "empty", status: 400, body: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, ok := parseContextOverflow(test.status, test.body); ok {
+				t.Fatalf("%q was read as a measured overflow refusal", test.body)
+			}
+		})
+	}
+}
+
+// Ollama 0.40.4 returned this sentence, and only this sentence, for an
+// oversized generate with truncate and shift disabled. The integers are the
+// runner's prompt-token count and per-slot window. Prose that lacks them is
+// covered by TestOnlyTheExactOverflowRefusalIsRecognized and must stay closed.
+const ollamaOverflowSentence = "request (8023 tokens) exceeds the available context size (2048 tokens), try increasing it"
+
+func TestOllamaSentenceOverflowCarriesBothCounts(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		body         string
+		prompt, nctx int
+	}{
+		{
+			name: "ollama envelope", prompt: 8023, nctx: 2048,
+			body: `{"error":` + strconv.Quote(ollamaOverflowSentence) + `}`,
+		},
+		{name: "bare sentence", body: ollamaOverflowSentence, prompt: 8023, nctx: 2048},
+		{
+			name: "envelope plus a runner status line", prompt: 8023, nctx: 2048,
+			body: `{"error":` + strconv.Quote(ollamaOverflowSentence+"\nggml_backend_alloc failed") + `}`,
+		},
+		{
+			name: "bare sentence plus a runner status line", prompt: 8023, nctx: 2048,
+			body: ollamaOverflowSentence + "\nggml_backend_alloc failed",
+		},
+		{
+			name: "both integers are read", prompt: 5000, nctx: 4096,
+			body: "request (5000 tokens) exceeds the available context size (4096 tokens), try increasing it",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			overflow, ok := parseContextOverflow(http.StatusBadRequest, test.body)
+			if !ok {
+				t.Fatal("the numbered context refusal was not recognized")
+			}
+			if overflow.PromptTokens != test.prompt || overflow.NCtx != test.nctx {
+				t.Fatalf("overflow = %+v, want prompt %d and window %d", overflow, test.prompt, test.nctx)
+			}
+			if !errors.Is(overflow, ErrContextOverflow) || overflow.FromRuntime != "the serving runtime" {
+				t.Fatalf("overflow = %+v", overflow)
+			}
+		})
+	}
+}
+
+func TestNativeHTTPErrorReadsTheOllamaSentenceAsOverflow(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader(`{"error":` + strconv.Quote(ollamaOverflowSentence) + `}`)),
+	}
+	err := nativeHTTPError(resp)
+	overflow, ok := AsContextOverflow(err)
+	if !ok {
+		t.Fatalf("native HTTP error = %v", err)
+	}
+	if overflow.PromptTokens != 8023 || overflow.NCtx != 2048 || !errors.Is(err, ErrContextOverflow) {
+		t.Fatalf("overflow = %+v", overflow)
+	}
+}
+
+func TestOllamaSentenceOverflowRejectsADifferentShape(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{
+			name: "leading zero", status: 400,
+			body: "request (08023 tokens) exceeds the available context size (2048 tokens), try increasing it",
+		},
+		{
+			name: "leading zero on the window", status: 400,
+			body: "request (8023 tokens) exceeds the available context size (02048 tokens), try increasing it",
+		},
+		{
+			name: "zero prompt", status: 400,
+			body: "request (0 tokens) exceeds the available context size (2048 tokens), try increasing it",
+		},
+		{
+			name: "zero window", status: 400,
+			body: "request (8023 tokens) exceeds the available context size (0 tokens), try increasing it",
+		},
+		{
+			name: "extra words", status: 400,
+			body: "request (8023 tokens) exceeds the available context size (2048 tokens), try increasing it now",
+		},
+		{
+			name: "other llama.cpp sentence", status: 400,
+			body: "input (8023 tokens) is larger than the max context size (2048 tokens). skipping",
+		},
+		{
+			name: "not a 400", status: 500,
+			body: ollamaOverflowSentence,
+		},
+		{
+			name: "count overflows", status: 400,
+			body: "request (99999999999999999999 tokens) exceeds the available context size (2048 tokens), try increasing it",
+		},
+		{
+			name: "decoded document of another type", status: 400,
+			body: `{"error":{"type":"server_error","message":"` + ollamaOverflowSentence + `","n_ctx":2048,"n_prompt_tokens":8023}}`,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, ok := parseContextOverflow(test.status, test.body); ok {

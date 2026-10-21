@@ -812,7 +812,7 @@ confirmation uses a new plan. `fitr role confirm` does not collect it.
 
 A model served by Ollama's MLX runner is refused before the plan is sealed:
 that runner silently reduces the output reserve the qualification rests on.
-Native acceptance for an oversized-prompt refusal still needs a real runtime.
+One Go-template refusal on Ollama 0.40.4 is recorded in [context quality](context-quality.md). The Jinja half is still open.
 
 This is not [the context experiment](#context-experiment). That command maps
 capacity and performance across requested windows and cannot certify a winner.
