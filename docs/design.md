@@ -336,7 +336,20 @@ changes.
   requires a load receipt. Malformed numeric dimensions and unsupported boolean
   recurrent-layer patterns with incomplete state dimensions remain unmeasured.
   Complete scalar or per-layer boolean declarations can project the attention
-  cache and fixed recurrent state; contradictions stay unresolved. Split GGUFs require
+  cache and fixed recurrent state; contradictions stay unresolved. A retained
+  prefix of `Qwen3.5-0.8B.Q4_K_M.gguf` from
+  Khide/Qwen3.5-0.8B-Beam-ToolRouter-GGUF commit
+  `22be680375651abdd30f4b771b7908a84cba5771` carries that boolean array. The
+  prefix ends inside a later key, so the recovered pattern does not clear a
+  source screen. Checked against llama.cpp
+  `4a89937354190cef5a97baf8eeb17336105eb72d`, the array matches that build's
+  Qwen3.5 interval fallback, including one non-recurrent
+  multi-token-prediction slot. Recurrent state follows
+  `llama_memory_recurrent`, which sizes `n_layer()` and omits that slot. The
+  context-scaling half uses the same decoder boundary. `llama_kv_cache`
+  iterates `n_layer_all`, so the prediction slot can still receive a KV tensor
+  this projection does not include. Sequence planes and a measured resident
+  total stay outside it. Split GGUFs require
   every shard. An artifact
   whose `head_count_kv` is a per-layer array is projected by summing the
   layers, so a layer that does not attend costs nothing; the array is used only

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"os"
 	"testing"
 )
 
@@ -41,6 +42,14 @@ func FuzzReadMetadata(f *testing.F) {
 	_ = binary.Write(hdr, binary.LittleEndian, ^uint64(0))
 	_ = binary.Write(hdr, binary.LittleEndian, ^uint64(0))
 	f.Add(hdr.Bytes())
+	// The retained published prefix carries a boolean recurrent-layer array.
+	// Seeding that file, rather than a header built from fitr structs, is what
+	// lets a mutation disagree with the decoder.
+	published, err := os.ReadFile(publishedRecurrentPrefixFixture)
+	if err != nil {
+		f.Fatalf("published recurrent prefix: %v", err)
+	}
+	f.Add(published)
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if !validateFullFuzzDecode(t, data) {
