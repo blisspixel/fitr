@@ -4,10 +4,50 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-10-20. The 0.11.8 receipt below covers its exact tagged
+Last updated: 2026-10-21. The 0.11.9 receipt below covers its exact tagged
 revision and downloaded assets. Historical sections retain their original
 candidates, including older metadata-only source receipts. 0.11.4 shipped
 without a measurement receipt in this file.
+
+### 0.11.9 release receipt
+
+Release [0.11.9](https://github.com/blisspixel/fitr/releases/tag/v0.11.9)
+is bound to commit `7e435f1d0675f7b1063d1242b42eed2151455a64`.
+[Main CI 39531163418](https://github.com/blisspixel/fitr/actions/runs/39531163418)
+passed with **80.84% aggregate coverage** (30296/37475 statements). The
+[release workflow 39532207405](https://github.com/blisspixel/fitr/actions/runs/39532207405)
+measured **80.84%** (30295/37475 statements) and repeated race, lint with
+golangci-lint v2.14.0, govulncheck v1.7.0 on Go 1.27.3 with no vulnerabilities
+found, sixteen fuzz smoke targets including the context overflow parser,
+the 1600-line cap, six binary builds, deterministic rebuild, and all three
+installer jobs. It uploaded ten verified assets into the owner draft. The
+owner published the release on October 21 UTC. The tag is annotated and
+SSH-signed.
+
+[Native acceptance 39531689662](https://github.com/blisspixel/fitr/actions/runs/39531689662)
+passed the installed-binary loop on Linux amd64 and macOS arm64 against
+checksum-pinned llama-server b10700 and both pinned GGUF artifacts. The
+installed binary reported `fitr 0.11.9`.
+
+All ten downloaded public assets passed the checksum manifest. The Windows
+amd64 executable is **16,862,208 bytes**, below the shared **16,897,448-byte**
+ceiling, and was built with go1.27.3 from the tagged revision with
+`vcs.modified=false`. It reports `fitr 0.11.9`. The release build checked
+that the Linux amd64 binary prints the same version. Public Windows SHA-256:
+`bd7f1f8a0592434ffe677cea7d8082ea8df6f7b652cd5b63474072b8108dd09e`.
+Manifest SHA-256:
+`6cd21142561f12b112338a67f9fcfd52d956ead15db8109eda989cbb8c860edd`.
+
+Ollama 0.40.4's exact numbered overflow sentence is recognized as
+context_limit. One Go-template run kept window 2048 and reserve 128, and
+the 8192-byte tier was context_limit. The 2048-byte tier failed
+invalid_json, so that phase has no verified prefix. Native acceptance did
+not repeat that run. This receipt does not accept the Jinja half of the
+oversized-prompt check, a recorded Pi process, a native local-model
+pi-workspace trial, or an overnight pack's wall time, disk, and resolved
+count. It does not accept a rendered qualified selection or an allowlisted
+benchmark click. It does not accept native Phoenix model-loading. It does
+not add a catalog, a delete path, Streamable HTTP, or A2A. It is not 1.0.
 
 ### 0.11.8 release receipt
 
