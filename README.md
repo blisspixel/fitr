@@ -33,10 +33,13 @@ Each role has its own requirements and preferences. A coding agent, daily
 driver and classifier need different fittings. Quality requirements come
 first; speed and resource preferences help choose among models that meet them.
 See [personal fitting](docs/personal-fitting.md) for `fitr tailor`, usable
-context, compaction, and harness scorecards. 0.11.9 treats Ollama's exact
-numbered context refusal as context_limit. One Go-template run on Ollama
-0.40.4 kept the window and reserve, and the oversized tier was
-context_limit. The module floor is Go 1.27.3. The Jinja half of that
+context, compaction, and harness scorecards. 0.11.10 retains the first
+2048 bytes of a published Qwen3.5 boolean recurrent-layer header and
+checks those decoder counts against llama.cpp
+`4a89937354190cef5a97baf8eeb17336105eb72d`. The prefix ends
+inside a later key, so source screening of it stays unresolved. The
+prediction-slot KV tensor, sequence planes, and a measured resident
+total stay outside the projection. The Jinja half of the oversized-prompt
 check, the Pi process, and the native local-model check remain open.
 
 <img src="docs/assets/top.svg?v=0.11.3" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
@@ -97,7 +100,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.11.9" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.11.10" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 

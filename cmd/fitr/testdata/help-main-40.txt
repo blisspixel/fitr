@@ -1,5 +1,5 @@
-fitr 0.11.9 - evidence for what local AI
-  works on this machine
+fitr 0.11.10 - evidence for what local
+  AI works on this machine
 
 usage:
   fitr
