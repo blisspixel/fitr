@@ -33,14 +33,15 @@ Each role has its own requirements and preferences. A coding agent, daily
 driver and classifier need different fittings. Quality requirements come
 first; speed and resource preferences help choose among models that meet them.
 See [personal fitting](docs/personal-fitting.md) for `fitr tailor`, usable
-context, compaction, and harness scorecards. 0.11.10 retains the first
-2048 bytes of a published Qwen3.5 boolean recurrent-layer header and
-checks those decoder counts against llama.cpp
-`4a89937354190cef5a97baf8eeb17336105eb72d`. The prefix ends
-inside a later key, so source screening of it stays unresolved. The
-prediction-slot KV tensor, sequence planes, and a measured resident
-total stay outside the projection. The Jinja half of the oversized-prompt
-check, the Pi process, and the native local-model check remain open.
+context, compaction, and harness scorecards. 0.11.11 seals an ordered
+model-set plan and refuses co-residency. One process-list body, a sum of
+isolated sizes, llama-server props, an unpinned router body, an empty
+OpenAI list, and a sleeping row are not one simultaneous observation.
+The report stays unresolved and does not enter the single-model Board.
+The command does not contact a runtime. Rows 7 and 8, the simultaneous
+observation, spill and eviction proof, and exact-context OTHER stay open.
+The Jinja half of the oversized-prompt check, the Pi process, and the
+native local-model check remain open.
 
 <img src="docs/assets/top.svg?v=0.11.3" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
@@ -100,7 +101,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.11.10" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.11.11" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 
