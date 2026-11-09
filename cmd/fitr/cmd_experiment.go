@@ -37,10 +37,15 @@ const experimentUsage = `usage:
   fitr experiment reference plan --images digests.json --out plan.json
   fitr experiment reference run --plan plan.json --verifier verifier.json --conditions conditions.json
   fitr experiment reference <result.json> [result.json]
+  fitr experiment modelset plan --members members.json --runtime ollama --device-key KEY --out plan.json
+  fitr experiment modelset classify --plan plan.json --observation observation.json --out bundle.json
+  fitr experiment modelset <modelset-bundle.json>
 
 Context analysis is exploratory. Every input must be a sealed fitr result.
 Requested context is the treatment; artifact, backend/runtime, device
 configuration, and measurement protocol must remain equal for comparison.
+Model-set plan and classify read only the files you pass. They do not contact
+a runtime, and the derived report does not claim co-residency.
 `
 
 func cmdExperiment(ctx context.Context, args []string) int {
@@ -64,6 +69,8 @@ func cmdExperiment(ctx context.Context, args []string) int {
 		return cmdExperimentServing(ctx, args[1:])
 	case "reference":
 		return cmdExperimentReference(args[1:])
+	case "modelset":
+		return cmdExperimentModelSet(args[1:])
 	default:
 		errPrint("unknown experiment", args[0], "fitr experiment context --help")
 		return exitUsage

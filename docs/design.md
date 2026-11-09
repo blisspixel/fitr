@@ -384,10 +384,14 @@ changes.
   full paired runs. A timed objective is refused first when the declared
   repeat budget cannot separate the declared relative gap at a coefficient
   of variation measured on this device and context. Serving concurrency is
-  its own experiment schema and does not enter ordinary rankings.
+  its own experiment schema and does not enter ordinary rankings. A model-set
+  plan seals the ordered members and derives an unresolved report. An Ollama
+  process list, separate responses, llama-server props, an unpinned router
+  body, and a sum of isolated allocations do not establish co-residency, and
+  the report does not enter the single-model Board.
   Evidence-backed limiter diagnoses beyond the
-  direct receipt patterns, context-experiment confirmation, model-set
-  projections, and soak runs remain pre-1.0 experiments.
+  direct receipt patterns and context-experiment confirmation, the model-set
+  simultaneous observation, and soak runs remain pre-1.0 experiments.
 - **Validated work starts with one fixed contract.** The policy-repair
   experiment predeclares a runtime-bound plan, uses a harness-owned virtual
   filesystem and capability-scoped tools, records monotonic per-trial events,

@@ -250,7 +250,8 @@ func takesValue(flagArg string) bool {
 		"wall-budget", "disk-budget", "required-disk", "prefill", "decode",
 		"prompt-tokens", "completion-tokens", "artifact", "artifact-release",
 		"quant", "runtime-build", "device-key", "plan", "verifier", "conditions",
-		"gpu-busy", "other-model", "served-context":
+		"gpu-busy", "other-model", "served-context",
+		"members", "observation", "capacity-policy":
 		return true
 	}
 	return false

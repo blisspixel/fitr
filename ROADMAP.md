@@ -72,7 +72,7 @@ methods live in [statistics](docs/statistics.md).
 | Shipped | 0.11.8 | New pi-workspace plans seal fitr.pi-preservation.v1 and read the corrected port from the task file. Historical plans keep six checks. Token conditions are a separate unsubmitted receipt, fitr.context-token-account.v2. The live oversized-prompt, Pi-process, native local-model, overnight, qualified-selection, and allowlisted-click checks remain open. |
 | Shipped | 0.11.9 | Recognizes the exact llama.cpp overflow sentence that Ollama 0.40.4 returns, so that refusal is context_limit. One Go-template run on Ollama 0.40.4 kept window 2048 and reserve 128, and the 8192-byte tier was context_limit. The module and CI toolchain are Go 1.27.3 after GO-2026-6809. The Jinja half, the Pi process, the native local-model check, overnight sizing, qualified selection, and an allowlisted click remain open. |
 | Shipped | 0.11.10 | Retains the first 2048 bytes of Qwen3.5-0.8B.Q4_K_M.gguf from Khide/Qwen3.5-0.8B-Beam-ToolRouter-GGUF commit 22be680375651abdd30f4b771b7908a84cba5771. The boolean array matches llama.cpp 4a89937354190cef5a97baf8eeb17336105eb72d: 18 recurrent decoder layers, 6 full-attention decoder layers, and one non-recurrent prediction slot. Fixed state is 20201472 bytes and stays constant as context grows. Source screening of the truncated prefix stays unresolved. The prediction-slot KV tensor, sequence planes, and a measured resident total stay outside the projection. The Jinja half, the Pi process, the native local-model check, overnight sizing, qualified selection, and an allowlisted click remain open. |
-| Now | 0.11 | Rows 7 and 8 stay open for those live checks. The next build is the model-set experiment. |
+| Now | 0.11 | Rows 7 and 8 stay open for those live checks. A model-set plan can be sealed, and co-residency stays unresolved until one simultaneous observation exists. |
 | Then | 1.0 | A clean-machine, evidence-backed local decision system with native acceptance |
 | Later | Trust C | Stronger confinement, release provenance, and calibrated profile provenance |
 | Later | Discovery and disk ownership | Research citations and a pull-ownership record, then a non-ranked catalog. A delete path waits on that record. Download plans, screening, and runtime profiles already ship. |
@@ -114,7 +114,7 @@ evidence paths.
 | 6 | complete | Serving concurrency experiments | Client-side queueing sits beside server timing, declared concurrency is checked against slot state where the runtime exposes it, warmup is excluded, and a tail percentile needs at least 20 samples. The result stays out of the single-model Board. |
 | 7 | now | Collect and freshly confirm the document-context scorecard inside the owned fitting | Owned fitting seals one document schedule for every candidate, collects it beside the battery, and confirms the byte floor from a fresh plan. A battery record alone cannot clear the floor. `fitr role confirm` still does not collect the pack. One Go-template run on Ollama 0.40.4 recorded the oversized tier as context_limit without lowering the window or reserve. The Jinja half of that check is still open. |
 | 8 | now | One pinned local model-plus-harness workflow | `fitr experiment workload --workflow pi-workspace` seals `fitr.pi-session.v1`. One request budget funds the ordinary cap, both split-compaction summaries, and the reopen turn. The independent file verifier accepts a trial only from the files, the summary digests, and a reopened checkpoint. A new plan also seals `fitr.pi-preservation.v1`: the file must carry the corrected port and the unresolved recall, and the context action must be the sealed model-generated summary. A historical plan keeps the six-check contract. A summary that names the port is not the file check. A blank summary stays missing. A fake provider cannot establish coverage or a rate. The schedule was checked against `@earendil-works/pi-coding-agent` 0.85.1 at `d981de1229ef899957bbe968bc8dcda02a21f477`; this process does not launch Pi. A Harbor reward is not this receipt. A recorded Pi process and a recorded native local-model trial remain open. Coverage and validated-outcome soak both wait on this receipt. |
-| 9 | next | Model-set experiment | One model's concurrency is not co-residency. Ollama's list cannot discharge it: membership is copied under a lock that is then released, and each runner's bytes are read afterward. A llama-server router response is only a candidate until that response is shown to be one observation of membership and bytes together. |
+| 9 | next | Model-set experiment | `fitr experiment modelset` seals `fitr.experiment.modelset.plan.v1` for an ordered set and derives an unresolved report. One model's concurrency is not co-residency. An Ollama process list cannot discharge it: membership is copied under a lock that is then released, and each runner's bytes are read afterward. A llama-server router response stays a candidate until that response is shown to be one observation of membership and bytes together. The simultaneous observation, spill and eviction receipt, and exact-context `OTHER` remain open. |
 | 10 | next | Soak | Speed drift is a trajectory of ordered windows. Validated-outcome drift waits until the workflow from step 8 is part of the experiment. Throughput alone has stayed healthy in a run whose tool calls collapsed. |
 | 11 | then | Declared workload coverage for that one workflow | Say whether the configuration is proven, unproven, blocked, inconclusive, or capacity-limited, and what still needs a fallback. This is the COVERAGE layer in the 1.0 acceptance outcome. |
 | 12 | then | Clean-machine acceptance and the 1.0 candidate | Windows, macOS, and Linux installs of the core loop, including the workload and coverage contracts that have graduated. Open experiment commands need not all graduate. |
@@ -1373,14 +1373,20 @@ distribution's tail, so it is reported only with the sample size that supports
 it, under the existing rule against implying a rate from a finite set.
 Serving is implemented via `fitr experiment serving` (`fitr.experiment.serving.plan.v1`, `fitr.experiment.serving.analysis.v1`, `fitr.experiment.serving.bundle.v1`).
 
-**Model sets.** The refusal stands: isolated measurements are never summed into
-a co-residency claim. Ollama cannot discharge it. `loadedModels` copies runner
-pointers under `loadedMu`, releases that lock, and then reads each runner's
-memory under a separate lock. That is the racing pair fitr refuses, inside one
-HTTP response, so the sum is still not a receipt. A llama-server router list
-is a candidate observation only after its handler is shown to read membership
-and byte figures as one observation. A sleeping or offloaded model is spill,
-not residency, and must be recorded as such rather than counted as loaded.
+**Model sets.** `fitr experiment modelset plan` seals the ordered artifacts,
+roles, requested contexts, and placement intentions before any observation is
+read. `classify` derives `fitr.experiment.modelset.analysis.v1` from that plan
+and one recorded body. The claim is unresolved, and `co_resident` is false.
+The report does not enter the single-model Board. Isolated measurements are
+never summed into a co-residency claim. Ollama cannot discharge it.
+`loadedModels` copies runner pointers under `loadedMu`, releases that lock,
+and then reads each runner's memory under a separate lock. That is the racing
+pair fitr refuses, inside one HTTP response, so the sum is still not a
+receipt. A llama-server router list is a candidate observation only after its
+handler is shown to read membership and byte figures as one observation. A
+sleeping or offloaded model is spill, not residency, and is recorded as such
+rather than counted as loaded. This command does not contact a runtime. The
+simultaneous observation is still open.
 
 Byte figures from either runtime are the runner's own allocation accounting
 rather than an independent residency reading, and per-process accelerator
