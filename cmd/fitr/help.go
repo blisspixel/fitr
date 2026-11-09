@@ -52,6 +52,7 @@ compare:
   fitr experiment workload <model> [-n N] [--ctx N] [--workflow pi-workspace] [--backend B]
   fitr experiment serving <model> [--concurrency N] [-n N] [--warmup N] [--ctx N] [--backend B]
   fitr experiment reference plan|run seals a recorded external pack; it does not launch one
+  fitr experiment modelset plan|classify seals an ordered set; it does not claim co-residency
   fitr view [model|result.json] [--display MODE]
   fitr export <model> [--out PATH] [--retonr]
   fitr apply [model] [--ctx N]

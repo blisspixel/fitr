@@ -91,7 +91,10 @@ independent residency reading, and fitr reports them as exactly that. They can
 understate badly in cases the runtime does not account for, such as a draft
 model ([ollama#17951](https://github.com/ollama/ollama/issues/17951), fixed).
 Per-process accelerator memory is unavailable on Windows WDDM, so there is no
-second source to corroborate them there.
+second source to corroborate them there. `fitr experiment modelset` classifies
+one saved process-list body as `not_one_observation`. The server copies
+membership under a lock it then releases, and reads each runner's bytes
+afterward, so the body is not a simultaneous co-residency receipt.
 
 **llama-server** is not just reach - it is measurement surface Ollama does
 not expose: per-request **cached-token counts** (the evidence needed to

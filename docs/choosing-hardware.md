@@ -171,10 +171,12 @@ demand, so one must never be relabeled as the other.
 
 Single-model capacity also does not prove co-residency. Adding independent
 weights and KV estimates ignores eviction, shared runtime state, mmap policy,
-placement, compute allocation, and the contexts active at the same time. A
-future model-set experiment must bind the ordered artifacts, roles, contexts,
-placements, runtime state, and simultaneous-residency receipt. Until then, a
-sum is an additive projection, not proof that the set co-fits.
+placement, compute allocation, and the contexts active at the same time.
+`fitr experiment modelset` binds the ordered artifacts, roles, contexts, and
+placement intentions, and labels a sum of isolated measurements as an additive
+projection. It does not accept an Ollama process list, separate responses,
+llama-server props, or an unpinned router body as a simultaneous-residency
+receipt. Until that receipt exists, a sum is not proof that the set co-fits.
 
 Pageability and offload settings change this problem without making it simple.
 An mmap setting is not proof that pages are absent from physical memory, and a

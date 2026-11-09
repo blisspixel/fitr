@@ -287,6 +287,7 @@ of installed RAM as an unconditional model budget.
 | `fitr experiment confirm <model> <model>... --spec decision.json [--ctx N] [-k N] [--min-gap F] [--noise-from result.json]` | seal the selected candidate set and confirm only a separated objective; a timed objective refuses, before inference, a repeat budget that cannot separate the declared gap |
 | `fitr experiment workload <model> [-n 3] [--ctx N] [--workflow pi-workspace]` | run policy-repair, or the pinned pi-workspace session. pi-workspace does not launch Pi |
 | `fitr experiment serving <model> [--concurrency N] [-n N]` | measure throughput, client-side queueing, server duration and tail latency distributions at a declared concurrency |
+| `fitr experiment modelset plan\|classify` | seal an ordered set, then derive an unresolved report from one recorded body. It does not contact a runtime or claim co-residency |
 | `fitr experiment reference plan\|run` | seal the frozen external-reference subset, or accept a recorded verifier file after preflight. It does not launch a harness. See [workload evidence](workload-evidence.md#external-reference-pack) |
 | `fitr discover add <source> --role <role> [--model <reference>]` | capture a private, unmeasured model or harness idea |
 | `fitr discover list\|plan [--role <role>]` | inspect the private inbox or draft next evidence steps without network access |
@@ -1137,6 +1138,32 @@ fitr experiment serving path/to/serving-bundle.json
 Reopening re-derives the report from the sealed request observations; any
 tampered report is rejected. A serving measurement does not claim to predict
 multi-model co-residency or unobserved external workload interference.
+
+### Model-set experiments
+
+`fitr experiment modelset plan` seals an ordered set before any observation
+is read. `classify` derives the report from that plan and one recorded body.
+Reopening a bundle derives the report again and rejects a stored claim the
+observation does not support.
+
+```bash
+fitr experiment modelset plan --members members.json --runtime ollama --device-key KEY --out plan.json
+fitr experiment modelset classify --plan plan.json --observation observation.json --out bundle.json
+```
+
+The plan binds each artifact digest, role, requested context, and placement
+intention. Placement intention is not an observed placement. The derived claim
+is unresolved, and `co_resident` is false. An Ollama process list is
+`not_one_observation`: membership is copied under a lock that is then
+released, and each runner's bytes are read afterward. Separate responses stay
+separate. llama-server props leaves bytes unmeasured; a zero size is not an
+empty set. A router body stays a candidate until its handler is shown to read
+membership and bytes together. A sum of isolated measurements is an additive
+projection. A sleeping or offloaded row is spill, not residency. None of these
+is a fit verdict, an exact-context `OTHER` figure, or a single-model Board row.
+
+This command does not contact a runtime. A simultaneous residency, spill, and
+eviction receipt remains open.
 
 ## Apply
 

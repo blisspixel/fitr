@@ -37,8 +37,12 @@ set -eu
 # 2026-10-21 dist job, which also contains the numbered context-refusal
 # parser, measured windows/amd64 at 16,862,208 bytes. That is 3,584 above
 # the 1.27.2 binary. The cap stays. Headroom is now 35,240 bytes.
+# The model-set plan, its recorded-body classifier, and the command
+# added 54,272 bytes on the 2026-11-09 dist job:
+# 16,862,208 -> 16,916,480. No new Go dependency was added. The same
+# headroom stays.
 # CI and releases use this single measured gate.
-max_bytes=16897448
+max_bytes=16951720
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"

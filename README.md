@@ -315,9 +315,10 @@ experiment are implemented. The serving result stays outside ordinary rankings.
 The pi-workspace adapter does not launch Pi. A new plan checks the corrected
 port and the unresolved recall in the file, and a historical plan keeps its
 six checks. A recorded Pi process and a recorded native local-model trial of
-that session remain open. Broader causal
-explanation, model-set and soak experiments, and declared workload coverage
-remain pre-1.0 work. The [roadmap](ROADMAP.md) is the dependency order.
+that session remain open. A model-set plan seals an ordered set and
+refuses co-residency without one simultaneous observation. Broader causal
+explanation, soak, and declared workload coverage remain pre-1.0 work. The
+[roadmap](ROADMAP.md) is the dependency order.
 
 README screenshots are deterministic fixtures rendered through the real
 presentation paths with `make screenshots`. Host identity and local paths are
