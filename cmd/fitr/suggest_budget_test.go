@@ -15,7 +15,7 @@ func TestSharedMemoryDoesNotFitOrPull(t *testing.T) {
 		{GPU: "AMD Radeon 780M", VRAMGb: 16, VRAMSource: device.AMDGTTMappingSource, RAMGb: 64},
 		{GPU: "AMD Radeon 780M", VRAMGb: 4, VRAMSource: "drm sysfs", RAMGb: 32},
 	}
-	item := suggest.Candidate{Name: "qwen2.5-coder:1.5b", Use: "coding"}
+	item := suggest.Candidate{Name: "qwen3.5:2b", Use: "general"}
 	weights := int64(1 << 30)
 	for _, fp := range cases {
 		t.Run(fp.VRAMSource, func(t *testing.T) {
@@ -38,9 +38,9 @@ func TestOperatorCeilingProjectsWithoutBecomingResidentFit(t *testing.T) {
 	if plan.Kind != "ceiling" || plan.Budget != 8 || !strings.Contains(plan.budgetLine(), "operator ceiling") || strings.Contains(plan.budgetLine(), "resident budget") && !strings.Contains(plan.budgetLine(), "not a measured resident budget") {
 		t.Fatalf("ceiling plan: %+v %s", plan, plan.budgetLine())
 	}
-	item := suggest.Candidate{Name: "qwen2.5-coder:1.5b", Use: "coding"}
+	item := suggest.Candidate{Name: "qwen3.5:2b", Use: "general"}
 	line := formatSuggestCandidate(item, observedWeight{bytes: 1 << 30}, plan.Budget, suggest.WeightFits, "")
-	if !strings.Contains(line, "catalog tag coding") || !strings.Contains(line, "Ollama library recipe") || !strings.Contains(line, "ollama pull "+item.Name) {
+	if !strings.Contains(line, "catalog tag general") || !strings.Contains(line, "Ollama library recipe") || !strings.Contains(line, "ollama pull "+item.Name) {
 		t.Fatalf("ceiling recipe: %s", line)
 	}
 	other := formatSuggestCandidate(item, observedWeight{bytes: 1 << 30}, plan.Budget, suggest.WeightFits, "llama-server")
@@ -58,8 +58,8 @@ func TestDiscreteBudgetStillPartitionsAndIgnoresACeiling(t *testing.T) {
 	if !strings.Contains(plan.budgetLine(), "discrete accelerator") {
 		t.Fatalf("ceiling was silent: %s", plan.budgetLine())
 	}
-	small := suggest.Candidate{Name: "qwen2.5-coder:1.5b", Use: "coding"}
-	large := suggest.Candidate{Name: "mixtral:8x7b", Use: "agent", CatalogMoE: true}
+	small := suggest.Candidate{Name: "qwen3.5:2b", Use: "general"}
+	large := suggest.Candidate{Name: "gpt-oss:20b", Use: "agent", CatalogMoE: true}
 	// 30 GiB exceeds the 24 GiB discrete budget. 20 GiB would still fit it.
 	groups := suggest.Partition([]suggest.Candidate{large, small}, []int64{30 << 30, 1 << 30}, plan.Budget, false)
 	if len(groups) < 2 || groups[0].Class != suggest.WeightFits || groups[0].Items[0].Name != small.Name || groups[1].Class != suggest.WeightOverBudget {
@@ -68,7 +68,7 @@ func TestDiscreteBudgetStillPartitionsAndIgnoresACeiling(t *testing.T) {
 }
 
 func TestDiscoverErrorIsNotAnEmptyRuntime(t *testing.T) {
-	item := suggest.Candidate{Name: "qwen2.5-coder:1.5b", Use: "coding"}
+	item := suggest.Candidate{Name: "qwen3.5:2b", Use: "general"}
 	line := formatSuggestCandidate(item, observedWeight{bytes: 1 << 30}, 8, suggest.WeightFits, reachabilityUnmeasured)
 	if strings.Contains(line, "ollama pull") || !strings.Contains(line, "reachability was unmeasured") {
 		t.Fatalf("discover error: %s", line)

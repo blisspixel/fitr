@@ -181,7 +181,9 @@ func suggestArtifactBytes(ctx context.Context, name string, sizeGB float64) (int
 func suggestShortlist(ctx context.Context, fp device.Fingerprint, plan suggestionPlan, runtime string) int {
 	items := suggest.Shortlist()
 	observed, weightBytes := observeShortlist(ctx, items)
-	fmt.Printf("names are a fixed reviewed set (%s), not a search. A catalog tag is not a measured purpose.\n", suggest.ShortlistReviewed)
+	for _, line := range suggest.ReviewedLines(time.Now()) {
+		fmt.Println(line)
+	}
 	fmt.Println("projection, not a measurement. Sizes come from the registry manifest. KV cache is not estimated.")
 	fmt.Println(plan.budgetLine())
 	prefer := suggest.PreferMoE(fp.GPU, fp.GPUBackend, fp.VRAMSource)

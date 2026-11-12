@@ -40,7 +40,9 @@ an adapter later; none becomes the source of truth for quality.
 of library names against the same memory selection advise and inventory use.
 Shared or unmeasured memory does not become a fit. An operator ceiling is
 labeled as a ceiling. A pull line is a recipe fitr does not run. The set
-does not grow because a registry search returned something.
+does not grow because a registry search returned something. When the
+review date is more than 45 days old, the command says so from the local
+clock and still does not search.
 
 ## The one thing worth stealing: NIM's three-tier output
 

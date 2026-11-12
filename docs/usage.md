@@ -555,7 +555,10 @@ command is `fitr suggest`. It does not name a smaller model.
 
 `fitr suggest` projects one fixed reviewed set of library names. The review
 date is printed with the set. A catalog tag is not a measured purpose, and
-the set is not a search. The budget is the same memory selection advise and
+the set is not a search. When that date is more than 45 days before the
+local date, the command also prints the age and says newer families may
+exist. That note is a clock comparison. It does not contact a registry.
+The budget is the same memory selection advise and
 inventory use. A shared, empty, or zero selection classifies nothing: those
 names stay unmeasured, resident fit stays unmeasured, and no pull line is
 printed. `--ceiling-gb` is the only way to project weights in that case, and
