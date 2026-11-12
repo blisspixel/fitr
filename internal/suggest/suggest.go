@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const bytesPerGiB = 1024 * 1024 * 1024
@@ -21,22 +22,69 @@ type Candidate struct {
 	CatalogMoE bool
 }
 
-// ShortlistReviewed is the date this fixed set was accepted. It is not a
-// live search and not a measured purpose.
-const ShortlistReviewed = "2026-10-12"
+// ShortlistReviewed is the date this fixed set was accepted against the
+// Ollama library and the Hugging Face cards named on Shortlist. It is not
+// a live search and not a measured purpose.
+const ShortlistReviewed = "2026-11-12"
+
+// ReviewStaleAfter is how many days a fixed set may age before the
+// preamble says newer families may exist. The comparison uses the local
+// calendar date and does not contact a registry.
+const ReviewStaleAfter = 45
 
 // Shortlist is the names fitr will ask the registry about. Sizes are not
-// stored here. The order is the reviewed order, not a search result.
+// stored here. The order is the reviewed order, smaller published defaults
+// first, not a search result and not a quality ranking.
+//
+// On 2026-11-12 each tag was a default on its Ollama library page and its
+// registry manifest had layers. Hugging Face published the same weights:
+// Qwen/Qwen3.5-2B, Qwen/Qwen3-8B, Qwen/Qwen3.5-9B, google/gemma-4-E4B-it,
+// openai/gpt-oss-20b (21B parameters, 3.6B active), Qwen/Qwen3.5-27B,
+// Qwen/Qwen3-Coder-30B-A3B-Instruct (about 3.3B activated), and
+// google/gemma-4-26B-A4B-it. CatalogMoE follows those mixture-of-experts
+// statements. Gemma 4 E4B is the effective-parameter edge model, so it is
+// not marked. Cloud-only tags are absent.
 func Shortlist() []Candidate {
 	return []Candidate{
-		{Name: "qwen2.5-coder:1.5b", Use: "coding"},
-		{Name: "qwen2.5-coder:7b", Use: "coding"},
-		{Name: "llama3.2:3b", Use: "general"},
-		{Name: "deepseek-coder:6.7b", Use: "coding"},
-		{Name: "mixtral:8x7b", Use: "agent", CatalogMoE: true},
-		{Name: "qwen2.5-coder:14b", Use: "coding"},
-		{Name: "qwen2.5-coder:32b", Use: "coding"},
+		{Name: "qwen3.5:2b", Use: "general"},
+		{Name: "qwen3:8b", Use: "general"},
+		{Name: "qwen3.5:9b", Use: "general"},
+		{Name: "gemma4:e4b", Use: "general"},
+		{Name: "gpt-oss:20b", Use: "agent", CatalogMoE: true},
+		{Name: "qwen3.5:27b", Use: "general"},
+		{Name: "qwen3-coder:30b", Use: "coding", CatalogMoE: true},
+		{Name: "gemma4:26b", Use: "agent", CatalogMoE: true},
 	}
+}
+
+// ReviewAgeNote reports the age of a YYYY-MM-DD review date once it is more
+// than ReviewStaleAfter days before now. A date that does not parse, a
+// future date, and a date still inside the cadence return an empty string.
+// The note is not a search.
+func ReviewAgeNote(reviewed string, now time.Time) string {
+	day, err := time.Parse("2006-01-02", reviewed)
+	if err != nil {
+		return ""
+	}
+	year, month, date := now.Date()
+	today := time.Date(year, month, date, 0, 0, 0, 0, time.UTC)
+	age := int(today.Sub(day).Hours() / 24)
+	if age <= ReviewStaleAfter {
+		return ""
+	}
+	return fmt.Sprintf("reviewed set is %d days old; newer families may exist", age)
+}
+
+// ReviewedLines is the fixed-set preamble. The age line is present only when
+// ReviewAgeNote has something to say.
+func ReviewedLines(now time.Time) []string {
+	lines := []string{fmt.Sprintf(
+		"names are a fixed reviewed set (%s), not a search. A catalog tag is not a measured purpose.",
+		ShortlistReviewed)}
+	if note := ReviewAgeNote(ShortlistReviewed, now); note != "" {
+		lines = append(lines, note)
+	}
+	return lines
 }
 
 const (

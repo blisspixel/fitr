@@ -41,6 +41,9 @@ set -eu
 # added 54,272 bytes on the 2026-11-09 dist job:
 # 16,862,208 -> 16,916,480. No new Go dependency was added. The same
 # headroom stays.
+# Go 1.27.4 is the toolchain after GO-2026-6859 in net/http. A local
+# windows/amd64 build with these flags measured 16,918,016 bytes.
+# The cap stays. Headroom against that local binary is 33,704 bytes.
 # CI and releases use this single measured gate.
 max_bytes=16951720
 dist_dir="${1:-dist}"
