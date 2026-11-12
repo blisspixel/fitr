@@ -42,9 +42,10 @@ The command does not contact a runtime. `fitr suggest` names the library
 tags checked on 2026-11-12: qwen3.5 at 2b, 9b and 27b, qwen3:8b,
 gemma4:e4b, gemma4:26b, gpt-oss:20b and qwen3-coder:30b. A review date
 more than 45 days old prints that age and does not search. Weight fit
-stays the registry manifest against the same budget. Rows 7 and 8, the
-simultaneous observation, spill and eviction proof, and exact-context
-OTHER stay open.
+stays the registry manifest against the same budget. The module and CI
+toolchain are Go 1.27.4 after GO-2026-6859 in net/http. release.yml
+still names Go 1.27.3. Rows 7 and 8, the simultaneous
+observation, spill and eviction proof, and exact-context OTHER stay open.
 The Jinja half of the oversized-prompt check, the Pi process, and the
 native local-model check remain open.
 
