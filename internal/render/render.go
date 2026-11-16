@@ -247,6 +247,7 @@ type Meta struct {
 	NumCtx                   int
 	EffectiveCtx             int
 	ContextState             string
+	ServingLoop              string
 	Repeats                  int
 	DecodeMean, DecodeSD     float64
 	DecodeMin, DecodeMax     float64
@@ -282,6 +283,7 @@ func resolvedMeta(meta Meta) Meta {
 		meta.EffectiveCtx = *report.Context.Effective
 	}
 	meta.ContextState = report.Context.State
+	meta.ServingLoop = report.ServingLoop
 	applyPerformanceObservation(&meta.DecodeMean, &meta.DecodeSD, &meta.DecodeMin,
 		&meta.DecodeMax, &meta.DecodeN, &meta.DecodeSeries, report.Performance.DecodeTPS)
 	applyPerformanceObservation(&meta.PrefillMean, &meta.PrefillSD, nil,
@@ -590,6 +592,9 @@ func writeResultContext(w io.Writer, m Meta) {
 		fmt.Fprintf(w, "ctx      %d requested; effective %s\n", m.NumCtx, SingleLine(m.ContextState))
 	default:
 		fmt.Fprintf(w, "ctx      %d\n", m.NumCtx)
+	}
+	if m.ServingLoop != "" {
+		fmt.Fprintf(w, "loop     %s\n", SingleLine(m.ServingLoop))
 	}
 }
 
@@ -1091,6 +1096,9 @@ func (d *jsonDisplay) Result(sc score.Scorecard, m Meta) {
 	}
 	if m.EffectiveCtx > 0 {
 		payload["effective_ctx"] = m.EffectiveCtx
+	}
+	if m.ServingLoop != "" {
+		payload["serving_loop"] = m.ServingLoop
 	}
 	if m.Analysis != nil {
 		payload["analysis"] = m.Analysis

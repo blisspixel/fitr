@@ -606,6 +606,17 @@ func baseHTMLData(a Artifact) htmlData {
 }
 
 func htmlContext(meta Meta) string {
+	base := htmlContextWindow(meta)
+	if meta.ServingLoop == "" {
+		return base
+	}
+	if base == "" {
+		return meta.ServingLoop
+	}
+	return base + "; " + meta.ServingLoop
+}
+
+func htmlContextWindow(meta Meta) string {
 	if meta.NumCtx <= 0 {
 		return ""
 	}

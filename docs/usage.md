@@ -403,7 +403,11 @@ requested gates or component comparison clear. See [source resolution](source-re
   tensor placement, binary version, or host-memory domain, so the projection
   is descriptive: it remains SKIP and does not enter a context row or produce
   a fit remedy. The weights+KV projection remains the default for conventional
-  attention and is labeled as such. Hybrid recurrent architectures stay SKIP
+  attention and is labeled as such. A loop declaration (`num_loops`,
+  `recurrent_kv_cache_mode`, or the scalar loop layer counts) withholds that
+  projection. The file value is not the serving loop count, a missing key is
+  not defaulted, and a publisher recommendation that is not in the artifact
+  stays unobserved. Hybrid recurrent architectures stay SKIP
   until `--load` observes their allocation at the runtime-reported context.
   Split GGUF weights are summed only after every declared shard is present.
   Pass any numbered shard of a split GGUF to `fitr advise`. fitr requires the
@@ -717,7 +721,11 @@ the budget is the suspect number. MoE decode class uses *active* parameters,
 not total.
 
 Hybrid recurrent architectures are not conventional KV-only models. fitr does
-not project their memory from an incomplete formula. Use `--load` at the
+not project their memory from an incomplete formula. A looped architecture is
+the same kind of refusal: the file can declare `num_loops` and
+`recurrent_kv_cache_mode`, and the reason is `looped-architecture` rather than
+a sliding-window sentence. That declaration is not the loop count the runtime
+served. Use `--load` at the
 requested context for a runtime observation. `--fit` can display an unbound
 allocator projection, but it cannot establish a point-specific verdict. For
 split GGUFs, every declared shard must be present and the weight total is the

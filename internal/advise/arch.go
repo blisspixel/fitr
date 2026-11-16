@@ -75,6 +75,21 @@ type Arch struct {
 	// An observed zero group count and an absent group count have different
 	// meanings for the recurrent convolution width.
 	SSMGroupCountKnown bool
+	// A loop declaration is file metadata. It is not the serving loop count,
+	// and a missing key is not filled with 1, 2, or 4. RecurrentLayerCount is
+	// the scalar {arch}.recurrent_layer_count field. It is not the boolean
+	// attention.recurrent_layers pattern stored in RecurrentLayers.
+	NumLoops                  int
+	NumLoopsState             string
+	RecurrentKVCacheMode      string
+	RecurrentKVCacheModeState string
+	InputLayerCount           int
+	InputLayerCountState      string
+	RecurrentLayerCount       int
+	RecurrentLayerCountState  string
+	OutputLayerCount          int
+	OutputLayerCountState     string
+	LayerPatternState         string
 }
 
 // modernKVLayout reports an architecture that declares grouped, windowed or
@@ -83,7 +98,7 @@ type Arch struct {
 // every head carries its own cache.
 func (a Arch) modernKVLayout() bool {
 	return a.Hybrid || a.FullAttentionInterval > 0 || a.RecurrentLayers > 0 ||
-		a.slidingWindowPresent() || a.SSMInnerSize > 0 ||
+		a.slidingWindowPresent() || a.SSMInnerSize > 0 || a.loopDeclared() ||
 		inherentHybridArchitecture(a.Name)
 }
 
@@ -152,6 +167,11 @@ func (a Arch) UnsizableReason() (note, hint string) {
 	case a.RecurrentPatternUnsupported:
 		return "the artifact declares a recurrent pattern whose per-layer state allocation is not modeled",
 			"observe runtime allocation at the requested context"
+	case a.loopDeclared():
+		// Name the loop before the sliding-window sentence. A looped file can
+		// also declare a window, and that window is not the reason the
+		// projection is withheld.
+		return loopRefusalNote, loopRefusalHint
 	case a.Blocks <= 0 || a.headDimK() <= 0 || a.headDimV() <= 0:
 		return "architecture metadata is missing or not believable",
 			"pass a GGUF whose layer count, KV heads and head dimensions are readable"
@@ -275,7 +295,7 @@ func (a Arch) totalKVHeads() int {
 // correct for Llama and wrong for Qwen3 (128, not 64) - that fallback is
 // disclosed, not hidden.
 func (a Arch) KVReady() bool {
-	if a.InvalidMetadata || a.RecurrentPatternUnsupported {
+	if a.InvalidMetadata || a.RecurrentPatternUnsupported || a.loopDeclared() {
 		return false
 	}
 	if a.Hybrid && !a.intervalHybridProjectable() {
@@ -456,7 +476,18 @@ func (a Arch) Shape() *ArchShape {
 		KeyLengthSWA: a.KeyLengthSWA, ValLengthSWA: a.ValLengthSWA,
 		SSMInnerSize: a.SSMInnerSize, SSMStateSize: a.SSMStateSize,
 		SSMConvKernel: a.SSMConvKernel, Hybrid: a.Hybrid,
-		KVSizable: a.KVReady(),
+		KVSizable:                 a.KVReady(),
+		NumLoops:                  a.NumLoops,
+		NumLoopsState:             a.NumLoopsState,
+		RecurrentKVCacheMode:      a.RecurrentKVCacheMode,
+		RecurrentKVCacheModeState: a.RecurrentKVCacheModeState,
+		InputLayerCount:           a.InputLayerCount,
+		InputLayerCountState:      a.InputLayerCountState,
+		RecurrentLayerCount:       a.RecurrentLayerCount,
+		RecurrentLayerCountState:  a.RecurrentLayerCountState,
+		OutputLayerCount:          a.OutputLayerCount,
+		OutputLayerCountState:     a.OutputLayerCountState,
+		LayerPatternState:         a.LayerPatternState,
 	}
 	if a.SSMGroupCountKnown {
 		s.SSMGroupCount = &a.SSMGroupCount
@@ -467,6 +498,7 @@ func (a Arch) Shape() *ArchShape {
 		return s
 	}
 	s.UnsizableReason, _ = a.UnsizableReason()
+	s.UnsizableReasonCode = a.UnsizableReasonCode()
 	return s
 }
 
@@ -518,6 +550,7 @@ func ArchFromKVs(kvs map[string]any) Arch {
 	a.FullAttentionInterval = a.dimension(kvs, p+"full_attention_interval")
 	recurrentPresent := a.readRecurrentPattern(kvs, p+"attention.recurrent_layers", "attention.recurrent_layers")
 	a.Hybrid = a.FullAttentionInterval > 0 || recurrentPresent || inherentHybridArchitecture(arch)
+	a.readLoopIdentity(kvs, p)
 	if !kvHeadsPresent && !a.modernKVLayout() {
 		// The pre-GQA default applies only to an absent key, after every layout
 		// discriminator is read. Explicit zero, null or malformed values are
@@ -708,6 +741,9 @@ func inherentHybridArchitecture(name string) bool {
 // ShapeClass is a compact architecture label from GGUF keys only. Empty means
 // the artifact did not supply enough metadata to name a class.
 func (a Arch) ShapeClass() string {
+	if a.loopDeclared() {
+		return "looped"
+	}
 	if a.Hybrid {
 		if a.Experts > 0 {
 			return "hybrid-linear+moe"
@@ -868,4 +904,126 @@ func integerScalar(v any) (int64, bool) {
 		return parsed, err == nil
 	}
 	return 0, false
+}
+
+const (
+	// LoopedArchitectureReason is the stable code for a file that declares a
+	// loop layout. The prose in UnsizableReason can be edited; this code stays.
+	LoopedArchitectureReason = "looped-architecture"
+	// LoopStateDeclared means the key was present and had the expected shape.
+	LoopStateDeclared = "declared"
+	// LoopStateUnmeasured means the key was present but not a usable value.
+	// The value is not coerced and not replaced with a default.
+	LoopStateUnmeasured = "unmeasured"
+	// RecurrentKVCachePerLoop and RecurrentKVCacheLastLoop are the only cache
+	// modes named by llama.cpp pull 30306 head
+	// ab0ffa188bbc3be15ce8e5d3f1278ba5224f4358. That pull was open and
+	// unmerged on 2026-11-16. llama.cpp b12359, commit b1b770d, does not
+	// serve or report them. vLLM pull 60149 merge
+	// 75fc05a53a366068f534a61ab3ee6b50485419f2 is in tag v0.33.0 and not in
+	// v0.32.0; a vLLM build that accepts the override is not a fitr
+	// measurement of the loop count.
+	RecurrentKVCachePerLoop  = "per_loop"
+	RecurrentKVCacheLastLoop = "last_loop"
+)
+
+const loopRefusalNote = "looped architecture: KV projection depends on loop count and cache mode"
+
+const loopRefusalHint = "a file-declared loop count is artifact metadata, not the serving configuration. " +
+	"a publisher recommendation is unobserved because the artifact does not carry one. " +
+	"record the loop count and cache mode the runtime reports or was started with"
+
+func (a Arch) loopDeclared() bool {
+	return a.NumLoopsState != "" || a.RecurrentKVCacheModeState != "" ||
+		a.InputLayerCountState != "" || a.RecurrentLayerCountState != "" ||
+		a.OutputLayerCountState != "" || a.LayerPatternState != ""
+}
+
+// UnsizableReasonCode is empty when the cache can be sized, and when the
+// refusal is not the loop declaration. The loop code stays stable while the
+// sentence in UnsizableReason stays readable.
+func (a Arch) UnsizableReasonCode() string {
+	if a.KVReady() || !a.loopDeclared() || a.InvalidMetadata || a.RecurrentPatternUnsupported {
+		return ""
+	}
+	return LoopedArchitectureReason
+}
+
+// FileLoopText is the artifact side of the loop gap. It does not invent a
+// publisher recommendation, and it does not treat the file count as the
+// serving configuration. Empty means this file did not declare a loop.
+func (a Arch) FileLoopText() string {
+	if !a.loopDeclared() {
+		return ""
+	}
+	return strings.Join([]string{
+		loopCountText("file num_loops", a.NumLoops, a.NumLoopsState),
+		loopModeText(a.RecurrentKVCacheMode, a.RecurrentKVCacheModeState),
+		"publisher recommendation unobserved",
+		"serving loop count is not taken from the file",
+	}, "; ")
+}
+
+func loopCountText(name string, count int, state string) string {
+	switch state {
+	case LoopStateDeclared:
+		return fmt.Sprintf("%s %d", name, count)
+	case LoopStateUnmeasured:
+		return name + " unmeasured"
+	default:
+		return name + " absent"
+	}
+}
+
+func loopModeText(mode, state string) string {
+	switch state {
+	case LoopStateDeclared:
+		return "file recurrent_kv_cache_mode " + mode
+	case LoopStateUnmeasured:
+		return "file recurrent_kv_cache_mode unmeasured"
+	default:
+		return "file recurrent_kv_cache_mode absent"
+	}
+}
+
+// readLoopIdentity reads the loop keys from llama.cpp pull 30306 head
+// ab0ffa188bbc3be15ce8e5d3f1278ba5224f4358. attention.recurrent_layers remains
+// the boolean hybrid pattern from llama.cpp
+// 4a89937354190cef5a97baf8eeb17336105eb72d. A wrong shape stays unmeasured.
+func (a *Arch) readLoopIdentity(kvs map[string]any, prefix string) {
+	if a.Name == "" || prefix == "" {
+		return
+	}
+	a.NumLoops, a.NumLoopsState = loopInteger(kvs, prefix+"num_loops")
+	a.RecurrentKVCacheMode, a.RecurrentKVCacheModeState = loopCacheMode(kvs, prefix+"recurrent_kv_cache_mode")
+	a.InputLayerCount, a.InputLayerCountState = loopInteger(kvs, prefix+"input_layer_count")
+	a.RecurrentLayerCount, a.RecurrentLayerCountState = loopInteger(kvs, prefix+"recurrent_layer_count")
+	a.OutputLayerCount, a.OutputLayerCountState = loopInteger(kvs, prefix+"output_layer_count")
+	if _, present := kvs[prefix+"layer_pattern"]; present {
+		a.LayerPatternState = LoopStateUnmeasured
+	}
+}
+
+func loopInteger(kvs map[string]any, key string) (int, string) {
+	value, present := kvs[key]
+	if !present {
+		return 0, ""
+	}
+	n, ok := architectureInteger(value)
+	if !ok || n <= 0 || n > maxArchDim {
+		return 0, LoopStateUnmeasured
+	}
+	return int(n), LoopStateDeclared
+}
+
+func loopCacheMode(kvs map[string]any, key string) (string, string) {
+	value, present := kvs[key]
+	if !present {
+		return "", ""
+	}
+	mode, ok := value.(string)
+	if !ok || (mode != RecurrentKVCachePerLoop && mode != RecurrentKVCacheLastLoop) {
+		return "", LoopStateUnmeasured
+	}
+	return mode, LoopStateDeclared
 }

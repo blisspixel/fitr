@@ -533,12 +533,30 @@ func configurationFrom(result *record.Record, report analysis.Report) (Configura
 		placement.Supports = append([]analysis.SupportClaim(nil), report.Capacity.Placement.Supports...)
 		configuration.Placement = &placement
 	}
+	configuration.ServingLoopCount = cloneInt(result.Manifest.ServingLoopCount)
+	configuration.RecurrentKVCacheMode = result.Manifest.RecurrentKVCacheMode
 	digest, err := digest("fitr.configuration.v1", configuration)
 	if err != nil {
 		return ConfigurationUnderTest{}, err
 	}
 	configuration.ID = digest
 	return configuration, nil
+}
+
+// LoopObservation describes the serving loop identity. It is not part of the
+// configuration digest. An absent observation stays unobserved and is not
+// filled from a file default.
+func (c ConfigurationUnderTest) LoopObservation() string {
+	return record.ServingLoopText(c.ServingLoopCount, c.RecurrentKVCacheMode)
+}
+
+// OneConfiguration reports whether two derived identities are one
+// configuration. Ranking uses this identity. Different serving loop counts
+// or cache modes are not one configuration. Two results that both left the
+// loop unobserved can still share an identity, and that identity does not
+// claim a file-declared loop count.
+func OneConfiguration(a, b ConfigurationUnderTest) bool {
+	return a.ID != "" && a.ID == b.ID
 }
 
 func compareBound(observed float64, atLeast, atMost *float64) (RequirementState, string) {
