@@ -117,8 +117,11 @@ type props struct {
 		Vision bool `json:"vision"`
 		Audio  bool `json:"audio"`
 	} `json:"modalities"`
-	ChatTemplateCaps map[string]bool `json:"chat_template_caps"`
-	SystemInfo       string          `json:"system_info"`
+	// chat_template_caps is an object of boolean flags plus, since llama.cpp
+	// b12359, reasoning_effort_levels as a string array. A map of bool would
+	// reject the whole /props body.
+	ChatTemplateCaps chatTemplateCaps `json:"chat_template_caps"`
+	SystemInfo       string           `json:"system_info"`
 	DefaultSettings  struct {
 		NCtx int `json:"n_ctx"`
 	} `json:"default_generation_settings"`
@@ -167,6 +170,55 @@ func (c *Client) Version(ctx context.Context) string {
 	return "llama-server " + p.BuildInfo
 }
 
+// chatTemplateCaps keeps the boolean flags from /props chat_template_caps.
+// llama.cpp b12359 (v1.0.0, commit b1b770d) builds that object in
+// common_chat_templates_get_caps: to_map() supplies the bools, then
+// reasoning_effort_levels, a vector of strings, is added beside them
+// (common/jinja/caps.h, common/chat.cpp). A non-boolean value is not a
+// flag. It stays out of the map and does not fail the props decode.
+type chatTemplateCaps struct {
+	flags   map[string]bool
+	nonBool map[string]struct{}
+}
+
+func (c *chatTemplateCaps) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		*c = chatTemplateCaps{}
+		return nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	flags := make(map[string]bool, len(raw))
+	var nonBool map[string]struct{}
+	for key, value := range raw {
+		var flag bool
+		if err := json.Unmarshal(value, &flag); err != nil {
+			if nonBool == nil {
+				nonBool = map[string]struct{}{}
+			}
+			nonBool[key] = struct{}{}
+			continue
+		}
+		flags[key] = flag
+	}
+	c.flags = flags
+	c.nonBool = nonBool
+	return nil
+}
+
+// boolFlag reports a boolean capability. A key that is present but not a
+// boolean is answered as false, so the caller does not scan the template
+// in its place. An absent key is not answered.
+func (c chatTemplateCaps) boolFlag(name string) (bool, bool) {
+	if _, bad := c.nonBool[name]; bad {
+		return false, true
+	}
+	value, ok := c.flags[name]
+	return value, ok
+}
+
 func modelName(p props) string {
 	path := strings.ReplaceAll(p.ModelPath, "\\", "/")
 	if i := strings.LastIndex(path, "/"); i >= 0 {
@@ -205,7 +257,7 @@ func (c *Client) Show(ctx context.Context, model string) (ollama.ModelInfo, erro
 
 func (c *Client) infoFromProps(p props) ollama.ModelInfo {
 	caps := []string{"completion"}
-	if v, ok := p.ChatTemplateCaps["supports_tools"]; ok {
+	if v, ok := p.ChatTemplateCaps.boolFlag("supports_tools"); ok {
 		if v {
 			caps = append(caps, "tools")
 		}

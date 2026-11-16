@@ -100,7 +100,11 @@ afterward, so the body is not a simultaneous co-residency receipt.
 not expose: per-request **cached-token counts** (the evidence needed to
 separate loaded/uncached prompt processing from a prefix-cache hit), and a
 **capability probe** via `/props`, so tool and vision support is read from
-the endpoint, never guessed from the model's name. Current llama-server
+the endpoint, never guessed from the model's name. A boolean flag in
+`chat_template_caps` is that probe. llama.cpp b12359 also puts
+`reasoning_effort_levels`, a list of strings, in the same object. A value
+that is not a boolean is not a capability flag, and it does not make
+`/props` unreadable. Current llama-server
 builds report the prefix actually reused as `timings.cache_n`. The top-level
 `tokens_cached` field describes slot state after processing and is not a
 reuse receipt; treating it as one can label a fresh prompt as a cache hit.
