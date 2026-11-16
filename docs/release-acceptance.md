@@ -4,10 +4,64 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-11-16. The 0.11.11 receipt below covers its exact tagged
+Last updated: 2026-11-16. The 0.11.12 receipt below covers its exact tagged
 revision and downloaded assets. Historical sections retain their original
 candidates, including older metadata-only source receipts. 0.11.4 shipped
 without a measurement receipt in this file.
+
+### 0.11.12 release receipt
+
+Release [0.11.12](https://github.com/blisspixel/fitr/releases/tag/v0.11.12)
+is bound to commit `9e9f4a8bbe3d052307c68b0339ea65f7b7b2d5ae`.
+[Main CI 43924280951](https://github.com/blisspixel/fitr/actions/runs/43924280951)
+passed with **80.98% aggregate coverage** (30804/38039 statements). The
+[release workflow 43925434939](https://github.com/blisspixel/fitr/actions/runs/43925434939)
+measured **80.99%** (30806/38039 statements) and repeated race, lint with
+golangci-lint v2.14.0, govulncheck v1.7.0 on Go 1.27.4 with no vulnerabilities
+found, sixteen fuzz smoke targets including the context overflow parser, the
+1600-line cap, six binary builds, deterministic rebuild, and all three
+installer jobs. It uploaded ten verified assets into the owner draft. The
+owner published the release on November 16 UTC. The tag is annotated.
+`git verify-tag v0.11.12` reports no signature.
+
+[Native acceptance 43924336107](https://github.com/blisspixel/fitr/actions/runs/43924336107)
+passed the installed-binary loop on Linux amd64 and macOS against
+checksum-pinned llama-server b12359 and both pinned GGUF artifacts. Each
+run recorded result_count=4 and status=pass. The installed binary reported
+`fitr 0.11.12`. The Linux job ran
+`llama-b12359/llama-server`.
+
+All ten published assets passed the release workflow's checksum check. The
+downloaded Windows amd64 executable is **16,932,352 bytes**, below the shared
+**16,951,720-byte** ceiling. Its build info is go1.27.4, revision
+`9e9f4a8bbe3d052307c68b0339ea65f7b7b2d5ae`, and `vcs.modified=false`. Its
+SHA-256 is
+`946d05c536ed2960be1417095238996ff3c952bda42058b369526857c4fffcb4`,
+checked against the downloaded bytes and `SHA256SUMS`. The release build
+checked that the Linux amd64 binary prints `fitr 0.11.12`. Manifest SHA-256:
+`03ec88fbdddd068927df54558c6a2eeb0bd07ca9655bad666ed28e5028e1ee00`.
+
+The tagged revision keeps llama-server `/props` readable when
+`chat_template_caps` contains a non-boolean value. llama.cpp b12359 writes
+`reasoning_effort_levels` as a string array beside the boolean flags. A
+coding pass or fail is stored only when the sealed execution policy is
+bubblewrap isolation and each scoreable observation has a validating
+verifier receipt. A disabled or unsafe count stays rejected. A mistyped
+command or flag is a usage notice and is not sent to a runtime. Guided plan
+approval holds the fitting lease. `opentelemetry-api` is 1.45.2. No
+dependency was added. Sixteen fuzz smoke targets ran.
+`FuzzDecodeModelSetBundle`, `FuzzDecodeServingBundle`, and
+`FuzzDecodeTokenPlan` are in the tree and were not among those steps.
+
+Native acceptance did not measure a resident model-set total. This receipt
+does not accept the Jinja half of the oversized-prompt check, a recorded Pi
+process, a native local-model pi-workspace trial, or an overnight pack's
+wall time, disk, and resolved count. It does not accept a rendered qualified
+selection or an allowlisted benchmark click. It does not accept native
+Phoenix model-loading. It does not accept a simultaneous model-set
+observation, a spill and eviction receipt, or exact-context OTHER. It does
+not add a catalog, a delete path, Streamable HTTP, or A2A. It is not 1.0.
+The 0.11.11 receipt is unchanged.
 
 ### 0.11.11 release receipt
 
