@@ -229,6 +229,41 @@ A finding that outlives the session belongs in the issue tracker, not in a
 summary. If you find a defect while doing something else, file it with enough
 detail to act on months later, then carry on with the task you were given.
 
+### Start tidy, stop tidy
+
+Work in this repository may come from several agent tools, and a session can
+end partway through a task. The next session finishes or parks what is already
+there. It does not open a second attempt beside an unfinished one.
+
+Before starting new work, run `git fetch --prune` and look at `git worktree
+list`, the local and remote branches, and the open pull requests. A squash
+merge hides the merged work from ancestry. Pull-request state says whether
+that branch has landed. `git branch --merged` stays silent about a squash.
+
+Commit and push at a meaningful checkpoint. Before stopping, leave a short
+handoff in the pull request or the commit message: what is done, and what is
+next.
+
+Test fixtures, scratch scripts, logs, and generated output go in the
+designated test or temp location, or in the gitignored `.agents/` directory.
+Throwaway files do not belong elsewhere in the tree. Remove scratch artifacts
+before finishing.
+
+Keep a branch short-lived. Merge it promptly, then delete the remote branch.
+Push finished work, and update or close its pull request. Close an issue only
+through the comment rule above.
+
+The resting state is one `main` whose CI is passing. Finished work does not
+stay on a side branch, and `main` does not stay red.
+
+Remove a worktree or a branch only once its work is merged, contained in
+`main`, or pushed to the remote. Do not pass `--force` to remove one. Report
+anything uncertain instead of deleting it. `git worktree prune` drops entries
+whose directories are already gone.
+
+When it is unclear whether leftover work should be finished, kept, or removed,
+stop and ask.
+
 `.agents/` is gitignored scratch: analysis, archived worktrees, generated
 fixtures, acceptance venvs, indexes and receipts. Never commit it, never put
 credentials in it, and remember it contains whole copies of the tree, so
