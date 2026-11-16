@@ -209,8 +209,8 @@ func TestMistypedSubcommandHintsBeforeDiscovery(t *testing.T) {
 	}
 	os.Args = []string{"fitr", "frobnicate"}
 	stderr, code = captureTopStderr(t, run)
-	if strings.Contains(stderr, "did you mean fitr") || strings.Contains(stderr, "is not a command") {
-		t.Fatalf("distant token was treated as a command:\n%s", stderr)
+	if code == exitOK || strings.Contains(stderr, "did you mean fitr") || strings.Contains(stderr, "is not a command") {
+		t.Fatalf("distant token was treated as a command: exit %d\n%s", code, stderr)
 	}
 	os.Args = []string{"fitr", "Suggest"}
 	stderr, code = captureTopStderr(t, run)

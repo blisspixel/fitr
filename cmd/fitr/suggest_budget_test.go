@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -66,7 +67,7 @@ func TestRepeatedRegistryFailuresDoNotRepeatTheResolverError(t *testing.T) {
 
 func TestNonTransportRegistryFailureStaysOneUnobservedNote(t *testing.T) {
 	item := suggest.Candidate{Name: "qwen3.5:2b", Use: "general"}
-	observed := []observedWeight{{err: fmt.Errorf("manifest digest was not sha256")}}
+	observed := []observedWeight{{err: errors.New("manifest digest was not sha256")}}
 	lines := suggestReportLines([]suggest.Candidate{item}, observed, []int64{0}, suggestionPlan{}, "", device.Fingerprint{})
 	joined := strings.Join(lines, "\n")
 	if strings.Count(joined, "some registry sizes are unobserved") != 1 || strings.Contains(joined, "manifest digest") || strings.Contains(joined, "offline") {
