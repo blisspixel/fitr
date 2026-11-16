@@ -44,8 +44,13 @@ set -eu
 # Go 1.27.4 is the toolchain after GO-2026-6859 in net/http. A local
 # windows/amd64 build with these flags measured 16,918,016 bytes.
 # The cap stays. Headroom against that local binary is 33,704 bytes.
+# Main at 7770890 measured 16,942,080 on the 2026-11-16 dist job, leaving
+# 9,640 bytes under the cap. Loop-count configuration identity added
+# 20,480 bytes on the pull 130 dist job the same day:
+# 16,942,080 -> 16,962,560. No new Go dependency was added. The cap
+# returns to the 35,240-byte headroom kept for the model-set plan.
 # CI and releases use this single measured gate.
-max_bytes=16951720
+max_bytes=16997800
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"
