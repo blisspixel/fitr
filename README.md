@@ -33,12 +33,15 @@ Each role has its own requirements and preferences. A coding agent, daily
 driver and classifier need different fittings. Quality requirements come
 first; speed and resource preferences help choose among models that meet them.
 See [personal fitting](docs/personal-fitting.md) for `fitr tailor`, usable
-context, compaction, and harness scorecards. 0.11.11 seals an ordered
-model-set plan and refuses co-residency. One process-list body, a sum of
-isolated sizes, llama-server props, an unpinned router body, an empty
-OpenAI list, and a sleeping row are not one simultaneous observation.
-The report stays unresolved and does not enter the single-model Board.
-The command does not contact a runtime. `fitr suggest` names the library
+context, compaction, and harness scorecards. 0.11.12 keeps llama-server
+`/props` readable when `chat_template_caps` contains a non-boolean value.
+Native acceptance uses llama.cpp b12359, the binary release of v1.0.0
+commit b1b770d. A coding pass or fail is stored only when the sealed
+policy is bubblewrap isolation and the verifier receipt validates. A
+mistyped command or flag is a usage notice and is not sent to a runtime.
+Guided fitting approval holds the session lease. An ordered model-set
+plan still refuses co-residency, and that report stays unresolved.
+`fitr suggest` names the library
 tags checked on 2026-11-12: qwen3.5 at 2b, 9b and 27b, qwen3:8b,
 gemma4:e4b, gemma4:26b, gpt-oss:20b and qwen3-coder:30b. A review date
 more than 45 days old prints that age and does not search. Weight fit
@@ -107,7 +110,7 @@ Read [usage](docs/usage.md) for all commands and flags, or
 [decision specifications](docs/decisions.md) for the strict schema and
 requirement semantics.
 
-<img src="docs/assets/inventory.svg?v=0.11.11" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
+<img src="docs/assets/inventory.svg?v=0.11.12" alt="fitr inventory fixture with local evidence, memory limits and a remote model excluded from local measurement" width="820">
 
 ## Start with something you heard about
 
