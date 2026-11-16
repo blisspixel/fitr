@@ -178,7 +178,9 @@ func writeHelpLine(w io.Writer, line string, width int) {
 // page only for -h and --help.
 func commandFlags(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	// The flag package's own sentence uses one dash and its parser's wording.
+	// parseCommandFlags prints the notice voice instead, so this stays quiet.
+	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
 	return fs
 }
