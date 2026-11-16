@@ -4,10 +4,71 @@ This document tracks the evidence required for the 1.0 release. Automated
 protocol tests are necessary, but they do not replace a native binary running
 against real serving runtimes on clean operating-system installs.
 
-Last updated: 2026-11-16. The 0.11.12 receipt below covers its exact tagged
+Last updated: 2026-11-16. The 0.11.13 receipt below covers its exact tagged
 revision and downloaded assets. Historical sections retain their original
 candidates, including older metadata-only source receipts. 0.11.4 shipped
 without a measurement receipt in this file.
+
+### 0.11.13 release receipt
+
+Release [0.11.13](https://github.com/blisspixel/fitr/releases/tag/v0.11.13)
+is bound to commit `6e6de7795af321b1c5c228875e3c8afec3b18355`.
+[Main CI 43942270791](https://github.com/blisspixel/fitr/actions/runs/43942270791)
+passed with **81.03% aggregate coverage** (30971/38224 statements). The
+[release workflow 43943658513](https://github.com/blisspixel/fitr/actions/runs/43943658513)
+measured **81.03%** (30974/38224 statements) and repeated race, lint with
+golangci-lint v2.14.0, govulncheck v1.7.0 on Go 1.27.4 with no vulnerabilities
+found, sixteen fuzz smoke targets including the context overflow parser, the
+1600-line cap, six binary builds, deterministic rebuild, and all three
+installer jobs. It uploaded ten verified assets into the owner draft. The
+owner published the release on November 16 UTC. The tag is annotated.
+`git verify-tag v0.11.13` reports no signature.
+
+[Native acceptance 43942360571](https://github.com/blisspixel/fitr/actions/runs/43942360571)
+passed the installed-binary loop on Linux amd64 and macOS against
+checksum-pinned llama-server b12359 and both pinned GGUF artifacts. Each
+run recorded result_count=4 and status=pass. The installed binary reported
+`fitr 0.11.13`. The Linux job ran
+`llama-b12359/llama-server`.
+
+All ten published assets passed the release workflow's checksum check. The
+downloaded Windows amd64 executable is **16,962,560 bytes**, below the shared
+**16,997,800-byte** ceiling. Its build info is go1.27.4, revision
+`6e6de7795af321b1c5c228875e3c8afec3b18355`, and `vcs.modified=false`. Its
+SHA-256 is
+`d312dbbffb41f1efdb9e64f39bbe0a63b1abe96fcd49b6d1f40fe08bc73f8e9b`,
+checked against the downloaded bytes and `SHA256SUMS`. The release build
+checked that the Linux amd64 binary prints `fitr 0.11.13`. The downloaded
+Linux amd64 binary prints the same version. Manifest SHA-256:
+`af761cb939fe460ce01be8aceaa8ea9dd9dd9334965cacac33bb18e27f95ff0a`.
+
+The tagged revision shows recovered tool results beside an accepted
+workload outcome. New plans seal `fitr.workload.analysis.v3`. A failed,
+malformed, or denied tool status is distinct from verifier rejection.
+Process counts, including explicit zeros, stay observations. Historical
+plans keep analysis v2. A GGUF that declares `num_loops`,
+`recurrent_kv_cache_mode`, or a scalar loop layer count is looped. The KV
+projection is withheld with reason `looped-architecture`. A missing key is
+not filled in. A wrong shape is unmeasured. The file count is not the
+serving configuration, and a publisher recommendation that the artifact
+does not carry stays unobserved. A serving loop count or cache mode enters
+the sealed manifest only when the runtime reported it or the run was
+started with it. llama.cpp b12359 does not report a loop count. Two sealed
+results at different loop counts or cache modes are different
+configurations. The optional loop experiment axis stays out. No dependency
+was added. Sixteen fuzz smoke targets ran.
+`FuzzDecodeModelSetBundle`, `FuzzDecodeServingBundle`, and
+`FuzzDecodeTokenPlan` are in the tree and were not among those steps.
+
+Native acceptance did not measure a resident model-set total. This receipt
+does not accept the Jinja half of the oversized-prompt check, a recorded Pi
+process, a native local-model pi-workspace trial, or an overnight pack's
+wall time, disk, and resolved count. It does not accept a rendered qualified
+selection or an allowlisted benchmark click. It does not accept native
+Phoenix model-loading. It does not accept a simultaneous model-set
+observation, a spill and eviction receipt, or exact-context OTHER. It does
+not add a catalog, a delete path, Streamable HTTP, or A2A. It is not 1.0.
+The 0.11.12 receipt is unchanged.
 
 ### 0.11.12 release receipt
 
