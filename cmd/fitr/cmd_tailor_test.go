@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -32,6 +33,94 @@ func TestTailorStartRequiresTheSessionLease(t *testing.T) {
 	})
 	if code != exitError || calls != 0 {
 		t.Fatalf("concurrent session mutation permitted: exit %d calls %d", code, calls)
+	}
+}
+
+func TestTailorApprovePlanRequiresTheSessionLease(t *testing.T) {
+	root, id, _ := draftCeiling(t)
+	path := filepath.Join(root, ".fitting", id+".json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := lock.Acquire("fitting-"+id, "test fitting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = guard.Release() })
+	calls := 0
+	deps := tailorDeps{runPoint: func(context.Context, tailorJob) (string, string, error) {
+		calls++
+		return "run", tailorDigest("c"), nil
+	}}
+	_, _, code := captureCommandOutput(t, func() int {
+		return cmdTailorWith(context.Background(), []string{id, "--approve-plan"}, deps)
+	})
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != exitError || calls != 0 || string(before) != string(after) {
+		t.Fatalf("approve-plan bypassed the fitting lease: exit %d calls %d bytes changed %v", code, calls, string(before) != string(after))
+	}
+}
+
+// promptThenAdvance is the open approval prompt. Its first read records that
+// another command has already moved the same preview forward.
+type promptThenAdvance struct {
+	t     *testing.T
+	id    string
+	rest  *bytes.Reader
+	saved []byte
+}
+
+func (p *promptThenAdvance) Read(buf []byte) (int, error) {
+	if p.saved == nil {
+		session := loadFitting(p.t, p.id)
+		session.Phase = fitting.PhaseMeasuring
+		session.Points = []fitting.Point{{
+			Model: session.Plan.Candidates[0], RunID: "run-kept",
+			EvidenceSHA256: tailorDigest("d"),
+		}}
+		if err := (fitting.Store{Results: os.Getenv("FITR_RESULTS")}).Save(session); err != nil {
+			p.t.Fatal(err)
+		}
+		path := filepath.Join(os.Getenv("FITR_RESULTS"), ".fitting", p.id+".json")
+		saved, err := os.ReadFile(path)
+		if err != nil {
+			p.t.Fatal(err)
+		}
+		p.saved = saved
+	}
+	return p.rest.Read(buf)
+}
+
+func TestStaleTailorApprovalDoesNotRewindTheSession(t *testing.T) {
+	_, id, _ := draftCeiling(t)
+	calls := 0
+	prompt := &promptThenAdvance{t: t, id: id, rest: bytes.NewReader([]byte("yes\n"))}
+	deps := tailorDeps{
+		interactive: true,
+		prompt:      bufio.NewReader(prompt),
+		runPoint: func(context.Context, tailorJob) (string, string, error) {
+			calls++
+			return "run-new", tailorDigest("e"), nil
+		},
+	}
+	_, _, code := captureCommandOutput(t, func() int {
+		return cmdTailorWith(context.Background(), []string{id}, deps)
+	})
+	session := loadFitting(t, id)
+	path := filepath.Join(os.Getenv("FITR_RESULTS"), ".fitting", id+".json")
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code == exitOK || calls != 0 || session.Phase != fitting.PhaseMeasuring ||
+		len(session.Points) != 1 || session.Points[0].RunID != "run-kept" ||
+		string(after) != string(prompt.saved) {
+		t.Fatalf("stale approval rewound the session: exit %d calls %d phase %s points %+v",
+			code, calls, session.Phase, session.Points)
 	}
 }
 
