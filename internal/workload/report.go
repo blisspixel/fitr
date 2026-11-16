@@ -53,22 +53,7 @@ func Analyze(plan Plan, trials []Trial) Report {
 	if report.Counts.TimedOut > 0 {
 		report.Gaps = append(report.Gaps, "timed-out trials remain in the denominator")
 	}
-	if plan.Schema == LegacyPlanSchema {
-		report.Schema = LegacyReportSchema
-	} else {
-		if plan.Analysis == ProcessReportSchema {
-			report.Schema = ProcessReportSchema
-		}
-		for _, trial := range trials {
-			analysis := analyzeTrial(trial)
-			if plan.Analysis != ProcessReportSchema {
-				// Historical plans rebuild analysis v2. Tool-process counts
-				// are a v3 observation, so they stay off that stored report.
-				analysis.Process = nil
-			}
-			report.TrialAnalysis = append(report.TrialAnalysis, analysis)
-		}
-	}
+	attachTrialAnalysis(&report, plan, trials)
 	if plan.Provider == PiProviderFake {
 		report.Coverage = "not_established"
 		report.MedianAcceptedMillis = nil
@@ -78,6 +63,25 @@ func Analyze(plan Plan, trials []Trial) Report {
 		report.Gaps = append(report.Gaps, piFakeProviderGap)
 	}
 	return report
+}
+
+// attachTrialAnalysis rebuilds the derived report. A historical plan keeps
+// analysis v2, so tool-process counts stay off a report that schema did not carry.
+func attachTrialAnalysis(report *Report, plan Plan, trials []Trial) {
+	if plan.Schema == LegacyPlanSchema {
+		report.Schema = LegacyReportSchema
+		return
+	}
+	if plan.Analysis == ProcessReportSchema {
+		report.Schema = ProcessReportSchema
+	}
+	for _, trial := range trials {
+		analysis := analyzeTrial(trial)
+		if plan.Analysis != ProcessReportSchema {
+			analysis.Process = nil
+		}
+		report.TrialAnalysis = append(report.TrialAnalysis, analysis)
+	}
 }
 
 func (trial Trial) Validate(plan Plan) error {
