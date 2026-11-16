@@ -10,8 +10,11 @@ Coding fixtures and executable tool or agent loops are disabled by default.
 `fitr run` on Linux executes the built-in verifier inside bubblewrap when
 `bwrap` and `/usr/bin/prlimit` can run a probe. That sandbox has no network
 and no view of the home directory. A PASS or FAIL from that worker is a
-measured outcome. A sandbox that does not start is an error, not a model
-score.
+measured outcome. The stored record accepts that pass or fail only when the
+sealed execution policy is bubblewrap isolation and each scoreable
+observation has a verifier receipt that validates. A disabled or unsafe
+record that carries a scoreable executable count is rejected. A sandbox that
+does not start is an error, not a model score.
 
 macOS, Windows, a missing `bwrap`, and a kernel that refuses the namespace
 record those tasks as SKIP before a model call or work directory is created.

@@ -295,9 +295,13 @@ func (r *Record) validateEvidenceCountCompleteness() error {
 
 func (r *Record) validateExecutableEvidenceIsolation() error {
 	for _, phase := range []string{"coding", "tools", "agentic"} {
-		if counts := r.EvidenceCounts[phase]; counts.Scorable != 0 {
-			return fmt.Errorf("%s executable observations cannot be scoreable before isolation", phase)
+		counts := r.EvidenceCounts[phase]
+		if counts.Scorable == 0 || r.isolatedPhaseScoreAllowed(phase) {
+			continue
 		}
+		// A policy name is not isolation. Disabled, unsafe, and an isolated
+		// pass or fail with no validating verifier receipt all stop here.
+		return fmt.Errorf("%s executable observations cannot be scoreable before isolation", phase)
 	}
 	return nil
 }

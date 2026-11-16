@@ -452,6 +452,53 @@ func (r *Record) validateIsolatedExecutorEvidence() error {
 	return nil
 }
 
+// isolatedPhaseScoreAllowed is the exception to the unscoreable executable
+// gate. Bubblewrap isolation may store a pass or fail, and only when every
+// scoreable observation in that phase carries a verifier receipt that
+// validates. Withdrawal is not one of these phases: it does not run
+// generated code, so it can be scoreable without a sandbox receipt.
+func (r *Record) isolatedPhaseScoreAllowed(phase string) bool {
+	if r == nil || r.Manifest == nil || r.Manifest.ExecutionPolicy != ExecutionIsolated {
+		return false
+	}
+	switch phase {
+	case "coding":
+		for _, result := range append(append([]eval.ExecResult{}, r.CodeWrite...), r.CodeFix...) {
+			if result.Outcome != eval.OutcomePass && result.Outcome != eval.OutcomeFail {
+				continue
+			}
+			if validateIsolatedCoding(phase, result) != nil {
+				return false
+			}
+		}
+		return true
+	case "tools":
+		for _, result := range r.Tools {
+			if result.Outcome != eval.OutcomePass && result.Outcome != eval.OutcomeFail {
+				continue
+			}
+			if !isolatedExecutableToolReceipt(result) {
+				return false
+			}
+		}
+		return true
+	case "agentic":
+		if r.Agentic == nil || (r.Agentic.Outcome != eval.OutcomePass && r.Agentic.Outcome != eval.OutcomeFail) {
+			return true
+		}
+		return isolatedExecutableToolReceipt(*r.Agentic)
+	default:
+		return false
+	}
+}
+
+func isolatedExecutableToolReceipt(result eval.ToolLoopResult) bool {
+	if result.Verifier == nil || len(result.VerifierObservations) == 0 {
+		return false
+	}
+	return validateIsolatedTool("tool", result) == nil
+}
+
 func validateIsolatedCoding(label string, result eval.ExecResult) error {
 	switch result.Outcome {
 	case eval.OutcomePass, eval.OutcomeFail:

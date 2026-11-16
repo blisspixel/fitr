@@ -755,6 +755,63 @@ var currentContractInvalidCases = []currentContractInvalidCase{
 	},
 }
 
+func TestIsolatedCodingPassSatisfiesTheEvidenceContract(t *testing.T) {
+	receipt := eval.VerificationReceipt{
+		Protocol: "fitr.verifier.v2", InterpreterPath: filepath.Join(t.TempDir(), "python"),
+		InterpreterVer: "Python 3.12.7", InterpreterHash: testArtifactDigest,
+		ProcessStarted: true, SuccessfulExit: true, ExactFinalMarker: true,
+	}
+	r := completeContractRecord(t, TaskPlan{CodeTrials: 1}, func(r *Record) {
+		r.ExecutionPolicy = ExecutionIsolated
+		r.CodeWrite = []eval.ExecResult{{
+			Pass: true, Outcome: eval.OutcomePass, Verifier: &receipt,
+		}}
+	})
+	if err := r.ValidateEvidenceContract(); err != nil {
+		t.Fatalf("isolated coding pass = %v", err)
+	}
+	if r.EvidenceCounts["coding"].Scorable != 1 || r.EvidenceCounts["coding"].Passed != 1 {
+		t.Fatalf("coding counts = %+v", r.EvidenceCounts["coding"])
+	}
+}
+
+func TestIsolatedCodingFailureBesideAnInconclusiveTrialIsStored(t *testing.T) {
+	receipt := eval.VerificationReceipt{
+		Protocol: "fitr.verifier.v2", InterpreterPath: filepath.Join(t.TempDir(), "python"),
+		InterpreterVer: "Python 3.12.7", InterpreterHash: testArtifactDigest,
+		ProcessStarted: true, ExitCode: 1,
+	}
+	r := completeContractRecord(t, TaskPlan{CodeTrials: 2}, func(r *Record) {
+		r.ExecutionPolicy = ExecutionIsolated
+		r.CodeWrite = []eval.ExecResult{{
+			Outcome: eval.OutcomeFail, Verifier: &receipt,
+		}}
+		r.CodeFix = []eval.ExecResult{{
+			Outcome: eval.OutcomeInconclusive, Detail: "no executable code was extracted",
+		}}
+	})
+	if err := r.ValidateEvidenceContract(); err != nil {
+		t.Fatalf("partial isolated coding result = %v", err)
+	}
+	counts := r.EvidenceCounts["coding"]
+	if counts.Scorable != 1 || counts.Failed != 1 || counts.Inconclusive != 1 || !counts.Complete() {
+		t.Fatalf("coding counts = %+v", counts)
+	}
+}
+
+func TestIsolatedToolPassWithoutReceiptStaysUnscoreable(t *testing.T) {
+	r := completeContractRecord(t, TaskPlan{ToolTrials: 1}, func(r *Record) {
+		r.ExecutionPolicy = ExecutionIsolated
+		r.Tools = []eval.ToolLoopResult{{
+			Pass: true, Outcome: eval.OutcomePass, Verified: true, Ended: "clean_stop",
+		}}
+	})
+	err := r.ValidateEvidenceContract()
+	if err == nil || !strings.Contains(err.Error(), "cannot be scoreable before isolation") {
+		t.Fatalf("tool pass without a receipt = %v", err)
+	}
+}
+
 func assertValidCurrentContract(t *testing.T) {
 	t.Helper()
 	valid := completeContractRecord(t, TaskPlan{CheckTrialsLimit: 1}, func(r *Record) {
