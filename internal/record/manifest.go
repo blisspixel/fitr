@@ -695,7 +695,15 @@ type RunManifest struct {
 	SeedSet                 string                `json:"seedset"`
 	Repeats                 int                   `json:"repeats"`
 	NumCtx                  int                   `json:"num_ctx"`
-	Provenance              *RunProvenance        `json:"provenance,omitempty"`
+	// ServingLoopCount and RecurrentKVCacheMode are set only when the runtime
+	// reported them or the run was started with them. A GGUF num_loops value
+	// is not copied here. Empty fields stay omitted so a manifest with no
+	// loop observation keeps its previous digest. The mode strings match
+	// llama.cpp pull 30306 head ab0ffa188bbc3be15ce8e5d3f1278ba5224f4358,
+	// which was unmerged on 2026-11-16. llama.cpp b12359 does not report them.
+	ServingLoopCount     *int           `json:"serving_loop_count,omitempty"`
+	RecurrentKVCacheMode string         `json:"recurrent_kv_cache_mode,omitempty"`
+	Provenance           *RunProvenance `json:"provenance,omitempty"`
 }
 
 func NewRunID() (string, error) {
@@ -762,14 +770,27 @@ func (r *Record) attachManifest(identity ModelIdentity, executor *eval.ExecutorR
 		SeedSet:        r.SeedSet, Repeats: r.Repeats,
 		NumCtx: r.ContextSize(), Provenance: receipt,
 	}
-	if schema == RunManifestSchema && r.DeviceV2 != nil {
+	if err := r.finishManifest(m); err != nil {
+		return err
+	}
+	if err := m.Seal(); err != nil {
+		return err
+	}
+	r.Manifest = m
+	return nil
+}
+
+// finishManifest adds the v2 fingerprint, completion key, and any staged
+// serving-loop observation. Those receipts are absent from a legacy manifest.
+func (r *Record) finishManifest(m *RunManifest) error {
+	if m.Schema == RunManifestSchema && r.DeviceV2 != nil {
 		key, err := r.DeviceV2.EvidenceKey()
 		if err != nil {
 			return fmt.Errorf("fingerprint v2: %w", err)
 		}
 		m.DeviceFingerprintSHA256 = key
 	}
-	if schema == RunManifestSchema {
+	if m.Schema == RunManifestSchema {
 		publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
 			return fmt.Errorf("generate completion signing key: %w", err)
@@ -777,11 +798,7 @@ func (r *Record) attachManifest(identity ModelIdentity, executor *eval.ExecutorR
 		m.CompletionPublicKey = base64.RawStdEncoding.EncodeToString(publicKey)
 		r.completionPrivateKey = privateKey
 	}
-	if err := m.Seal(); err != nil {
-		return err
-	}
-	r.Manifest = m
-	return nil
+	return m.applyServingLoop(r.servingLoopCount, r.servingLoopMode)
 }
 
 func (m *RunManifest) Seal() error {
@@ -944,7 +961,7 @@ func (m RunManifest) validateOptionalReceipts() error {
 			return errors.New("run manifest has a capacity plan without a memory probe")
 		}
 	}
-	return nil
+	return m.validateServingLoop()
 }
 
 func validCompletionPublicKey(encoded string) bool {

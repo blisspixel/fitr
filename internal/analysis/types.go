@@ -536,4 +536,8 @@ type Report struct {
 	Gaps            []EvidenceGap    `json:"gaps,omitempty"`
 	Diagnoses       []Diagnosis      `json:"diagnoses,omitempty"`
 	NextActions     []Action         `json:"next_actions"`
+	// ServingLoop is the sealed serving loop observation. Empty means the run
+	// did not record one. The unobserved sentence is a text projection and is
+	// not stored here, so a historical report keeps its bytes.
+	ServingLoop string `json:"serving_loop,omitempty"`
 }

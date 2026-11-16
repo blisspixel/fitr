@@ -98,7 +98,28 @@ func fromValidatedRecordWithDisplayOnly(result *record.Record, displayOnly displ
 	report.Gaps = gapsFrom(result, report, displayOnly)
 	report.Diagnoses = diagnosesFrom(result, unclaimable)
 	report.NextActions = nextActionsFrom(result, unclaimable)
+	report.ServingLoop = servingLoopFrom(result)
 	return report
+}
+
+// ServingLoopObservation says what the sealed run recorded. An empty stored
+// field stays unobserved rather than borrowing a file default.
+func (r Report) ServingLoopObservation() string {
+	if r.ServingLoop != "" {
+		return r.ServingLoop
+	}
+	return record.ServingLoopText(nil, "")
+}
+
+func servingLoopFrom(result *record.Record) string {
+	if result == nil || result.Manifest == nil {
+		return ""
+	}
+	count, mode := result.Manifest.ServingLoopCount, result.Manifest.RecurrentKVCacheMode
+	if count == nil && mode == "" {
+		return ""
+	}
+	return record.ServingLoopText(count, mode)
 }
 
 // contextTasksFrom projects an attached document-task phase.

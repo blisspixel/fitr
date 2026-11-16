@@ -336,6 +336,12 @@ type ConfigurationUnderTest struct {
 	ContextState     string                         `json:"context_state"`
 	ComparabilityKey string                         `json:"comparability_key,omitempty"`
 	Placement        *analysis.PlacementObservation `json:"placement,omitempty"`
+	// ServingLoopCount and RecurrentKVCacheMode participate in the
+	// configuration digest only when a sealed manifest recorded them. An
+	// unobserved loop is omitted, so a historical identity stays put, and it
+	// is not described as the file's num_loops value.
+	ServingLoopCount     *int   `json:"serving_loop_count,omitempty"`
+	RecurrentKVCacheMode string `json:"recurrent_kv_cache_mode,omitempty"`
 }
 
 type EvaluationState string

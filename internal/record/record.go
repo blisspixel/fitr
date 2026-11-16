@@ -86,6 +86,11 @@ type Record struct {
 
 	completionPrivateKey  ed25519.PrivateKey
 	storageIntegrityIssue string
+	// servingLoopCount is staged until AttachManifest seals it. It is not part
+	// of the record JSON. Nil means the run did not observe a loop count.
+	servingLoopCount *int
+	servingLoopMode  string
+	servingLoopSet   bool
 }
 
 var validRunID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$`)

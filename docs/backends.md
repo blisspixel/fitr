@@ -120,7 +120,17 @@ run and a CUDA run of the same binary are not comparable.
 Ollama `/api/show` `model_info`, or llama-server's `model_path` when that
 file is readable. OpenAI-compatible servers do not expose GGUF metadata, so
 advise SKIPs the KV cache (and says so) unless you pass a `.gguf` path.
-Unmeasured GPU memory is SKIP, never a card-from-name number.
+Unmeasured GPU memory is SKIP, never a card-from-name number. A GGUF that
+declares `{arch}.num_loops` or `{arch}.recurrent_kv_cache_mode` is looped.
+Those names were checked against llama.cpp pull 30306 head
+`ab0ffa188bbc3be15ce8e5d3f1278ba5224f4358`, open and unmerged on 2026-11-16.
+The pinned acceptance binary, llama.cpp b12359 (commit `b1b770d`), does not
+serve or report a loop count. vLLM pull 60149 merge
+`75fc05a53a366068f534a61ab3ee6b50485419f2` is in tag v0.33.0 and not in
+v0.32.0. fitr does not read that override. A serving loop count enters a
+sealed manifest only when the runtime reported it or the run was started
+with it. The file's `num_loops` value is not that observation, and a missing
+key is not replaced with 1, 2, or 4.
 
 **Generic OpenAI-compatible** covers roughly ten of the twelve relevant
 local runtimes with one adapter. Its honesty notes: timings are

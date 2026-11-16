@@ -278,12 +278,17 @@ Different shapes need different labels, and they fail in different ways:
 
 ```text
 MODEL SHAPE
-  architecture       MoE | dense | hybrid-linear | recurrent
+  architecture       MoE | dense | hybrid-linear | recurrent | looped
   kv strategy        full-kv | hybrid-interval-N | recurrent-state
   total parameters   metadata-derived
   active per token   nominal estimate from routing metadata, MoE only
   quant              Q5_K_M   (recipe label, not identity)
 ```
+
+A `looped` label means the file declared a loop count, a recurrent KV cache
+mode, or a scalar loop layer count. fitr does not project that cache. The
+label is not a serving measurement, and it is not a recommendation to run
+any particular loop count.
 
 Total parameters help explain artifact capacity. Nominal active parameters
 help describe the MoE compute path. An interval hybrid supports cache arithmetic

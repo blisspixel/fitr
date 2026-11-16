@@ -357,7 +357,24 @@ changes.
   a sliding window is not projected at all, because which layers slide is
   decided by llama.cpp's per-architecture `dense_first` argument rather than by
   any GGUF key, and at pattern 1 the same metadata means either every layer is
-  dense or every layer slides. Unmeasured
+  dense or every layer slides. A file that declares `{arch}.num_loops`,
+  `{arch}.recurrent_kv_cache_mode`, `{arch}.recurrent_layer_count`,
+  `{arch}.input_layer_count`, `{arch}.output_layer_count`, or
+  `{arch}.layer_pattern` is a looped architecture. Its KV projection is
+  withheld with the stable reason `looped-architecture`, including when a
+  sliding window is also present, because the cache depends on the serving
+  loop count and cache mode. A missing key is not filled with 1, 2, or 4. A
+  wrong shape is unmeasured, not coerced. The file count is artifact metadata
+  and is not copied into the sealed serving configuration. A publisher
+  recommendation is unobserved when the artifact does not carry one. The
+  boolean `attention.recurrent_layers` pattern is a separate hybrid layout.
+  These key names were checked against llama.cpp pull 30306 head
+  `ab0ffa188bbc3be15ce8e5d3f1278ba5224f4358`, which was open and unmerged on
+  2026-11-16. llama.cpp b12359 does not report a serving loop count. vLLM
+  pull 60149 merge `75fc05a53a366068f534a61ab3ee6b50485419f2` is in tag
+  v0.33.0 and not in v0.32.0; fitr records a loop only from a sealed serving
+  observation. Two sealed results at different loop counts or cache modes are
+  different configurations. Unmeasured
   capacity, incomplete weights, or architecture is SKIP, not a name-to-GB
   guess.
 - **Cache state can be unknown.** TTFT and prefill are still observed. An
