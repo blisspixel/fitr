@@ -464,7 +464,21 @@ func approveSealedPlan(ctx context.Context, session fitting.Session, flags tailo
 	return exitOK, true
 }
 
-func launchApprovedSession(ctx context.Context, session fitting.Session, display string, deps tailorDeps) int {
+func launchApprovedSession(ctx context.Context, approved fitting.Session, display string, deps tailorDeps) int {
+	// Approval can sit on a prompt. Take the same lease as start and resume,
+	// then re-read. A stale preview must not rewrite a phase that already moved.
+	session, guard, err := loadLockedFitting(approved.Plan.ID)
+	if err != nil {
+		return fittingFailure(err)
+	}
+	defer func() { _ = guard.Release() }()
+	if !approvedPlanStillPreviewed(session, approved) {
+		if code := printTailor(session, display); code != exitOK {
+			return code
+		}
+		errPrint("this fitting changed before measurement started", session.Phase, "fitr tailor status "+session.Plan.ID)
+		return exitUsage
+	}
 	if err := recheckInventory(ctx, session, deps); err != nil {
 		errPrint(err.Error(), "Nothing was measured.", "fitr tailor status "+session.Plan.ID)
 		return exitUnresolved
@@ -473,6 +487,16 @@ func launchApprovedSession(ctx context.Context, session fitting.Session, display
 		return launchOwnedSession(ctx, session, display, deps)
 	}
 	return runApprovedFitting(ctx, session, display, deps)
+}
+
+// approvedPlanStillPreviewed is the gate between a remembered preview and a
+// write. The sealed digest is the plan identity. A later phase, including one
+// that already has points, is left as it was stored.
+func approvedPlanStillPreviewed(current, approved fitting.Session) bool {
+	return current.Phase == fitting.PhasePreviewed &&
+		current.Plan.ID == approved.Plan.ID &&
+		current.Plan.SHA256 != "" &&
+		current.Plan.SHA256 == approved.Plan.SHA256
 }
 
 func recheckInventory(ctx context.Context, session fitting.Session, deps tailorDeps) error {
