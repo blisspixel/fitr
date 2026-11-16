@@ -6,15 +6,16 @@ package workload
 import "github.com/blisspixel/fitr/internal/record"
 
 const (
-	PlanSchema         = "fitr.workload.plan.v2"
-	LegacyPlanSchema   = "fitr.workload.plan.v1"
-	TrialSchema        = "fitr.workload.trial.v1"
-	ReportSchema       = "fitr.workload.analysis.v2"
-	LegacyReportSchema = "fitr.workload.analysis.v1"
-	BundleSchema       = "fitr.workload.bundle.v1"
-	WorkflowID         = "policy-repair"
-	PiWorkflowID       = "pi-workspace"
-	WorkflowVersion    = 1
+	PlanSchema          = "fitr.workload.plan.v2"
+	LegacyPlanSchema    = "fitr.workload.plan.v1"
+	TrialSchema         = "fitr.workload.trial.v1"
+	ReportSchema        = "fitr.workload.analysis.v2"
+	ProcessReportSchema = "fitr.workload.analysis.v3"
+	LegacyReportSchema  = "fitr.workload.analysis.v1"
+	BundleSchema        = "fitr.workload.bundle.v1"
+	WorkflowID          = "policy-repair"
+	PiWorkflowID        = "pi-workspace"
+	WorkflowVersion     = 1
 
 	// Checked against packages/coding-agent/package.json and
 	// docs/compaction.md at commit d981de1229ef899957bbe968bc8dcda02a21f477,
@@ -47,6 +48,9 @@ type Plan struct {
 	MaxAttempts      int                  `json:"max_attempts,omitempty"`
 	Retention        RetentionPolicy      `json:"retention"`
 	Contract         *WorkflowContract    `json:"contract,omitempty"`
+	// Analysis selects the derived report. Empty keeps analysis v2, so a
+	// historical plan rebuilds its stored report without tool-process counts.
+	Analysis string `json:"analysis,omitempty"`
 	// Pi-workspace fields stay empty on every other workflow so older plans
 	// keep their exact bytes.
 	Driver        *SessionDriver   `json:"driver,omitempty"`

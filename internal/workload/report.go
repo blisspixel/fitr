@@ -53,13 +53,7 @@ func Analyze(plan Plan, trials []Trial) Report {
 	if report.Counts.TimedOut > 0 {
 		report.Gaps = append(report.Gaps, "timed-out trials remain in the denominator")
 	}
-	if plan.Schema == LegacyPlanSchema {
-		report.Schema = LegacyReportSchema
-	} else {
-		for _, trial := range trials {
-			report.TrialAnalysis = append(report.TrialAnalysis, analyzeTrial(trial))
-		}
-	}
+	attachTrialAnalysis(&report, plan, trials)
 	if plan.Provider == PiProviderFake {
 		report.Coverage = "not_established"
 		report.MedianAcceptedMillis = nil
@@ -69,6 +63,25 @@ func Analyze(plan Plan, trials []Trial) Report {
 		report.Gaps = append(report.Gaps, piFakeProviderGap)
 	}
 	return report
+}
+
+// attachTrialAnalysis rebuilds the derived report. A historical plan keeps
+// analysis v2, so tool-process counts stay off a report that schema did not carry.
+func attachTrialAnalysis(report *Report, plan Plan, trials []Trial) {
+	if plan.Schema == LegacyPlanSchema {
+		report.Schema = LegacyReportSchema
+		return
+	}
+	if plan.Analysis == ProcessReportSchema {
+		report.Schema = ProcessReportSchema
+	}
+	for _, trial := range trials {
+		analysis := analyzeTrial(trial)
+		if plan.Analysis != ProcessReportSchema {
+			analysis.Process = nil
+		}
+		report.TrialAnalysis = append(report.TrialAnalysis, analysis)
+	}
 }
 
 func (trial Trial) Validate(plan Plan) error {
@@ -174,8 +187,10 @@ type eventStats struct {
 	approvalsGranted, approvalsDenied             int
 	escalations, humanWaits, compactions, retries int
 	summaryCalls, resumes                         int
+	malformed, denied, failed                     int
 	terminalElapsed                               int64
 	workerStatus, lastModelStatus                 string
+	toolNotes                                     []string
 }
 
 func validateEvents(events []Event, outcome Outcome, verifier VerifierReceipt) (eventStats, error) {
@@ -382,14 +397,39 @@ func consumeToolEvents(events []Event, cursor *int, seenCalls map[string]int, st
 		completed.Tool != started.Tool || !validToolCompletionStatus(completed.Status) {
 		return errors.New("workload trial tool events are unbalanced")
 	}
+	// The repeated-call key is the tool plus its argument digest. A later
+	// call with the same digest still counts, including a check after a write.
 	callKey := started.Tool + "\x00" + started.EvidenceSHA256
 	seenCalls[callKey]++
-	if seenCalls[callKey] > 1 {
+	repeated := seenCalls[callKey] > 1
+	if repeated {
 		stats.duplicateCalls++
 	}
 	stats.toolCalls++
+	recordToolResult(stats, completed, repeated)
 	*cursor += 2
 	return nil
+}
+
+func recordToolResult(stats *eventStats, completed Event, repeated bool) {
+	note := ""
+	switch completed.Status {
+	case "malformed":
+		stats.malformed++
+		note = completed.Status
+	case "denied":
+		stats.denied++
+		note = completed.Status
+	case "failed":
+		stats.failed++
+		note = completed.Status
+	}
+	if note != "" {
+		stats.toolNotes = append(stats.toolNotes, fmt.Sprintf("%s sequence %d %s", completed.Tool, completed.Sequence, note))
+	}
+	if repeated {
+		stats.toolNotes = append(stats.toolNotes, fmt.Sprintf("%s sequence %d repeated", completed.Tool, completed.Sequence))
+	}
 }
 
 func validateTerminalEvents(events []Event, cursor int, outcome Outcome, verifier VerifierReceipt,

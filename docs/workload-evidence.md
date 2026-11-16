@@ -20,9 +20,23 @@ assertion. pi-workspace's proof is an independent file verifier. Plain text
 projects that sealed class, including the forced split-summary schedule. In 0.10.4+, plan v2 binds scenario/tool
 digests and authority/proof policies, and analysis v2 reconstructs timing
 partitions including human wait, escalation, and compaction segregated from
-worker overhead. Multi-attempt retries, approval requests and grants/denials,
-human wait periods, escalation intervals, compaction/checkpoint resumption, and
-typed external protocol receipts are explicit before execution. See
+worker overhead. A new plan seals `fitr.workload.analysis.v3`. That report
+adds one tool-process observation derived from the validated event sequence:
+counts of completions whose status is `malformed`, `denied`, or `failed`, and
+the existing repeated-call count. A repeat is the same tool and the same
+argument digest, including a later check after a write. The observation names
+the tool and the completion sequence. It carries no arguments, model output,
+paths, or process-quality score. A failed check before a repair stays a tool
+result beside an accepted verifier outcome. An invalid or incomplete sequence
+leaves the observation unavailable, and that absence is not a count of zero.
+A validated count of zero is still an observation. It does not label the run
+flawless, and a repeat is not labeled unnecessary or penalized. A historical
+plan leaves the analysis selector empty, rebuilds analysis v2, and does not
+gain these counts. Signed trial bytes stay the event sequence, counters,
+outcome, and verifier receipt. Multi-attempt retries, approval requests and
+grants/denials, human wait periods, escalation intervals,
+compaction/checkpoint resumption, and typed external protocol receipts are
+explicit before execution. See
 [usage](usage.md#validated-work-experiment) for the exact supported fields.
 
 `fitr experiment workload --workflow pi-workspace` seals one additional

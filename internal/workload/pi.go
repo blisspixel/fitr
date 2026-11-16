@@ -64,7 +64,7 @@ func NewPiPlan(model record.ModelIdentity, deviceKey string, trials, timeoutSeco
 		Model: model, DeviceKey: deviceKey, Trials: trials, MaxTurns: piRequestBudget,
 		TimeoutSeconds: timeoutSeconds, RequestedContext: requestedContext, Retention: RetainHashesAndVerifier,
 		Contract: &contract, Driver: &driver, Provider: provider, RequestBudget: piRequestBudget,
-		PiSchedule: &schedule, Preservation: preservationPointer(),
+		PiSchedule: &schedule, Preservation: preservationPointer(), Analysis: ProcessReportSchema,
 	}
 	digest, err := planDigest(plan)
 	if err != nil {

@@ -1026,6 +1026,14 @@ Retries are not permitted in this fixed workflow; human wait and escalation
 are unsupported, not measured zeroes. The plan's requested context does not
 establish the runtime's effective context.
 
+A new plan seals analysis `fitr.workload.analysis.v3`. The text report and
+the stored analysis both project tool-process counts for malformed, denied,
+and failed results, plus a repeated call of the same tool and argument
+digest. Those counts sit beside the verifier outcome. They are not a quality
+score, and they do not include tool arguments or model output. An incomplete
+event sequence stays unavailable. A historical plan still rebuilds analysis
+v2 and does not gain the counts. Saved trial signatures are unchanged.
+
 The aggregate never hides unsuccessful exposure:
 
 ```text
