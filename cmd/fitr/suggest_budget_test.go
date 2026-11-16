@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net"
 	"strings"
 	"testing"
 
@@ -29,6 +32,49 @@ func TestSharedMemoryDoesNotFitOrPull(t *testing.T) {
 				t.Fatalf("line=%s budget=%s", line, plan.budgetLine())
 			}
 		})
+	}
+}
+
+func TestRepeatedRegistryFailuresDoNotRepeatTheResolverError(t *testing.T) {
+	err := fmt.Errorf("Get \"https://registry.ollama.ai/v2/library/qwen2.5-coder/manifests/1.5b\": %w",
+		&net.DNSError{Err: "no such host", Name: "registry.ollama.ai", IsNotFound: true})
+	item := suggest.Candidate{Name: "qwen3.5:2b", Use: "general"}
+	observed := make([]observedWeight, 7)
+	items := make([]suggest.Candidate, len(observed))
+	weights := make([]int64, len(observed))
+	for i := range observed {
+		observed[i].err = err
+		items[i] = item
+	}
+	lines := suggestReportLines(items, observed, weights, suggestionPlan{}, "", device.Fingerprint{})
+	joined := strings.Join(lines, "\n")
+	if strings.Count(joined, "registry unreachable; sizes unobserved for all names") != 1 {
+		t.Fatalf("note count in:\n%s", joined)
+	}
+	if strings.Contains(joined, "registry.ollama.ai") || strings.Contains(joined, "dial") || strings.Contains(joined, "no such host") {
+		t.Fatalf("resolver error repeated on the rows:\n%s", joined)
+	}
+	rows := 0
+	for _, line := range lines {
+		if strings.Contains(line, "size unobserved (offline)") {
+			rows++
+		}
+	}
+	if rows != len(observed) {
+		t.Fatalf("offline rows = %d in:\n%s", rows, joined)
+	}
+}
+
+func TestNonTransportRegistryFailureStaysOneUnobservedNote(t *testing.T) {
+	item := suggest.Candidate{Name: "qwen3.5:2b", Use: "general"}
+	observed := []observedWeight{{err: errors.New("manifest digest was not sha256")}}
+	lines := suggestReportLines([]suggest.Candidate{item}, observed, []int64{0}, suggestionPlan{}, "", device.Fingerprint{})
+	joined := strings.Join(lines, "\n")
+	if strings.Count(joined, "some registry sizes are unobserved") != 1 || strings.Contains(joined, "manifest digest") || strings.Contains(joined, "offline") {
+		t.Fatalf("lines:\n%s", joined)
+	}
+	if !strings.Contains(joined, "size unobserved") {
+		t.Fatalf("row missing:\n%s", joined)
 	}
 }
 

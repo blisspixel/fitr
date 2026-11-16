@@ -459,6 +459,8 @@ a report. `fitr help <command> [form]` prints one command's flags, for example
 `fitr help run` or `fitr help experiment context`. Malformed invocations write
 a diagnostic and next action to stderr, exit 2, and do not begin runtime
 discovery or modify stored evidence. A usage error does not repeat the help page.
+A malformed flag value uses the same `error` / `note` / `hint` voice, and it
+names the flag with the two dashes help shows.
 
 ```bash
 fitr run m --display json    # NDJSON on stdout, nothing else
@@ -570,6 +572,11 @@ artifact size for one named model, not the budget. KV is not estimated.
 Ollama library recipe fitr does not run, and only when the reachable runtime
 is Ollama or no runtime is reachable. Another reachable runtime leaves the
 install command unmeasured. A discovery failure is not an empty runtime.
+When every registry read fails because the network is unreachable, one note
+says the sizes are unobserved for all names and each row says
+`size unobserved (offline)`. The resolver error is not repeated on the rows.
+A registry failure that is not a transport error stays `size unobserved`
+and does not claim the registry was unreachable.
 When the inventory is empty, reachable or not, the next command is
 `fitr suggest`. The reachable line calls that a weight projection and says
 KV cache is not estimated. It does not offer a pull, a model name, or
@@ -578,7 +585,12 @@ KV cache is not estimated. It does not offer a pull, a model name, or
 Model arguments are exact, apart from the explicit `name` and `name:latest`
 equivalence. Long names may be filtered and selected in `fitr top`, but
 truncated display text never becomes identity. fitr does not guess from a
-prefix or a row number.
+prefix or a row number. A first token within two single-character edits of
+a command, or differing only by case, is a usage hint. That hint is not sent
+to a serving runtime, and it is not a claim that the token is absent from
+the model library. `fitr advise <name>` remains the exact path, including a
+library name that sits close to a command. A token containing `:`, `/`,
+`\`, or `.` is never that hint.
 
 If a saved result cannot be decoded or trusted, inventory keeps every healthy
 row visible and prints that evidence line as a `warning`. The damaged file

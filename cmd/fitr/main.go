@@ -129,6 +129,14 @@ func run() int {
 		if strings.HasPrefix(os.Args[1], "-") {
 			return cmdStatus(ctx, os.Args[1:])
 		}
+		// A near miss is a hint, not a model lookup. fitr advise <name> remains
+		// the exact path, including a name that happens to sit close to a command.
+		if command, ok := closestCommand(os.Args[1]); ok {
+			errPrint(fmt.Sprintf("%q is not a command", os.Args[1]),
+				"this spelling was not sent to a serving runtime",
+				"did you mean fitr "+command+"?")
+			return exitUsage
+		}
 		// A positional that is not a command is a model: the named advise.
 		return cmdAdvise(ctx, os.Args[1:])
 	}
@@ -296,6 +304,8 @@ func parseCommandFlags(fs *flag.FlagSet, args []string) (int, bool) {
 		}
 		return exitOK, false
 	}
+	msg, note, hint := flagNotice(fs, err)
+	errPrint(msg, note, hint)
 	return exitUsage, false
 }
 

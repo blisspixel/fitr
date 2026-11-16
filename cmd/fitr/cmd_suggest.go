@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -186,6 +188,17 @@ func suggestShortlist(ctx context.Context, fp device.Fingerprint, plan suggestio
 	}
 	fmt.Println("projection, not a measurement. Sizes come from the registry manifest. KV cache is not estimated.")
 	fmt.Println(plan.budgetLine())
+	for _, line := range suggestReportLines(items, observed, weightBytes, plan, runtime, fp) {
+		fmt.Println(line)
+	}
+	return exitOK
+}
+
+func suggestReportLines(items []suggest.Candidate, observed []observedWeight, weightBytes []int64, plan suggestionPlan, runtime string, fp device.Fingerprint) []string {
+	var lines []string
+	if note := unobservedRegistryNote(observed); note != "" {
+		lines = append(lines, note)
+	}
 	prefer := suggest.PreferMoE(fp.GPU, fp.GPUBackend, fp.VRAMSource)
 	index := make(map[string]int, len(items))
 	for i, item := range items {
@@ -193,13 +206,44 @@ func suggestShortlist(ctx context.Context, fp device.Fingerprint, plan suggestio
 	}
 	for _, group := range suggest.Partition(items, weightBytes, plan.Budget, prefer) {
 		if label := suggestGroupLabel(group.Class); label != "" {
-			fmt.Println(label)
+			lines = append(lines, label)
 		}
 		for _, item := range group.Items {
-			fmt.Println(formatSuggestCandidate(item, observed[index[item.Name]], plan.Budget, group.Class, runtime))
+			lines = append(lines, formatSuggestCandidate(item, observed[index[item.Name]], plan.Budget, group.Class, runtime))
 		}
 	}
-	return exitOK
+	return lines
+}
+
+// unobservedRegistryNote is one line for a repeated registry failure.
+// The resolver text stays off every row.
+func unobservedRegistryNote(observed []observedWeight) string {
+	failures := 0
+	offline := 0
+	for _, item := range observed {
+		if item.err == nil {
+			continue
+		}
+		failures++
+		if registryUnreachable(item.err) {
+			offline++
+		}
+	}
+	if failures == 0 {
+		return ""
+	}
+	if offline == failures && failures == len(observed) {
+		return "registry unreachable; sizes unobserved for all names"
+	}
+	if offline == failures {
+		return "registry unreachable; some sizes are unobserved"
+	}
+	return "some registry sizes are unobserved"
+}
+
+func registryUnreachable(err error) bool {
+	var netErr net.Error
+	return err != nil && errors.As(err, &netErr)
 }
 
 func observeShortlist(ctx context.Context, items []suggest.Candidate) ([]observedWeight, []int64) {
@@ -234,7 +278,10 @@ func suggestGroupLabel(class string) string {
 func formatSuggestCandidate(item suggest.Candidate, observed observedWeight, budget float64, class, runtime string) string {
 	label := catalogLabel(item)
 	if observed.err != nil {
-		return item.Name + "  " + label + "  size unobserved: " + observed.err.Error()
+		if registryUnreachable(observed.err) {
+			return item.Name + "  " + label + "  size unobserved (offline)"
+		}
+		return item.Name + "  " + label + "  size unobserved"
 	}
 	project := suggest.ProjectWeights(budget, observed.bytes)
 	line := item.Name + "  " + label + "  " + project.Note

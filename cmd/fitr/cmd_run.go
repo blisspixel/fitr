@@ -110,9 +110,13 @@ func parseRunCommand(args []string, supplied render.Display) (runCommand, int, b
 			}
 			return runCommand{}, exitOK, false
 		}
+		// commandFlags discards the flag package's own sentence. This path
+		// does not go through parseCommandFlags, so the notice is printed here.
+		msg, note, hint := flagNotice(fs, err)
 		if supplied != nil {
-			reportError("invalid run arguments", err.Error(), "fitr top run <model> [run flags]")
+			hint = "fitr top run <model> [run flags]"
 		}
+		reportError(msg, note, hint)
 		return runCommand{}, exitUsage, false
 	}
 	if code, ok := validateRunFlags(fs, flags, reportError); !ok {
