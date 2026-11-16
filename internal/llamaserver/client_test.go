@@ -344,6 +344,47 @@ func TestAccelReadsDevicesAndSystemInfo(t *testing.T) {
 	}
 }
 
+func TestTagsKeepsBooleanCapsBesideReasoningEffortLevels(t *testing.T) {
+	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"model_path":"/models/SmolLM2.gguf",` +
+			`"chat_template_caps":{"supports_tools":true,"reasoning_effort_levels":["low","medium","high"]}}`))
+	})
+	defer done()
+	tags, err := c.Tags(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) != 1 || tags[0].Name != "SmolLM2.gguf" {
+		t.Fatalf("tags = %+v", tags)
+	}
+	hasTools := false
+	for _, cap := range tags[0].Capabilities {
+		if cap == "tools" {
+			hasTools = true
+		}
+	}
+	if !hasTools {
+		t.Fatalf("capabilities = %v", tags[0].Capabilities)
+	}
+}
+
+func TestNonBooleanToolCapDoesNotScanTheTemplate(t *testing.T) {
+	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"model_path":"m.gguf","chat_template":"{% for tool in tools %}{% endfor %}",` +
+			`"chat_template_caps":{"supports_tools":["low"]}}`))
+	})
+	defer done()
+	mi, err := c.Show(context.Background(), "label")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cap := range mi.Capabilities {
+		if cap == "tools" {
+			t.Fatalf("a non-boolean supports_tools became a tool capability: %v", mi.Capabilities)
+		}
+	}
+}
+
 func TestShowFallsBackToTemplateScan(t *testing.T) {
 	c, done := testClient(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"model_path":"m.gguf","chat_template":"{% for tool in tools %}...{% endfor %}"}`))

@@ -12,7 +12,10 @@ concurrency:
 
 env:
   GOTOOLCHAIN: local
-  LLAMA_BUILD: b10700
+  # b12359 is the binary release of llama.cpp v1.0.0, commit b1b770d
+  # (also tagged v1.0.0-b12359-b1b770d). The v1.0.0 release tag does not
+  # publish these archives. The binary inside is still named llama-server.
+  LLAMA_BUILD: b12359
   MODEL_REVISION: 9e6855bc4be717fca1ef21360a1db4b29d5c559a
   MODEL_A_SHA256: ed5fa30c487b282ec156c29062f1222e5c20875a944ac98289dbd242e947f747
   MODEL_B_SHA256: 4ffe3cb59ea03238cea3f4a4b03fe516bcd827b6bd02c868a64cf31b2f94dab9
@@ -84,15 +87,15 @@ jobs:
           case "$os_name/$arch_name" in
             Linux/x86_64)
               asset="llama-$LLAMA_BUILD-bin-ubuntu-x64.tar.gz"
-              asset_sha="53ea0d05846b443414f04d7acd2a0f89b902909be1c25eea3d08f166768692ef"
+              asset_sha="0bc1f091e8916102b6d8f2cf944233a620e90a0f856c72d0ce41150c65c2e72e"
               ;;
             Darwin/arm64)
               asset="llama-$LLAMA_BUILD-bin-macos-arm64.tar.gz"
-              asset_sha="e2f2844b2d477d85da2c76b7b356029ce746504aaac9b624f681e6b517654ca9"
+              asset_sha="82b00abc740160e1b9980e6cc79c117345fa34af058c80e6c0a69aa8ddccde75"
               ;;
             Darwin/x86_64)
               asset="llama-$LLAMA_BUILD-bin-macos-x64.tar.gz"
-              asset_sha="b8b51e7e5a7d43aafba3bf280c7a731dca64692ac03a5409859e1a5d8db8a593"
+              asset_sha="25320d529077ef5a3d16e7b5da26438f221d88c8c0930a32b0c79457f5eede56"
               ;;
             *)
               echo "unsupported native acceptance host: $os_name/$arch_name" >&2
