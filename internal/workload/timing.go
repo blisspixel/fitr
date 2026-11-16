@@ -1,6 +1,9 @@
 package workload
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // TrialAnalysis is reconstructed from a validated trial's harness events.
 // Worker includes model and tool time; those components must not be added to it.
@@ -14,6 +17,20 @@ type TrialAnalysis struct {
 	Escalation   string        `json:"escalation"`
 	Approvals    string        `json:"approvals,omitempty"`
 	Compaction   string        `json:"compaction,omitempty"`
+	// Process is derived from a validated event sequence. Nil means the
+	// sequence was not validated, which is not a count of zero.
+	Process *ToolProcess `json:"tool_process,omitempty"`
+}
+
+// ToolProcess counts tool results already stored on the trial. It is not a
+// quality score. Repeated counts the same tool and argument digest again.
+type ToolProcess struct {
+	Status       string   `json:"status"`
+	Malformed    int      `json:"malformed"`
+	Denied       int      `json:"denied"`
+	Failed       int      `json:"failed"`
+	Repeated     int      `json:"repeated"`
+	Observations []string `json:"observations,omitempty"`
 }
 
 type TrialTiming struct {
@@ -44,7 +61,19 @@ func analyzeTrial(trial Trial) TrialAnalysis {
 	timing := calculateTiming(trial.Events, trial.Outcome)
 	populateAnalysisFields(&analysis, trial, stats, &timing)
 	analysis.Timing, analysis.TimingStatus = &timing, "harness_observed"
+	analysis.Process = processFromStats(stats)
 	return analysis
+}
+
+func processFromStats(stats eventStats) *ToolProcess {
+	var notes []string
+	if len(stats.toolNotes) > 0 {
+		notes = append([]string(nil), stats.toolNotes...)
+	}
+	return &ToolProcess{
+		Status: "observed", Malformed: stats.malformed, Denied: stats.denied,
+		Failed: stats.failed, Repeated: stats.duplicateCalls, Observations: notes,
+	}
 }
 
 func calculateTiming(events []Event, outcome Outcome) TrialTiming {
@@ -104,4 +133,21 @@ func populateAnalysisFields(analysis *TrialAnalysis, trial Trial, stats eventSta
 	if stats.compactions > 0 || timing.CompactionMillis > 0 {
 		analysis.Compaction = "observed"
 	}
+}
+
+// ProcessText projects the derived tool-process observation. Unavailable is
+// the absence of a validated sequence, not a count of zero. The counts are
+// observations. The wording stays free of a quality judgement.
+func (analysis TrialAnalysis) ProcessText() string {
+	process := analysis.Process
+	if process == nil {
+		return "unavailable"
+	}
+	parts := []string{fmt.Sprintf(
+		"observed malformed %d denied %d failed %d repeated %d",
+		process.Malformed, process.Denied, process.Failed, process.Repeated,
+	)}
+	parts = append(parts, process.Observations...)
+	parts = append(parts, "same tool and argument digest", "a zero count is an observation")
+	return strings.Join(parts, "; ")
 }

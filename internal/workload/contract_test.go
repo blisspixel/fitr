@@ -48,7 +48,7 @@ func TestWorkloadContractCannotDriftEvenWithRehashedPlan(t *testing.T) {
 
 func TestLegacyWorkloadBundleRoundTripWithoutInventedReceipts(t *testing.T) {
 	sealed := workloadTestPlan(t, 1)
-	sealed.Plan.Schema, sealed.Plan.Contract = LegacyPlanSchema, nil
+	sealed.Plan.Schema, sealed.Plan.Contract, sealed.Plan.Analysis = LegacyPlanSchema, nil, ""
 	sealed.Plan.PlanSHA256, _ = planDigest(sealed.Plan)
 	bundle, err := sealed.Run(context.Background(), &scriptedWorkflowBackend{})
 	if err != nil {
@@ -88,7 +88,7 @@ func TestWorkloadTimingPartitionsElapsedWithoutDoubleCounting(t *testing.T) {
 		t.Fatalf("inconsistent time partition = %+v", timing)
 	}
 	trial.Events = nil
-	if got := analyzeTrial(trial); got.Timing != nil || got.TimingStatus != "unavailable" {
+	if got := analyzeTrial(trial); got.Timing != nil || got.Process != nil || got.TimingStatus != "unavailable" {
 		t.Fatal("missing receipts became timing")
 	}
 }

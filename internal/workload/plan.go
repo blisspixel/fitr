@@ -43,6 +43,7 @@ func NewPlan(model record.ModelIdentity, deviceKey string, trials, maxTurns,
 		Workflow: WorkflowID, WorkflowVersion: WorkflowVersion, Model: model, DeviceKey: deviceKey,
 		Trials: trials, MaxTurns: maxTurns, TimeoutSeconds: timeoutSeconds,
 		RequestedContext: requestedContext, Retention: RetainHashesAndVerifier,
+		Analysis: ProcessReportSchema,
 	}
 	contract := policyRepairContract()
 	plan.Contract = &contract
@@ -61,6 +62,9 @@ func (plan Plan) Validate() error {
 		return errors.New("unsupported workload plan schema or workflow")
 	}
 	if err := validateWorkflowIdentity(plan); err != nil {
+		return err
+	}
+	if err := validateAnalysisContract(plan); err != nil {
 		return err
 	}
 	if plan.Schema == PlanSchema {
@@ -91,6 +95,20 @@ func (plan Plan) Validate() error {
 		return errors.New("workload plan digest does not match")
 	}
 	return nil
+}
+
+func validateAnalysisContract(plan Plan) error {
+	switch plan.Analysis {
+	case "":
+		return nil
+	case ProcessReportSchema:
+		if plan.Schema == LegacyPlanSchema {
+			return errors.New("legacy workload plan cannot carry a process analysis contract")
+		}
+		return nil
+	default:
+		return errors.New("unsupported workload analysis contract")
+	}
 }
 
 func validateWorkflowIdentity(plan Plan) error {

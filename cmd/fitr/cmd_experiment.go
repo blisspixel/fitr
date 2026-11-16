@@ -961,25 +961,30 @@ func writeWorkloadField(w io.Writer, label, value string) {
 }
 
 func writeWorkloadTrials(bundle workload.Bundle) {
-	timing := make(map[string]*workload.TrialTiming, len(bundle.Report.TrialAnalysis))
+	analysis := make(map[string]workload.TrialAnalysis, len(bundle.Report.TrialAnalysis))
 	for _, item := range bundle.Report.TrialAnalysis {
-		if item.Timing != nil {
-			timing[item.TrialID] = item.Timing
-		}
+		analysis[item.TrialID] = item
 	}
 	for _, trial := range bundle.Trials {
 		fmt.Fprintf(os.Stdout, "  %-3d %-20s %8.3fs  %2d turns  %2d tools  %2d authority violations\n",
 			trial.Index, strings.ToUpper(string(trial.Outcome)), float64(trial.ElapsedMillis)/1000,
 			trial.Turns, trial.ToolCalls, trial.AuthorityViolations)
-		item := timing[trial.TrialID]
-		if item == nil {
+		item, ok := analysis[trial.TrialID]
+		if ok && item.Timing != nil {
+			writeWorkloadField(os.Stdout, "timing", fmt.Sprintf(
+				"worker %.3fs (model %.3fs, tools %.3fs), queue %.3fs, verifier %.3fs",
+				float64(item.Timing.WorkerMillis)/1000, float64(item.Timing.ModelMillis)/1000,
+				float64(item.Timing.ToolMillis)/1000, float64(item.Timing.VerifierQueueMillis)/1000,
+				float64(item.Timing.VerifierMillis)/1000))
+		}
+		if bundle.Report.Schema != workload.ProcessReportSchema {
 			continue
 		}
-		writeWorkloadField(os.Stdout, "timing", fmt.Sprintf(
-			"worker %.3fs (model %.3fs, tools %.3fs), queue %.3fs, verifier %.3fs",
-			float64(item.WorkerMillis)/1000, float64(item.ModelMillis)/1000,
-			float64(item.ToolMillis)/1000, float64(item.VerifierQueueMillis)/1000,
-			float64(item.VerifierMillis)/1000))
+		text := "unavailable"
+		if ok {
+			text = item.ProcessText()
+		}
+		writeWorkloadField(os.Stdout, "process", text)
 	}
 }
 

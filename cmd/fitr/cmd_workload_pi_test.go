@@ -155,6 +155,54 @@ func TestWorkloadTextKeepsTheContractWithTheHeader(t *testing.T) {
 	if first < 0 || secondRow < 0 || second < 0 || first > secondRow || secondRow > second || strings.Contains(ordered, "0.111s") {
 		t.Fatalf("timing followed analysis order instead of the trial:\n%s", rendered)
 	}
+	if strings.Contains(rendered, "process") {
+		t.Fatalf("analysis v2 grew a process row:\n%s", rendered)
+	}
+}
+
+func TestWorkloadTextProjectsTheProcessObservation(t *testing.T) {
+	bundle := workload.Bundle{
+		Report: workload.Report{
+			Schema: workload.ProcessReportSchema,
+			TrialAnalysis: []workload.TrialAnalysis{{
+				TrialID: "one",
+				Process: &workload.ToolProcess{
+					Status: "observed", Malformed: 1,
+					Observations: []string{"write_file sequence 7 malformed"},
+				},
+			}},
+		},
+		Trials: []workload.Trial{{
+			Index: 1, TrialID: "one", Outcome: workload.OutcomeAccepted, ElapsedMillis: 1000,
+		}},
+	}
+	rendered, code := captureTopStdout(t, func() int { return renderWorkloadExperiment(bundle, "plain") })
+	if code != exitOK {
+		t.Fatalf("process workload exit=%d output=%s", code, rendered)
+	}
+	flat := strings.Join(strings.Fields(rendered), " ")
+	if !strings.Contains(flat, "malformed 1") || !strings.Contains(flat, "write_file sequence 7 malformed") {
+		t.Fatalf("text dropped the structured observation:\n%s", rendered)
+	}
+	processAt := strings.Index(rendered, "process")
+	if processAt < 0 {
+		t.Fatalf("process row missing:\n%s", rendered)
+	}
+	processRow := rendered[processAt:]
+	if strings.Contains(processRow, "policy.json") || strings.Contains(processRow, "timeout_ms") || strings.Contains(processRow, "rejected") {
+		t.Fatalf("process row relabels or exposes tool content:\n%s", processRow)
+	}
+	for _, line := range strings.Split(processRow, "\n") {
+		if line != "" && len([]rune(line)) > render.DefaultWidth {
+			t.Errorf("line is %d cols against %d: %q", len([]rune(line)), render.DefaultWidth, line)
+		}
+	}
+	missing := bundle
+	missing.Report.TrialAnalysis = []workload.TrialAnalysis{{TrialID: "one"}}
+	unavailable, code := captureTopStdout(t, func() int { return renderWorkloadExperiment(missing, "plain") })
+	if code != exitOK || !strings.Contains(unavailable, "unavailable") {
+		t.Fatalf("missing sequence exit=%d output=%s", code, unavailable)
+	}
 }
 
 func TestPinnedSessionRejectsAForeignTurnCap(t *testing.T) {
