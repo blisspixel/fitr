@@ -36,7 +36,8 @@ func TestBadRunFlagDoesNotDumpHelp(t *testing.T) {
 	stdout, stderr, code := captureCommandOutput(t, func() int {
 		return cmdRun(context.Background(), []string{"model", "--not-a-flag"})
 	})
-	if code != exitUsage || stdout != "" || !strings.Contains(stderr, "not-a-flag") {
+	if code != exitUsage || stdout != "" || !strings.Contains(stderr, "error: unknown flag --not-a-flag") ||
+		strings.Contains(stderr, "flag provided but not defined") || strings.Contains(stderr, "usage:") {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }

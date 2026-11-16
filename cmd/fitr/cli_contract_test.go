@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -159,6 +160,112 @@ func TestPublicCommandsRejectInvalidNumericInputsBeforeRuntimeDiscovery(t *testi
 				t.Fatalf("exit=%d stderr=%q, want usage mentioning %q", code, stderr, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunRejectsANonNumericContextInTheNoticeVoice(t *testing.T) {
+	stdout, stderr, code := captureCommandOutput(t, func() int {
+		return cmdRun(context.Background(), []string{"model-a", "--ctx", "abc"})
+	})
+	if code != exitUsage || stdout != "" {
+		t.Fatalf("exit %d stdout %q\n%s", code, stdout, stderr)
+	}
+	if strings.Contains(stderr, "flag -ctx") || strings.Contains(stderr, "ParseInt") || strings.Contains(stderr, "invalid value") || strings.Contains(stderr, "usage:") {
+		t.Fatalf("raw flag parse error or help dump:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, `error: invalid --ctx value "abc"`) || !strings.Contains(stderr, " note:") {
+		t.Fatalf("stderr:\n%s", stderr)
+	}
+}
+
+func TestAdviseRejectsANonNumericContextInTheNoticeVoice(t *testing.T) {
+	stderr, code := captureTopStderr(t, func() int {
+		return cmdAdvise(context.Background(), []string{"qwen3-8b", "--ctx", "abc"})
+	})
+	if code != exitUsage {
+		t.Fatalf("exit %d\n%s", code, stderr)
+	}
+	if strings.Contains(stderr, "flag -ctx") || strings.Contains(stderr, "ParseInt") || strings.Contains(stderr, "invalid value") {
+		t.Fatalf("raw flag parse error:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, `error: invalid --ctx value "abc"`) || !strings.Contains(stderr, " note:") {
+		t.Fatalf("stderr:\n%s", stderr)
+	}
+}
+
+func TestMistypedSubcommandHintsBeforeDiscovery(t *testing.T) {
+	previous := os.Args
+	t.Cleanup(func() { os.Args = previous })
+	os.Args = []string{"fitr", "sugest"}
+	stderr, code := captureTopStderr(t, run)
+	if code != exitUsage || strings.Contains(stderr, "no serving runtime") || strings.Contains(stderr, "not installed") ||
+		!strings.Contains(stderr, `error: "sugest" is not a command`) || !strings.Contains(stderr, "did you mean fitr suggest?") {
+		t.Fatalf("exit %d\n%s", code, stderr)
+	}
+	os.Args = []string{"fitr", "boad"}
+	stderr, code = captureTopStderr(t, run)
+	if code != exitUsage || strings.Contains(stderr, "no serving runtime") || !strings.Contains(stderr, "fitr board") {
+		t.Fatalf("board exit %d\n%s", code, stderr)
+	}
+	os.Args = []string{"fitr", "frobnicate"}
+	stderr, code = captureTopStderr(t, run)
+	if strings.Contains(stderr, "did you mean fitr") || strings.Contains(stderr, "is not a command") {
+		t.Fatalf("distant token was treated as a command:\n%s", stderr)
+	}
+	os.Args = []string{"fitr", "Suggest"}
+	stderr, code = captureTopStderr(t, run)
+	if code != exitUsage || !strings.Contains(stderr, "did you mean fitr suggest?") {
+		t.Fatalf("case exit %d\n%s", code, stderr)
+	}
+}
+
+func TestClosestCommandLeavesModelReferencesAlone(t *testing.T) {
+	for _, typed := range []string{"", "suggest", "qwen3:8b", "models/foo", `C:\m`, "model.gguf", "frobnicate"} {
+		if got, ok := closestCommand(typed); ok {
+			t.Fatalf("%q hinted %q", typed, got)
+		}
+	}
+	for _, typed := range []struct{ in, want string }{
+		{"sugest", "suggest"},
+		{"boad", "board"},
+		{"Suggest", "suggest"},
+		{"HELP", "help"},
+	} {
+		got, ok := closestCommand(typed.in)
+		if !ok || got != typed.want {
+			t.Fatalf("%q -> %q ok=%v, want %s", typed.in, got, ok, typed.want)
+		}
+	}
+}
+
+func TestHintListCoversEveryHelpCommand(t *testing.T) {
+	listed := map[string]bool{}
+	for _, name := range userCommands {
+		if listed[name] {
+			t.Fatalf("duplicate hint %s", name)
+		}
+		listed[name] = true
+	}
+	for _, line := range strings.Split(usageText, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 2 || fields[0] != "fitr" {
+			continue
+		}
+		name := fields[1]
+		if strings.HasPrefix(name, "<") || strings.HasPrefix(name, "[") || strings.HasPrefix(name, "-") {
+			continue
+		}
+		if !listed[name] {
+			t.Errorf("help names %q, the hint list does not", name)
+		}
+	}
+	for _, name := range userCommands {
+		if name == "screenshots" || name == "version" {
+			continue
+		}
+		if !strings.Contains(usageText, "fitr "+name) {
+			t.Errorf("hint list names %q, help does not", name)
+		}
 	}
 }
 
