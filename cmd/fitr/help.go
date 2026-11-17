@@ -69,6 +69,7 @@ roles and tailoring:
   fitr tailor start|status|resume|adopt <session-id>
   fitr discover add <source> --role <role> [--model <reference>] [--harness <name>]
   fitr discover list|plan [--role <role>] [--display MODE]
+  fitr discover requalify <input.json> [--display MODE]
 
 desktop and integrations:
   fitr desktop status [--role NAME] [--display MODE]

@@ -291,6 +291,7 @@ of installed RAM as an unconditional model budget.
 | `fitr experiment reference plan\|run` | seal the frozen external-reference subset, or accept a recorded verifier file after preflight. It does not launch a harness. See [workload evidence](workload-evidence.md#external-reference-pack) |
 | `fitr discover add <source> --role <role> [--model <reference>]` | capture a private, unmeasured model or harness idea |
 | `fitr discover list\|plan [--role <role>]` | inspect the private inbox or draft next evidence steps without network access |
+| `fitr discover requalify <input.json>` | derive which supplied claims still apply to two operator-supplied installations. It does not read the host. A stale or unresolved claim exits 4. That exit is not a failed task |
 | `fitr discover attach-source <idea-id> <receipt.json>` | copy validated source metadata into a private association; keep the idea unmeasured |
 | `fitr discover plan <idea-id> [--source <resolution-sha256>]` | inspect one source-aware plan; select explicitly when multiple receipts exist |
 | `fitr discover detach-source <idea-id> <resolution-sha256>` | remove only the managed association copy; see [source attachments](source-attachments.md) |

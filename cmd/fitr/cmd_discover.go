@@ -17,7 +17,8 @@ const discoveryHelp = `usage: fitr discover add <source> --role <role> [--model 
        fitr discover list|plan [--role <role>] [--display MODE]
        fitr discover attach-source <idea-id> <receipt.json> [--display MODE]
        fitr discover detach-source <idea-id> <resolution-sha256> [--display MODE]
-       fitr discover plan <idea-id> [--source <resolution-sha256>] [--display MODE]`
+       fitr discover plan <idea-id> [--source <resolution-sha256>] [--display MODE]
+       fitr discover requalify <input.json> [--display MODE]`
 
 type discoveryCommand struct {
 	action, mode, role, model, harness, claim, selected string
@@ -35,6 +36,9 @@ func cmdDiscover(ctx context.Context, args []string) int {
 	}
 	if ctx.Err() != nil {
 		return exitInterrupt
+	}
+	if command.action == "requalify" {
+		return discoverRequalify(ctx, command.args[0], command.mode)
 	}
 	store := discovery.SourceStore{Directory: filepath.Join(resultsDir(), ".discovery")}
 	ideaIDs, err := discoveryAction(store, command)
@@ -76,7 +80,7 @@ func parseDiscoveryCommand(args []string) (discoveryCommand, int, bool) {
 		if command.action == "plan" {
 			fs.StringVar(&command.selected, "source", "", "full attached source resolution digest")
 		}
-	case "attach-source", "detach-source":
+	case "attach-source", "detach-source", "requalify":
 	default:
 		errPrint("unknown discovery action", "", "fitr discover --help")
 		return command, exitUsage, false
@@ -114,6 +118,9 @@ func validDiscoveryArguments(command discoveryCommand) bool {
 		return len(command.args) == 2 && validDiscoveryID(command.args[0])
 	case "detach-source":
 		return len(command.args) == 2 && validDiscoveryID(command.args[0]) && validDiscoveryDigest(command.args[1])
+	case "requalify":
+		return len(command.args) == 1 && command.role == "" && command.model == "" &&
+			command.harness == "" && command.claim == "" && command.selected == ""
 	default:
 		return false
 	}

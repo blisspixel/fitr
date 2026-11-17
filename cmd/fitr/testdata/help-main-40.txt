@@ -104,6 +104,8 @@ roles and tailoring:
     [--harness <name>]
   fitr discover list|plan [--role
     <role>] [--display MODE]
+  fitr discover requalify <input.json>
+    [--display MODE]
 
 desktop and integrations:
   fitr desktop status [--role NAME]

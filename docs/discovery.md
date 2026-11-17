@@ -62,8 +62,30 @@ release announcement are not identity. A presentation-only difference does
 not schedule work. When some claims stay applicable and others do not, the
 next action names only the affected claims and is a fresh confirmation, not
 a full rerun. The report does not read the host, does not submit work to a
-runtime, does not erase the historical receipt, and is not a quality pass.
-The CLI does not print it. What remains here is extracting source claims
+runtime, does not erase the historical receipt, and is not a quality result.
+
+`fitr discover requalify installation.json` prints that report from one
+operator-supplied document. The schema is `fitr.requalification-input.v1`.
+A field the document omits stays unknown. `--display json` prints
+`fitr.requalification.v1`. A stale or unresolved claim exits 4. That exit
+means the supplied claims do not all still apply. It is not a failed task
+and it is not permission to rerun every receipt. The command reads only
+that file.
+
+```json
+{
+  "schema": "fitr.requalification-input.v1",
+  "prior": {"runtime": {"state": "observed", "value": "ollama 0.40.7"}},
+  "current": {"runtime": {"state": "observed", "value": "ollama 0.40.8"}},
+  "claims": [{"id": "speed", "depends_on": ["runtime"]}]
+}
+```
+
+That document leaves the speed claim stale, because the observed runtime
+changed. The other identity fields stay unknown, and this claim does not
+depend on them.
+
+What remains here is extracting source claims
 without turning them into evidence, executing an owned download, and binding
 the configuration of a daemon that is already listening. The fitting sequence
 that promotes a candidate is the
