@@ -2137,28 +2137,9 @@ func TestCompareCtxSplitNamesTheKnob(t *testing.T) {
 }
 
 func TestTuneDiffsNumCtx(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("FITR_RESULTS", dir)
-	a, b := golden(t), golden(t)
-	a.Model, b.Model = "aa", "bb"
+	a, b := tunePair(t)
 	a.NumCtx, b.NumCtx = eval.NumCtx, 4096
-	for _, r := range []*Result{a, b} {
-		raw, err := json.Marshal(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	old := os.Stdout
-	or, ow, _ := os.Pipe()
-	os.Stdout = ow
-	code := cmdTune(context.Background(), []string{"aa", "bb"})
-	ow.Close()
-	os.Stdout = old
-	out, _ := io.ReadAll(or)
-	got := string(out)
+	code, got := captureTune(t, a, b)
 	if code != exitOK {
 		t.Fatalf("code = %d\n%s", code, got)
 	}
@@ -2171,29 +2152,10 @@ func TestTuneDiffsNumCtx(t *testing.T) {
 }
 
 func TestTuneNamesAStartTimeBoundary(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("FITR_RESULTS", dir)
-	a, b := golden(t), golden(t)
-	a.Model, b.Model = "aa", "bb"
+	a, b := tunePair(t)
 	a.Device.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "f16"}
 	b.Device.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "q8_0"}
-	for _, r := range []*Result{a, b} {
-		raw, err := json.Marshal(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, safeName(r.Model)+".json"), raw, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	old := os.Stdout
-	or, ow, _ := os.Pipe()
-	os.Stdout = ow
-	code := cmdTune(context.Background(), []string{"aa", "bb"})
-	ow.Close()
-	os.Stdout = old
-	out, _ := io.ReadAll(or)
-	got := string(out)
+	code, got := captureTune(t, a, b)
 	if code != exitOK || !strings.Contains(got, "restart boundary") || !strings.Contains(got, "fresh measurement") ||
 		!strings.Contains(got, "OLLAMA_KV_CACHE_TYPE") {
 		t.Fatalf("code = %d, start-time boundary missing:\n%s", code, got)
@@ -2205,14 +2167,40 @@ func TestTuneNamesAStartTimeBoundary(t *testing.T) {
 }
 
 func TestTuneNamesAMeasuredStartValue(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("FITR_RESULTS", dir)
-	a, b := golden(t), golden(t)
-	a.Model, b.Model = "aa", "bb"
+	a, b := tunePair(t)
 	a.Device.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "f16"}
 	b.Device.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "q8_0"}
 	a.Device.ConfigSource = device.ConfigSourceServerLog
 	b.Device.ConfigSource = device.ConfigSourceServerLog
+	code, got := captureTune(t, a, b)
+	if code != exitOK || !strings.Contains(got, "measured f16 (server-log)") || !strings.Contains(got, "measured q8_0 (server-log)") {
+		t.Fatalf("code = %d, a measured start-time value hid its reading:\n%s", code, got)
+	}
+}
+
+func TestTuneKeepsAListenerCopyDistinctFromTheDaemonLog(t *testing.T) {
+	a, b := tunePair(t)
+	a.Device.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "f16"}
+	b.Device.Config = map[string]string{"OLLAMA_KV_CACHE_TYPE": "q8_0"}
+	a.Device.ConfigSource = device.ConfigSourceServerLog
+	b.Device.ConfigSource = device.ConfigSourceListener
+	code, got := captureTune(t, a, b)
+	if code != exitOK || !strings.Contains(got, "measured f16 (server-log)") || !strings.Contains(got, "measured q8_0 (listener-environ)") {
+		t.Fatalf("code = %d, listener copy collapsed into the daemon log:\n%s", code, got)
+	}
+}
+
+func tunePair(t *testing.T) (*Result, *Result) {
+	t.Helper()
+	a, b := golden(t), golden(t)
+	a.Model, b.Model = "aa", "bb"
+	return a, b
+}
+
+func captureTune(t *testing.T, a, b *Result) (int, string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("FITR_RESULTS", dir)
 	for _, r := range []*Result{a, b} {
 		raw, err := json.Marshal(r)
 		if err != nil {
@@ -2225,14 +2213,37 @@ func TestTuneNamesAMeasuredStartValue(t *testing.T) {
 	old := os.Stdout
 	or, ow, _ := os.Pipe()
 	os.Stdout = ow
-	code := cmdTune(context.Background(), []string{"aa", "bb"})
+	code := cmdTune(context.Background(), []string{a.Model, b.Model})
 	ow.Close()
 	os.Stdout = old
 	out, _ := io.ReadAll(or)
-	got := string(out)
-	if code != exitOK || !strings.Contains(got, "measured f16") || !strings.Contains(got, "measured q8_0") {
-		t.Fatalf("code = %d, measured start-time value missing:\n%s", code, got)
+	return code, string(out)
+}
+
+func TestDeviceConfigNamesTheReadingAndDoesNotBlameTheStartupLog(t *testing.T) {
+	listener := captureDeviceConfig(t, device.Fingerprint{
+		Config:       map[string]string{"OLLAMA_KV_CACHE_TYPE": "q8_0"},
+		ConfigSource: device.ConfigSourceListener,
+	})
+	if !strings.Contains(listener, "listener-environ") || strings.Contains(listener, "startup log") {
+		t.Fatalf("listener config hid its reading:\n%s", listener)
 	}
+	unobserved := captureDeviceConfig(t, device.Fingerprint{ConfigSource: device.ConfigSourceUnobserved})
+	if strings.Contains(unobserved, "startup log") || !strings.Contains(unobserved, "unobserved") {
+		t.Fatalf("an unread daemon blamed the startup log:\n%s", unobserved)
+	}
+}
+
+func captureDeviceConfig(t *testing.T, fp device.Fingerprint) string {
+	t.Helper()
+	old := os.Stdout
+	or, ow, _ := os.Pipe()
+	os.Stdout = ow
+	writeDeviceConfiguration(fp)
+	ow.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(or)
+	return string(out)
 }
 
 func TestResultNumCtxFallsBackToDefault(t *testing.T) {

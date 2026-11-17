@@ -63,7 +63,10 @@ claims that still apply, the claims that need fresh confirmation,
 and that next action. It does not read the host, does not submit
 work, and is not a quality result. Source-claim extraction, an owned
 download, and binding a listening daemon remain open. See
-[discovery](docs/discovery.md).
+[discovery](docs/discovery.md). `fitr tune` and the advise configuration
+account name how each present start-time setting was read. A daemon log
+and a child fitr launched are not a copy of the listening process
+environment. fitr does not restore a value and does not restart the server.
 
 <img src="docs/assets/top.svg?v=0.11.3" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 

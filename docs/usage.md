@@ -269,7 +269,7 @@ of installed RAM as an unconditional model budget.
 | `fitr [model]` / `fitr advise [model] [--vram-gb N] [--ctx N] [--load] [--fit]` | no model: inventory. With a model: does it fit, and if not, which flag to try |
 | `fitr suggest [model] [--size-gb N] [--ceiling-gb N]` | project one fixed reviewed library set; shared or unmeasured memory is not a fit; `--ceiling-gb` is an operator ceiling, not a measured resident budget; a pull line is a recipe |
 | `fitr apply [model] [--ctx N]` | print how to persist a measured context; never restarts the server |
-| `fitr tune [a b]` | print request and start-time knobs; a start-time difference is a restart boundary and names whether each side was measured, historical, or unobserved; fitr does not restart the server |
+| `fitr tune [a b]` | print request and start-time knobs; a start-time difference is a restart boundary and names whether each side was measured, historical, or unobserved, and which reading a measured value came from; fitr does not restart the server or restore a value |
 | `fitr export <model> [--out PATH] [--retonr]` | HTML scorecard, and/or opt-in evidence for [retonr](retonr.md) |
 | `fitr view [model\|result.json] [--display MODE] [--full]` | reopen a saved result; `--full` emits the complete sealed record only with JSON display |
 | `fitr board [--current] [--display MODE] [--full]` | compare by device; `--full` emits complete sealed records only with JSON display |
@@ -486,7 +486,11 @@ fitr top --snapshot          # pipe-safe presentation JSON, no terminal controls
 `fitr advise --display json` includes a `fitr.configuration-account.v1` account.
 A sampler the artifact does not declare stays unobserved. fitr does not fill a
 runtime sampler default. A dtype read from this process is not a measurement
-of the server.
+of the server. A measured start-time value names its reading. `server-log`
+and `owned-launch` are readings a later restore may cite. `listener-environ`
+is a copy of the listening process environment, and a later restore must not
+cite it. An absent key does not inherit the map's reading. fitr does not
+restore a value.
 
 `--display auto` chooses `rich` on a capable terminal and `plain` when stdout
 is redirected. `rich` can be forced for a capture; `plain`, `json`, and `none`

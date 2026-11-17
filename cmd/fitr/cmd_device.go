@@ -101,11 +101,13 @@ func formatGPUDriver(version, date string) string {
 
 func writeDeviceConfiguration(fp device.Fingerprint) {
 	fmt.Println("  config")
-	// Detect reads the serving runtime's own startup log when it can and
-	// otherwise falls back to this process's environment. Those are different
-	// facts. A daemon started by launchd or systemd carries an environment
-	// this process never sees, so calling an empty value "(unset)" there
-	// claims the daemon's configuration from evidence about fitr's own.
+	// ConfigSource is how this map was read. server-log, owned-launch, and
+	// listener-environ are different readings, and an absent key does not
+	// inherit one. The startup log is not a fallback, and this process's
+	// environment is not the listening process. An empty source was not read.
+	if fp.ConfigSource != "" {
+		fmt.Printf("    %-26s %s\n", "source", terminalText(fp.ConfigSource))
+	}
 	observed := fp.RuntimeConfigObserved()
 	keys := make([]string, 0, len(fp.Config))
 	for k := range fp.Config {
@@ -124,8 +126,8 @@ func writeDeviceConfiguration(fp device.Fingerprint) {
 	}
 	if !observed {
 		render.Field(os.Stdout, "  ! config", deviceLabelWidth,
-			"the serving runtime's startup log was not readable, so these values are unobserved "+
-				"rather than the daemon's", render.Width())
+			"the serving process was not read, so these values are unobserved "+
+				"rather than the daemon's settings", render.Width())
 	}
 }
 
