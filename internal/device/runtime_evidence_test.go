@@ -128,12 +128,10 @@ func TestProfileBoolAcceptsOnlyBooleanValues(t *testing.T) {
 	}
 }
 
-// An empty configuration value means two different things. When the serving
-// runtime's startup log was read, the runtime did not have that variable. When
-// it was not, fitr only ever saw its own environment, and a daemon started by
-// launchd or systemd carries one this process never sees. Reporting the first
-// when only the second is true states the daemon's configuration from evidence
-// about fitr's own.
+// ServerConfigObserved reports that the default log file has bytes. A
+// readable file is not the listening process, and an empty file is not a
+// claim that a variable was unset. The configuration account does not read
+// this file.
 func TestServerConfigObservedSeparatesUnsetFromUnobserved(t *testing.T) {
 	root := t.TempDir()
 	if runtime.GOOS == "windows" {

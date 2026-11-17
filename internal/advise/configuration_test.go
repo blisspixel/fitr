@@ -1,8 +1,12 @@
 package advise
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/blisspixel/fitr/internal/device"
 )
 
 func TestDeclaredSamplingStaysDeclared(t *testing.T) {
@@ -33,6 +37,54 @@ func TestAbsentSamplingIsUnobserved(t *testing.T) {
 	if strings.Contains(row.Note, "0.8") || strings.Contains(strings.ToLower(row.Note), "temperature") {
 		t.Fatalf("an absent sampler was filled with a runtime default: %q", row.Note)
 	}
+}
+
+func TestServingReadingsStayDistinct(t *testing.T) {
+	value := map[string]string{"OLLAMA_KV_CACHE_TYPE": "q8_0"}
+	logRow := measuredCache(t, value, device.ConfigSourceServerLog)
+	owned := measuredCache(t, value, device.ConfigSourceOwnedLaunch)
+	listener := measuredCache(t, value, device.ConfigSourceListener)
+	if logRow.Reading != device.ConfigSourceServerLog || logRow.LaterRestore != LaterRestoreCite {
+		t.Fatalf("daemon log = %+v", logRow)
+	}
+	if owned.Reading != device.ConfigSourceOwnedLaunch || owned.LaterRestore != LaterRestoreCite {
+		t.Fatalf("owned launch = %+v", owned)
+	}
+	if listener.Reading != device.ConfigSourceListener || listener.LaterRestore != LaterRestoreRefuse {
+		t.Fatalf("listener copy = %+v", listener)
+	}
+	if logRow.Note == owned.Note || owned.Note == listener.Note || logRow.Note == listener.Note {
+		t.Fatalf("three readings collapsed: log %q owned %q listener %q", logRow.Note, owned.Note, listener.Note)
+	}
+	if !strings.Contains(listener.Note, "not the daemon log") || !strings.Contains(listener.Note, "must not cite") {
+		t.Fatalf("listener note = %q", listener.Note)
+	}
+	absent := findAccountRow(t, Configuration(ConfigurationInput{
+		Config: value, ConfigSource: device.ConfigSourceServerLog,
+	}).Values, "OLLAMA_FLASH_ATTENTION", OriginUnobserved)
+	if absent.Reading != "" || absent.LaterRestore != "" || absent.Value != "" || strings.Contains(absent.Note, "may cite") {
+		t.Fatalf("an absent key inherited the map reading: %+v", absent)
+	}
+	raw, err := json.Marshal(listener)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"reading":"listener-environ"`)) || !bytes.Contains(raw, []byte(`"later_restore":"refuse"`)) {
+		t.Fatalf("listener JSON = %s", raw)
+	}
+	absentJSON, err := json.Marshal(absent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(absentJSON, []byte(`"reading"`)) || bytes.Contains(absentJSON, []byte(`"later_restore"`)) {
+		t.Fatalf("an absent key published a reading: %s", absentJSON)
+	}
+}
+
+func measuredCache(t *testing.T, config map[string]string, source string) ConfigurationValue {
+	t.Helper()
+	account := Configuration(ConfigurationInput{Config: config, ConfigSource: source})
+	return findAccountRow(t, account.Values, "OLLAMA_KV_CACHE_TYPE", OriginMeasured)
 }
 
 func TestObservedCacheIsMeasured(t *testing.T) {

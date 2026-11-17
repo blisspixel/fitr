@@ -28,6 +28,13 @@ const (
 	OriginUnobserved = "unobserved"
 	// OriginProcessEnvironment is a value from this process, not the server.
 	OriginProcessEnvironment = "process-environment"
+	// LaterRestoreCite means a later restore may cite this value.
+	// The daemon log and a child fitr launched are the only such readings.
+	// This account does not restore anything.
+	LaterRestoreCite = "cite"
+	// LaterRestoreRefuse means a later restore must not cite this reading.
+	// A copy of the listening process environment is that case.
+	LaterRestoreRefuse = "refuse"
 )
 
 const declaredSamplingNote = "declared by the artifact. a runtime that does not read this key uses its own default instead."
@@ -38,7 +45,14 @@ type ConfigurationValue struct {
 	Name   string `json:"name"`
 	Value  string `json:"value,omitempty"`
 	Origin string `json:"origin"`
-	Note   string `json:"note,omitempty"`
+	// Reading is how this present value was observed: server-log,
+	// owned-launch, or listener-environ. An absent key leaves it empty.
+	// The map's source is not copied onto a key that was not in the reading.
+	Reading string `json:"reading,omitempty"`
+	// LaterRestore is cite or refuse for a present serving observation.
+	// Empty means this row authorizes no later restore.
+	LaterRestore string `json:"later_restore,omitempty"`
+	Note         string `json:"note,omitempty"`
 }
 
 // ConfigurationAccount distinguishes where each setting came from.
@@ -151,14 +165,52 @@ func servingValues(config map[string]string, source string) []ConfigurationValue
 		}
 		value := config[knob.Name]
 		if value == "" {
-			rows = append(rows, valueRow(knob.Name, "", OriginUnobserved,
-				"the serving runtime was read and this key was absent. a runtime default was not filled in."))
+			// The map was read. This key was not in it, so it does not
+			// inherit the map's reading or a later-restore permission.
+			rows = append(rows, valueRow(knob.Name, "", OriginUnobserved, absentServingNote(source)))
 			continue
 		}
-		rows = append(rows, valueRow(knob.Name, value, OriginMeasured,
-			"observed from the serving runtime on this machine."))
+		rows = append(rows, observedServingRow(knob.Name, value, source))
 	}
 	return rows
+}
+
+func observedServingRow(name, value, source string) ConfigurationValue {
+	row := valueRow(name, value, OriginMeasured, observedServingNote(source))
+	row.Reading = source
+	switch source {
+	case device.ConfigSourceServerLog, device.ConfigSourceOwnedLaunch:
+		row.LaterRestore = LaterRestoreCite
+	case device.ConfigSourceListener:
+		row.LaterRestore = LaterRestoreRefuse
+	}
+	return row
+}
+
+func observedServingNote(source string) string {
+	switch source {
+	case device.ConfigSourceServerLog:
+		return "read from the daemon log. a later restore may cite this value. fitr does not restore it."
+	case device.ConfigSourceOwnedLaunch:
+		return "sealed from the child fitr launched. a later restore may cite this value. fitr does not restore it."
+	case device.ConfigSourceListener:
+		return "copied from the listening process environment. a later restore must not cite this reading. it is not the daemon log."
+	default:
+		return "observed from the serving runtime on this machine."
+	}
+}
+
+func absentServingNote(source string) string {
+	switch source {
+	case device.ConfigSourceServerLog:
+		return "the daemon log was read and this key was absent. a runtime default was not filled in."
+	case device.ConfigSourceOwnedLaunch:
+		return "the child fitr launched did not seal this key. a runtime default was not filled in."
+	case device.ConfigSourceListener:
+		return "the listening process environment was read and this key was absent. a runtime default was not filled in."
+	default:
+		return "the serving runtime was read and this key was absent. a runtime default was not filled in."
+	}
 }
 
 func historicalServing(config map[string]string) []ConfigurationValue {

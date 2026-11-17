@@ -605,7 +605,11 @@ func configurationSide(fp device.Fingerprint, key string) string {
 		if row.Value == "" {
 			return row.Origin
 		}
-		return row.Origin + " " + row.Value
+		text := row.Origin + " " + row.Value
+		if row.Reading != "" {
+			text += " (" + row.Reading + ")"
+		}
+		return text
 	}
 	return advise.OriginUnobserved
 }
