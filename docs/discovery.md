@@ -52,7 +52,18 @@ an explicit download plan (`fitr.discovery.download-plan.v1`) and artifact mappi
 template (`artifact.Spec`), defining required download files, byte footprints and
 provider SHA-256 bounds before network fetch or disk allocation.
 Runtime support profiles and component plans bind architecture contracts and
-companions before that plan. What remains here is extracting source claims
+companions before that plan. `fitr.requalification.v1` is a derived report.
+It compares a historical installation identity with a current one and names
+which claims still apply. A claim stays applicable only when every dependency
+it names is observed on both sides and the values match. A requested value,
+an unknown value, or a missing dependency list stays unresolved. An observed
+difference makes that claim stale and names the field. A model name and a
+release announcement are not identity. A presentation-only difference does
+not schedule work. When some claims stay applicable and others do not, the
+next action names only the affected claims and is a fresh confirmation, not
+a full rerun. The report does not read the host, does not submit work to a
+runtime, does not erase the historical receipt, and is not a quality pass.
+The CLI does not print it. What remains here is extracting source claims
 without turning them into evidence, executing an owned download, and binding
 the configuration of a daemon that is already listening. The fitting sequence
 that promotes a candidate is the
