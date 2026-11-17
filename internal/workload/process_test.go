@@ -56,6 +56,9 @@ func TestRepeatedCallIsCountedWithoutAPenaltyLabel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The scripted pair often shares one millisecond. A completion that
+	// lands later is the case the race detector hit on ubuntu-26.04.
+	spreadToolCompletion(&trial, "run_checks", 5)
 	if !duplicateNamedToolPair(&trial, "run_checks") {
 		t.Fatal("run_checks pair missing")
 	}
@@ -78,11 +81,37 @@ func TestRepeatedCallIsCountedWithoutAPenaltyLabel(t *testing.T) {
 	}
 }
 
+func spreadToolCompletion(trial *Trial, tool string, delta int64) {
+	for index, event := range trial.Events {
+		if event.Type != EventToolStarted || event.Tool != tool {
+			continue
+		}
+		for i := index + 1; i < len(trial.Events); i++ {
+			trial.Events[i].ElapsedMillis += delta
+		}
+		trial.ElapsedMillis += delta
+		return
+	}
+}
+
 func duplicateNamedToolPair(trial *Trial, tool string) bool {
 	for index, event := range trial.Events {
 		if event.Type == EventToolStarted && event.Tool == tool {
 			pair := append([]Event(nil), trial.Events[index:index+2]...)
 			trial.Events = append(trial.Events[:index], append(pair, trial.Events[index:]...)...)
+			// The copy keeps the original start time. When that completion
+			// is later, the copied start steps backwards. A repeated call
+			// is a later observation, so its clock does not go backwards.
+			var prior int64
+			for i := range trial.Events {
+				if i > 0 && trial.Events[i].ElapsedMillis < prior {
+					trial.Events[i].ElapsedMillis = prior
+				}
+				prior = trial.Events[i].ElapsedMillis
+			}
+			if last := trial.Events[len(trial.Events)-1].ElapsedMillis; trial.ElapsedMillis < last {
+				trial.ElapsedMillis = last
+			}
 			resequenceEvents(trial.Events)
 			return true
 		}
