@@ -12,6 +12,7 @@ concurrency:
 
 env:
   GOTOOLCHAIN: local
+  # Hosted Ubuntu jobs pin ubuntu-26.04. See scripts/check-runner-image.sh.
   # b12359 is the binary release of llama.cpp v1.0.0, commit b1b770d
   # (also tagged v1.0.0-b12359-b1b770d). The v1.0.0 release tag does not
   # publish these archives. The binary inside is still named llama-server.
@@ -22,7 +23,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-26.04, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
