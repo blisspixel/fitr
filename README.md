@@ -57,6 +57,11 @@ observation, spill and eviction proof, and exact-context OTHER stay open.
 The Jinja half of the oversized-prompt check, the Pi process, and the
 native local-model check remain open.
 
+On main after 0.11.13, a derived requalification report names the
+claims a changed installation leaves stale. The CLI does not print
+it. Source-claim extraction, an owned download, and binding a
+listening daemon remain open. See [discovery](docs/discovery.md).
+
 <img src="docs/assets/top.svg?v=0.11.3" alt="fitr top wide board with comparable configurations and selected evidence" width="1000">
 
 The wide Board keeps the comparable configurations, selected evidence, exact
