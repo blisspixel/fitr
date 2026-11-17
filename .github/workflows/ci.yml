@@ -30,13 +30,22 @@ env:
 # A failed unit or race run is copied to a 14-day artifact. That log is
 # the test report from this pure-logic job. Installer fixture logs use
 # the same retention. Fuzz and lint output stays in the job log.
+# Hosted Ubuntu jobs pin ubuntu-26.04. Checked against
+# actions/runner-images Ubuntu2604-Readme.md on 2026-11-17: image
+# 20261111.196.1, OS 26.04.1 LTS. The floating label was moving from
+# 24.04 to 26.04 through 2026-11-19. Go 1.27.4, the reference Python
+# lines, and the MCP SDK Python are installed by their setup actions.
+# make, bash, jq, gcc, and the installer fixture's python3 come from
+# the image. The release binary stays CGO_ENABLED=0, so this pin is
+# not a glibc floor. The race detector uses the image C compiler.
+# macOS and Windows keep their floating latest labels.
 
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-26.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -47,6 +56,10 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: bash scripts/check-ci-needs_test.sh
+      - name: Ubuntu runner image pin
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/check-runner-image_test.sh
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: '1.27.4' }
       # No Ollama needed: every test here is pure logic. The tests that would
@@ -120,7 +133,7 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
   dist:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,7 +186,7 @@ jobs:
           path: dist/
 
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -190,7 +203,7 @@ jobs:
   # stays a block mapping. A one-line flow mapping around the matrix
   # expression is rejected as invalid workflow YAML before any job starts.
   reference-python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -214,7 +227,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-26.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -266,7 +279,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-26.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -378,7 +391,7 @@ jobs:
           retention-days: 14
 
   security:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -448,7 +461,7 @@ jobs:
   ci:
     if: always()
     needs: [test, dist, coverage, reference-python, mcp-sdk, installer, security]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

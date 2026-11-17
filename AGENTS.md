@@ -136,6 +136,12 @@ builds on the current release while re-running the suite on the minimum.
 Job `timeout-minutes` values in that workflow are measured budgets. A timeout,
 a skip, or a missing result fails the aggregate gate. That failure is an
 incomplete check, not a product measurement and not a runtime qualification.
+Hosted Ubuntu jobs pin `ubuntu-26.04`. The floating `ubuntu-latest` label was
+moving from 24.04 to 26.04 through 2026-11-19. The image readme checked on
+2026-11-17 is 20261111.196.1, OS 26.04.1 LTS. Go, the reference Python lines,
+and the linter are installed by their setup actions. The release binary stays
+`CGO_ENABLED=0`, so this pin is not a glibc floor. The race detector uses the
+image C compiler. macOS and Windows keep their floating latest labels.
 
 CI has no GPU and no serving runtime, so every test there is pure logic. Real
 evidence that a measurement path works comes from a live backend:
