@@ -49,8 +49,12 @@ set -eu
 # 20,480 bytes on the pull 130 dist job the same day:
 # 16,942,080 -> 16,962,560. No new Go dependency was added. The cap
 # returns to the 35,240-byte headroom kept for the model-set plan.
+# The requalification command, which prints the derived report from
+# one operator document, added 37,376 bytes on the 2026-11-17 dist
+# job of pull 139: 16,962,560 -> 16,999,936. No new Go dependency was
+# added. The cap returns to the 35,240-byte headroom.
 # CI and releases use this single measured gate.
-max_bytes=16997800
+max_bytes=17035176
 dist_dir="${1:-dist}"
 for binary in "$dist_dir"/fitr-*; do
   size="$(wc -c < "$binary")"
